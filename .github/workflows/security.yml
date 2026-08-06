@@ -1,0 +1,46 @@
+# Scans sécurité (S5 du plan) : dépendances Python/npm + secrets.
+# Politique : ces scans BLOQUENT la release (release.yml les rejoue) ; sur PR
+# ils remontent l'info sans exiger un correctif immédiat (voir plan §3.2).
+name: Security
+
+on:
+  push:
+    branches: [main, block]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1" # lundi matin : capte les CVE publiées entre deux commits
+  workflow_call: {}
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+      - run: pip install pip-audit
+      - name: Audit des dépendances Python
+        run: pip-audit -r requirements.txt
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Audit des dépendances npm (prod = bloquant dès « high »)
+        run: npm audit --audit-level=high
+        working-directory: frontend
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tout l'historique : un secret commité puis retiré reste exposé
+      - name: Détection de secrets (garde-fou — app local-only sans secret attendu)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,92 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment & secrets ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.secret
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Application runtime state (generated locally, not source code) ────────────
+/data/
+/logs/
+/debug_outputs/
+/debug_reports/
+/nwol/assets/
+/assets/cache/
+
+# ── Documents de travail (jamais versionnés : poids et droits d'auteur) ───────
+/doc_test/
+*.pdf
+
+# ── LLM and extraction caches ─────────────────────────────────────────────────
+nwol/llm/cache/
+nwol/pdf/cache/
+nwol/document/cache/
+nwol/reader/cache/
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+/tests/nwol/assets/
+nwol/tests/assets/
+
+# ── Node (if frontend tooling is added) ───────────────────────────────────────
+node_modules/
+.next/
+npm-debug.log*
+yarn-error.log*
+
+# ── ML model weights ──────────────────────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+models/
+checkpoints/
+
+# ── Databases ─────────────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# ── Temporary and generated output ────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# ── Old local experiments ─────────────────────────────────────────────────────
+ancien_script/
+
+# ── Packaging artifacts (PyInstaller) ─────────────────────────────────────────
+/dist_app/
+/build_app/
+/frontend/dist/

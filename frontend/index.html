@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meta-Capp</title>
+    <script>
+      // Applique le thème avant le premier rendu (évite un flash sombre ; clair par défaut).
+      (function () {
+        var saved = localStorage.getItem("metacapp-theme");
+        document.documentElement.dataset.theme = saved === "dark" ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,122 @@
+# services/library.py — Documents, pages et images (lecture).
+#
+# Frontière entre le frontend/serveur et le stockage des documents + le rendu
+# PyMuPDF. Renvoie des dicts JSON-sérialisables ; les coordonnées de recherche
+# sont en POINTS PDF (le client met à l'échelle selon le zoom d'affichage).
+from __future__ import annotations
+
+from db.chapters import get_chapters
+from db.documents import get_document as _get_document
+from db.documents import list_recent_documents as _list_recent
+from pdf_viewer.page_renderer import clear_reader_cache as _clear_reader_cache
+from pdf_viewer.page_renderer import render_page as _render_page
+from pdf_viewer.pdf_document import PdfDocument
+
+__all__ = [
+    "list_recent_documents",
+    "get_document",
+    "render_page",
+    "page_text",
+    "page_blocks",
+    "page_words",
+    "search_page",
+    "clear_reader_cache",
+]
+
+
+def list_recent_documents(limit: int = 10) -> list[dict]:
+    return [_summary(doc) for doc in _list_recent(limit)]
+
+
+def get_document(doc_id: int) -> dict | None:
+    """Détail d'un document : résumé + chapitres + tailles de page (points)."""
+    doc = _get_document(doc_id)
+    if doc is None:
+        return None
+    detail = _summary(doc)
+    detail["chapters"] = get_chapters(doc_id)
+    if doc.get("extraction_engine") == "code":
+        # Pas de PDF : tailles de page uniformes (repli avant chargement des blocs).
+        detail["page_sizes_pts"] = [[595, 842]] * (doc.get("page_count") or 1)
+        return detail
+    try:
+        with PdfDocument(doc["path"]) as pdf:
+            detail["page_sizes_pts"] = [[w, h] for (w, h) in pdf.page_sizes()]
+    except Exception:
+        detail["page_sizes_pts"] = []
+    return detail
+
+
+def render_page(doc_id: int, page: int, zoom: float = 2.5) -> str | None:
+    """Chemin du PNG d'une page (cache disque géré par page_renderer)."""
+    doc = _get_document(doc_id)
+    if doc is None:
+        return None
+    if doc.get("extraction_engine") == "code":
+        return None  # Document code : pas d'image (rendu texte côté client).
+    return _render_page(doc["path"], page, zoom)
+
+
+def page_text(doc_id: int, page: int) -> str:
+    """Texte d'une page — LE point d'alimentation de tout l'empilement LLM."""
+    doc = _get_document(doc_id)
+    if doc is None:
+        return ""
+    if doc.get("extraction_engine") == "code":
+        from services import code_reader
+
+        return code_reader.page_text(doc["path"], page)
+    with PdfDocument(doc["path"]) as pdf:
+        return pdf.raw_text(page)
+
+
+def page_blocks(doc_id: int, page: int) -> list[dict] | None:
+    """Reader blocks d'une page (None si le document n'est pas en blocs)."""
+    doc = _get_document(doc_id)
+    if doc is None or doc.get("extraction_engine") != "code":
+        return None
+    from services import code_reader
+
+    return [code_reader.page_block(doc["path"], page)]
+
+
+def page_words(doc_id: int, page: int) -> list[list]:
+    """Boîtes de mots d'une page → [[x0, y0, x1, y1, "mot"], …] en points PDF.
+
+    Sert au calque de texte transparent du lecteur web (sélection native).
+    """
+    doc = _get_document(doc_id)
+    if doc is None or doc.get("extraction_engine") == "code":
+        return []
+    with PdfDocument(doc["path"]) as pdf:
+        return [[x0, y0, x1, y1, word] for (x0, y0, x1, y1, word) in pdf.words(page)]
+
+
+def clear_reader_cache(doc_id: int) -> None:
+    """Purge les pages rendues du doc (sauf la vignette) — fin de session lecture."""
+    doc = _get_document(doc_id)
+    if doc and doc.get("path"):
+        _clear_reader_cache(doc["path"])
+
+
+def search_page(doc_id: int, page: int, needle: str) -> list[list[float]]:
+    """Rects (x0, y0, x1, y1) en points PDF où `needle` apparaît sur la page."""
+    doc = _get_document(doc_id)
+    if doc is None or doc.get("extraction_engine") == "code":
+        return []
+    with PdfDocument(doc["path"]) as pdf:
+        return [list(rect) for rect in pdf.search_text(page, needle)]
+
+
+def _summary(doc: dict) -> dict:
+    return {
+        "id": doc["id"],
+        "title": doc.get("filename") or "",
+        "filename": doc.get("filename") or "",
+        "page_count": doc.get("page_count") or 0,
+        "last_page": doc.get("last_page") or 1,
+        "subject": doc.get("subject"),
+        "last_opened": doc.get("last_opened") or "",
+        # Le frontend branche le lecteur en blocs (fichiers de code) sur ce champ.
+        "extraction_engine": doc.get("extraction_engine"),
+    }

@@ -1,0 +1,68 @@
+# CI minimale (P0 du plan de durcissement) — bloque toute PR rouge.
+# Ollama n'existe pas en CI : les tests couvrent les chemins de repli/mocks.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1" # F9 : pas de conda en CI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: pip install -r requirements.txt ruff pytest-cov
+      - name: Syntaxe / imports
+        run: python -m compileall -q nwol desktop
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Tests + couverture (informative, seuil géré hors CI)
+        run: python -m pytest -q --cov=services --cov=metacog --cov=db --cov=server --cov-report=term
+        working-directory: nwol
+
+  backend-windows:
+    # Détecte les régressions spécifiques Windows (chemins, encodage, env vars)
+    # à chaque push, pas seulement au tag de release. Lint et couverture restent
+    # sur le job ubuntu : ici on ne vérifie que install + compilation + tests.
+    runs-on: windows-latest
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Syntaxe / imports
+        run: python -m compileall -q nwol desktop
+      - name: Tests
+        run: python -m pytest -q
+        working-directory: nwol
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Tests (vitest — anti-XSS S6, nonce S1)
+        run: npm test
+      - name: Type-check + build
+        run: npm run build

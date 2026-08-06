@@ -1,0 +1,154 @@
+/* tokens.css — Source unique du langage visuel (portée depuis nwol/ui/theme.py).
+   Clair par défaut + thème sombre via [data-theme="dark"]. */
+
+:root {
+  /* Neutres */
+  --bg: #f4f7f8;
+  --bg-alt: #eaf1f3;
+  --surface: #ffffff;
+  --surface-soft: #f8fbfc;
+  --border: #d6e1e6;
+  --border-strong: #b9cbd3;
+
+  /* Texte */
+  --text: #20303a;
+  --text-soft: #344b58;
+  --muted: #667985;
+  --muted-light: #93a3ac;
+
+  /* Accent (teal) */
+  --accent: #2f7d8c;
+  --accent-hover: #266979;
+  --accent-soft: #e4f2f4;
+
+  /* Sémantiques */
+  --success: #2f8a66;
+  --success-soft: #e3f3ec;
+  --warning: #9a6b22;
+  --warning-soft: #f6ecd9;
+  --danger: #b65a4a;
+  --danger-soft: #f6e3df;
+
+  /* Surlignage lecture */
+  --hl-key: #f2c12e;
+  --hl-explain: #4d9de0;
+  --hl-reference: #5fbf77;
+
+  /* Coloration syntaxique (lecteur de code) */
+  --code-comment: #7a8a6f;
+  --code-string: #a85d2b;
+  --code-keyword: #2f7d8c;
+  --code-number: #9a6b22;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Rayons */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+
+  /* Espacement (grille 4px) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 14px;
+  --space-lg: 22px;
+  --space-xl: 34px;
+
+  /* Élévation */
+  --shadow-sm: 0 1px 2px rgba(32, 48, 58, 0.06), 0 2px 8px rgba(32, 48, 58, 0.05);
+  --shadow-md: 0 4px 12px rgba(32, 48, 58, 0.08), 0 12px 32px rgba(32, 48, 58, 0.06);
+  --shadow-lg: 0 8px 24px rgba(32, 48, 58, 0.12), 0 24px 64px rgba(32, 48, 58, 0.10);
+
+  /* Mouvement */
+  --anim-fast: 120ms;
+  --anim-normal: 180ms;
+  --anim-slow: 280ms;
+  --ease: cubic-bezier(0.33, 1, 0.68, 1); /* ease-out-cubic */
+
+  /* Typographie */
+  --font-ui: -apple-system, "Segoe UI", "Inter", system-ui, sans-serif;
+  --font-title: "Georgia", "Iowan Old Style", serif;
+}
+
+[data-theme="dark"] {
+  --bg: #11181c;
+  --bg-alt: #161f24;
+  --surface: #1a242a;
+  --surface-soft: #202c33;
+  --border: #2b3a42;
+  --border-strong: #3b4e58;
+
+  --text: #e7eef1;
+  --text-soft: #b9cbd3;
+  --muted: #8fa3ad;
+  --muted-light: #6c7e88;
+
+  --accent: #4fb3c4;
+  --accent-hover: #69c4d3;
+  --accent-soft: #173238;
+
+  --code-comment: #7f9483;
+  --code-string: #d69a63;
+  --code-keyword: #7fd0dd;
+  --code-number: #d2a24f;
+
+  --success: #4cb98a;
+  --success-soft: #142b22;
+  --warning: #d2a24f;
+  --warning-soft: #2e2515;
+  --danger: #d98373;
+  --danger-soft: #2e1c18;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45), 0 24px 64px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Lecteur de code : coloration syntaxique légère (thème-aware). */
+.tok-c {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.tok-s {
+  color: var(--code-string);
+}
+.tok-k {
+  color: var(--code-keyword);
+  font-weight: 600;
+}
+.tok-n {
+  color: var(--code-number);
+}

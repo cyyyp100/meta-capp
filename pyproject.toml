@@ -1,0 +1,24 @@
+# Outillage qualité (P0 du plan de durcissement). Pas de section pytest ici :
+# la suite se lance depuis nwol/ (rootdir = nwol/, voir CLAUDE.md).
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    "dist_app",
+    "frontend",
+    "doc_test",
+    "debug_reports",
+    "logs",
+    "data",
+]
+
+[tool.ruff.lint]
+# Règles par défaut (E4/E7/E9 + pyflakes F) : erreurs réelles, faible bruit.
+# Extension progressive (I, B, UP…) prévue en P1 avec pre-commit.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Entrées de script : sys.path est inséré avant les imports applicatifs.
+"main.py" = ["E402"]
+"scripts/*" = ["E402"]
+"desktop/*" = ["E402"]

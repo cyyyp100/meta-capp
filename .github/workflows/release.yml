@@ -1,0 +1,192 @@
+# Release (P3 du plan) — le « prod » d'une app desktop est un BINAIRE publié.
+#
+# Déclenchement : tag `v*` (ex. v1.4.0-beta.1 -> canal beta ; v1.4.0 -> stable).
+# Gate : tests backend+frontend ET scans sécurité verts, puis build PyInstaller
+# sur macOS ET Windows, SMOKE TEST du binaire réel (--server-only + /api/health),
+# signature si les secrets sont configurés, puis publication GitHub Release UNIQUE
+# (job `publish`) regroupant les deux archives — les builds ne publient pas
+# eux-mêmes pour éviter toute course sur la création de la Release.
+#
+# Secrets optionnels (sans eux le binaire est publié NON signé, canal beta only) :
+#   macOS   : MACOS_CERT_P12 (base64), MACOS_CERT_PASSWORD, APPLE_ID,
+#             APPLE_TEAM_ID, APPLE_APP_PASSWORD (mot de passe d'app notarytool).
+#   Windows : WINDOWS_CERT_PFX (base64), WINDOWS_CERT_PASSWORD (Authenticode,
+#             signtool). Alternative future : azure/trusted-signing-action.
+# Rollback : les releases précédentes restent téléchargeables sur la page Releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: pip install -r requirements.txt ruff
+      - run: python -m compileall -q nwol desktop
+      - run: ruff check .
+      - run: python -m pytest -q
+        working-directory: nwol
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run lint && npm test && npm run build
+        working-directory: frontend
+
+  scans:
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+
+  build-macos:
+    needs: [checks, scans]
+    runs-on: macos-14
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      APPLE_ID_SET: ${{ secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dépendances + frontend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          cd frontend && npm ci && npm run build
+      - name: Build PyInstaller (reproductible sans conda)
+        run: pyinstaller desktop/metacapp.spec --noconfirm --distpath dist_app
+      - name: Smoke test du binaire réel (serveur + /api/health)
+        run: |
+          ./dist_app/Meta-Capp.app/Contents/MacOS/Meta-Capp --server-only &
+          SMOKE_PID=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8756/api/health > /dev/null 2>&1; then
+              echo "Smoke test OK"; kill $SMOKE_PID; exit 0
+            fi
+            sleep 2
+          done
+          echo "Smoke test FAILED : /api/health injoignable"; kill $SMOKE_PID || true; exit 1
+      - name: Signature (codesign) — si certificat configuré
+        if: env.HAS_CERT == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p tmppass build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p tmppass build.keychain
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tmppass build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | sed 's/.*"\(.*\)"/\1/')
+          codesign --deep --force --options runtime --sign "$IDENTITY" dist_app/Meta-Capp.app
+          codesign --verify --deep --strict dist_app/Meta-Capp.app
+          rm cert.p12
+      - name: Notarisation + staple — si identifiants Apple configurés
+        if: env.HAS_CERT == 'true' && env.APPLE_ID_SET == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist_app/Meta-Capp.app notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple dist_app/Meta-Capp.app
+      - name: Archive de distribution
+        run: ditto -c -k --keepParent dist_app/Meta-Capp.app "Meta-Capp-${GITHUB_REF_NAME}-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meta-Capp-macos
+          path: Meta-Capp-*-macos.zip
+          if-no-files-found: error
+
+  build-windows:
+    needs: [checks, scans]
+    runs-on: windows-latest
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dépendances + frontend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          cd frontend
+          npm ci
+          npm run build
+      - name: Build PyInstaller (BUNDLE macOS ignoré -> dossier COLLECT + exe)
+        run: pyinstaller desktop/metacapp.spec --noconfirm --distpath dist_app
+      - name: Smoke test du binaire réel (serveur + /api/health)
+        run: |
+          $proc = Start-Process -FilePath "dist_app\Meta-Capp\Meta-Capp.exe" -ArgumentList "--server-only" -PassThru
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 2
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8756/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $ok = $true
+              break
+            } catch {}
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { Write-Error "Smoke test FAILED : /api/health injoignable"; exit 1 }
+          Write-Host "Smoke test OK"
+      - name: Signature Authenticode (signtool) — si certificat configuré
+        if: env.HAS_WIN_CERT == 'true'
+        env:
+          CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:CERT_PFX))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+          & $signtool sign /f cert.pfx /p $env:CERT_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 dist_app\Meta-Capp\Meta-Capp.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item cert.pfx
+      - name: Archive de distribution
+        run: Compress-Archive -Path dist_app\Meta-Capp -DestinationPath "Meta-Capp-$env:GITHUB_REF_NAME-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meta-Capp-windows
+          path: Meta-Capp-*-windows.zip
+          if-no-files-found: error
+
+  publish:
+    # Publication UNIQUE une fois les DEUX builds verts : un seul job crée la
+    # Release, donc pas de course. Un build rouge bloque la publication entière.
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Meta-Capp-*
+          merge-multiple: true
+      - name: Publication (canal beta si tag pré-release, sinon stable)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Meta-Capp-*.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
