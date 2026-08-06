@@ -21,7 +21,7 @@ PyMuPDF==1.24.14
 Pillow==12.3.0
 
 # LaTeX mathtext rendering for inline formulas in assistant/Q&A text
-matplotlib==3.10.8
+matplotlib==3.11.1
 
 # Local API server (web UI backend) — runs on 127.0.0.1, embedded in the app
 fastapi==0.136.1
