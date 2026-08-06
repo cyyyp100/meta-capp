@@ -27,7 +27,7 @@ matplotlib==3.10.8
 fastapi==0.136.1
 uvicorn==0.46.0
 websockets==16.0          # WebSocket transport (reader + brainstorming streams)
-pydantic==2.10.6          # request bodies in server/routers (used directly)
+pydantic==2.13.4          # request bodies in server/routers (used directly)
 
 # Native desktop shell (embeds the local web UI in an OS window)
 pywebview==6.2.1
