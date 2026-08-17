@@ -31,4 +31,4 @@ pythonnet==3.0.5 ; sys_platform == "win32"
 httpx==0.28.1
 
 # Testing
-pytest==9.0.3
+pytest==9.1.1
