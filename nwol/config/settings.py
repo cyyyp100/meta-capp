@@ -32,9 +32,6 @@ OLLAMA_KEEP_ALIVE = "30m"
 # ── Fournisseur LLM ──────────────────────────────────────────────────────────
 # Cette édition est 100 % locale : Ollama sur 127.0.0.1, point d'insertion
 # unique dans services/llm_provider.py. Aucune génération ne quitte la machine.
-LLM_PROVIDER_DEFAULT = "ollama"
-TTS_MAX_CHARS = 1000
-AUDIO_TIMEOUT = 60
 
 # Options spécifiques par type de tâche LLM
 # Permet d'économiser du compute sur les tâches courtes sans sacrifier la précision des tâches complexes.
@@ -242,15 +239,9 @@ TONAL_LANGUAGES: set[str] = {"vietnamien"}
 # Consignes de script dérivées (compat. ascendante de `_lang_script_hint`).
 SCRIPT_HINTS: dict[str, str] = {key: meta["hint"] for key, meta in SCRIPTS.items()}
 
-# Vitesse d'affichage caractère par caractère du texte généré par le LLM (ms/char)
-LLM_CHAR_SPEED_MS = 15
-
-# Lecture progressive
-MIN_SPEED_MS = 10
-MAX_SPEED_MS = 500
-READING_SPEED_INITIAL_MS = MAX_SPEED_MS  # ms/caractère (vitesse la plus lente)
-DEFAULT_SPEED_MS = READING_SPEED_INITIAL_MS
-FIGURE_DISPLAY_PAUSE_MS = 3000
+# Vitesse de lecture progressive par défaut (ms/caractère), servie par
+# db.user.get_user_speed quand l'utilisateur n'en a pas choisi une.
+READING_SPEED_INITIAL_MS = 500
 
 # Chapitres heuristiques (si pas de TOC)
 DEFAULT_PAGES_PER_CHAPTER = 10
@@ -274,36 +265,12 @@ DB_SCHEMA_VERSION = 25
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 5
 
-# UI
-UI_FONT_FAMILY = "Georgia"
-UI_FONT_SIZE = 15
-UI_MONO_FONT = "Courier"
-UI_BG_COLOR = "#FFFFFF"
-UI_FG_COLOR = "#1A1A1A"
-UI_HEADING_COLOR = "#0D3B6E"
-UI_LEFT_PANE_RATIO = 0.67
-
-# Moteurs d'extraction (ordre cascade)
-EXTRACTION_ENGINES = ["pymupdf_structured", "pymupdf"]
-
-# Pipeline PDF ciblé par LLM
-MAX_CONCURRENT_LLM_PDF_TASKS = 1
-LLM_LAYOUT_TIMEOUT = 12
-LLM_CROP_TIMEOUT = 18
-LLM_LATEX_TIMEOUT = 15
-LLM_CACHE_ENABLED = True
-PDF_LLM_TIMEOUT_COOLDOWN = 75
-PDF_LLM_MAX_ORDER_BLOCKS = 32
-PDF_LLM_MAX_ORDER_ANCHORS = 10
-PDF_READER_INITIAL_PAGES = 3
-
-# Lecteur scroll libre
-READER_RENDER_ZOOM = 2.0          # zoom PNG des pages affichées
-READER_SNAPSHOT_ZOOM = 1.3        # zoom PNG allégé envoyé au LLM (contexte)
-READER_PRELOAD_PAGES = 2          # pages rendues en avance autour du viewport
-READER_PHOTO_CACHE_PAGES = 9      # images Tk gardées en mémoire
-
-# Assistant (bulle Gemma) — cooldowns d'intervention par mode (secondes)
+# ── Assistant (bulle Gemma) : SOURCE DE VÉRITÉ UNIQUE de la cadence ──────────
+# Ces constantes sont lues par `services/intervention.py`, l'unique moteur de
+# décision d'intervention. Ne jamais redéfinir ces valeurs ailleurs (routeur,
+# service) : c'est ce qui avait produit deux politiques divergentes entre l'UI
+# Tk et l'UI web. Un test verrouille cette lecture
+# (tests/services/test_intervention.py).
 ASSISTANT_MODES = ("discret", "normal", "coach")
 ASSISTANT_DEFAULT_MODE = "normal"
 ASSISTANT_GLOBAL_COOLDOWN = {"normal": 240.0, "coach": 120.0}

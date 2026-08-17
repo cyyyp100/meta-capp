@@ -17,7 +17,7 @@ datas = []
 binaries = []
 hiddenimports = []
 
-for pkg in ("uvicorn", "fastapi", "starlette", "fitz", "webview", "PIL"):
+for pkg in ("uvicorn", "fastapi", "starlette", "fitz", "webview"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -49,7 +49,11 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     excludes=[
+        # L'UI Tkinter a été retirée du produit : ni Tk, ni matplotlib (qui ne
+        # servait qu'au rendu LaTeX de l'ancien lecteur), ni Pillow.
         "tkinter",
+        "matplotlib",
+        "PIL",
         "webview.platforms.android",
         "webview.platforms.gtk",
         "webview.platforms.qt",

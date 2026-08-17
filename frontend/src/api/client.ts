@@ -72,7 +72,12 @@ export const api = {
   quizQuestions: (n = 10, subject?: string) =>
     getJSON<QuizQuestion[]>(`/api/quiz/questions?n=${n}${subject ? `&subject=${encodeURIComponent(subject)}` : ""}`),
   submitQuizAnswer: (category: string | null, correct: boolean) =>
-    postJSON<{ updated: boolean; level?: number }>("/api/quiz/answer", { category, correct }),
+    postJSON<{ updated: boolean; level?: number; retention: number }>(
+      "/api/quiz/answer", { category, correct },
+    ),
+  // Langue du backend : pilote les prompts LLM, pas seulement les libellés.
+  setBackendLang: (lang: string) =>
+    postJSON<{ lang: string; supported: string[] }>("/api/preferences/lang", { lang }),
   // Analyse LLM de fin de session de quiz + conseils de cours à renforcer.
   quizAnalysis: (answers: QuizAnswerRecord[]) =>
     postJSON<QuizAnalysis>("/api/quiz/analysis", { answers }),

@@ -62,3 +62,24 @@ def test_flashcard_create_review_delete(client):
     assert resp.status_code == 200
     assert resp.json()["removed"] == 1
     assert client.get("/api/flashcards").json() == []
+
+
+def test_spa_deep_links_serve_index(client):
+    """Une route client (/reader/12, /stats) doit renvoyer index.html.
+
+    Sans ce repli, tout rechargement de page ou deep-link renvoie 404 dans
+    l'application packagée (le bundle est servi par StaticFiles)."""
+    from server.config import FRONTEND_DIST
+
+    if not FRONTEND_DIST.is_dir():
+        import pytest
+
+        pytest.skip("frontend non compilé")
+
+    for path in ("/reader/12", "/stats", "/flashcards"):
+        res = client.get(path)
+        assert res.status_code == 200, path
+        assert res.headers["content-type"].startswith("text/html"), path
+
+    # Les routes API gardent la priorité sur le repli SPA.
+    assert client.get("/api/health").headers["content-type"].startswith("application/json")

@@ -86,6 +86,11 @@ temp/
 # ── Old local experiments ─────────────────────────────────────────────────────
 ancien_script/
 
+# ── Notes internes de travail (jamais publiées) ───────────────────────────────
+/architecture/
+/docs/
+/CLAUDE.md
+
 # ── Packaging artifacts (PyInstaller) ─────────────────────────────────────────
 /dist_app/
 /build_app/

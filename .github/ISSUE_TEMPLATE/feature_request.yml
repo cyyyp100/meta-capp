@@ -1,0 +1,44 @@
+name: 💡 Feature or pedagogy idea
+description: Suggest a capability, or a change to how the assistant teaches
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas about *pedagogy* are as welcome as ideas about code — intervention timing,
+        prompt quality, gauge formulas and flashcard usefulness all shape the product.
+
+        Note that this repository is the **local edition**: anything requiring a remote
+        service, an account or a subscription is out of scope (see
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you hit as a learner or a developer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead? Sketches and prompt drafts welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This works fully offline, with local inference only.
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Questions and ideas
+    url: https://github.com/cyyyp100/meta-capp/discussions
+    about: Usage questions, pedagogy debates, showing what you built with it.
+  - name: 🔒 Report a vulnerability
+    url: https://github.com/cyyyp100/meta-capp/security/advisories/new
+    about: Please report security issues privately, never as a public issue.
+  - name: ✨ Meta-Capp Pro (hosted models, OCR, speech)
+    url: https://github.com/cyyyp100/meta-capp#editions--local-vs-pro
+    about: Early access, school deployments and anything about the hosted edition.

@@ -104,12 +104,32 @@ def build_quiz(subject: str | None = None, n: int = 10, user_id: int = DEFAULT_U
     return quiz
 
 
-def submit_answer(category: str | None, correct: bool, user_id: int = DEFAULT_USER_ID) -> dict:
-    """Met à jour la maîtrise de la matière à partir d'une réponse de quiz."""
+def submit_answer(
+    category: str | None,
+    correct: bool,
+    user_id: int = DEFAULT_USER_ID,
+    session_id: int | None = None,
+) -> dict:
+    """Met à jour la maîtrise de la matière ET la rétention permanente.
+
+    Un quiz de révision est une mesure directe de la mémorisation : il fait donc
+    bouger le critère `retention` du profil long terme, en plus du niveau de la
+    matière. Les deux mises à jour sont indépendantes — une question sans matière
+    nourrit quand même la rétention."""
+    from metacog.profile import update_retention_from_quiz
+
+    retention = update_retention_from_quiz(
+        user_id, "correct" if correct else "incorrect", session_id=session_id,
+    )
+    result = {
+        "updated": bool(category),
+        "retention": float(retention.get("retention", 50.0)),
+    }
     if not category:
-        return {"updated": False}
-    level = update_subject_from_answer(user_id, category, bool(correct))
-    return {"updated": True, "category": category, "level": level}
+        return result
+    result["category"] = category
+    result["level"] = update_subject_from_answer(user_id, category, bool(correct))
+    return result
 
 
 def analyze_session(answers_history: list[dict], user_id: int = DEFAULT_USER_ID) -> dict:

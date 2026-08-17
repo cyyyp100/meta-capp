@@ -12,8 +12,20 @@ def test_quiz_answer_updates_subject(client):
     assert body["updated"] is True
     assert 0.0 <= body["level"] <= 100.0
 
-    # Sans catégorie : pas de mise à jour.
-    assert client.post("/api/quiz/answer", json={"correct": True}).json() == {"updated": False}
+    # Sans catégorie : pas de matière mise à jour — mais la rétention bouge quand même.
+    body = client.post("/api/quiz/answer", json={"correct": True}).json()
+    assert body["updated"] is False
+    assert "level" not in body
+    assert 0.0 <= body["retention"] <= 100.0
+
+
+def test_quiz_answer_moves_permanent_retention(client):
+    # Un quiz de révision est une mesure directe de la mémorisation : il doit
+    # faire bouger le critère `retention` du profil long terme (comportement
+    # présent en Tk, absent du web avant l'unification).
+    good = client.post("/api/quiz/answer", json={"correct": True}).json()["retention"]
+    bad = client.post("/api/quiz/answer", json={"correct": False}).json()["retention"]
+    assert bad < good
 
 
 def test_import_pdf(client, tmp_path):

@@ -1,0 +1,101 @@
+name: 🐛 Bug report
+description: Something behaves incorrectly (reader, assistant, gauges, flashcards, packaging…)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. English or French are both fine.
+
+        ⚠️ **Security issue?** Do not use this form — follow
+        [SECURITY.md](../blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import '...'
+        2. Scroll to page '...'
+        3. Ask the assistant '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Reader / PDF rendering
+        - Assistant (answers, interventions, bubble)
+        - Metacognition (gauges, profile, session summary)
+        - Flashcards / quiz
+        - Library / import
+        - Stats
+        - Languages module
+        - Installation / packaging
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: "macOS 15.3 / Windows 11 23H2 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Meta-Capp version or commit
+      placeholder: "v0.1.0, or the output of `git rev-parse --short HEAD`"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ollama
+    attributes:
+      label: Was Ollama running?
+      options:
+        - "Yes, with gemma4:e4b"
+        - "Yes, with a different model"
+        - "No (degraded mode)"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Relevant output from `logs/`, or from the terminal when running
+        `python main.py --debug`. Please redact anything personal.
+      render: shell
+
+  - type: textarea
+    id: document
+    attributes:
+      label: Document involved (optional)
+      description: >
+        If a specific PDF or source file triggers it, describe it (size, number of
+        pages, scanned or native, language) — or attach it if you can share it.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

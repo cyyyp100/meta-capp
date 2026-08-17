@@ -1,6 +1,8 @@
 // i18n : dictionnaires FR/EN complets + store de langue persistant + interpolation {x}.
 import { create } from "zustand";
 
+import { api } from "../api/client";
+
 export type Lang = "fr" | "en";
 
 const FR: Record<string, string> = {
@@ -681,6 +683,10 @@ export const useLangStore = create<LangState>((set) => ({
   setLang: (l) => {
     localStorage.setItem("metacapp-lang", l);
     set({ lang: l });
+    // La langue ne concerne pas que l'UI : le backend s'en sert pour les prompts
+    // LLM. Sans cet appel, l'interface passe en anglais et Gemma continue de
+    // répondre en français. Best-effort : l'UI ne doit pas dépendre du réseau.
+    void api.setBackendLang(l).catch(() => undefined);
   },
 }));
 

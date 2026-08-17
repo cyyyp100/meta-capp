@@ -1,6 +1,11 @@
-# services/ — Couche de service (Python pur, sans Tkinter ni FastAPI).
+# services/ — Couche métier (Python pur, sans FastAPI ni asyncio).
 #
-# Frontière partagée : les pages Tkinter ET le futur serveur web/FastAPI
-# consomment ces fonctions, qui renvoient des dicts/lists JSON-sérialisables.
-# Aucune logique de présentation ici (pas de couleurs, polices, libellés
-# traduits) : seulement la lecture des données et les calculs métier.
+# C'est LE domicile de la logique applicative : le serveur web n'y ajoute que le
+# transport (HTTP/WebSocket) et la validation d'entrée. Les fonctions renvoient
+# des dicts/lists JSON-sérialisables ; aucune logique de présentation ici (pas
+# de couleurs, polices, libellés traduits).
+#
+# Règle de non-duplication : une politique métier vit dans UN seul module. Un
+# routeur ne la réimplémente pas, et un seuil déclaré dans `config/settings.py`
+# n'est jamais recopié en littéral. La migration de l'ancienne UI vers le web
+# avait enfreint les deux, et les copies ont silencieusement divergé.

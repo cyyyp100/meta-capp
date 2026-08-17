@@ -1,12 +1,11 @@
-# Meta-Capp - Python dependencies (branche `block`)
+# Meta-Capp — Python dependencies.
 # Versions aligned with the working conda env `nwol`.
-# Python 3.11.9 + Tk runtime recommended.
 #
-# Quick start (clone of branch `block`):
+# Quick start:
 #   conda create -n nwol python=3.11.9 && conda activate nwol
 #   pip install -r requirements.txt
 #   cd frontend && npm install && npm run build && cd ..   # web UI bundle
-#   python main.py --web                                    # native web UI
+#   python main.py                                          # native app window
 #
 # Prerequisites NOT installable via pip:
 #   - Node.js + npm  (to build the React/Vite frontend in frontend/)
@@ -17,13 +16,7 @@
 # PDF rendering, page text and chapter detection
 PyMuPDF==1.24.14
 
-# Image processing (page rendering, display)
-Pillow==12.3.0
-
-# LaTeX mathtext rendering for inline formulas in assistant/Q&A text
-matplotlib==3.10.8
-
-# Local API server (web UI backend) — runs on 127.0.0.1, embedded in the app
+# Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
 fastapi==0.136.1
 uvicorn==0.46.0
 websockets==16.0          # WebSocket transport (reader + brainstorming streams)
@@ -34,13 +27,7 @@ pywebview==6.2.1
 # Windows-only: pywebview's EdgeChromium/WebView2 backend needs the .NET binding.
 pythonnet==3.0.5 ; sys_platform == "win32"
 
-# License verification (Ed25519, offline) — see services/licensing.py
-cryptography==48.0.1
-
-# OS keychain for API keys (S8, cloud-LLM subscription) — see services/secrets_store.py
-keyring==25.7.0
-
-# HTTP client — FastAPI TestClient + proxy IA de l'édition cloud (services/cloud_proxy)
+# HTTP client — required by FastAPI's TestClient
 httpx==0.28.1
 
 # Testing

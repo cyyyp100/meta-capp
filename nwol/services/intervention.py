@@ -1,9 +1,13 @@
-# reader/intervention.py — Politique d'intervention autonome de l'assistant
+# services/intervention.py — Politique d'intervention autonome de l'assistant.
 #
 # Surveille la lecture (temps sur page, retours, jauges, densité mathématique,
 # questions répétées) et demande au LLM une décision structurée
 # {should_intervene, kind, message, question}. Les cooldowns global et par page
 # évitent un assistant trop bavard ; le mode « discret » coupe tout.
+#
+# UI-agnostique : tout entre et sort par callbacks, et TOUS les seuils viennent
+# de `config/settings.py` — c'est la source de vérité unique de la cadence de
+# Gemma. Ne jamais réintroduire de valeur en dur ici ou chez un appelant.
 from __future__ import annotations
 
 import logging
@@ -21,9 +25,9 @@ from config.settings import (
     ASSISTANT_REVISIT_TRIGGER,
     ASSISTANT_WARMUP_S,
 )
-from reader.session_memory import SessionMemory
+from services.session_memory import SessionMemory
 
-logger = logging.getLogger("Reader.intervention")
+logger = logging.getLogger("services.intervention")
 
 INTERVENTION_KINDS = {"offer_help", "ask_question", "suggest_pause", "rephrase_offer", "review_flashcard"}
 

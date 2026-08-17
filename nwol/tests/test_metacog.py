@@ -131,3 +131,41 @@ def test_update_retention_from_quiz(fresh_db):
     assert float(after["retention"]) > float(before["retention"])
     worst = update_retention_from_quiz(DEFAULT_USER_ID, verdict="incorrect")
     assert float(worst["retention"]) < float(after["retention"])
+
+
+def test_web_and_shared_engine_apply_the_same_alpha(fresh_db):
+    """Anti-régression § A4 : un seul moteur d'apprentissage du profil.
+
+    `services.session.nudge_metacog_profile` (chemin web) doit produire exactement
+    le même profil que `metacog.profile.update_profile` (moteur partagé). Avant
+    l'unification, le web appliquait un alpha fixe de 0,1 : sur une première
+    session l'écart était d'un facteur 10."""
+    from db.user import DEFAULT_USER_ID
+    from services.session import nudge_metacog_profile
+
+    gauges = {c: 90.0 for c in CRITERIA}
+    values = nudge_metacog_profile(
+        DEFAULT_USER_ID, score=90.0, responses=[], metrics={},
+        session_id=None, session_gauges=gauges,
+    )
+    # Première session -> alpha = 1.0 : le profil adopte les jauges de session.
+    assert values["attention"] == pytest.approx(90.0)
+    assert values["creativity"] == pytest.approx(90.0)
+    assert set(values) == set(CRITERIA)
+
+
+def test_fallback_moves_only_evidence_backed_criteria(fresh_db):
+    # Sans canal temps réel, le taux de réussite n'informe que 3 critères :
+    # les autres restent inchangés plutôt que d'être déduits d'un score.
+    from db.metacog import ensure_profile
+    from db.user import DEFAULT_USER_ID
+    from services.session import nudge_metacog_profile
+
+    before = dict(ensure_profile(DEFAULT_USER_ID))
+    values = nudge_metacog_profile(
+        DEFAULT_USER_ID, score=100.0, responses=[], metrics={}, session_id=None,
+    )
+    assert set(values) == {"attention", "context_comprehension", "retention"}
+    after = ensure_profile(DEFAULT_USER_ID)
+    for untouched in ("curiosity", "creativity", "meta_cognition"):
+        assert float(after[untouched]) == pytest.approx(float(before[untouched]))

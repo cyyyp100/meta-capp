@@ -86,20 +86,39 @@ def _wait_until_ready(timeout: float = 15.0) -> bool:
     return False
 
 
-def main() -> None:
+def _open_document(path: str) -> int | None:
+    """Importe un document passé en ligne de commande. Renvoie son id."""
+    from services import code_reader
+    from services.orchestrator import import_code, import_pdf
+
+    try:
+        if path.lower().endswith(".pdf"):
+            doc = import_pdf(path)
+        elif code_reader.is_code_file(path):
+            doc = import_code(path)
+        else:
+            logger.error("Format non pris en charge : %s", path)
+            return None
+        return int(doc.get("id")) if doc else None
+    except Exception:
+        logger.exception("Import impossible : %s", path)
+        return None
+
+
+def main(pdf_path: str | None = None, debug: bool = False) -> None:
     # Logging fichier + console (rotation) : indispensable en app packagée pour
     # que « Exporter les logs » ait de la matière (diagnostic sur consentement).
     from config.logging_config import setup_logging
 
-    setup_logging()
+    setup_logging(debug=debug)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--server-only",
         action="store_true",
         help="Serveur seul, sans fenêtre native (smoke test CI / usage headless)",
     )
-    # parse_known_args : quand on arrive ici via `python main.py --web`, argv
-    # contient encore les options de main.py (--web, --debug, pdf) — les ignorer.
+    # parse_known_args : lancé directement, argv peut contenir les options de
+    # main.py (--debug, pdf) — elles sont déjà traitées par l'appelant.
     args, _ = parser.parse_known_args()
 
     if args.server_only:
@@ -136,10 +155,18 @@ def main() -> None:
         logger.error("Le serveur local n'a pas démarré à temps.")
         sys.exit(1)
 
+    # Document passé en argument : importé côté serveur, puis ouvert directement
+    # dans le lecteur (deep-link) plutôt que sur l'accueil.
+    start_url = f"http://{HOST}:{PORT}/?lt={launch_token}"
+    if pdf_path:
+        doc_id = _open_document(pdf_path)
+        if doc_id:
+            start_url = f"http://{HOST}:{PORT}/reader/{doc_id}?lt={launch_token}"
+
     api = NativeApi()
     window = webview.create_window(
         "Meta-Capp",
-        f"http://{HOST}:{PORT}/?lt={launch_token}",
+        start_url,
         js_api=api,
         width=1280,
         height=860,

@@ -271,38 +271,28 @@ def build_intervention_context(
     doc_id: int,
     page: int,
     *,
+    trigger: str,
     dwell_s: float,
     visits: int,
     questions_on_page: int,
     mode: str,
     gauges: dict | None = None,
+    due_flashcard_front: str = "",
 ) -> dict:
     """Contexte d'une décision d'intervention autonome.
 
-    Choisit le signal le plus saillant à partir des compteurs de session et des
-    jauges live, puis enrichit avec une éventuelle flashcard arrivée à échéance.
+    `trigger` est **décidé par `services/intervention.py`** (seuils de
+    `config/settings.py`) : cette fonction ne fait qu'habiller le signal reçu avec
+    le texte de page et les surlignages. Ne pas y remettre de cascade de seuils —
+    ce fut la cause d'une politique dupliquée entre les deux UI.
     Synchrone (lectures DB + texte de page) : à appeler hors de la boucle asyncio
     (executor)."""
     gauges = gauges or {}
     page_text = library.page_text(doc_id, page) or ""
-    due = _safe(lambda: get_due_flashcards(doc_id=doc_id, limit=1), [])
-    due_front = (due[0].get("front") if due else "") or ""
-
-    try:
-        attention = float(gauges.get("attention", 100.0))
-    except (TypeError, ValueError):
-        attention = 100.0
-
-    if attention < 35:
-        trigger = "low_attention"
-    elif questions_on_page >= 2:
-        trigger = "repeated_questions"
-    elif visits >= 2:
-        trigger = "page_revisits"
-    elif due_front:
-        trigger = "flashcard_due"
-    else:
-        trigger = "long_dwell"
+    due_front = due_flashcard_front or ""
+    if not due_front:
+        due = _safe(lambda: get_due_flashcards(doc_id=doc_id, limit=1), [])
+        due_front = (due[0].get("front") if due else "") or ""
 
     return {
         "trigger": trigger,

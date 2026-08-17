@@ -19,8 +19,8 @@ class LangSession:
     """Timer sequencer for a 20-minute language session.
 
     Caller drives the clock by calling tick() at regular intervals.
-    Callbacks run synchronously in the calling thread — use after(0, ...) around them
-    when invoking from a Tkinter widget.
+    Callbacks run synchronously in the calling thread — depuis la boucle asyncio du
+    serveur, repasser par `server.events.push_threadsafe`.
     """
 
     def __init__(

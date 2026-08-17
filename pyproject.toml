@@ -1,5 +1,5 @@
 # Outillage qualité (P0 du plan de durcissement). Pas de section pytest ici :
-# la suite se lance depuis nwol/ (rootdir = nwol/, voir CLAUDE.md).
+# la suite se lance depuis nwol/ (rootdir = nwol/, voir CONTRIBUTING.md).
 [tool.ruff]
 target-version = "py311"
 line-length = 120

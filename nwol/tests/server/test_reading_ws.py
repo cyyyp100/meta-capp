@@ -1,3 +1,17 @@
+def _relax_policy(monkeypatch, *, dwell=0.0, cooldown=0.0, warmup=0.0, page_cooldown=0.0):
+    """Neutralise la cadence de la politique d'intervention pour un test.
+
+    Les seuils sont importés dans `services.intervention` au chargement du module :
+    c'est là qu'il faut les remplacer, pas dans `config.settings`."""
+    from services import intervention
+
+    modes = ("discret", "normal", "coach")
+    monkeypatch.setattr(intervention, "ASSISTANT_DWELL_TRIGGER_S", dict.fromkeys(modes, dwell))
+    monkeypatch.setattr(intervention, "ASSISTANT_GLOBAL_COOLDOWN", dict.fromkeys(modes, cooldown))
+    monkeypatch.setattr(intervention, "ASSISTANT_PAGE_COOLDOWN", dict.fromkeys(modes, page_cooldown))
+    monkeypatch.setattr(intervention, "ASSISTANT_WARMUP_S", dict.fromkeys(modes, warmup))
+
+
 def test_build_answer_context_empty_db(client):
     # Pas de document -> contexte avec valeurs par défaut sûres.
     from services.assistant import build_answer_context
@@ -155,12 +169,14 @@ def test_live_gauges_seed_and_apply(client):
     assert after["attention"] > snap["attention"]
 
 
-def test_intervention_context_low_attention_trigger(client):
+def test_intervention_context_relays_policy_trigger(client):
+    # build_intervention_context ne DÉCIDE plus rien : il relaie le signal que la
+    # politique (services/intervention.py) lui passe. Garde-fou anti-duplication.
     from services import assistant
 
     ctx = assistant.build_intervention_context(
-        1, 1, dwell_s=70.0, visits=1, questions_on_page=0, mode="normal",
-        gauges={"attention": 10.0},
+        1, 1, trigger="low_attention", dwell_s=70.0, visits=1, questions_on_page=0,
+        mode="normal", gauges={"attention": 10.0},
     )
     assert ctx["trigger"] == "low_attention"
     assert ctx["gauges"]["attention"] == 10.0
@@ -275,11 +291,7 @@ def test_reader_ws_gated_question_from_intervention(client, monkeypatch):
     from services import assistant
 
     monkeypatch.setattr(reading, "_TICK_SECONDS", 0.05)
-    monkeypatch.setattr(
-        reading, "_MODE_POLICY",
-        {"coach": (0.0, 0.0), "normal": (float("inf"), float("inf")), "discret": (float("inf"), float("inf"))},
-    )
-    monkeypatch.setattr(reading, "_MODE_WARMUP_S", dict.fromkeys(reading._MODE_WARMUP_S, 0.0))
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
     monkeypatch.setattr(
         assistant, "build_intervention_context",
         lambda *a, **k: {"trigger": "long_dwell", "page": 1},
@@ -316,11 +328,7 @@ def test_reader_ws_warmup_silences_start_of_reading(client, monkeypatch):
 
     decided = []
     monkeypatch.setattr(reading, "_TICK_SECONDS", 0.01)
-    monkeypatch.setattr(
-        reading, "_MODE_POLICY",
-        {"coach": (0.0, 0.0), "normal": (0.0, 0.0), "discret": (float("inf"), float("inf"))},
-    )
-    monkeypatch.setattr(reading, "_MODE_WARMUP_S", dict.fromkeys(reading._MODE_WARMUP_S, 60.0))
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=60.0)
     monkeypatch.setattr(
         assistant, "build_intervention_context",
         lambda *a, **k: decided.append(1) or {"trigger": "long_dwell", "page": 1},

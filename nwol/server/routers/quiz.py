@@ -14,6 +14,7 @@ router = APIRouter(prefix="/quiz", tags=["quiz"])
 class AnswerBody(BaseModel):
     category: str | None = None
     correct: bool = False
+    session_id: int | None = None
 
 
 class AnalysisBody(BaseModel):
@@ -34,7 +35,8 @@ def questions(subject: str | None = None, n: int = 10) -> list[dict]:
 
 @router.post("/answer")
 def answer(body: AnswerBody) -> dict:
-    return submit_answer(body.category, body.correct)
+    """Enregistre une réponse : maîtrise de la matière + rétention du profil."""
+    return submit_answer(body.category, body.correct, session_id=body.session_id)
 
 
 @router.post("/analysis")

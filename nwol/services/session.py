@@ -22,12 +22,12 @@ from db.sessions import get_session
 from db.sessions import start_session as _start_session
 from db.user import DEFAULT_USER_ID
 from metacog.gauges import (
-    PROFILE_SESSION_WEIGHT,
+    clamp_gauge,
     make_gauges,
     snapshot,
     update_gauges_from_evaluation,
-    update_profile_gauges_from_session,
 )
+from metacog.profile import compute_alpha, update_profile
 
 __all__ = [
     "REFLECTION_QUESTIONS",
@@ -46,9 +46,10 @@ REFLECTION_QUESTIONS = [
     "Comment pourrais-tu réutiliser ce que tu viens d'apprendre ?",
 ]
 
-# Critères nudgés en fin de session (EMA douce vers le score de réussite).
+# Critères que le seul taux de réussite informe honnêtement, quand la séance n'a
+# pas de canal de jauges temps réel. Les trois autres (curiosité, créativité,
+# métacognition) ne sont pas déduisibles d'un score : on les laisse inchangés.
 _PROFILE_NUDGE_CRITERIA = ("attention", "context_comprehension", "retention")
-_NUDGE_ALPHA = 0.1
 
 
 class LiveGauges:
@@ -213,26 +214,27 @@ def nudge_metacog_profile(
     if session_gauges is None and session_id is not None:
         session_gauges = get_latest_gauges(session_id)
 
+    # Poids adaptatif : les premières sessions pèsent plus, puis l'apprentissage
+    # ralentit (plancher ALPHA_MIN). Un seul modèle pour tout le produit.
+    alpha = compute_alpha(int(profile.get("sessions_count") or 0))
+
     if session_gauges:
-        # Nudge fin : tout le profil (6 critères) glisse vers les jauges live de la
-        # session (EMA douce), avec historique par critère.
-        new_values: dict[str, float] = update_profile_gauges_from_session(profile, session_gauges)
-        for criterion, after in new_values.items():
-            before = float(profile.get(criterion, 50.0))
-            insert_history(
-                user_id, session_id, criterion, before, after,
-                float(session_gauges.get(criterion, before)), PROFILE_SESSION_WEIGHT,
-            )
+        # Canal temps réel disponible : tout le profil (6 critères) glisse vers les
+        # jauges live via le moteur unique `metacog.profile.update_profile`
+        # (historique par critère + incrément du compteur de sessions inclus).
+        updated = update_profile(user_id, session_gauges, session_id)
+        new_values: dict[str, float] = {c: float(updated.get(c, 50.0)) for c in CRITERIA}
     else:
-        # Repli (lecture/séance sans canal temps réel) : nudge des 3 critères clés
-        # vers le taux de réussite.
+        # Repli (séance sans canal temps réel) : le taux de réussite n'informe
+        # honnêtement que ces trois critères. On ne bouge pas les autres plutôt que
+        # d'inventer une mesure — mais on utilise le MÊME alpha adaptatif.
         new_values = {}
         for criterion in _PROFILE_NUDGE_CRITERIA:
             before = float(profile.get(criterion, 50.0))
-            after = max(0.0, min(100.0, before * (1 - _NUDGE_ALPHA) + score * _NUDGE_ALPHA))
+            after = clamp_gauge(before * (1 - alpha) + score * alpha)
             new_values[criterion] = after
-            insert_history(user_id, session_id, criterion, before, after, score, _NUDGE_ALPHA)
-    update_profile_values(user_id, new_values, increment_sessions=True)
+            insert_history(user_id, session_id, criterion, before, after, score, alpha)
+        update_profile_values(user_id, new_values, increment_sessions=True)
 
     # Analyse générale de l'apprenant (best-effort, après le nudge profil).
     _update_general_analysis(session_id, responses, metrics, session_gauges, user_id)
