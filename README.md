@@ -405,8 +405,3 @@ Released under the [MIT License](LICENSE) — © 2026 Cyprien Vial.
 
 Third-party components keep their own licenses (PyMuPDF is AGPL/commercial-dual-licensed; check its terms before redistributing a closed-source derivative).
 
-<div align="center">
-
-**Built for learners who still want to think.**
-
-</div>
