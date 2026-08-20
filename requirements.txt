@@ -18,7 +18,7 @@ PyMuPDF==1.24.14
 
 # Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
 fastapi==0.136.1
-uvicorn==0.46.0
+uvicorn==0.52.3
 websockets==16.0          # WebSocket transport (reader + brainstorming streams)
 pydantic==2.10.6          # request bodies in server/routers (used directly)
 
