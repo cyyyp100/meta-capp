@@ -14,7 +14,7 @@
 #     The app degrades gracefully when Ollama is offline (no API key needed).
 
 # PDF rendering, page text and chapter detection
-PyMuPDF==1.24.14
+PyMuPDF==1.28.2
 
 # Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
 fastapi==0.136.1
