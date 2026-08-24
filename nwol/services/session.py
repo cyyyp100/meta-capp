@@ -4,6 +4,7 @@
 # + nudge du profil métacognitif vers le score de session).
 from __future__ import annotations
 
+import logging
 import time
 
 from db.answers import get_answers_for_session
@@ -28,6 +29,8 @@ from metacog.gauges import (
     update_gauges_from_evaluation,
 )
 from metacog.profile import compute_alpha, update_profile
+
+logger = logging.getLogger("services.session")
 
 __all__ = [
     "REFLECTION_QUESTIONS",
@@ -85,8 +88,8 @@ class LiveGauges:
             return
         try:
             record_gauges(int(self.session_id), self.snapshot(), t=time.monotonic() - self._t0)
-        except Exception:  # pragma: no cover - persistance best-effort
-            pass
+        except Exception:  # persistance best-effort
+            logger.debug("Enregistrement des jauges de session ignoré", exc_info=True)
 
 
 def start_session(doc_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
@@ -143,7 +146,6 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
 
         result = run_llm_sync(
             lambda ok, err: generate_session_summary_async(context, ok, err),
-            timeout=45,
         )
         summary = (result or {}).get("session_summary") or {}
         return {"analysis": str(summary.get("qualitative_summary") or "")}
@@ -181,13 +183,12 @@ def _update_general_analysis(
 
         result = run_llm_sync(
             lambda ok, err: generate_profile_analysis_async(context, ok, err),
-            timeout=45,
         )
         analysis = str((result or {}).get("analysis") or "").strip()
         if analysis:
             set_general_analysis(user_id, analysis)
-    except Exception:  # pragma: no cover - best-effort : conserve l'analyse précédente
-        pass
+    except Exception:  # best-effort : conserve l'analyse précédente
+        logger.debug("Analyse de profil ignorée (analyse précédente conservée)", exc_info=True)
 
 
 def nudge_metacog_profile(

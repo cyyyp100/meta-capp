@@ -62,7 +62,6 @@ def build_quiz(subject: str | None = None, n: int = 10, user_id: int = DEFAULT_U
         try:
             distractors_map = run_llm_sync(
                 lambda ok, err: generate_quiz_distractors_async({"items": llm_items}, ok, err),
-                timeout=120.0,
             ) or {}
         except Exception as exc:  # pragma: no cover - dégradation best-effort
             logger.warning("Génération des distracteurs de quiz échouée : %s", exc)
@@ -149,7 +148,6 @@ def analyze_session(answers_history: list[dict], user_id: int = DEFAULT_USER_ID)
             lambda ok, err: generate_quiz_session_analysis_async(
                 {"answers_history": history, "subject_profiles": subject_profiles}, ok, err
             ),
-            timeout=90.0,
         )
     except Exception as exc:  # pragma: no cover - dégradation best-effort
         logger.warning("Analyse de session de quiz échouée : %s", exc)

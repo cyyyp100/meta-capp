@@ -128,7 +128,6 @@ def decide_session_type(profile: dict) -> tuple[str, str]:
     try:
         result = run_llm_sync(
             lambda ok, err: choose_session_type_async(state, available, ok, err),
-            timeout=20,  # appel court : c'est un choix, pas une génération de contenu
         )
         if isinstance(result, dict):
             chosen = result.get("chosen_type")
@@ -165,7 +164,6 @@ def _decide_theme(state: dict, profile: dict, phase: str) -> str:
     try:
         result = run_llm_sync(
             lambda ok, err: plan_lesson_async(state, level, language, phase, ok, err),
-            timeout=15,
         )
         if isinstance(result, dict) and result.get("theme"):
             return result["theme"]

@@ -96,11 +96,17 @@ def purge_all_data() -> dict:
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
     ]
-    with conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        for table in tables:
-            if table != "schema_version":
-                conn.execute(f'DELETE FROM "{table}"')
+    # SQLite ignore silencieusement `PRAGMA foreign_keys` à l'intérieur d'une
+    # transaction : les deux pragmas doivent rester *hors* du `with conn`, sinon
+    # la réactivation est un no-op et la connexion (mise en cache par thread et
+    # jamais fermée) écrit sans intégrité référentielle pour le reste du process.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        with conn:
+            for table in tables:
+                if table != "schema_version":
+                    conn.execute(f'DELETE FROM "{table}"')
+    finally:
         conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("VACUUM")
 

@@ -89,7 +89,6 @@ def from_exchange(body: FromExchangeBody) -> dict:
     try:
         result = run_llm_sync(
             lambda ok, err: make_flashcard(body.doc_id or 0, body.page or 1, front, back, ok, err),
-            timeout=30,
         )
         if isinstance(result, dict):
             card = result

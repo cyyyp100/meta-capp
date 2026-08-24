@@ -36,7 +36,9 @@ def test_code_document_serves_code_blocks(client, tmp_path):
     assert "def add" in payload[0]["text"]
     assert payload[0]["metadata"]["lang"] == "python"
 
-    # Le document code n'a pas d'image de page.
+    # Le document code n'a pas d'image de page : le lecteur en blocs
+    # (frontend BlockPages) ne doit donc jamais retomber sur <img>, sous peine
+    # d'une requête 404 par page hors fenêtre de préchargement.
     png = client.get(f"/api/library/doc/{doc_id}/page/1.png")
     assert png.status_code == 404
 

@@ -6,7 +6,7 @@ import { api, pageImageUrl } from "../api/client";
 import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
 import { GemmaPanel } from "../features/reader/GemmaPanel";
-import { ReconstructedPages } from "../features/reader/ReconstructedPages";
+import { BlockPages } from "../features/reader/BlockPages";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
@@ -125,7 +125,7 @@ export function Reader() {
   async function handleHighlights(items: Highlight[], page: number) {
     // Lecture reconstruite : les citations sont localisées par recherche pliée
     // dans le texte des blocs (anchorText), pas par géométrie PyMuPDF.
-    if (reconstructed) {
+    if (isCode) {
       const marks: TextMark[] = [];
       for (const h of items) {
         const quote = (h.quote || h.text || "").trim();
@@ -178,7 +178,7 @@ export function Reader() {
   // ancrage TEXTE {block_id, start, end} + quote (rects vides).
   async function highlightSelection() {
     if (!selection) return clearSelection();
-    if (!reconstructed && !selection.rects.length) return clearSelection();
+    if (!isCode && !selection.rects.length) return clearSelection();
     const { page, text, rects, anchor } = selection;
     try {
       const { id: hid } = await api.createHighlight(id, {
@@ -213,7 +213,6 @@ export function Reader() {
   // Fichier de code : lecteur en blocs (monospace + numéros de ligne), sans PDF
   // ni image de page. Un PDF reste rendu tel quel, en images.
   const isCode = data?.extraction_engine === "code";
-  const reconstructed = isCode;
 
   // Marque-page : on fige la page de reprise au tout premier chargement (valeur de la
   // session précédente, écrite en fin de session côté backend). On ignore la page 1
@@ -382,9 +381,9 @@ export function Reader() {
     );
     root.querySelectorAll("[data-page]").forEach((el) => obs.observe(el));
     return () => obs.disconnect();
-    // `reconstructed` recrée les éléments [data-page] -> l'observer doit se rebrancher.
+    // `isCode` change le rendu des [data-page] -> l'observer doit se rebrancher.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.page_count, reconstructed]);
+  }, [data?.page_count, isCode]);
 
   // Démarre une session de lecture à l'ouverture du document.
   useEffect(() => {
@@ -406,7 +405,7 @@ export function Reader() {
   // Charge les mots (calque de texte) de la page dominante et de ses voisines.
   // Inutile en lecture reconstruite : le texte y est nativement sélectionnable.
   useEffect(() => {
-    if (!data || reconstructed) return;
+    if (!data || isCode) return;
     const pages = [currentPage - 1, currentPage, currentPage + 1].filter(
       (p) => p >= 1 && p <= data.page_count,
     );
@@ -418,7 +417,7 @@ export function Reader() {
         .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, data?.page_count, reconstructed]);
+  }, [currentPage, data?.page_count, isCode]);
 
   function computeSelectionRects(pageEl: HTMLElement, page: number, sel: Selection): number[][] {
     const words = wordsByPage[page] || [];
@@ -478,8 +477,8 @@ export function Reader() {
         return;
       }
       const page = Number(pageEl.dataset.page);
-      const rects = reconstructed ? [] : computeSelectionRects(pageEl, page, sel);
-      const anchor = reconstructed ? computeSelectionAnchor(sel) : null;
+      const rects = isCode ? [] : computeSelectionRects(pageEl, page, sel);
+      const anchor = isCode ? computeSelectionAnchor(sel) : null;
       const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
       const rootRect = rootEl.getBoundingClientRect();
       setSelection({
@@ -494,11 +493,11 @@ export function Reader() {
     document.addEventListener("mouseup", onUp);
     return () => document.removeEventListener("mouseup", onUp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wordsByPage, reconstructed]);
+  }, [wordsByPage, isCode]);
 
   // Marques des pages reconstruites : citations de Gemma + surlignages mémorisés.
   const marksByPage = useMemo(() => {
-    if (!reconstructed) return {};
+    if (!isCode) return {};
     const out: Record<number, TextMark[]> = {};
     for (const [p, marks] of Object.entries(quoteMarksByPage)) out[Number(p)] = [...marks];
     for (const hl of savedHighlights) {
@@ -510,7 +509,7 @@ export function Reader() {
       });
     }
     return out;
-  }, [reconstructed, quoteMarksByPage, savedHighlights]);
+  }, [isCode, quoteMarksByPage, savedHighlights]);
 
   // Verrouillage de la lecture pendant une question automatique : on amène la
   // page-contexte dans la vue et on fige le scroll jusqu'à la bonne réponse.
@@ -583,14 +582,13 @@ export function Reader() {
               transform: `translateX(${panX}px)`,
             }}
           >
-            {reconstructed ? (
-              <ReconstructedPages
+            {isCode ? (
+              <BlockPages
                 docId={id}
                 pageCount={data.page_count}
                 width={width}
                 zoom={zoom}
                 currentPage={currentPage}
-                renderZoom={renderZoom}
                 sizes={sizes}
                 bookmarkPage={bookmarkPage}
                 locked={locked}

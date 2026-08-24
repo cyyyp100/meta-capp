@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 
-import { api, pageImageUrl } from "../../api/client";
+import { api } from "../../api/client";
 import type { ReaderBlock } from "../../api/types";
 import { useT } from "../../i18n";
 import type { TextMark } from "./anchorText";
 import { BlockRenderer } from "./blocks/BlockRenderer";
 
 /**
- * Boucle de pages du lecteur RECONSTRUIT (édition cloud) : un div[data-page=n]
- * par page — les contrats du shell Reader restent intacts (IntersectionObserver
- * de page dominante, page verrouillée, ruban marque-page, sélection native via
- * closest("[data-page]")). Une page pas encore OCRisée (reconstruction en
- * cours) retombe sur son image raster : lecture jamais bloquée.
+ * Boucle de pages du lecteur en BLOCS DE TEXTE — les fichiers de code, seuls
+ * documents paginés en blocs dans cette édition (les PDF sont rendus en images
+ * par le lecteur raster). Un div[data-page=n] par page : les contrats du shell
+ * Reader restent intacts (IntersectionObserver de page dominante, page
+ * verrouillée, ruban marque-page, sélection native via closest("[data-page]")).
+ *
+ * Les blocs ne sont chargés qu'autour de la page courante (PREFETCH_RADIUS) :
+ * une page pas encore chargée affiche un cadre vide au bon ratio, ce qui garde
+ * le scroll et l'observer stables sans rien demander au serveur.
  */
 
 interface Props {
@@ -21,7 +25,6 @@ interface Props {
   width: number;
   zoom: number;
   currentPage: number;
-  renderZoom: number;
   sizes: [number, number][];
   bookmarkPage: number | null;
   locked: boolean;
@@ -32,18 +35,18 @@ interface Props {
   onDeleteHighlight?: (id: number) => void;
 }
 
-// undefined = pas encore demandé ; null = pas encore reconstruite (raster).
+// undefined = pas encore demandé ; null = le serveur n'a pas de blocs pour
+// cette page (ne se produit pas pour un fichier de code, mais l'API le permet).
 type BlocksState = Record<number, ReaderBlock[] | null | undefined>;
 
 const PREFETCH_RADIUS = 2;
 
-export function ReconstructedPages({
+export function BlockPages({
   docId,
   pageCount,
   width,
   zoom,
   currentPage,
-  renderZoom,
   sizes,
   bookmarkPage,
   locked,
@@ -105,8 +108,8 @@ export function ReconstructedPages({
               cursor: "default",
               opacity: dimmed ? 0.3 : 1,
               transition: "opacity 0.2s",
-              // Page reconstruite : hauteur au contenu (min ≈ ratio du PDF pour
-              // que l'observer et le scroll restent stables avant chargement).
+              // Page chargée : hauteur au contenu. Sinon on garde le ratio de
+              // page pour que l'observer et le scroll restent stables.
               ...(blocks && visible.length
                 ? { minHeight: width * 0.3 }
                 : { aspectRatio: `${w} / ${h}` }),
@@ -134,42 +137,12 @@ export function ReconstructedPages({
                 </div>
               </div>
             ) : (
-              // Page pas (encore) reconstruite : image raster, lecture continue.
-              <>
-                <img
-                  src={pageImageUrl(docId, n, renderZoom)}
-                  alt={`Page ${n}`}
-                  loading="lazy"
-                  draggable={false}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    display: "block",
-                    pointerEvents: "none",
-                    userSelect: "none",
-                    WebkitUserSelect: "none",
-                  }}
-                />
-                {blocks === null ? (
-                  <div
-                    style={{
-                      position: "absolute",
-                      bottom: 10,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      padding: "3px 10px",
-                      borderRadius: 999,
-                      fontSize: 11,
-                      background: "color-mix(in srgb, var(--surface) 85%, transparent)",
-                      border: "1px solid var(--border)",
-                      color: "var(--muted)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {t("reader.ocr_page_pending")}
-                  </div>
-                ) : null}
-              </>
+              // Blocs pas encore chargés : cadre vide au ratio de la page. Ne
+              // JAMAIS retomber sur <img src={pageImageUrl(...)}> ici — un
+              // document code n'a pas d'image de page (render_page renvoie None,
+              // l'endpoint .png répond 404), donc chaque page hors fenêtre de
+              // préchargement déclencherait une requête en échec.
+              <div style={{ width: "100%", height: "100%" }} />
             )}
             {n === bookmarkPage ? (
               <div

@@ -82,7 +82,7 @@ def hook(doc_id: int, page: int = 1) -> dict:
     from services.llm_bridge import run_llm_sync
 
     try:
-        result = run_llm_sync(lambda ok, err: curiosity_hook(doc_id, page, ok, err), timeout=45)
+        result = run_llm_sync(lambda ok, err: curiosity_hook(doc_id, page, ok, err))
         return {"hook": (result or {}).get("answer", "")}
     except Exception:
         return {"hook": ""}

@@ -59,20 +59,22 @@ def _page_image_paths(doc_id: int, page: int) -> list[str]:
     Le client LLM ignore silencieusement une image trop lourde et se replie sur
     le texte seul si Ollama refuse l'image : aucun risque pour la réponse.
 
-    Document reconstruit (édition cloud) : le texte OCR complet est déjà dans
-    le contexte — l'image (facturée au fournisseur) n'est jointe QUE si la
-    page contient des visuels (figure/table) que le compagnon doit voir."""
-    if _ocr_page_without_visuals(doc_id, page):
+    Un document servi en blocs (fichier de code) n'a rien à montrer au modèle
+    que le texte ne dise déjà : on n'y joint pas d'image. Un rendu PyMuPDF de
+    code coûte du temps et des tokens de vision pour zéro information."""
+    if _served_as_text_blocks(doc_id, page):
         return []
     path = _safe(lambda: library.render_page(doc_id, page, _ASSISTANT_IMAGE_ZOOM), None)
     return [path] if path else []
 
 
-def _ocr_page_without_visuals(doc_id: int, page: int) -> bool:
+def _served_as_text_blocks(doc_id: int, page: int) -> bool:
+    """La page est-elle servie en blocs de texte plutôt qu'en image ?
+
+    `library.page_blocks` renvoie None pour un document raster (PDF) et une
+    liste de blocs `code` pour un fichier source."""
     blocks = _safe(lambda: library.page_blocks(doc_id, page), None)
-    if blocks is None:  # document raster ou page pas encore reconstruite
-        return False
-    return not any(b.get("type") in ("figure", "table") for b in blocks)
+    return bool(blocks)
 
 
 def chapter_title_for_page(doc_id: int, page: int) -> str:

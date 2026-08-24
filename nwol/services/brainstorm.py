@@ -55,14 +55,14 @@ def handle_message(
     if (discussion.get("title") or "").strip() in _DEFAULT_TITLES and not history:
         try:
             store.rename_discussion(discussion_id, user_message[:60])
-        except Exception:  # pragma: no cover - best-effort
-            pass
+        except Exception:  # best-effort : un titre raté ne casse pas la réponse
+            logger.debug("Auto-titre de discussion ignoré", exc_info=True)
 
     # Persistance immédiate du message user (réapparaît même si le LLM échoue ensuite).
     try:
         store.add_message(discussion_id, "user", user_message)
-    except Exception:  # pragma: no cover - best-effort
-        pass
+    except Exception:  # best-effort : la réponse prime sur son archivage
+        logger.debug("Persistance du message utilisateur ignorée", exc_info=True)
 
     def _answer(sources: list[dict]) -> None:
         context = {
@@ -76,8 +76,8 @@ def handle_message(
             text = (text or "").strip()
             try:
                 store.add_message(discussion_id, "assistant", text, sources=sources)
-            except Exception:  # pragma: no cover - best-effort
-                pass
+            except Exception:  # best-effort : la réponse prime sur son archivage
+                logger.debug("Persistance de la réponse assistant ignorée", exc_info=True)
             _maybe_summarize(discussion_id)
             on_answer({"answer": text, "sources": sources})
 
@@ -134,11 +134,11 @@ def _maybe_summarize(discussion_id: int) -> None:
         def _on_summary(text: str) -> None:
             try:
                 store.update_summary(discussion_id, text, max_id)
-            except Exception:  # pragma: no cover - best-effort
-                pass
+            except Exception:  # best-effort : le résumé glissant se rattrape au tour suivant
+                logger.debug("Mise à jour du résumé de discussion ignorée", exc_info=True)
 
-        def _on_err(_msg: str) -> None:  # pragma: no cover - best-effort
-            pass
+        def _on_err(msg: str) -> None:  # best-effort : pas de résumé ce tour-ci
+            logger.debug("Résumé glissant abandonné : %s", msg)
 
         summarize_brainstorm_async(discussion.get("summary") or "", pending, _on_summary, _on_err)
     except Exception as exc:  # pragma: no cover - best-effort

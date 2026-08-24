@@ -102,6 +102,27 @@ def test_purge_erases_everything_and_reseeds(client, tmp_path, monkeypatch):
     assert not (log_dir / "nwol.log").exists()
 
 
+def test_purge_leaves_foreign_keys_enabled(client):
+    """`PRAGMA foreign_keys` est ignoré dans une transaction : si la purge
+    réactive les FK *dedans*, la connexion (mise en cache par thread et jamais
+    fermée) reste sans intégrité référentielle pour toute la vie du process.
+
+    On appelle le service directement : passer par le client HTTP exécuterait la
+    purge dans un thread du pool, donc sur une *autre* connexion que celle que
+    le test inspecte — et le test passerait même avec le bug."""
+    import db
+    from services.data_export import purge_all_data
+
+    _insert_document(client, filename="perso.pdf")
+    conn = db.get_connection()
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+    purge_all_data()
+
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
 def test_export_logs(client, tmp_path, monkeypatch):
     from services import data_export
 

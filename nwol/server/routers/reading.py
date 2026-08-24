@@ -325,8 +325,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     if answer:
                         try:
                             save_assistant_exchange(doc_id, _page, _q, answer, session_id=_sid)
-                        except Exception:  # pragma: no cover - persistance best-effort
-                            pass
+                        except Exception:  # persistance best-effort
+                            logger.debug("Persistance de l'échange assistant ignorée", exc_info=True)
                     on_success(result)
 
                 assistant.answer_question(
@@ -379,8 +379,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                             question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,
                             verdict=ev.get("verdict"), feedback=ev.get("feedback"), session_id=_sid,
                         )
-                    except Exception:  # pragma: no cover - persistance best-effort
-                        pass
+                    except Exception:  # persistance best-effort
+                        logger.debug("Persistance de la réponse ignorée", exc_info=True)
                     # Flashcard auto-portante créée à la bonne réponse (le LLM exclut
                     # déjà metacognition/anticipation -> flashcard=null).
                     flashcard_created = False
@@ -399,8 +399,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                                 session_id=_sid,
                             )
                             flashcard_created = True
-                        except Exception:  # pragma: no cover - persistance best-effort
-                            pass
+                        except Exception:  # persistance best-effort
+                            logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
                     # Idée principale présente (correct/partial) -> fin du verrouillage.
                     if ev.get("verdict") in ("correct", "partial"):
                         state["gated"] = False
@@ -445,12 +445,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         # Marque-page : mémorise la dernière page vue pour la signaler à la réouverture.
         try:
             update_last_page(doc_id, int(state["page"]))
-        except Exception:  # pragma: no cover - persistance best-effort
-            pass
+        except Exception:  # persistance best-effort
+            logger.debug("Persistance du marque-page ignorée", exc_info=True)
         # Stockage borné : ne garder que la vignette, jeter les pages de la session.
         try:
             library.clear_reader_cache(doc_id)
-        except Exception:  # pragma: no cover - best-effort
-            pass
+        except Exception:  # best-effort : le cache sera purgé au prochain passage
+            logger.debug("Purge du cache lecteur ignorée", exc_info=True)
         await out.put(None)
         await sender_task

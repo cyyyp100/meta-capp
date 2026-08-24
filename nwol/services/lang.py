@@ -237,7 +237,7 @@ def _ensure_curriculum(language: str) -> list[dict]:
     existing = get_curriculum(language)
     if existing:
         return existing
-    result = run_llm_sync(lambda ok, err: generate_lang_curriculum_async(language, ok, err), timeout=90)
+    result = run_llm_sync(lambda ok, err: generate_lang_curriculum_async(language, ok, err))
     lessons = result.get("lessons") if isinstance(result, dict) else result if isinstance(result, list) else []
     if lessons:
         save_curriculum(language, lessons)
@@ -259,7 +259,6 @@ def generate_session(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
             lambda ok, err: generate_session_content_async(
                 language, session_type, profile, weak_points, ok, err
             ),
-            timeout=60,  # un seul type de contenu : bien plus tenable qu'un curriculum entier
         )
     except Exception as exc:
         logger.warning("Génération de session échouée (%s) : %s", session_type, exc)
@@ -309,7 +308,6 @@ def correct_attempt(
             lambda ok, err: generate_lang_correction_async(
                 language, target_phrase, user_attempt, ok, err
             ),
-            timeout=30,
         )
     except Exception as exc:
         logger.warning("Correction indisponible : %s", exc)
@@ -455,7 +453,6 @@ def _generate_exercise(language: str, profile: dict, lesson: dict, index: int) -
                 language, slot["exercise_type"], aug_profile, weak_points, ok, err,
                 due_cards=due_cards,
             ),
-            timeout=60,
         )
     except Exception as exc:
         logger.warning("Exercice %d (%s) échoué : %s", index, slot["exercise_type"], exc)
@@ -692,7 +689,6 @@ def lang_lesson_analysis(lesson_id: int, user_id: int = DEFAULT_USER_ID) -> dict
 
         result = run_llm_sync(
             lambda ok, err: generate_session_summary_async(context, ok, err),
-            timeout=45,
         )
         summary = (result or {}).get("session_summary") or {}
         return {"analysis": str(summary.get("qualitative_summary") or ""), "skills": skills}
@@ -796,7 +792,6 @@ def placement_start(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
         # à froid du modèle, souvent le tout premier appel LLM pour cette langue).
         test = run_llm_sync(
             lambda ok, err: generate_placement_test_async(language, script, ok, err),
-            timeout=150,
         )
     except Exception as exc:
         logger.warning("Test de niveau indisponible : %s", exc)
@@ -835,7 +830,6 @@ def placement_submit(language: str, answers: dict, user_id: int = DEFAULT_USER_I
     try:
         ev = run_llm_sync(
             lambda ok, err: evaluate_placement_async(language, summary, ok, err),
-            timeout=30,
         )
     except Exception as exc:
         logger.info("Éval CEFR LLM indisponible (%s), repli heuristique", exc)
@@ -867,7 +861,6 @@ def generate_lesson(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
     row = next((c for c in curriculum if int(c.get("lesson_n", 0)) == lesson_n), curriculum[0])
     lesson = run_llm_sync(
         lambda ok, err: generate_lang_lesson_async(language, int(row.get("lesson_n", 1)), row, ok, err),
-        timeout=90,
     )
     return {
         "lesson_n": int(row.get("lesson_n", 1)),

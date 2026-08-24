@@ -20,6 +20,8 @@ def _app_data_dir() -> Path:
 # LLM
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma4:e4b"
+# Plancher du budget socket d'une génération (voir `task_timeout_s` plus bas :
+# le budget réel est DÉRIVÉ du num_predict de la tâche, jamais saisi à la main).
 OLLAMA_TIMEOUT = 60
 OLLAMA_OPTIONS = {
     "num_ctx": 4096,
@@ -48,8 +50,6 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "meta_cognition_analysis":  {"num_ctx": 4096, "num_predict": 320, "temperature": 0.1},
     "profile_analysis":         {"num_ctx": 4096, "num_predict": 360, "temperature": 0.2},
     "math_render":              {"num_ctx": 4096, "num_predict": 900, "temperature": 0.1},
-    "schema_description":       {"num_ctx": 4096, "num_predict": 460, "temperature": 0.1},
-    "table_description":        {"num_ctx": 4096, "num_predict": 520, "temperature": 0.1},
     "subject_detection":        {"num_ctx": 1024, "num_predict": 30,  "temperature": 0.1},
     # num_ctx élargi : page visible (3500 car.) + passages RAG plein-document.
     "assistant_answer":         {"num_ctx": 6144, "num_predict": 560, "temperature": 0.1},
@@ -99,6 +99,50 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # Résumé glissant d'une discussion (mémoire longue compactée).
     "brainstorm_summary":       {"num_ctx": 4096, "num_predict": 360, "temperature": 0.15},
 }
+
+# ── Budget temps d'une génération ─────────────────────────────────────────────
+# Le timeout d'une tâche est DÉRIVÉ de ce qu'elle demande au modèle, pas choisi
+# à la main : un `num_predict` de 3000 ne peut pas tenir dans le même budget
+# qu'un de 160. Saisir les deux nombres séparément, c'est garantir qu'ils
+# divergent — et un timeout applicatif plus long que le timeout socket est une
+# échéance que personne n'atteindra jamais.
+#
+# Débit mesuré sur gemma4:e4b (machine de dev, sans GPU dédié). Volontairement
+# pessimiste : un budget trop court fait échouer une génération correcte, un
+# budget trop long ne coûte que dans le cas déjà anormal.
+OLLAMA_TOKENS_PER_S = 18.0
+# Chargement du modèle à froid + évaluation du prompt, avant le premier token.
+OLLAMA_TIMEOUT_OVERHEAD_S = 25.0
+# Plafond dur : au-delà, l'utilisateur a déjà renoncé.
+OLLAMA_TIMEOUT_MAX = 240.0
+
+
+# Une génération JSON peut être rejouée (sortie non conforme -> prompt de
+# réparation). Le budget TOTAL d'une tâche couvre ces tentatives : sans ça, la
+# boucle de retry et l'appelant qui attend se contredisent, et une deuxième
+# tentative sur le point d'aboutir est tuée par un appelant déjà parti.
+OLLAMA_RETRY_BUDGET_FACTOR = 2.0
+OLLAMA_WALL_TIMEOUT_MAX = 300.0
+
+
+def task_timeout_s(task: str) -> float:
+    """Budget d'UNE tentative, dérivé du `num_predict` de la tâche.
+
+    C'est le timeout socket appliqué par `urlopen` (llm/ollama_client). Une
+    tâche inconnue retombe sur les options par défaut."""
+    options = OLLAMA_TASK_OPTIONS.get(task) or OLLAMA_OPTIONS
+    tokens = float(options.get("num_predict") or OLLAMA_OPTIONS["num_predict"])
+    budget = OLLAMA_TIMEOUT_OVERHEAD_S + tokens / OLLAMA_TOKENS_PER_S
+    return min(OLLAMA_TIMEOUT_MAX, max(float(OLLAMA_TIMEOUT), budget))
+
+
+def task_wall_timeout_s(task: str) -> float:
+    """Budget TOTAL d'une tâche, tentatives comprises.
+
+    Source unique de DEUX échéances qui doivent rester d'accord : la boucle de
+    retry de `_generate_json` cesse de rejouer au-delà, et `run_llm_sync`
+    attend exactement ça avant d'abandonner."""
+    return min(OLLAMA_WALL_TIMEOUT_MAX, task_timeout_s(task) * OLLAMA_RETRY_BUDGET_FACTOR)
 
 # ── Systèmes d'écriture (module Langues) ──────────────────────────────────────
 # Taxonomie des scripts : chaque entrée porte les propriétés qui PILOTENT le

@@ -39,12 +39,15 @@ def generate(
     format_json: bool = True,
     task: str = "",
 ) -> str:
-    """Génération synchrone via Ollama local."""
-    return _ollama_generate(prompt, model=model, images=images, options=options, format_json=format_json)
+    """Génération synchrone via Ollama local.
+
+    `task` n'est pas que de l'observabilité : il porte le budget temps de la
+    tâche (`settings.task_timeout_s`), appliqué au timeout socket."""
+    return _ollama_generate(prompt, model=model, images=images, options=options, format_json=format_json, task=task)
 
 
-def _ollama_generate(prompt: str, model: str, images, options, format_json: bool) -> str:
+def _ollama_generate(prompt: str, model: str, images, options, format_json: bool, task: str = "") -> str:
     # Import au call-time : évite l'import circulaire (ollama_client délègue ici).
     from llm.ollama_client import _call_ollama_http
 
-    return _call_ollama_http(prompt, model, images=images, options=options, format_json=format_json)
+    return _call_ollama_http(prompt, model, images=images, options=options, format_json=format_json, task=task)

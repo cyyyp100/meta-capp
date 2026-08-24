@@ -8,6 +8,7 @@ import logging
 import queue
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,8 +18,9 @@ from config.settings import (
     OLLAMA_MODEL,
     OLLAMA_OPTIONS,
     OLLAMA_TASK_OPTIONS,
-    OLLAMA_TIMEOUT,
     OLLAMA_URL,
+    task_timeout_s,
+    task_wall_timeout_s,
 )
 from i18n import current_lang, t
 from llm.prompts import (
@@ -31,7 +33,6 @@ from llm.prompts import (
     build_follow_up_prompt,
     build_intervention_prompt,
     build_latex_contextual_chunk_render_prompt,
-    build_latex_contextual_chunk_render_text_prompt,
     build_meta_cognition_analysis_prompt,
     build_meta_cognition_questions_prompt,
     build_profile_analysis_prompt,
@@ -39,11 +40,8 @@ from llm.prompts import (
     build_quiz_distractors_prompt,
     build_quiz_session_analysis_prompt,
     build_rephrasing_prompt,
-    build_schema_render_prompt,
     build_session_summary_prompt,
-    build_slide_analysis_prompt,
     build_subject_detection_prompt,
-    build_table_render_prompt,
 )
 from llm.schema_json import (
     parse_chapter_summary,
@@ -75,8 +73,6 @@ _IMAGE_MAX_BYTES = 500_000
 # Valeur basse = priorité haute. Ordre : math_render > descriptions > Q&A > background.
 _TASK_PRIORITY: dict[str, int] = {
     "math_render":              0,
-    "schema_description":       1,
-    "table_description":        1,
     "question":                 2,
     "follow_up":                3,
     "assistant_answer":         3,
@@ -124,6 +120,47 @@ def cancel_pending_generations() -> None:
     global _generation_token
     _generation_token += 1
     logger.info("Génération LLM annulée (token=%s)", _generation_token)
+
+
+class CallerSlot:
+    """Canal ténu entre un appelant synchrone et la tâche qu'il vient d'enfiler.
+
+    `services/llm_bridge.run_llm_sync` ouvre un slot AVANT d'appeler la fonction
+    `*_async` ; celle-ci, qui s'exécute dans le même thread, y publie le budget
+    de sa tâche et y lit de quoi savoir si l'appelant a renoncé.
+
+    Deux problèmes en un seul objet :
+      * `timeout_s` — l'attente synchrone reprend le budget RÉEL de la tâche au
+        lieu d'un nombre saisi à la main qui contredisait le timeout socket ;
+      * `abandon` — sur timeout, l'appelant lève le drapeau et le worker jette
+        la tâche au lieu de la lancer. Il n'y a qu'UN worker LLM : sans ça, un
+        travail dont plus personne ne veut le résultat bloque toute la file.
+    """
+
+    __slots__ = ("abandon", "timeout_s")
+
+    def __init__(self) -> None:
+        self.abandon = threading.Event()
+        self.timeout_s: float | None = None
+
+
+_caller_slot = threading.local()
+
+
+def open_caller_slot() -> CallerSlot:
+    """Ouvre un slot pour le thread courant (appelé par run_llm_sync)."""
+    slot = CallerSlot()
+    _caller_slot.value = slot
+    return slot
+
+
+def close_caller_slot() -> None:
+    """Referme le slot : une tâche enfilée hors run_llm_sync n'en hérite pas."""
+    _caller_slot.value = None
+
+
+def _current_caller_slot() -> "CallerSlot | None":
+    return getattr(_caller_slot, "value", None)
 
 
 def _queue_worker() -> None:
@@ -521,209 +558,6 @@ def render_math_paragraph_async(
     _LLM_QUEUE.put((0, seq, _run_chunks))
 
 
-def render_math_paragraph_stream_async(
-    paragraph_text: str,
-    image_paths: list[str] | None,
-    on_token,
-    on_complete,
-    on_error,
-    model: str = OLLAMA_MODEL,
-    document_context_before: str = "",
-) -> None:
-    chunks = _split_paragraph_for_llm_with_context(
-        paragraph_text,
-        document_context_before=document_context_before,
-    )
-    safe_images = _filter_heavy_images(image_paths or [])
-    task_options = OLLAMA_TASK_OPTIONS.get("math_render", OLLAMA_OPTIONS)
-    seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
-
-    def _run_chunks() -> None:
-        if _generation_token != captured_token:
-            logger.debug("Tâche LLM math_render stream annulée (token obsolète)")
-            return
-        try:
-            parts: list[str] = []
-            for index, chunk in enumerate(chunks):
-                target = chunk["target"]
-                if _generation_token != captured_token:
-                    logger.debug("Streaming math_render interrompu (token annulé)")
-                    return
-                if index:
-                    separator = "\n\n"
-                    parts.append(separator)
-                    on_token(separator)
-
-                chunk_image_paths = safe_images if index == 0 else []
-                images = _load_ollama_images(chunk_image_paths)
-                prompt = build_latex_contextual_chunk_render_text_prompt(
-                    target,
-                    chunk.get("previous_context", ""),
-                    chunk.get("next_context", ""),
-                )
-                try:
-                    rendered = _stream_ollama_response(prompt, model, images, on_token, options=task_options, cancel_token=captured_token)
-                    if _generation_token != captured_token:
-                        logger.debug("Streaming math_render interrompu après réponse partielle (token annulé)")
-                        return
-                    degradation_reason = _math_render_degradation_reason(rendered, target)
-                    if degradation_reason:
-                        logger.debug("Rendu math streaming dégradé (%s), tentative JSON.", degradation_reason)
-                        rendered = _json_math_render_fallback(
-                            target,
-                            chunk_image_paths,
-                            task_options,
-                            model,
-                            previous_context=chunk.get("previous_context", ""),
-                            next_context=chunk.get("next_context", ""),
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "math_render streaming chunk %s/%s échoué, tentative JSON: %s",
-                        index + 1,
-                        len(chunks),
-                        exc,
-                    )
-                    try:
-                        parsed = _generate_json(
-                            "math_render",
-                            build_latex_contextual_chunk_render_prompt(
-                                target,
-                                chunk.get("previous_context", ""),
-                                chunk.get("next_context", ""),
-                            ),
-                            parse_latex_paragraph_render,
-                            model=model,
-                            retries=1,
-                            image_paths=chunk_image_paths,
-                            options=task_options,
-                        )
-                        rendered = _sanitize_math_paragraph_render(parsed.get("rendered"), target)
-                    except Exception as fallback_exc:
-                        logger.warning(
-                            "math_render JSON chunk %s/%s échoué, repli texte brut: %s",
-                            index + 1,
-                            len(chunks),
-                            fallback_exc,
-                        )
-                        rendered = target
-                    on_token(rendered)
-                parts.append(_sanitize_math_paragraph_render(rendered, target))
-
-            on_complete(_sanitize_math_paragraph_render("".join(parts).strip(), paragraph_text))
-        except Exception as exc:
-            logger.error("Échec streaming LLM math_render : %s", exc)
-            on_error(str(exc))
-
-    _LLM_QUEUE.put((0, seq, _run_chunks))
-
-
-def render_schema_stream_async(
-    image_path: str,
-    caption: str,
-    on_token,
-    on_complete,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    safe_images = _filter_heavy_images([image_path] if image_path else [])
-    task_options = OLLAMA_TASK_OPTIONS.get("schema_description", OLLAMA_OPTIONS)
-    seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
-
-    def _run() -> None:
-        if _generation_token != captured_token:
-            logger.debug("Tâche LLM schema_render annulée (token obsolète)")
-            on_error("Génération annulée")
-            return
-        try:
-            images = _load_ollama_images(safe_images)
-            if not images:
-                raise ValueError("Image de schéma indisponible ou trop lourde")
-            prompt = build_schema_render_prompt(caption)
-            rendered = _stream_ollama_response(prompt, model, images, on_token, options=task_options, cancel_token=captured_token)
-            if _generation_token != captured_token:
-                on_error("Génération annulée")
-                return
-            on_complete(rendered.strip())
-        except Exception as exc:
-            logger.error("Échec streaming LLM schema_render : %s", exc)
-            on_error(str(exc))
-
-    _LLM_QUEUE.put((1, seq, _run))
-
-
-def render_table_stream_async(
-    image_path: str,
-    caption: str,
-    on_token,
-    on_complete,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    safe_images = _filter_heavy_images([image_path] if image_path else [])
-    task_options = OLLAMA_TASK_OPTIONS.get("table_description", OLLAMA_OPTIONS)
-    seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
-
-    def _run() -> None:
-        if _generation_token != captured_token:
-            logger.debug("Tâche LLM table_render annulée (token obsolète)")
-            on_error("Génération annulée")
-            return
-        try:
-            images = _load_ollama_images(safe_images)
-            if not images:
-                raise ValueError("Image de tableau indisponible ou trop lourde")
-            prompt = build_table_render_prompt(caption)
-            rendered = _stream_ollama_response(prompt, model, images, on_token, options=task_options, cancel_token=captured_token)
-            if _generation_token != captured_token:
-                on_error("Génération annulée")
-                return
-            on_complete(rendered.strip())
-        except Exception as exc:
-            logger.error("Échec streaming LLM table_render : %s", exc)
-            on_error(str(exc))
-
-    _LLM_QUEUE.put((1, seq, _run))
-
-
-def render_slide_stream_async(
-    image_path: str,
-    caption: str,
-    on_token,
-    on_complete,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    safe_images = _filter_heavy_images([image_path] if image_path else [])
-    task_options = OLLAMA_TASK_OPTIONS.get("schema_description", OLLAMA_OPTIONS)
-    seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
-
-    def _run() -> None:
-        if _generation_token != captured_token:
-            logger.debug("Tâche LLM slide_render annulée (token obsolète)")
-            on_error("Génération annulée")
-            return
-        try:
-            images = _load_ollama_images(safe_images)
-            if not images:
-                raise ValueError("Image de slide indisponible ou trop lourde")
-            prompt = build_slide_analysis_prompt()
-            rendered = _stream_ollama_response(prompt, model, images, on_token, options=task_options, cancel_token=captured_token)
-            if _generation_token != captured_token:
-                on_error("Génération annulée")
-                return
-            on_complete(rendered.strip())
-        except Exception as exc:
-            logger.error("Échec streaming LLM slide_render : %s", exc)
-            on_error(str(exc))
-
-    _LLM_QUEUE.put((1, seq, _run))
-
-
 def generate_questions_async(
     text: str,
     on_success,
@@ -1032,10 +866,16 @@ def _run_json_async(
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
     captured_token = _generation_token
+    slot = _current_caller_slot()
+    if slot is not None:
+        slot.timeout_s = task_wall_timeout_s(label)
 
     def _run() -> None:
         if _generation_token != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
+            return
+        if slot is not None and slot.abandon.is_set():
+            logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
         try:
             logger.info("Génération LLM %s lancée modèle=%s", label, model)
@@ -1070,10 +910,16 @@ def _run_text_async(
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
     captured_token = _generation_token
+    slot = _current_caller_slot()
+    if slot is not None:
+        slot.timeout_s = task_wall_timeout_s(label)
 
     def _run() -> None:
         if _generation_token != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
+            return
+        if slot is not None and slot.abandon.is_set():
+            logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
         try:
             logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model)
@@ -1108,6 +954,10 @@ def _generate_json(
     options: dict | None = None,
 ) -> dict:
     attempts = retries + 1
+    # Échéance de la tâche ENTIÈRE : on ne rejoue pas au-delà du budget que
+    # l'appelant synchrone attend (config.settings.task_wall_timeout_s), sinon
+    # les tentatives suivantes travaillent pour un destinataire déjà parti.
+    deadline = time.monotonic() + task_wall_timeout_s(label)
     last_raw = ""
     last_error: Exception | None = None
     images = _load_ollama_images(image_paths or [])
@@ -1130,7 +980,7 @@ def _generate_json(
                         attempts,
                         text_exc,
                     )
-                    if attempt < attempts:
+                    if attempt < attempts and time.monotonic() < deadline:
                         current_prompt = prompt
                         continue
                     break
@@ -1143,7 +993,7 @@ def _generate_json(
                     attempts,
                     exc,
                 )
-                if attempt < attempts:
+                if attempt < attempts and time.monotonic() < deadline:
                     current_prompt = prompt
                     continue
                 break
@@ -1152,6 +1002,9 @@ def _generate_json(
         if parsed is not None:
             return parsed
         logger.debug("JSON LLM %s non conforme tentative %s/%s", label, attempt, attempts)
+        if time.monotonic() >= deadline:
+            logger.debug("Budget de la tâche %s épuisé : plus de réparation", label)
+            break
         if attempt < attempts:
             current_prompt = _build_json_repair_prompt(label, prompt, raw)
 
@@ -2119,8 +1972,12 @@ def _call_ollama(prompt: str, model: str, images: list[str] | None = None, optio
     return generate(prompt, model=model, images=images, options=options, format_json=format_json, task=task)
 
 
-def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None, format_json: bool = True) -> str:
-    """Implémentation HTTP brute vers Ollama local (appelée par llm_provider)."""
+def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None, format_json: bool = True, task: str = "") -> str:
+    """Implémentation HTTP brute vers Ollama local (appelée par llm_provider).
+
+    Le timeout socket est dérivé du budget de `task` (`settings.task_timeout_s`) :
+    une tâche qui demande 3000 tokens ne peut pas tenir dans le budget d'une qui
+    en demande 160."""
     payload_data = {
         "model": model,
         "prompt": prompt,
@@ -2145,7 +2002,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=task_timeout_s(task)) as resp:
             data = json.loads(resp.read())
             if "error" in data:
                 raise RuntimeError(f"Ollama error: {data['error']}")
@@ -2162,82 +2019,6 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     if not isinstance(response, str) or not response.strip():
         raise ValueError("Réponse Ollama vide")
 
-    return response
-
-
-def _call_ollama_streaming(
-    prompt: str,
-    model: str,
-    images: list[str] | None,
-    on_token,
-    on_complete,
-    on_error,
-) -> threading.Thread:
-    def _run() -> None:
-        try:
-            response = _stream_ollama_response(prompt, model, images or [], on_token)
-            on_complete(response)
-        except Exception as exc:
-            on_error(str(exc))
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return thread
-
-
-def _stream_ollama_response(prompt: str, model: str, images: list[str] | None, on_token, options: dict | None = None, cancel_token: int | None = None) -> str:
-    payload_data = {
-        "model": model,
-        "prompt": prompt,
-        "stream": True,
-        "think": False,
-        "options": options if options is not None else OLLAMA_OPTIONS,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-    }
-    if images:
-        payload_data["images"] = images
-
-    payload = json.dumps(payload_data).encode()
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    response_chunks: list[str] = []
-    try:
-        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
-            for line in resp:
-                if cancel_token is not None and _generation_token != cancel_token:
-                    logger.debug("Streaming LLM interrompu (token annulé)")
-                    break
-
-                if not line.strip():
-                    continue
-
-                chunk = json.loads(line.decode("utf-8"))
-                if "error" in chunk:
-                    raise RuntimeError(f"Ollama error: {chunk['error']}")
-
-                part = chunk.get("response", "")
-                if isinstance(part, str) and part:
-                    response_chunks.append(part)
-                    on_token(part)
-
-                if chunk.get("done") is True:
-                    break
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Ollama indisponible: {exc}") from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Réponse Ollama invalide: {exc}") from exc
-
-    response = "".join(response_chunks)
-    if not response.strip():
-        raise ValueError("Réponse Ollama vide")
     return response
 
 

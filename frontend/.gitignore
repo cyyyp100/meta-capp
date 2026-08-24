@@ -2,3 +2,6 @@ node_modules
 dist
 *.local
 .vite
+
+# Caches incrémentaux de tsc (locaux, jamais versionnés)
+*.tsbuildinfo
