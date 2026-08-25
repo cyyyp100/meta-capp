@@ -130,7 +130,15 @@ export function DocumentCard({
 
         {/* Seul chemin CLAVIER pour ranger un document : le glisser-déposer n'en
             a aucun. Discret au repos, révélé au survol — mais jamais retiré de
-            l'arbre d'accessibilité, sinon il ne servirait plus à rien. */}
+            l'arbre d'accessibilité, sinon il ne servirait plus à rien.
+
+            RESTE UN <select> NATIF, à dessein. Les autres listes de l'app sont
+            passées au Select de shadcn, pas celle-ci : son affichage dépend de
+            `.card-move` (tokens.css), qui s'appuie sur le `:hover` / `:focus-within`
+            de la carte. Un menu en portail se détacherait de la carte à
+            l'ouverture, le survol serait perdu et le déclencheur repasserait à
+            `opacity: 0` pendant que sa liste est ouverte. Le gain esthétique ne
+            vaut pas la perte du seul chemin clavier de rangement. */}
         <select
           className="card-move"
           aria-label={t("library.move_to")}
@@ -159,18 +167,20 @@ export function DocumentCard({
   );
 }
 
-// Le survol (soulèvement, mise au premier plan, dépliage du ruban) vit dans
-// tokens.css (`.doc-card`) : lui seul peut atteindre les enfants et doubler le
-// `:hover` d'un `:focus-within` pour le clavier. Tout ce que ce survol modifie
-// (position, z-index, ombre) y est déclaré AUSSI au repos : un style inline
-// gagnerait contre la règle `:hover` et l'effet disparaîtrait.
+// Le survol (soulèvement, mise au premier plan, rapprochement de la vignette,
+// dépliage du ruban) vit dans tokens.css (`.doc-card`) : lui seul peut atteindre
+// les enfants et doubler le `:hover` d'un `:focus-within` pour le clavier. Tout
+// ce que ce survol modifie (position, z-index, ombre, transform) y est déclaré
+// AUSSI au repos : un style inline gagnerait contre la règle `:hover` et l'effet
+// disparaîtrait.
+// La `transition` est dans le même cas depuis que la retombée dure plus
+// longtemps que la levée : déclarée ici, elle écraserait la durée de sortie.
 const card: React.CSSProperties = {
   background: "var(--surface)",
   border: "1px solid var(--border)",
   borderRadius: "var(--radius-md)",
   overflow: "hidden",
   cursor: "pointer",
-  transition: "box-shadow var(--anim-normal) var(--ease), transform var(--anim-normal) var(--ease), opacity var(--anim-fast) var(--ease)",
 };
 
 const thumbnail: React.CSSProperties = {

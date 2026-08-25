@@ -52,6 +52,8 @@ jobs:
     defaults:
       run:
         working-directory: frontend
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,7 +64,29 @@ jobs:
       - run: npm ci
       - name: Lint (eslint)
         run: npm run lint
-      - name: Tests (vitest — anti-XSS S6, nonce S1)
+      - name: Tests (vitest — anti-XSS S6, nonce S1, primitives d'interface)
         run: npm test
       - name: Type-check + build
         run: npm run build
+
+      # Parcours de bout en bout : le bundle compilé ci-dessus est servi par le
+      # VRAI backend FastAPI (même montage qu'en production). Ollama est absent
+      # en CI : les scénarios s'appuient sur les chemins de repli, déjà couverts
+      # côté Python par tests/server/test_llm_fallback.py.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - name: Dépendances backend (pour le serveur des parcours)
+        run: pip install -r ../requirements.txt
+      - name: Navigateur Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Parcours de bout en bout (playwright)
+        run: npx playwright test
+      - name: Rapport Playwright (si échec)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

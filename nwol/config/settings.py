@@ -338,6 +338,17 @@ else:
     DB_PATH = str(_PROJECT_ROOT / "data" / "nwol.db")
     LOG_FILE = str(_PROJECT_ROOT / "logs" / "nwol.log")
     ASSETS_DIR = str(_PROJECT_ROOT / "nwol" / "assets")
+
+# Redirection de la base par l'environnement. Les tests pytest monkeypatchent
+# `db.DB_PATH` en mémoire, ce qui suppose de vivre dans le même processus ; les
+# parcours Playwright lancent un VRAI serveur, et écriraient donc dans la
+# bibliothèque de l'utilisateur. Même mécanisme que NWOL_IMPORT_ROOTS.
+# Jamais honoré en app empaquetée : là, l'emplacement des données est imposé.
+if not getattr(sys, "frozen", False):
+    _db_override = os.environ.get("NWOL_DB_PATH")
+    if _db_override:
+        DB_PATH = str(Path(_db_override).expanduser().resolve())
+
 DB_SCHEMA_VERSION = 26
 
 # Logs

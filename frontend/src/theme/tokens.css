@@ -1,6 +1,15 @@
 /* tokens.css — Source unique du langage visuel (portée depuis nwol/ui/theme.py).
    Clair par défaut + thème sombre via [data-theme="dark"]. */
 
+@import "tailwindcss";
+
+/* Le thème est piloté par un attribut posé sur <html> (voir index.html et
+   AppLayout), pas par la classe `.dark` attendue par défaut en v4. */
+@custom-variant dark ([data-theme="dark"] &);
+
+/* Les classes sont scannées dans tout `src/` (ce fichier vit dans src/theme/). */
+@source "../";
+
 :root {
   /* Neutres */
   --bg: #f4f7f8;
@@ -20,6 +29,9 @@
   --accent: #2f7d8c;
   --accent-hover: #266979;
   --accent-soft: #e4f2f4;
+  /* Texte posé SUR l'accent. Blanc en clair ; en sombre l'accent s'éclaircit,
+     du blanc dessus tomberait sous le seuil de contraste -> encre foncée. */
+  --on-accent: #ffffff;
 
   /* Sémantiques */
   --success: #2f8a66;
@@ -41,11 +53,9 @@
   --code-number: #9a6b22;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* Rayons */
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 30px;
+  /* Les rayons vivent dans le `@theme` statique plus bas : ils ne changent pas
+     avec le thème, et `--radius-*` est aussi l'espace de noms Tailwind — les
+     déclarer ici en plus créerait `--radius-sm: var(--radius-sm)`, circulaire. */
 
   /* Espacement (grille 4px) */
   --space-xs: 4px;
@@ -64,10 +74,17 @@
   --anim-normal: 180ms;
   --anim-slow: 280ms;
   --ease: cubic-bezier(0.33, 1, 0.68, 1); /* ease-out-cubic */
+  /* Survol d'un objet qu'on désigne du curseur (carte de bibliothèque). Une
+     ease-out démarre à pleine vitesse : sous la souris, le mouvement « claque »
+     et redouble le sursaut du survol. Cette courbe part et arrive au ralenti —
+     la carte se soulève au lieu de sauter. */
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Typographie */
-  --font-ui: -apple-system, "Segoe UI", "Inter", system-ui, sans-serif;
-  --font-title: "Georgia", "Iowan Old Style", serif;
+  /* Typographie — polices embarquées (voir les imports de main.tsx), suivies
+     des piles système en repli si un fichier venait à manquer. L'app doit avoir
+     le même visage sur macOS et sur Windows : les deux sont publiés. */
+  --font-ui: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-title: "Fraunces Variable", "Iowan Old Style", Georgia, serif;
 }
 
 [data-theme="dark"] {
@@ -86,6 +103,7 @@
   --accent: #4fb3c4;
   --accent-hover: #69c4d3;
   --accent-soft: #173238;
+  --on-accent: #0d1518;
 
   --code-comment: #7f9483;
   --code-string: #d69a63;
@@ -108,6 +126,105 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Pont Tailwind — les tokens ci-dessus restent la SEULE source. Ce bloc n'est
+   qu'une vue en lecture : chaque entrée pointe sur un token, jamais sur une
+   valeur littérale. Ajouter une couleur = l'ajouter dans `:root` PUIS l'aliaser
+   ici, jamais l'inverse.
+
+   `inline` est obligatoire : sans lui Tailwind résoudrait les couleurs au build
+   et le basculement [data-theme="dark"] cesserait d'agir. Avec `inline`, les
+   utilitaires émettent `var(--accent)` — le thème sombre continue de fonctionner
+   sans écrire un seul variant `dark:`.
+
+   Le vocabulaire suit celui de shadcn/ui (background, primary, muted…), pour que
+   les composants copiés depuis shadcn ou MagicUI se branchent sans retouche. Les
+   notions propres à l'app (surlignage, coloration de code, sémantiques) sont
+   ajoutées en dessous.
+   --------------------------------------------------------------------------- */
+@theme inline {
+  /* Vocabulaire shadcn */
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--surface-soft);
+  --color-secondary-foreground: var(--text-soft);
+  --color-muted: var(--surface-soft);
+  --color-muted-foreground: var(--muted);
+  /* Chez shadcn `accent` désigne la surface de survol des menus, pas la couleur
+     de marque : on la branche donc sur --accent-soft. La marque, c'est `brand`. */
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--accent-hover);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--on-accent);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+
+  /* Vocabulaire propre à Meta-Capp */
+  --color-brand: var(--accent);
+  --color-brand-hover: var(--accent-hover);
+  --color-brand-soft: var(--accent-soft);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-canvas-alt: var(--bg-alt);
+  --color-border-strong: var(--border-strong);
+  --color-text-soft: var(--text-soft);
+  --color-muted-light: var(--muted-light);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-hl-key: var(--hl-key);
+  --color-hl-explain: var(--hl-explain);
+  --color-hl-reference: var(--hl-reference);
+
+  /* Typographie. `--font-mono` existe déjà dans `:root` ET est un espace de noms
+     Tailwind : on l'expose sous un autre nom (`font-code`) plutôt que de créer
+     `--font-mono: var(--font-mono)`. */
+  --font-sans: var(--font-ui);
+  --font-serif: var(--font-title);
+  --font-code: var(--font-mono);
+
+  /* Élévations. Même collision que les rayons, mais l'inverse comme solution :
+     les ombres CHANGENT avec le thème, elles doivent donc rester des variables
+     runtime dans `:root`/[data-theme]. On les expose sous `shadow-e1..e3`. */
+  --shadow-e1: var(--shadow-sm);
+  --shadow-e2: var(--shadow-md);
+  --shadow-e3: var(--shadow-lg);
+
+  /* PAS d'alias d'espacement nommés (--spacing-sm/md/lg…).
+     Tailwind fait retomber sur l'échelle d'espacement TOUS les utilitaires de
+     dimension : `max-w-md`, `max-w-lg`, `w-xs`, `h-sm`… Déclarer `--spacing-md`
+     rendait donc `max-w-md` égal à 14px — et comme dialog.tsx et alert-dialog.tsx
+     portent `sm:max-w-lg`, chaque dialogue de l'app faisait 22px de large.
+     L'échelle numérique de Tailwind (`p-4`, `gap-3`) est déjà une grille de 4px,
+     la même que `--space-*` : on s'en sert, et `var(--space-md)` reste disponible
+     pour les rares endroits qui veulent le token exact. */
+
+  --ease-brand: var(--ease);
+  --duration-fast: var(--anim-fast);
+  --duration-normal: var(--anim-normal);
+  --duration-slow: var(--anim-slow);
+}
+
+/* Rayons — seule définition. `@theme` (sans `inline`) émet de vraies valeurs
+   dans `:root`, donc les ~90 `var(--radius-sm)` déjà présents dans le code
+   continuent de résoudre, et `rounded-sm` marche. Une seule source, pas deux. */
+@theme {
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
 }
 
 * {
@@ -135,6 +252,30 @@ body {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   COMPAT PREFLIGHT — À SUPPRIMER en fin de migration Tailwind.
+
+   Le preflight de Tailwind aplatit les titres (taille et graisse héritées),
+   supprime les marges de <p> et les puces de <ul>. Les écrans encore stylés en
+   inline comptent sur ces défauts navigateur : sans ce bloc, l'app change
+   d'aspect avant même qu'une seule classe ait été écrite.
+
+   Posé dans `@layer base`, APRÈS le preflight : il le rattrape sans jamais
+   l'emporter sur un utilitaire (la couche `utilities` passe après `base`). Donc
+   dès qu'un écran migre vers `text-2xl font-bold`, ces règles s'effacent d'elles-
+   mêmes. Le bloc disparaît quand plus aucun écran ne dépend des défauts.
+   --------------------------------------------------------------------------- */
+@layer base {
+  h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; }
+  h2 { font-size: 1.5em; font-weight: 700; margin: 0.83em 0; }
+  h3 { font-size: 1.17em; font-weight: 700; margin: 1em 0; }
+  h4 { font-size: 1em; font-weight: 700; margin: 1.33em 0; }
+  p { margin: 1em 0; }
+  ul, ol { list-style: revert; margin: 1em 0; padding-left: 40px; }
+  /* v4 rend aux boutons le curseur natif (`default`) ; l'app suppose `pointer`. */
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
 }
 
 /* Lecteur de code : coloration syntaxique légère (thème-aware). */
@@ -201,12 +342,37 @@ input[type="search"]::-webkit-search-cancel-button {
   position: relative;
   z-index: 0;
   box-shadow: var(--shadow-sm);
+  transform: translateY(0) scale(1);
+  /* La transition est ici et NON en style inline : un style inline gagnerait
+     contre la règle `:hover`, qui a besoin d'allonger la retombée. */
+  transition:
+    transform var(--anim-slow) var(--ease-soft),
+    box-shadow var(--anim-slow) var(--ease-soft),
+    opacity var(--anim-fast) var(--ease);
 }
 .doc-card:hover:not([data-dragging="true"]),
 .doc-card:focus-within:not([data-dragging="true"]) {
   z-index: 3;
-  transform: translateY(-4px) scale(1.03);
+  /* Levée franche mais peu d'agrandissement : c'est l'échelle qui rend un
+     survol nerveux (le texte se recompose sous le curseur), pas la hauteur. */
+  transform: translateY(-6px) scale(1.02);
   box-shadow: var(--shadow-md);
+}
+/* La retombée est plus lente que la levée : l'œil suit une carte qui redescend
+   bien plus longtemps qu'une carte qui se soulève, et un simple passage du
+   curseur sur la grille ne laisse plus une traînée de cartes qui claquent. */
+.doc-card:not(:hover):not(:focus-within) {
+  transition-duration: 360ms, 360ms, var(--anim-fast);
+}
+
+/* Vignette : léger rapprochement, dans le même mouvement que la carte. Le
+   `overflow: hidden` de la vignette la garde dans ses bords. */
+.doc-card img {
+  transition: transform var(--anim-slow) var(--ease-soft);
+}
+.doc-card:hover:not([data-dragging="true"]) img,
+.doc-card:focus-within:not([data-dragging="true"]) img {
+  transform: scale(1.04);
 }
 
 /* Le ruban est ancré en bas d'une vignette déjà en `overflow: hidden` : déplié,
@@ -216,7 +382,9 @@ input[type="search"]::-webkit-search-cancel-button {
   max-height: 45%;
   overflow: hidden;
   background: color-mix(in srgb, var(--surface) 84%, transparent);
-  transition: max-height var(--anim-normal) var(--ease), background var(--anim-normal) var(--ease);
+  /* Même durée et même courbe que la levée de la carte : le ruban se déplie
+     AVEC elle, au lieu d'avoir fini avant qu'elle ait bougé. */
+  transition: max-height var(--anim-slow) var(--ease-soft), background var(--anim-slow) var(--ease-soft);
 }
 .doc-card:hover:not([data-dragging="true"]) .doc-ribbon,
 .doc-card:focus-within:not([data-dragging="true"]) .doc-ribbon {

@@ -7,6 +7,7 @@ import { useT } from "../../i18n";
 import { scoreColor } from "../stats/labels";
 import { WhyButton } from "../science/WhyButton";
 import { SKILL_ORDER } from "./skills";
+import { SasCard, SasOverlay } from "../session/SasOverlay";
 
 // Bilan de fin de séance de langue : métriques + décomposition par compétence +
 // analyse LLM + questions de métacognition. Même rituel que le SAS de sortie d'un
@@ -50,8 +51,8 @@ export function LangExitSas({
   }
 
   return (
-    <div style={overlay}>
-      <div style={card}>
+    <SasOverlay variant="scrim">
+      <SasCard className="max-h-[88vh] overflow-y-auto">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
           <div>
             <h2 style={{ fontFamily: "var(--font-title)", fontSize: 26, margin: "0 0 4px" }}>{t("exit.title")}</h2>
@@ -120,8 +121,8 @@ export function LangExitSas({
             {saving ? "…" : t("exit.finish")}
           </button>
         </div>
-      </div>
-    </div>
+      </SasCard>
+    </SasOverlay>
   );
 }
 
@@ -155,21 +156,4 @@ function formatDuration(s: number): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 100,
-};
-const card: React.CSSProperties = {
-  width: "min(560px, 92vw)",
-  maxHeight: "88vh",
-  overflow: "auto",
-  background: "var(--surface)",
-  borderRadius: "var(--radius-lg)",
-  boxShadow: "var(--shadow-lg)",
-  padding: "var(--space-xl)",
-};
 const btn: React.CSSProperties = { borderRadius: "var(--radius-sm)", padding: "10px 20px", fontWeight: 600, cursor: "pointer" };

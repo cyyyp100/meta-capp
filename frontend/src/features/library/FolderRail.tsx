@@ -3,7 +3,10 @@
 // Trois entrées pseudo en tête (Tous / Récents / Non classés) puis l'arbre.
 // « Tous » et « Non classés » sont aussi des cibles de dépôt : c'est par elles
 // qu'on sort un document d'un dossier à la souris.
+import { Clock, File, Files, FolderPlus, type LucideIcon } from "lucide-react";
 import { useState } from "react";
+
+import { cn } from "@/lib/utils";
 
 import type { FolderNode } from "../../api/types";
 import { useT } from "../../i18n";
@@ -39,7 +42,7 @@ export function FolderRail({
     <aside style={rail}>
       <PseudoRow
         label={t("library.all")}
-        icon="📚"
+        Icon={Files}
         count={counts.all}
         active={selection.kind === "all"}
         onSelect={() => select({ kind: "all" })}
@@ -49,14 +52,14 @@ export function FolderRail({
       />
       <PseudoRow
         label={t("library.recent")}
-        icon="🕒"
+        Icon={Clock}
         count={counts.recent}
         active={selection.kind === "recent"}
         onSelect={() => select({ kind: "recent" })}
       />
       <PseudoRow
         label={t("library.unfiled")}
-        icon="📄"
+        Icon={File}
         count={counts.unfiled}
         active={selection.kind === "unfiled"}
         onSelect={() => select({ kind: "unfiled" })}
@@ -99,7 +102,16 @@ export function FolderRail({
           style={createInput}
         />
       ) : (
-        <button type="button" onClick={() => setCreating(true)} style={newFolderButton}>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="mt-2 flex items-center gap-2 rounded-sm border border-dashed border-border-strong
+                     bg-transparent px-2.5 py-1.5 text-left text-xs font-semibold text-muted-foreground
+                     transition-colors duration-fast ease-brand
+                     hover:border-brand hover:bg-brand-soft hover:text-accent-foreground
+                     focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <FolderPlus className="size-3.5 shrink-0" aria-hidden />
           {t("library.new_folder")}
         </button>
       )}
@@ -110,7 +122,7 @@ export function FolderRail({
 /** Une entrée non-dossier du rail, éventuellement cible de dépôt. */
 function PseudoRow({
   label,
-  icon,
+  Icon,
   count,
   active,
   onSelect,
@@ -118,7 +130,7 @@ function PseudoRow({
   onDropFolder,
 }: {
   label: string;
-  icon: string;
+  Icon: LucideIcon;
   count: number;
   active: boolean;
   onSelect: () => void;
@@ -171,21 +183,23 @@ function PseudoRow({
         const folderId = readId(e.dataTransfer, FOLDER_MIME);
         if (folderId !== null) onDropFolder?.(folderId);
       }}
-      style={{
-        ...pseudoRow,
-        background: over || active ? "var(--accent-soft)" : "transparent",
-        color: over || active ? "var(--accent-hover)" : "var(--text-soft)",
-        outline: over ? "2px solid var(--accent)" : "2px solid transparent",
-        outlineOffset: -2,
-      }}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] select-none",
+        "outline-2 -outline-offset-2 outline-transparent",
+        "transition-[background-color,color,outline-color] duration-fast ease-brand",
+        "focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+        over || active
+          ? "bg-accent text-accent-foreground"
+          : "text-text-soft hover:bg-accent/60 hover:text-accent-foreground",
+        // Cible de dépôt survolée : le liseré dit « on lâche ici ».
+        over && "outline-brand",
+      )}
     >
-      <span aria-hidden="true" style={{ fontSize: 13 }}>
-        {icon}
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="text-[11px] text-muted-foreground tabular-nums">
+        {count > 0 ? count : ""}
       </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 11, color: "var(--muted)" }}>{count > 0 ? count : ""}</span>
     </div>
   );
 }
@@ -200,17 +214,6 @@ const rail: React.CSSProperties = {
   paddingRight: "var(--space-xs)",
 };
 
-const pseudoRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "6px 8px",
-  borderRadius: "var(--radius-sm)",
-  cursor: "pointer",
-  fontSize: 13,
-  userSelect: "none",
-  transition: "background var(--anim-fast) var(--ease)",
-};
 
 const separator: React.CSSProperties = {
   height: 1,
@@ -235,18 +238,6 @@ const emptyHint: React.CSSProperties = {
   margin: 0,
 };
 
-const newFolderButton: React.CSSProperties = {
-  marginTop: "var(--space-sm)",
-  border: "1px dashed var(--border-strong)",
-  background: "transparent",
-  color: "var(--muted)",
-  borderRadius: "var(--radius-sm)",
-  padding: "7px 10px",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  textAlign: "left",
-};
 
 const createInput: React.CSSProperties = {
   marginTop: "var(--space-sm)",

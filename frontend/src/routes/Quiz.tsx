@@ -4,6 +4,17 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { QuizAnswerRecord, QuizQuestion } from "../api/types";
+import { ArrowRight, Check, Eye, X } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { renderMathToHtml } from "../features/reader/renderMath";
 import { useT } from "../i18n";
 
@@ -137,25 +148,25 @@ export function Quiz() {
       <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>{t("quiz.title")}</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("quiz.subtitle")}</p>
 
-      <select
-        value={subject}
-        onChange={(e) => changeSubject(e.target.value)}
-        style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 12px", background: "var(--bg)", color: "var(--text)", fontSize: 14 }}
-      >
-        {subjectOptions.map((s) => (
-          <option key={s.code} value={s.code}>{s.label}</option>
-        ))}
-      </select>
+      <Select value={subject} onValueChange={changeSubject}>
+        <SelectTrigger className="mt-2 w-[260px]" aria-label={t("quiz.subject_label")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {subjectOptions.map((option) => (
+            <SelectItem key={option.code} value={option.code}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {!started && !done && (
         <div style={{ marginTop: 28 }}>
           <p style={{ color: "var(--muted)", marginBottom: 12 }}>{t("quiz.pickThemeHint")}</p>
-          <button
-            onClick={startQuiz}
-            style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "12px 26px", fontWeight: 600, cursor: "pointer", fontSize: 15 }}
-          >
+          <Button size="lg" onClick={startQuiz}>
             {t("quiz.start")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -205,12 +216,9 @@ export function Quiz() {
                       <div style={{ fontWeight: 600 }}>{course.title}</div>
                       {course.reason && <div style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 8px" }}>{course.reason}</div>}
                       {course.document_id != null && (
-                        <button
-                          onClick={() => navigate(`/reader/${course.document_id}`)}
-                          style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "8px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
-                        >
+                        <Button size="sm" onClick={() => navigate(`/reader/${course.document_id}`)}>
                           {t("quiz.launchReading")}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   ))}
@@ -280,8 +288,29 @@ function QuestionCard({
                 }
               }
               return (
-                <button key={choice} onClick={() => pick(choice)} disabled={picked !== null} style={{ textAlign: "left", padding: "10px 14px", borderRadius: "var(--radius-sm)", border: `1px solid ${border}`, background: bg, color: "var(--text)", cursor: picked === null ? "pointer" : "default", fontSize: 14 }}>
+                <button
+                  key={choice}
+                  onClick={() => pick(choice)}
+                  disabled={picked !== null}
+                  // Un choix non repondu doit reagir au survol : sans cela, rien
+                  // ne signale qu'il est cliquable.
+                  className="flex items-center justify-between gap-3 rounded-sm border p-[10px_14px] text-left text-sm text-foreground
+                             transition-[background-color,border-color,transform] duration-fast ease-brand
+                             enabled:cursor-pointer enabled:hover:border-border-strong enabled:active:scale-[0.995]
+                             focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none
+                             disabled:cursor-default"
+                  style={{ background: bg, borderColor: border }}
+                >
                   <span dangerouslySetInnerHTML={{ __html: renderMathToHtml(choice) }} />
+                  {/* La bonne et la mauvaise reponse ne se distinguaient QUE par
+                      la couleur : illisible pour un daltonien. L'icone double
+                      l'information. */}
+                  {picked !== null && isCorrect && (
+                    <Check className="size-4 shrink-0 text-success" aria-label={t("verdict.correct")} />
+                  )}
+                  {picked !== null && isPicked && !isCorrect && (
+                    <X className="size-4 shrink-0 text-danger" aria-label={t("verdict.incorrect")} />
+                  )}
                 </button>
               );
             })}
@@ -291,17 +320,32 @@ function QuestionCard({
             {revealed && <div style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }} dangerouslySetInnerHTML={{ __html: renderMathToHtml(q.answer) }} />}
             {!revealed && (
               <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => selfGrade(true)} style={{ border: "1px solid var(--success)", color: "var(--success)", background: "var(--surface)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}>{t("quiz.knew")}</button>
-                <button onClick={() => selfGrade(false)} style={{ border: "1px solid var(--danger)", color: "var(--danger)", background: "var(--surface)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}>{t("quiz.reveal")}</button>
+                <Button
+                  variant="secondary"
+                  onClick={() => selfGrade(true)}
+                  className="border-success/50 text-success hover:border-success hover:bg-success-soft hover:text-success"
+                >
+                  <Check className="size-4" aria-hidden />
+                  {t("quiz.knew")}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => selfGrade(false)}
+                  className="border-danger/50 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
+                >
+                  <Eye className="size-4" aria-hidden />
+                  {t("quiz.reveal")}
+                </Button>
               </div>
             )}
           </div>
         )}
 
         {(picked !== null || revealed) && (
-          <button onClick={onNext} style={{ marginTop: 18, border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "10px 22px", fontWeight: 600, cursor: "pointer" }}>
+          <Button onClick={onNext} className="mt-4.5">
             {t("quiz.next")}
-          </button>
+            <ArrowRight className="size-4" aria-hidden />
+          </Button>
         )}
       </div>
     </div>

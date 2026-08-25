@@ -1,6 +1,14 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Flame, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { api } from "../api/client";
 import { pickFilePath } from "../api/platform";
@@ -25,6 +33,7 @@ export function Home() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const t = useT();
+  const confirm = useConfirm();
   const [importing, setImporting] = useState(false);
   const [rawQuery, setRawQuery] = useState("");
 
@@ -103,7 +112,8 @@ export function Home() {
       await refreshLibrary();
       navigate(`/reader/${doc.id}`);
     } catch (e) {
-      alert(t("library.import_error", { message: String((e as Error).message) }));
+      // Un `alert()` bloquait la fenêtre et s'annonçait « 127.0.0.1:8756 indique ».
+      toast.error(t("library.import_error", { message: String((e as Error).message) }));
     } finally {
       setImporting(false);
     }
@@ -116,7 +126,7 @@ export function Home() {
       await refreshLibrary();
     } catch (e) {
       // Le serveur renvoie un `detail` déjà traduit (garde-fou de cycle…).
-      alert((e as Error).message || t(fallbackKey));
+      toast.error((e as Error).message || t(fallbackKey));
     }
   }
 
@@ -134,8 +144,14 @@ export function Home() {
         expand([...ancestorIds(tree, parentId), parentId]);
         return created;
       }, "library.folder_error"),
-    onDelete: (folder: FolderNode) => {
-      if (!window.confirm(t("library.folder_delete_confirm", { name: folder.name }))) return;
+    onDelete: async (folder: FolderNode) => {
+      const ok = await confirm({
+        title: t("library.folder_delete_title", { name: folder.name }),
+        description: t("library.folder_delete_confirm"),
+        confirmLabel: t("common.delete"),
+        destructive: true,
+      });
+      if (!ok) return;
       void mutate(async () => {
         await api.deleteFolder(folder.id);
         // La sélection pointait peut-être sur le dossier supprimé.
@@ -154,28 +170,58 @@ export function Home() {
     <div style={page}>
       <div style={header}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>
+          <div className="flex items-center gap-3">
+            <h1 className="m-0 font-serif text-[32px] leading-tight font-bold">
               {t("home.title")}
             </h1>
             {streak && streak.streak > 0 && (
-              <span title="Jours consécutifs" style={streakPill}>
-                🔥 {streak.streak}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-warning/30 bg-warning-soft font-bold text-warning"
+                  >
+                    <Flame className="size-3.5" aria-hidden />
+                    {streak.streak}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>{t("home.streak", { n: streak.streak })}</TooltipContent>
+              </Tooltip>
             )}
           </div>
-          <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("home.subtitle")}</p>
+          <p className="mt-1 mb-0 text-muted-foreground">{t("home.subtitle")}</p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+        <div className="flex items-center gap-2">
           <SearchBox value={rawQuery} onChange={setRawQuery} />
-          <button onClick={handleImport} disabled={importing} style={importButton(importing)}>
+          <Button onClick={handleImport} pending={importing}>
+            {!importing && <Plus className="size-4" aria-hidden />}
             {importing ? t("home.importing") : t("home.import")}
-          </button>
+          </Button>
         </div>
       </div>
 
-      {isLoading && <p style={{ color: "var(--muted)" }}>{t("common.loading")}</p>}
-      {isError && <p style={{ color: "var(--danger)" }}>{t("home.error")}</p>}
+      {/* La grille sautait d'un « Chargement… » d'une ligne à un mur de cartes.
+          La silhouette réserve exactement la place que prendra le contenu. */}
+      {isLoading && (
+        <div style={body} role="status" aria-busy="true">
+          <span className="sr-only">{t("common.loading")}</span>
+          <Skeleton className="h-72 w-56 shrink-0 rounded-lg" />
+          <div className="grid flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5.5">
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className="h-52 rounded-lg" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isError && (
+        <div className="mt-5.5 flex flex-col items-start gap-3 rounded-md border border-danger/30 bg-danger-soft p-5.5">
+          <p className="m-0 font-semibold text-danger">{t("home.error")}</p>
+          <Button variant="secondary" size="sm" onClick={() => void refreshLibrary()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
 
       {documents && (
         <div style={body}>
@@ -199,6 +245,10 @@ export function Home() {
               emptyMessage={emptyMessage}
               onKeyword={setRawQuery}
               onMove={handlers.onDropDocument}
+              // L'état vide porte lui-même l'appel à l'import : c'est le premier
+              // écran d'un nouvel utilisateur, le bouton du bandeau est loin.
+              onImport={selection.kind === "all" ? handleImport : undefined}
+              importing={importing}
             />
           </main>
         </div>
@@ -240,25 +290,3 @@ const main: React.CSSProperties = {
   padding: "8px 6px",
 };
 
-const streakPill: React.CSSProperties = {
-  background: "var(--warning-soft)",
-  color: "var(--warning)",
-  fontWeight: 700,
-  fontSize: 13,
-  padding: "4px 10px",
-  borderRadius: 999,
-};
-
-function importButton(importing: boolean): React.CSSProperties {
-  return {
-    border: "none",
-    background: "var(--accent)",
-    color: "#fff",
-    borderRadius: "var(--radius-sm)",
-    padding: "10px 18px",
-    fontWeight: 600,
-    cursor: importing ? "default" : "pointer",
-    whiteSpace: "nowrap",
-    boxShadow: "var(--shadow-sm)",
-  };
-}

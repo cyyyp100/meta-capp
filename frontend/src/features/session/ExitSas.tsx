@@ -1,15 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
+import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { api } from "../../api/client";
 import type { SessionMetrics } from "../../api/types";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
+import { SasCard, SasOverlay } from "./SasOverlay";
 
 // Bilan de fin de session : analyse LLM + métriques + questions de réflexion métacognitive.
 export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose: () => void }) {
   const t = useT();
+  const reduce = useReducedMotion();
   const [responses, setResponses] = useState<string[]>(metrics.reflection_questions.map(() => ""));
   const [saving, setSaving] = useState(false);
 
@@ -31,37 +37,57 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
   }
 
   return (
-    <div style={overlay}>
-      <div style={card}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
+    <SasOverlay variant="scrim">
+      <SasCard className="max-h-[88vh] overflow-y-auto">
+        <div className="flex items-start justify-between gap-3.5">
           <div>
-            <h2 style={{ fontFamily: "var(--font-title)", fontSize: 26, margin: "0 0 4px" }}>{t("exit.title")}</h2>
-            <p style={{ color: "var(--muted)", margin: 0 }}>{t("exit.subtitle")}</p>
+            <h2 className="m-0 mb-1 font-serif text-[26px] font-bold">{t("exit.title")}</h2>
+            <p className="m-0 text-muted-foreground">{t("exit.subtitle")}</p>
           </div>
           <WhyButton whyKey="exit" />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, margin: "18px 0" }}>
-          <Metric label={t("exit.duration")} value={formatDuration(metrics.duration_s)} />
-          <Metric label={t("exit.pages")} value={String(metrics.pages_read)} />
-          <Metric label={t("exit.questions")} value={String(metrics.questions_answered)} />
-          <Metric label={t("exit.success")} value={`${metrics.success_rate}%`} />
+        <div className="my-4.5 grid grid-cols-4 gap-3">
+          {[
+            { label: t("exit.duration"), value: formatDuration(metrics.duration_s) },
+            { label: t("exit.pages"), value: String(metrics.pages_read) },
+            { label: t("exit.questions"), value: String(metrics.questions_answered) },
+            { label: t("exit.success"), value: `${metrics.success_rate}%` },
+          ].map((m, i) => (
+            <Metric key={m.label} label={m.label} value={m.value} index={i} reduce={reduce} />
+          ))}
         </div>
 
         {(analysisLoading || analysis?.analysis) && (
-          <div style={{ background: "var(--accent-soft)", color: "var(--accent-hover)", borderRadius: "var(--radius-md)", padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>{t("exit.analysis_title")}</div>
-            <div style={{ fontSize: 14, lineHeight: 1.55, color: "var(--text)" }}>
-              {analysisLoading ? <span style={{ fontStyle: "italic", color: "var(--muted)" }}>{t("exit.analysis_loading")}</span> : analysis?.analysis}
+          <div className="mb-4 rounded-md bg-brand-soft px-4 py-3.5 text-accent-foreground">
+            <div className="mb-1.5 text-[11px] font-bold tracking-wide">
+              {t("exit.analysis_title")}
+            </div>
+            <div className="text-sm leading-relaxed text-foreground">
+              {analysisLoading ? (
+                // C'était un texte gris en italique : rien ne bougeait, on ne
+                // savait pas si l'analyse arrivait ou si elle avait échoué.
+                <div className="flex flex-col gap-2" role="status" aria-busy="true">
+                  <span className="sr-only">{t("exit.analysis_loading")}</span>
+                  <Skeleton className="h-3.5 w-full" />
+                  <Skeleton className="h-3.5 w-[85%]" />
+                  <Skeleton className="h-3.5 w-[60%]" />
+                </div>
+              ) : (
+                analysis?.analysis
+              )}
             </div>
           </div>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="flex flex-col gap-3.5">
           {metrics.reflection_questions.map((q, i) => (
             <div key={i}>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{q}</label>
+              <label className="text-[13px] font-semibold" htmlFor={`reflection-${i}`}>
+                {q}
+              </label>
               <AutoGrowTextarea
+                id={`reflection-${i}`}
                 value={responses[i]}
                 onChange={(e) => setResponses((r) => r.map((v, j) => (j === i ? e.target.value : v)))}
                 style={{
@@ -81,25 +107,42 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
           ))}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-          <button onClick={onClose} style={{ ...btn, background: "var(--surface-soft)", color: "var(--text-soft)", border: "1px solid var(--border)" }}>
+        <div className="mt-4.5 flex justify-end gap-2.5">
+          <Button variant="secondary" onClick={onClose}>
             {t("exit.skip")}
-          </button>
-          <button onClick={finish} disabled={saving} style={{ ...btn, background: "var(--accent)", color: "#fff", border: "none" }}>
-            {saving ? "…" : t("exit.finish")}
-          </button>
+          </Button>
+          {/* Le bouton affichait « … » pendant l'enregistrement : un indicateur
+              muet, indistinguable d'un libellé cassé. */}
+          <Button onClick={finish} pending={saving}>
+            {t("exit.finish")}
+          </Button>
         </div>
-      </div>
-    </div>
+      </SasCard>
+    </SasOverlay>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  index,
+  reduce,
+}: {
+  label: string;
+  value: string;
+  index: number;
+  reduce: boolean | null;
+}) {
   return (
-    <div style={{ background: "var(--surface-soft)", borderRadius: "var(--radius-md)", padding: "14px 10px", textAlign: "center" }}>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
-      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{label}</div>
-    </div>
+    <motion.div
+      className="rounded-md bg-surface-soft px-2.5 py-3.5 text-center"
+      initial={reduce ? false : { opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.08 + index * 0.06, ease: [0.33, 1, 0.68, 1] }}
+    >
+      <div className="text-[22px] font-bold tabular-nums">{value}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
+    </motion.div>
   );
 }
 
@@ -108,22 +151,3 @@ function formatDuration(s: number): string {
   const sec = s % 60;
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
-
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 100,
-};
-const card: React.CSSProperties = {
-  width: "min(560px, 92vw)",
-  maxHeight: "88vh",
-  overflow: "auto",
-  background: "var(--surface)",
-  borderRadius: "var(--radius-lg)",
-  boxShadow: "var(--shadow-lg)",
-  padding: "var(--space-xl)",
-};
-const btn: React.CSSProperties = { borderRadius: "var(--radius-sm)", padding: "10px 20px", fontWeight: 600, cursor: "pointer" };

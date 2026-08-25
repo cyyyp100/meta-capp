@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { useConfirm } from "@/components/ui/confirm";
+
 import { api, pageImageUrl } from "../api/client";
 import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
@@ -73,6 +75,7 @@ export function Reader() {
   const { docId } = useParams();
   const navigate = useNavigate();
   const t = useT();
+  const confirm = useConfirm();
   const id = Number(docId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -164,6 +167,20 @@ export function Reader() {
   function removeSavedHighlight(hid: number) {
     setSavedHighlights((prev) => prev.filter((h) => h.id !== hid));
     api.deleteHighlight(id, hid).catch(() => {});
+  }
+
+  /**
+   * Suppression d'un surlignage : demandée depuis deux endroits (le lecteur de
+   * code et le calque SVG du PDF), qui appelaient chacun leur `window.confirm`.
+   * Une seule fonction ici — le message et le libellé ne peuvent plus diverger.
+   */
+  async function askRemoveHighlight(hid: number) {
+    const ok = await confirm({
+      title: t("reader.hl_delete_confirm"),
+      confirmLabel: t("common.delete"),
+      destructive: true,
+    });
+    if (ok) removeSavedHighlight(hid);
   }
 
   // Action « ➕ Contexte » : mémorise l'extrait pour la prochaine question.
@@ -594,9 +611,7 @@ export function Reader() {
                 locked={locked}
                 lockedPage={lockedPage}
                 marksByPage={marksByPage}
-                onDeleteHighlight={(hid) => {
-                  if (window.confirm(t("reader.hl_delete_confirm"))) removeSavedHighlight(hid);
-                }}
+                onDeleteHighlight={(hid) => void askRemoveHighlight(hid)}
               />
             ) : (
             Array.from({ length: data.page_count }, (_, i) => i + 1).map((n) => {
@@ -727,9 +742,7 @@ export function Reader() {
                             opacity={0.32}
                             rx={1}
                             style={{ pointerEvents: "all", cursor: "pointer" }}
-                            onClick={() => {
-                              if (window.confirm(t("reader.hl_delete_confirm"))) removeSavedHighlight(hl.id);
-                            }}
+                            onClick={() => void askRemoveHighlight(hl.id)}
                           />
                         )),
                       )}

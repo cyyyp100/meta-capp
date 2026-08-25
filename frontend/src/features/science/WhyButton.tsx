@@ -1,157 +1,92 @@
-import { useEffect, useId, useState } from "react";
+// WhyButton — « Pourquoi ce moment ? » : la justification scientifique d'un SAS.
+//
+// La modale était écrite à la main : un voile en `position: fixed`, un
+// `role="dialog"` posé à la main, un écouteur `keydown` pour Échap, et c'est
+// tout. Ce qui manquait — et qu'aucun de ces bouts ne fournit — c'est le PIÈGE À
+// FOCUS : la tabulation sortait du dialogue et continuait dans la page en
+// dessous, invisible. Radix (via shadcn) le fournit, avec le portail, le
+// verrouillage du défilement et la restauration du focus à la fermeture.
+
+import { HelpCircle } from "lucide-react";
 import { Link } from "react-router-dom";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 import { useLangStore, useT } from "../../i18n";
 import { whyContent, type WhyKey } from "./metacogContent";
 
 export function WhyButton({ whyKey }: { whyKey: WhyKey }) {
-  const [open, setOpen] = useState(false);
   const t = useT();
   const lang = useLangStore((s) => s.lang);
   const content = whyContent[lang][whyKey];
 
   return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} style={buttonStyle}>
-        {t("sas.why")}
-      </button>
-      {open && <WhyDialog title={content.title} onClose={() => setOpen(false)} whyKey={whyKey} />}
-    </>
-  );
-}
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="secondary" size="sm" className="font-extrabold text-accent-foreground">
+          <HelpCircle className="size-4" aria-hidden />
+          {t("sas.why")}
+        </Button>
+      </DialogTrigger>
 
-function WhyDialog({ title, whyKey, onClose }: { title: string; whyKey: WhyKey; onClose: () => void }) {
-  const t = useT();
-  const lang = useLangStore((s) => s.lang);
-  const content = whyContent[lang][whyKey];
-  const titleId = useId();
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div onClick={onClose} style={overlay}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()} style={dialog}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, justifyContent: "space-between" }}>
-          <h2 id={titleId} style={{ fontFamily: "var(--font-title)", fontSize: 23, lineHeight: 1.2, margin: 0 }}>
-            {title}
-          </h2>
-          <button type="button" onClick={onClose} aria-label={t("common.close")} style={closeButton}>
-            ×
-          </button>
-        </div>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[620px]">
+        <DialogHeader>
+          <DialogTitle className="pr-8 font-serif text-[23px] leading-tight">
+            {content.title}
+          </DialogTitle>
+        </DialogHeader>
 
         <WhyBlock label={t("why.principle")} text={content.principle} />
         <WhyBlock label={t("why.conclusion")} text={content.conclusion} />
         <WhyBlock label={t("why.in_app")} text={content.inApp} />
 
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <div className="mt-4">
+          <div className="text-xs font-extrabold tracking-wide text-muted-foreground uppercase">
             {t("why.sources")}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          <div className="mt-2 flex flex-wrap gap-2">
             {content.sources.map((source) => (
-              <span key={source} style={sourceChip}>
+              <Badge key={source} variant="secondary" className="font-bold">
                 {source}
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-          <Link to="/stats/science" style={scienceLink}>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/stats/science"
+            className="rounded-sm font-extrabold text-accent-foreground underline underline-offset-2
+                       transition-colors duration-fast ease-brand hover:text-brand
+                       focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
             {t("why.full_page")}
           </Link>
-          <button type="button" onClick={onClose} autoFocus style={primaryButton}>
-            {t("common.close")}
-          </button>
+          <DialogClose asChild>
+            <Button>{t("common.close")}</Button>
+          </DialogClose>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function WhyBlock({ label, text }: { label: string; text: string }) {
   return (
-    <section style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent-hover)", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</div>
-      <p style={{ color: "var(--text-soft)", lineHeight: 1.55, margin: "5px 0 0" }}>{text}</p>
+    <section className="mt-3.5">
+      <div className="text-xs font-extrabold tracking-wide text-accent-foreground uppercase">
+        {label}
+      </div>
+      <p className="mt-1.5 mb-0 leading-relaxed text-text-soft">{text}</p>
     </section>
   );
 }
-
-const buttonStyle: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  background: "var(--surface)",
-  color: "var(--accent-hover)",
-  borderRadius: "var(--radius-sm)",
-  padding: "8px 13px",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.42)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 300,
-  padding: 16,
-};
-
-const dialog: React.CSSProperties = {
-  width: "min(620px, 94vw)",
-  maxHeight: "88vh",
-  overflow: "auto",
-  background: "var(--surface)",
-  color: "var(--text)",
-  borderRadius: "var(--radius-lg)",
-  boxShadow: "var(--shadow-lg)",
-  border: "1px solid var(--border)",
-  padding: "var(--space-xl)",
-};
-
-const closeButton: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: "var(--radius-sm)",
-  border: "1px solid var(--border)",
-  background: "var(--surface-soft)",
-  color: "var(--text)",
-  cursor: "pointer",
-  fontSize: 22,
-  lineHeight: 1,
-};
-
-const sourceChip: React.CSSProperties = {
-  display: "inline-flex",
-  border: "1px solid var(--border)",
-  background: "var(--surface-soft)",
-  color: "var(--text-soft)",
-  borderRadius: 999,
-  padding: "5px 10px",
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const scienceLink: React.CSSProperties = {
-  color: "var(--accent-hover)",
-  fontWeight: 800,
-  textDecoration: "underline",
-};
-
-const primaryButton: React.CSSProperties = {
-  border: "none",
-  background: "var(--accent)",
-  color: "#fff",
-  borderRadius: "var(--radius-sm)",
-  padding: "10px 18px",
-  fontWeight: 800,
-  cursor: "pointer",
-};

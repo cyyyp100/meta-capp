@@ -1,3 +1,7 @@
+import { Trash2 } from "lucide-react";
+
+import { useConfirm } from "@/components/ui/confirm";
+
 import type { BrainstormDiscussion } from "../../api/client";
 import { useT } from "../../i18n";
 
@@ -13,6 +17,7 @@ export function DiscussionList({
   onDelete: (id: number) => void;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   if (discussions.length === 0) {
     return <div style={{ color: "var(--muted)", fontSize: 13, padding: "8px 4px", lineHeight: 1.5 }}>{t("brainstorm.empty")}</div>;
   }
@@ -66,19 +71,23 @@ export function DiscussionList({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (window.confirm(t("brainstorm.delete_confirm"))) onDelete(d.id);
+                void (async () => {
+                  const ok = await confirm({
+                    title: t("brainstorm.delete_confirm"),
+                    confirmLabel: t("common.delete"),
+                    destructive: true,
+                  });
+                  if (ok) onDelete(d.id);
+                })();
               }}
-              title="🗑"
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "var(--muted)",
-                cursor: "pointer",
-                fontSize: 13,
-                padding: 2,
-              }}
+              title={t("common.delete")}
+              aria-label={t("common.delete")}
+              className="flex rounded-[4px] border-none bg-transparent p-0.5 text-muted-foreground
+                         transition-colors duration-fast ease-brand
+                         hover:bg-danger-soft hover:text-danger
+                         focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
             >
-              ✕
+              <Trash2 className="size-3.5" aria-hidden />
             </button>
           </div>
         );

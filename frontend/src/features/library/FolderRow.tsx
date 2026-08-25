@@ -5,6 +5,7 @@
 // nativement le curseur « interdit ». Refuser après le lâcher serait trop tard.
 // Le serveur revalide de toute façon (400) : le client fait l'ergonomie, le
 // serveur fait la vérité.
+import { FolderPlus, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { FolderNode } from "../../api/types";
@@ -214,9 +215,9 @@ export function FolderRow({
                   e.stopPropagation();
                   handlers.onCreateChild(folder.id);
                 }}
-                style={actionButton}
+                className={actionButton}
               >
-                ＋
+                <FolderPlus className="size-3.5" aria-hidden />
               </button>
               <button
                 type="button"
@@ -227,9 +228,9 @@ export function FolderRow({
                   setDraft(folder.name);
                   setRenaming(true);
                 }}
-                style={actionButton}
+                className={actionButton}
               >
-                ✎
+                <Pencil className="size-3.5" aria-hidden />
               </button>
               <button
                 type="button"
@@ -239,9 +240,9 @@ export function FolderRow({
                   e.stopPropagation();
                   handlers.onDelete(folder);
                 }}
-                style={actionButton}
+                className={actionButton}
               >
-                ✕
+                <Trash2 className="size-3.5" aria-hidden />
               </button>
             </span>
           </>
@@ -307,16 +308,11 @@ const actions: React.CSSProperties = {
   transition: "opacity var(--anim-fast) var(--ease)",
 };
 
-const actionButton: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "var(--muted)",
-  cursor: "pointer",
-  fontSize: 12,
-  lineHeight: 1,
-  padding: "2px 3px",
-  borderRadius: 4,
-};
+const actionButton =
+  "flex rounded-[4px] border-none bg-transparent p-[2px_3px] leading-none text-muted-foreground " +
+  "transition-colors duration-fast ease-brand " +
+  "hover:bg-accent hover:text-accent-foreground " +
+  "focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none";
 
 const renameInput: React.CSSProperties = {
   flex: 1,

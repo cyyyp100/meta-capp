@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
+import { SasOverlay } from "./SasOverlay";
 
 // Warm-up clic-only partagé (SAS d'entrée PDF et séance de langue) : clic => retourne ;
 // re-clic => revue neutre (avance la répétition espacée) + carte suivante. « Passer »
@@ -28,7 +29,7 @@ export function WarmUp({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
   }
 
   return (
-    <div style={overlay}>
+    <SasOverlay contained>
       <div style={{ textAlign: "center", width: "min(820px, 92vw)", padding: "var(--space-xl)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>
           {t("entry.warmup_title")} · {i + 1}/{cards.length}
@@ -52,15 +53,7 @@ export function WarmUp({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
           <button onClick={onDone} style={{ border: "1px solid var(--border)", background: "var(--surface-soft)", color: "var(--text-soft)", borderRadius: "var(--radius-sm)", padding: "8px 16px", fontWeight: 600, cursor: "pointer" }}>{t("entry.start")}</button>
         </div>
       </div>
-    </div>
+    </SasOverlay>
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  background: "var(--bg)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 80,
-};

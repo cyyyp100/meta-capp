@@ -1,0 +1,64 @@
+/* fonts.css — Polices EMBARQUÉES. Aucun CDN, aucun appel réseau : l’édition
+   locale ne parle qu’à 127.0.0.1.
+
+   Écrit à la main plutôt qu’en important les feuilles « standard » de
+   @fontsource-variable : celles-ci déclarent TOUS les alphabets (cyrillique,
+   grec, vietnamien, latin-ext…). L’interface est FR/EN, donc on n’embarque que
+   latin et latin-ext, et on prend les fichiers de l’axe de graisse seul plutôt
+   que « standard », qui y ajoute l’axe de taille optique inutilisé ici.
+   Gain mesuré sur le bundle : 490 Ko de fichiers de police ramenés à 204 Ko.
+
+   font-display: swap — le texte s’affiche tout de suite dans la pile de repli
+   puis bascule. Les fichiers étant locaux la bascule est imperceptible, alors
+   qu’un « block » figerait l’écran si un fichier venait à manquer.
+
+   Les plages Unicode sont reprises telles quelles des paquets @fontsource.
+
+   ATTENTION : le lexeur CSS du build (Lightning CSS) a déjà échoué ici sur une
+   apostrophe droite dans un commentaire, prise pour un début de chaîne. En cas
+   de « CssSyntaxError: Unterminated string » sur ce fichier, regarder les
+   apostrophes et les accents graves des commentaires avant toute autre piste. */
+
+/* ── Inter Variable : texte d’interface ───────────────────────────────────── */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ── Fraunces Variable : titres ───────────────────────────────────────────── */
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/fraunces/files/fraunces-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/fraunces/files/fraunces-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}

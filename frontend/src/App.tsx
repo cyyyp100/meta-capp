@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { RouteFallback } from "./components/RouteFallback";
 import { Home } from "./routes/Home";
 
 // Code-splitting par route : recharts (Stats) et react-rnd (Reader) ne sont
@@ -15,13 +16,18 @@ const LangLesson = lazy(() => import("./routes/LangLesson").then((m) => ({ defau
 const Brainstorming = lazy(() => import("./routes/Brainstorming").then((m) => ({ default: m.Brainstorming })));
 const Reader = lazy(() => import("./routes/Reader").then((m) => ({ default: m.Reader })));
 
-function Loading() {
-  return <div style={{ padding: 40, color: "var(--muted)" }}>Chargement…</div>;
-}
-
+/**
+ * Aucune animation à ce niveau : elle emporterait la barre latérale avec elle,
+ * alors que seule la moitié droite de l'écran change. La transition de page vit
+ * donc dans `AppLayout`, autour du seul `<Outlet />` (cf. le commentaire là-bas).
+ *
+ * Ce `Suspense` ne sert plus qu'aux routes PLEIN ÉCRAN (Reader, séance de
+ * langue), qui n'ont pas de barre latérale et sortent donc du layout ; celles du
+ * layout ont le leur, à l'intérieur du panneau de droite.
+ */
 export function App() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Home />} />

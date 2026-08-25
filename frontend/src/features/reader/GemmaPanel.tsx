@@ -1,5 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  CornerDownLeft,
+  Lightbulb,
+  Maximize2,
+  PanelRight,
+  Sparkles,
+  Target,
+  X,
+} from "lucide-react";
 import { Rnd } from "react-rnd";
+
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
@@ -262,7 +282,7 @@ export function GemmaPanel({
   }
 
   async function makeFlashcard(index: number) {
-    let front = "Note de lecture";
+    let front = t("gemma.note_front");
     for (let i = index - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         front = messages[i].text;
@@ -308,36 +328,95 @@ export function GemmaPanel({
     >
       <div ref={panelRef} style={panelStyle}>
         <div className="gemma-drag" style={{ ...headerStyle, cursor: layout === "dockRight" ? "default" : "move" }}>
-          <strong style={{ color: "var(--accent-hover)", fontSize: 14 }}>
-            ✦ Gemma <span style={{ fontSize: 10 }}>{connected ? "🟢" : "⚪️"}</span>
+          <strong className="flex items-center gap-1.5 text-sm text-accent-foreground">
+            <Sparkles className="size-4" aria-hidden />
+            Gemma
+            {/* Le voyant était 🟢/⚪️ : deux emoji dont le rendu change d'un OS à
+                l'autre, et dont personne ne devine le sens. Une pastille + une
+                infobulle disent la même chose, en toutes lettres au survol. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  role="status"
+                  aria-label={connected ? t("gemma.connected") : t("gemma.disconnected")}
+                  className={cn(
+                    "size-2 rounded-full transition-colors duration-normal ease-brand",
+                    connected ? "bg-success" : "bg-muted-light",
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipContent>
+                {connected ? t("gemma.connected") : t("gemma.disconnected")}
+              </TooltipContent>
+            </Tooltip>
           </strong>
           <div className="gemma-nodrag" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select
-              value={mode}
-              onChange={(e) => changeMode(e.target.value as (typeof MODES)[number])}
-              title="Mode d'accompagnement"
-              style={{ fontSize: 11, border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface)", color: "var(--text)", padding: "2px 4px" }}
-            >
-              {MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => sendRaw({ type: "focus" })} title="Mode focus (pause des interruptions)" style={iconBtn}>
-              🎯
-            </button>
-            <button
-              onClick={() => setLayout(layout === "dockRight" ? "float" : "dockRight")}
-              title={layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
-              style={{ ...iconBtn, color: layout === "dockRight" ? "var(--accent)" : "var(--muted)" }}
-            >
-              {layout === "dockRight" ? "⤢" : "▭"}
-            </button>
+            {/* Le <select> natif affichait « discret / normal / coach » bruts, non
+                traduits, et non stylables. Chaque mode explique maintenant ce
+                qu'il change. */}
+            <Select value={mode} onValueChange={(v) => changeMode(v as (typeof MODES)[number])}>
+              <SelectTrigger
+                size="sm"
+                aria-label={t("gemma.mode_label")}
+                className="h-7 w-auto gap-1 border-border bg-surface text-[11px]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODES.map((m) => (
+                  <SelectItem key={m} value={m} className="text-xs">
+                    <span className="flex flex-col">
+                      <span className="font-semibold">{t(`gemma.mode_${m}`)}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {t(`gemma.mode_${m}_hint`)}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("gemma.focus")}
+                  onClick={() => sendRaw({ type: "focus" })}
+                >
+                  <Target className="size-4" aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("gemma.focus")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
+                  onClick={() => setLayout(layout === "dockRight" ? "float" : "dockRight")}
+                  className={layout === "dockRight" ? "text-brand" : undefined}
+                >
+                  {layout === "dockRight" ? (
+                    <Maximize2 className="size-4" aria-hidden />
+                  ) : (
+                    <PanelRight className="size-4" aria-hidden />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
+              </TooltipContent>
+            </Tooltip>
             {!gated && (
-              <button onClick={() => setOpen(false)} style={iconBtn}>
-                ✕
-              </button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("common.close")}
+                onClick={() => setOpen(false)}
+              >
+                <X className="size-4" aria-hidden />
+              </Button>
             )}
           </div>
         </div>
@@ -357,7 +436,14 @@ export function GemmaPanel({
                     : { children: m.text })}
                 />
                 {m.role === "assistant" && i > 0 && (
-                  <button onClick={() => makeFlashcard(i)} style={miniBtn} title="Flashcard">
+                  <button
+                    onClick={() => makeFlashcard(i)}
+                    title={t("gemma.flashcard_hint")}
+                    className="mt-1 rounded-[4px] border-none bg-transparent p-0 text-[11px] text-brand
+                               underline-offset-2 transition-colors duration-fast ease-brand
+                               hover:text-accent-foreground hover:underline
+                               focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  >
                     {t("gemma.flashcard")}
                   </button>
                 )}
@@ -380,22 +466,47 @@ export function GemmaPanel({
               }}
             />
           )}
-          {busy && <div style={{ alignSelf: "flex-start", fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>{t("gemma.thinking")}</div>}
+          {busy && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 self-start text-xs text-muted-foreground"
+            >
+              {/* Le texte italique « Gemma réfléchit… » était immobile : rien ne
+                  distinguait une attente en cours d'une interface figée. */}
+              <span className="flex gap-1" aria-hidden>
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="size-1.5 animate-bounce rounded-full bg-muted-light"
+                    style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }}
+                  />
+                ))}
+              </span>
+              {t("gemma.thinking")}
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 6, padding: "6px 10px", flexWrap: "wrap", borderTop: "1px solid var(--border)" }}>
-          <button disabled={busy} onClick={() => action("rephrase", t("gemma.rephrase_cmd"))} style={chip}>
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("rephrase", t("gemma.rephrase_cmd"))}>
             {t("gemma.rephrase")}
-          </button>
-          <button disabled={busy} onClick={() => action("recap", t("gemma.recap_cmd"))} style={chip}>
+          </Button>
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("recap", t("gemma.recap_cmd"))}>
             {t("gemma.recap")}
-          </button>
-          <button disabled={busy} onClick={() => action("hook", t("gemma.curiosity_cmd"))} style={chip}>
+          </Button>
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("hook", t("gemma.curiosity_cmd"))}>
             {t("gemma.curiosity")}
-          </button>
-          <button disabled={busy} onClick={startQa} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-hover)" }}>
+          </Button>
+          <Button
+            variant="chip"
+            size="sm"
+            disabled={busy}
+            onClick={startQa}
+            className="border-brand text-accent-foreground"
+          >
             {t("gemma.quizme")}
-          </button>
+          </Button>
         </div>
 
         {contextChips && contextChips.length > 0 && (
@@ -421,9 +532,15 @@ export function GemmaPanel({
             placeholder={t("gemma.placeholder", { n: currentPage })}
             style={inputStyle}
           />
-          <button onClick={ask} disabled={busy} style={{ ...sendBtn, background: busy ? "var(--muted-light)" : "var(--accent)" }}>
-            ↵
-          </button>
+          <Button
+            onClick={ask}
+            pending={busy}
+            aria-label={t("gemma.send")}
+            size="icon"
+            className="shrink-0"
+          >
+            {!busy && <CornerDownLeft className="size-4" aria-hidden />}
+          </Button>
         </div>
       </div>
     </Rnd>
@@ -442,18 +559,14 @@ const headerStyle: React.CSSProperties = {
   background: "color-mix(in srgb, var(--accent-soft) 75%, transparent)", cursor: "move", userSelect: "none",
 };
 const bodyStyle: React.CSSProperties = { flex: 1, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 };
-const iconBtn: React.CSSProperties = { border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 15 };
+// Champ de saisie : passé à AutoGrowTextarea, qui attend un objet de style.
 const inputStyle: React.CSSProperties = {
   flex: 1, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px",
   background: "var(--bg)", color: "var(--text)", fontSize: 13,
 };
-const sendBtn: React.CSSProperties = { border: "none", color: "#fff", borderRadius: "var(--radius-sm)", padding: "0 14px", height: 36, cursor: "pointer", fontWeight: 600 };
 const chip: React.CSSProperties = {
   border: "1px solid var(--border)", background: "var(--surface-soft)", color: "var(--text-soft)",
   borderRadius: 999, padding: "4px 10px", fontSize: 12, cursor: "pointer",
-};
-const miniBtn: React.CSSProperties = {
-  marginTop: 4, border: "none", background: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 11, padding: 0,
 };
 const contextChipStyle: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%",
@@ -475,7 +588,7 @@ const VERDICT_COLOR: Record<string, string> = {
 // (`scanning`), la bulle se tourne vers le PDF et fixe son regard de ce côté.
 function GemmaBubble({ scanning, onOpen, title }: { scanning: boolean; onOpen: () => void; title: string }) {
   const SIZE = 64;
-  const sphereRef = useRef<HTMLDivElement>(null);
+  const sphereRef = useRef<HTMLButtonElement>(null);
   const movedRef = useRef(false);
   const [pupil, setPupil] = useState({ x: 0, y: 0 });
 
@@ -514,17 +627,24 @@ function GemmaBubble({ scanning, onOpen, title }: { scanning: boolean; onOpen: (
     >
       <style>{BUBBLE_KEYFRAMES}</style>
       <div style={{ width: SIZE, height: SIZE, perspective: 320, animation: "gemmaFloat 4.2s ease-in-out infinite" }}>
-        <div
+        {/* C'était un <div onClick> : la seule façon d'ouvrir Gemma était un clic
+            souris — pas de tabulation, pas d'Entrée, rien d'annoncé. Un vrai
+            <button> rend l'assistant atteignable au clavier, et `movedRef`
+            continue de distinguer un clic d'une fin de glissement. */}
+        <button
           ref={sphereRef}
+          type="button"
           title={title}
+          aria-label={title}
           onClick={() => { if (!movedRef.current) onOpen(); }}
+          className="border-none p-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           style={{ ...sphereStyle, transform: scanning ? "rotateY(-32deg) scale(1.04)" : "rotateY(0deg) scale(1)" }}
         >
           <div style={{ display: "flex", gap: 9, transform: "translateZ(10px)" }}>
             <Eye look={look} />
             <Eye look={look} />
           </div>
-        </div>
+        </button>
       </div>
     </Rnd>
   );
@@ -619,9 +739,9 @@ function QaCard({
               placeholder={t("gemma.your_answer")}
               style={inputStyle}
             />
-            <button onClick={() => onSubmit(draft)} disabled={busy} style={{ ...sendBtn, background: busy ? "var(--muted-light)" : "var(--accent)" }}>
+            <Button onClick={() => onSubmit(draft)} pending={busy} className="shrink-0">
               OK
-            </button>
+            </Button>
           </div>
         ))}
 
@@ -642,7 +762,10 @@ function QaCard({
           </span>
           <div style={{ fontSize: 13, color: "var(--text-soft)" }}>{feedback.feedback}</div>
           {feedback.hint && feedback.verdict === "incorrect" && (
-            <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>💡 {feedback.hint}</div>
+            <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Lightbulb className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
+              {feedback.hint}
+            </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-hover)" }}>

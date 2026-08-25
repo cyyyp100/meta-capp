@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { WarmUp } from "../session/WarmUp";
+import { SasOverlay } from "../session/SasOverlay";
 
 // SAS d'entrée d'une séance de langue : même rituel qu'avant un PDF (mise en condition
 // ~30 s + warm-up de flashcards), mais les cartes sont filtrées par langue (dues +
@@ -51,17 +52,17 @@ export function LangEntrySas({
   if (phase === "review") {
     if (!cards) {
       return (
-        <div style={overlay}>
-          <div style={{ color: "var(--muted)", fontStyle: "italic" }}>{t("common.loading")}</div>
-        </div>
+        <SasOverlay contained>
+          <div className="text-muted-foreground italic">{t("common.loading")}</div>
+        </SasOverlay>
       );
     }
     if (cards.length > 0) return <WarmUp cards={cards} onDone={onStart} />;
-    return <div style={overlay} />;
+    return <SasOverlay contained />;
   }
 
   return (
-    <div style={overlay}>
+    <SasOverlay contained>
       <div style={{ textAlign: "center", maxWidth: 520, padding: "var(--space-xl)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>{t("entry.label")}</div>
         <h2 style={{ fontFamily: "var(--font-title)", fontSize: 24, margin: "0 0 10px", color: "var(--text)" }}>{label}</h2>
@@ -90,15 +91,7 @@ export function LangEntrySas({
           </button>
         </div>
       </div>
-    </div>
+    </SasOverlay>
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  background: "var(--bg)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 80,
-};

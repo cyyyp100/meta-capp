@@ -5,3 +5,8 @@ dist
 
 # Caches incrémentaux de tsc (locaux, jamais versionnés)
 *.tsbuildinfo
+
+# Playwright : rapports, traces et base SQLite jetable des parcours e2e
+/test-results/
+/playwright-report/
+/e2e/.tmp/

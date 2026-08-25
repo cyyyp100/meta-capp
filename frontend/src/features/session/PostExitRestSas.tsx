@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { WhyButton } from "../science/WhyButton";
 import { useT } from "../../i18n";
+import { SasOverlay } from "./SasOverlay";
 
 const REST_SECONDS = 60;
 const UNLOCK_AFTER_SECONDS = 15;
@@ -25,7 +26,7 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
   }, [left, onDone]);
 
   return (
-    <div style={overlay}>
+    <SasOverlay>
       <div style={{ textAlign: "center", maxWidth: 560, padding: "var(--space-xl)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>
           {t("post_exit_rest.label")}
@@ -99,15 +100,7 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
           {canSkip ? t("post_exit_rest.skip") : t("post_exit_rest.locked", { n: lockedLeft })}
         </button>
       </div>
-    </div>
+    </SasOverlay>
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "var(--bg)",
-  display: "grid",
-  placeItems: "center",
-  zIndex: 110,
-};
