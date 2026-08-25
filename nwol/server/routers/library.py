@@ -7,12 +7,15 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from config.settings import LIBRARY_MAX_DOCUMENTS, LIBRARY_SEARCH_LIMIT
 from server.security import import_path_allowed
 from services.library import (
     get_document,
+    list_all_documents,
     list_recent_documents,
     page_words,
     render_page,
+    search_documents,
     search_page,
 )
 
@@ -23,9 +26,94 @@ class ImportBody(BaseModel):
     path: str
 
 
+class FolderBody(BaseModel):
+    name: str
+    parent_id: int | None = None
+
+
+class FolderNameBody(BaseModel):
+    name: str
+
+
+class FolderParentBody(BaseModel):
+    parent_id: int | None = None
+
+
+class DocumentFolderBody(BaseModel):
+    folder_id: int | None = None
+
+
 @router.get("/recent")
 def recent(limit: int = 10) -> list[dict]:
     return list_recent_documents(limit)
+
+
+@router.get("/documents")
+def documents(limit: int = Query(LIBRARY_MAX_DOCUMENTS, ge=1, le=5000)) -> list[dict]:
+    """Catalogue complet, du plus récemment ouvert au plus ancien.
+
+    Servi d'un bloc : le rail de dossiers filtre côté client, ce qui rend un
+    glisser-déposer instantané et évite une clé de cache par dossier.
+    """
+    return list_all_documents(limit)
+
+
+@router.get("/search")
+def search_library(q: str, limit: int = Query(LIBRARY_SEARCH_LIMIT, ge=1, le=200)) -> list[dict]:
+    """Recherche globale : nom de fichier + résumé généré + mots-clés + matière."""
+    return search_documents(q, limit)
+
+
+# ── Dossiers de la bibliothèque ─────────────────────────────────────────────
+# La politique (cycles, profondeur, sort des documents) est dans
+# services/folders.py ; ici on ne fait que traduire ses ValueError en 400.
+
+
+@router.get("/folders")
+def folders() -> list[dict]:
+    from services.folders import folder_tree
+
+    return folder_tree()
+
+
+@router.post("/folders")
+def create_folder(body: FolderBody) -> dict:
+    from services import folders as folders_service
+
+    try:
+        return folders_service.create_folder(body.name, body.parent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/folders/{folder_id}/rename")
+def rename_folder(folder_id: int, body: FolderNameBody) -> dict:
+    from services import folders as folders_service
+
+    try:
+        return folders_service.rename_folder(folder_id, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/folders/{folder_id}/move")
+def move_folder(folder_id: int, body: FolderParentBody) -> dict:
+    from services import folders as folders_service
+
+    try:
+        return folders_service.move_folder(folder_id, body.parent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(folder_id: int) -> dict:
+    from services import folders as folders_service
+
+    try:
+        return folders_service.delete_folder(folder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/import")
@@ -60,6 +148,18 @@ def document(doc_id: int) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="Document introuvable")
     return detail
+
+
+@router.post("/doc/{doc_id}/folder")
+def move_document(doc_id: int, body: DocumentFolderBody) -> dict:
+    """Range un document. `folder_id: null` = racine (« Non classés »)."""
+    from services import folders as folders_service
+
+    try:
+        folders_service.move_document(doc_id, body.folder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "document": get_document(doc_id)}
 
 
 @router.get("/doc/{doc_id}/page/{page}/search")

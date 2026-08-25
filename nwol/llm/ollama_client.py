@@ -41,7 +41,7 @@ from llm.prompts import (
     build_quiz_session_analysis_prompt,
     build_rephrasing_prompt,
     build_session_summary_prompt,
-    build_subject_detection_prompt,
+    build_document_digest_prompt,
 )
 from llm.schema_json import (
     parse_chapter_summary,
@@ -60,7 +60,7 @@ from llm.schema_json import (
     parse_quiz_session_analysis,
     parse_rephrasing,
     parse_session_summary,
-    parse_subject_detection,
+    parse_document_digest,
 )
 
 logger = logging.getLogger("LLM")
@@ -82,6 +82,10 @@ _TASK_PRIORITY: dict[str, int] = {
     "quiz_distractors":         5,
     "quiz_analysis":            6,
     "assistant_intervention":   6,
+    # Fiche d'un document fraîchement importé : travail de fond, joué pendant que
+    # l'utilisateur ouvre déjà le PDF. Doit céder le pas à TOUT ce qui est
+    # interactif — une question du lecteur ne doit jamais attendre derrière elle.
+    "document_digest":          7,
     # ── Module langue ────────────────────────────────────────────────────────
     "lang_curriculum":          7,
     "lang_curiosity":           7,
@@ -471,18 +475,18 @@ def generate_chapter_summary_async(
     return _run_json_async("chapter_summary", prompt, parse_chapter_summary, on_success, on_error, model)
 
 
-def detect_document_subject_async(
+def generate_document_digest_async(
     doc_title: str,
     excerpt: str,
     on_success,
     on_error,
     model: str = OLLAMA_MODEL,
 ) -> None:
-    prompt = build_subject_detection_prompt(doc_title, excerpt)
+    prompt = build_document_digest_prompt(doc_title, excerpt)
     return _run_json_async(
-        "subject_detection",
+        "document_digest",
         prompt,
-        parse_subject_detection,
+        parse_document_digest,
         on_success,
         on_error,
         model,
@@ -1107,8 +1111,8 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
 }""",
         "math_render": """
 {"rendered": "texte nettoyé"}""",
-        "subject_detection": """
-{"subject": "culture"}""",
+        "document_digest": """
+{"subject": "culture", "summary": "phrase courte décrivant le contenu du document", "keywords": ["mot-clé 1", "mot-clé 2", "mot-clé 3"]}""",
         "assistant_answer": """
 {
   "answer": "réponse claire",
@@ -1181,8 +1185,8 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
         return _fallback_quiz_analysis_from_prompt(prompt)
     if label == "math_render":
         return _fallback_math_render_from_prompt(prompt)
-    if label == "subject_detection":
-        return _fallback_subject_detection_from_prompt(prompt)
+    if label == "document_digest":
+        return _fallback_document_digest_from_prompt(prompt)
     return None
 
 
@@ -1689,7 +1693,7 @@ def _fallback_meta_cognition_analysis_from_prompt(prompt: str) -> dict | None:
 
 
 def _fallback_flashcard_tags_from_prompt(prompt: str) -> dict | None:
-    from utils.flashcard_tags import fallback_flashcard_tags
+    from utils.tags import fallback_flashcard_tags
 
     front = _extract_prompt_section(prompt, "Recto")
     back = _extract_prompt_section(prompt, "Verso")
@@ -1788,11 +1792,43 @@ def _fallback_math_render_from_prompt(prompt: str) -> dict | None:
     return parse_latex_paragraph_render({"rendered": text})
 
 
-def _fallback_subject_detection_from_prompt(prompt: str) -> dict | None:
-    doc_title = _extract_line_after_prefix(prompt, "Titre du document :")
-    excerpt = _extract_prompt_section(prompt, "Début du document")
-    subject = _heuristic_subject(f"{doc_title}\n{excerpt}")
-    return parse_subject_detection({"subject": subject})
+def _fallback_document_digest_from_prompt(prompt: str) -> dict | None:
+    """Fiche de document sans LLM (Ollama éteint ou sortie inexploitable).
+
+    Ni le rangement ni la recherche ne doivent dépendre d'Ollama : on retombe sur
+    la matière heuristique, la première phrase utile de l'extrait comme résumé,
+    et des mots-clés tirés du titre puis de l'extrait.
+    """
+    from utils.tags import fallback_document_keywords
+
+    doc_title = (
+        _extract_line_after_prefix(prompt, "Titre du document :")
+        or _extract_line_after_prefix(prompt, "Document title:")
+    )
+    excerpt = (
+        _extract_prompt_section(prompt, "Début du document")
+        or _extract_prompt_section(prompt, "Beginning of the document")
+    )
+    return parse_document_digest({
+        "subject": _heuristic_subject(f"{doc_title}\n{excerpt}"),
+        "summary": _heuristic_document_summary(excerpt),
+        "keywords": fallback_document_keywords(doc_title, excerpt),
+    })
+
+
+def _heuristic_document_summary(excerpt: str) -> str:
+    """Première phrase substantielle de l'extrait — descriptif, jamais inventé.
+
+    Une page de garde donne souvent une ligne parfaitement parlante. Si rien ne
+    dépasse 40 caractères, on renvoie "" : le ruban se replie côté interface
+    plutôt que d'afficher une bouillie.
+    """
+    text = " ".join((excerpt or "").split())
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        candidate = sentence.strip(" -–—•")
+        if len(candidate) >= 40:
+            return candidate
+    return text if len(text) >= 40 else ""
 
 
 def _fallback_meta_questions(previous_questions: list[str] | None = None, seed=None) -> list[str]:

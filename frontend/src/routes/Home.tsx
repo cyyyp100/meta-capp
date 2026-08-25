@@ -1,24 +1,97 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, pageImageUrl } from "../api/client";
+import { api } from "../api/client";
 import { pickFilePath } from "../api/platform";
-import type { DocumentSummary } from "../api/types";
+import type { DocumentSummary, FolderNode } from "../api/types";
+import { DocumentGrid } from "../features/library/DocumentGrid";
+import { FolderRail } from "../features/library/FolderRail";
+import type { FolderRowHandlers } from "../features/library/FolderRow";
+import { ancestorIds, findFolder, flattenFolders } from "../features/library/folderTree";
+import { SearchBox } from "../features/library/SearchBox";
+import { useDebounced } from "../features/library/useDebounced";
+import { useLibraryUi } from "../features/library/useLibraryUi";
 import { useT } from "../i18n";
+
+/** Nombre de documents de l'entrée « Récents » (le catalogue est déjà trié). */
+const RECENT_COUNT = 12;
+/** En dessous de 2 caractères, une recherche ramènerait toute la bibliothèque. */
+const MIN_QUERY_LENGTH = 2;
+/** Cadence de relance tant qu'une fiche LLM est en cours de génération. */
+const DIGEST_POLL_MS = 4000;
 
 export function Home() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const t = useT();
   const [importing, setImporting] = useState(false);
+  const [rawQuery, setRawQuery] = useState("");
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["library", "recent"],
-    queryFn: () => api.recentDocuments(12),
+  const query = useDebounced(rawQuery, 250).trim();
+  const searching = query.length >= MIN_QUERY_LENGTH;
+
+  const selection = useLibraryUi((s) => s.selection);
+  const select = useLibraryUi((s) => s.select);
+  const expand = useLibraryUi((s) => s.expand);
+
+  const { data: documents, isLoading, isError } = useQuery({
+    queryKey: ["library", "documents"],
+    queryFn: api.libraryDocuments,
+    // La fiche LLM arrive APRÈS la réponse d'import (file LLM sérialisée) : on
+    // relance tant qu'un document visible attend la sienne, puis on s'arrête.
+    refetchInterval: (q) =>
+      (q.state.data ?? []).some((d) => d.digest_status === "pending") ? DIGEST_POLL_MS : false,
   });
-
+  const { data: folders } = useQuery({ queryKey: ["library", "folders"], queryFn: api.folders });
+  const { data: results } = useQuery({
+    queryKey: ["library", "search", query],
+    queryFn: () => api.searchDocuments(query),
+    enabled: searching,
+    placeholderData: keepPreviousData,
+  });
   const { data: streak } = useQuery({ queryKey: ["streak"], queryFn: api.streak });
+
+  const tree = useMemo(() => folders ?? [], [folders]);
+  const allDocuments = useMemo(() => documents ?? [], [documents]);
+
+  // Arbre aplati : sert au menu « Déplacer vers… » des cartes et à retrouver le
+  // nom d'un dossier depuis son id.
+  const flatFolders = useMemo(() => flattenFolders(tree), [tree]);
+  const folderNames = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const folder of flatFolders) map.set(folder.id, folder.name);
+    return map;
+  }, [flatFolders]);
+
+  const visible = useMemo(() => {
+    if (searching) return results ?? [];
+    switch (selection.kind) {
+      case "recent":
+        return allDocuments.slice(0, RECENT_COUNT);
+      case "unfiled":
+        return allDocuments.filter((d) => d.folder_id === null);
+      case "folder":
+        return allDocuments.filter((d) => d.folder_id === selection.id);
+      default:
+        return allDocuments;
+    }
+  }, [searching, results, selection, allDocuments]);
+
+  const counts = useMemo(
+    () => ({
+      all: allDocuments.length,
+      recent: Math.min(allDocuments.length, RECENT_COUNT),
+      unfiled: allDocuments.filter((d) => d.folder_id === null).length,
+    }),
+    [allDocuments],
+  );
+
+  async function refreshLibrary() {
+    // React Query compare les clés par préfixe : un seul appel rafraîchit le
+    // catalogue, l'arbre et la recherche en cours.
+    await queryClient.invalidateQueries({ queryKey: ["library"] });
+  }
 
   async function handleImport() {
     if (importing) return;
@@ -27,172 +100,162 @@ export function Home() {
     setImporting(true);
     try {
       const doc = await api.importPdf(path);
-      await queryClient.invalidateQueries({ queryKey: ["library", "recent"] });
+      await refreshLibrary();
       navigate(`/reader/${doc.id}`);
     } catch (e) {
-      alert("Import impossible : " + String((e as Error).message));
+      alert(t("library.import_error", { message: String((e as Error).message) }));
     } finally {
       setImporting(false);
     }
   }
 
+  /** Une mutation de rangement : on rejoue la lecture, on signale les refus. */
+  async function mutate(action: () => Promise<unknown>, fallbackKey: string) {
+    try {
+      await action();
+      await refreshLibrary();
+    } catch (e) {
+      // Le serveur renvoie un `detail` déjà traduit (garde-fou de cycle…).
+      alert((e as Error).message || t(fallbackKey));
+    }
+  }
+
+  const handlers: FolderRowHandlers = {
+    onDropDocument: (docId, folderId) =>
+      void mutate(() => api.moveDocument(docId, folderId), "library.move_error"),
+    onDropFolder: (folderId, parentId) =>
+      void mutate(() => api.moveFolder(folderId, parentId), "library.move_error"),
+    onRename: (folderId, name) =>
+      void mutate(() => api.renameFolder(folderId, name), "library.folder_error"),
+    onCreateChild: (parentId) =>
+      void mutate(async () => {
+        const created = await api.createFolder(t("library.new_subfolder"), parentId);
+        // Déplier la chaîne d'ancêtres, sinon le dossier créé reste invisible.
+        expand([...ancestorIds(tree, parentId), parentId]);
+        return created;
+      }, "library.folder_error"),
+    onDelete: (folder: FolderNode) => {
+      if (!window.confirm(t("library.folder_delete_confirm", { name: folder.name }))) return;
+      void mutate(async () => {
+        await api.deleteFolder(folder.id);
+        // La sélection pointait peut-être sur le dossier supprimé.
+        if (selection.kind === "folder" && findFolder(tree, selection.id)) {
+          const gone = selection.id === folder.id;
+          if (gone) select({ kind: "all" });
+        }
+      }, "library.folder_error");
+    },
+  };
+
+  const emptyMessage =
+    selection.kind === "folder" && !searching ? t("library.folder_empty_docs") : t("home.empty");
+
   return (
-    <div style={{ maxWidth: 1080, margin: "0 auto", padding: "var(--space-xl)" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+    <div style={page}>
+      <div style={header}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>{t("home.title")}</h1>
+            <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>
+              {t("home.title")}
+            </h1>
             {streak && streak.streak > 0 && (
-              <span
-                title="Jours consécutifs"
-                style={{
-                  background: "var(--warning-soft)",
-                  color: "var(--warning)",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                }}
-              >
+              <span title="Jours consécutifs" style={streakPill}>
                 🔥 {streak.streak}
               </span>
             )}
           </div>
           <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("home.subtitle")}</p>
         </div>
-        <button
-          onClick={handleImport}
-          disabled={importing}
-          style={{
-            border: "none",
-            background: "var(--accent)",
-            color: "#fff",
-            borderRadius: "var(--radius-sm)",
-            padding: "10px 18px",
-            fontWeight: 600,
-            cursor: importing ? "default" : "pointer",
-            whiteSpace: "nowrap",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          {importing ? t("home.importing") : t("home.import")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+          <SearchBox value={rawQuery} onChange={setRawQuery} />
+          <button onClick={handleImport} disabled={importing} style={importButton(importing)}>
+            {importing ? t("home.importing") : t("home.import")}
+          </button>
+        </div>
       </div>
 
       {isLoading && <p style={{ color: "var(--muted)" }}>{t("common.loading")}</p>}
       {isError && <p style={{ color: "var(--danger)" }}>{t("home.error")}</p>}
 
-      {data && data.length === 0 && (
-        <div
-          style={{
-            marginTop: 40,
-            padding: 48,
-            textAlign: "center",
-            border: "1px dashed var(--border-strong)",
-            borderRadius: "var(--radius-lg)",
-            color: "var(--muted)",
-          }}
-        >
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📄</div>
-          {t("home.empty")}
+      {documents && (
+        <div style={body}>
+          <FolderRail
+            tree={tree}
+            counts={counts}
+            handlers={handlers}
+            onCreateRoot={(name) =>
+              void mutate(() => api.createFolder(name, null), "library.folder_error")
+            }
+          />
+          <main style={main}>
+            <DocumentGrid
+              documents={visible}
+              folderNameOf={(doc: DocumentSummary) =>
+                doc.folder_id === null ? undefined : folderNames.get(doc.folder_id)
+              }
+              folders={flatFolders}
+              searching={searching}
+              query={query}
+              emptyMessage={emptyMessage}
+              onKeyword={setRawQuery}
+              onMove={handlers.onDropDocument}
+            />
+          </main>
         </div>
       )}
-
-      {data && data.length > 0 && (
-        <div
-          style={{
-            marginTop: "var(--space-lg)",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: "var(--space-lg)",
-          }}
-        >
-          {data.map((doc) => (
-            <DocumentCard key={doc.id} doc={doc} />
-          ))}
-        </div>
-      )}
-
     </div>
   );
 }
 
-function DocumentCard({ doc }: { doc: DocumentSummary }) {
-  const navigate = useNavigate();
-  const t = useT();
-  const progress = doc.page_count > 0 ? Math.round((doc.last_page / doc.page_count) * 100) : 0;
-  return (
-    <div
-      onClick={() => navigate(`/reader/${doc.id}`)}
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-md)",
-        boxShadow: "var(--shadow-sm)",
-        overflow: "hidden",
-        cursor: "pointer",
-        transition: "box-shadow var(--anim-normal) var(--ease), transform var(--anim-normal) var(--ease)",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = "var(--shadow-md)";
-        e.currentTarget.style.transform = "translateY(-2px)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = "var(--shadow-sm)";
-        e.currentTarget.style.transform = "none";
-      }}
-    >
-      <div style={{ aspectRatio: "3 / 4", background: "var(--bg-alt)", overflow: "hidden", position: "relative" }}>
-        {doc.extraction_engine === "code" ? (
-          // Fichier de code : pas d'image de page → vignette dédiée.
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              background: "var(--surface-soft)",
-              color: "var(--muted)",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            <span style={{ fontSize: 34 }}>{"</>"}</span>
-            <span style={{ fontSize: 11, padding: "0 10px", textAlign: "center", wordBreak: "break-all" }}>
-              {doc.title}
-            </span>
-          </div>
-        ) : (
-          <img
-            src={pageImageUrl(doc.id, 1, 0.5)}
-            alt={doc.title}
-            loading="lazy"
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-          />
-        )}
-      </div>
-      <div style={{ padding: "var(--space-md)" }}>
-        <div
-          style={{
-            fontWeight: 600,
-            fontSize: 13,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-          title={doc.title}
-        >
-          {doc.title}
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
-          {t("home.pages", { n: doc.page_count })}{doc.subject ? ` · ${doc.subject}` : ""}
-        </div>
-        <div style={{ height: 6, borderRadius: 999, background: "var(--border)", marginTop: 10, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${progress}%`, background: "var(--accent)", borderRadius: 999 }} />
-        </div>
-      </div>
-    </div>
-  );
+const page: React.CSSProperties = {
+  height: "100%",
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  padding: "var(--space-xl)",
+};
+
+const header: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 16,
+  flexWrap: "wrap",
+};
+
+const body: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-lg)",
+  flex: 1,
+  minHeight: 0,
+  marginTop: "var(--space-lg)",
+};
+
+const main: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  overflowY: "auto",
+};
+
+const streakPill: React.CSSProperties = {
+  background: "var(--warning-soft)",
+  color: "var(--warning)",
+  fontWeight: 700,
+  fontSize: 13,
+  padding: "4px 10px",
+  borderRadius: 999,
+};
+
+function importButton(importing: boolean): React.CSSProperties {
+  return {
+    border: "none",
+    background: "var(--accent)",
+    color: "#fff",
+    borderRadius: "var(--radius-sm)",
+    padding: "10px 18px",
+    fontWeight: 600,
+    cursor: importing ? "default" : "pointer",
+    whiteSpace: "nowrap",
+    boxShadow: "var(--shadow-sm)",
+  };
 }

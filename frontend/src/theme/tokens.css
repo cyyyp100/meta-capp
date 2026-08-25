@@ -152,3 +152,36 @@ body {
 .tok-n {
   color: var(--code-number);
 }
+
+/* Rail de dossiers : les actions (＋ ✎ ✕) n'apparaissent qu'au survol ou au
+   focus clavier de la ligne — la colonne reste lisible au repos, sans les
+   rendre inaccessibles au clavier. */
+[role="treeitem"]:hover .folder-actions,
+[role="treeitem"]:focus-within .folder-actions {
+  opacity: 1;
+}
+[role="treeitem"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* La bibliothèque fournit son propre bouton d'effacement : on masque celui que
+   WebKit ajoute d'office aux input[type=search], sinon deux ✕ se superposent. */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+/* « Déplacer vers… » d'une carte : seul chemin clavier pour ranger un document,
+   le glisser-déposer n'en ayant aucun. Discret au repos, révélé au survol de la
+   carte ET dès qu'il reçoit le focus — d'où `:focus`, qui rend la tabulation
+   utilisable sans souris. */
+.card-move {
+  opacity: 0;
+}
+[draggable="true"]:hover .card-move,
+.card-move:focus,
+.card-move:focus-visible {
+  opacity: 1;
+}

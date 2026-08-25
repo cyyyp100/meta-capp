@@ -19,7 +19,7 @@ from db.flashcards import (
     update_review,
 )
 from db.user import DEFAULT_USER_ID
-from utils.flashcard_tags import fallback_flashcard_tags
+from utils.tags import fallback_flashcard_tags
 
 logger = logging.getLogger("services.flashcards")
 

@@ -5,6 +5,7 @@ import type {
   DocumentDetail,
   DocumentSummary,
   Flashcard,
+  FolderNode,
   Health,
   HighlightAnchor,
   MetacogOverview,
@@ -33,9 +34,21 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
+    throw new Error(await errorMessage(res));
   }
   return (await res.json()) as T;
+}
+
+/** Message d'erreur lisible : le `detail` de FastAPI est déjà traduit côté
+ *  serveur (le garde-fou de cycle, par exemple) — bien plus utile qu'un « 400 ». */
+async function errorMessage(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (data && typeof data.detail === "string") return data.detail;
+  } catch {
+    // Réponse non-JSON : on retombe sur le statut.
+  }
+  return `${res.status} ${res.statusText}`;
 }
 
 export const api = {
@@ -43,6 +56,32 @@ export const api = {
   statsOverview: () => getJSON<MetacogOverview>("/api/stats/overview"),
   recentDocuments: (limit = 12) => getJSON<DocumentSummary[]>(`/api/library/recent?limit=${limit}`),
   document: (id: number) => getJSON<DocumentDetail>(`/api/library/doc/${id}`),
+
+  // ── Bibliothèque : catalogue, recherche et dossiers ──────────────────────
+  // Le catalogue est servi d'un bloc et le rail filtre côté client : un
+  // glisser-déposer doit être instantané, sans aller-retour réseau.
+  libraryDocuments: () => getJSON<DocumentSummary[]>("/api/library/documents"),
+  searchDocuments: (q: string) => {
+    const p = new URLSearchParams({ q });
+    return getJSON<DocumentSummary[]>(`/api/library/search?${p.toString()}`);
+  },
+  folders: () => getJSON<FolderNode[]>("/api/library/folders"),
+  createFolder: (name: string, parentId: number | null = null) =>
+    postJSON<FolderNode>("/api/library/folders", { name, parent_id: parentId }),
+  renameFolder: (id: number, name: string) =>
+    postJSON<FolderNode>(`/api/library/folders/${id}/rename`, { name }),
+  moveFolder: (id: number, parentId: number | null) =>
+    postJSON<FolderNode>(`/api/library/folders/${id}/move`, { parent_id: parentId }),
+  deleteFolder: (id: number) =>
+    fetch(`/api/library/folders/${id}`, { method: "DELETE" }).then(async (r) => {
+      if (!r.ok) throw new Error(await errorMessage(r));
+      return r.json() as Promise<{ deleted_folders: number; detached_documents: number }>;
+    }),
+  moveDocument: (docId: number, folderId: number | null) =>
+    postJSON<{ ok: boolean; document: DocumentSummary }>(
+      `/api/library/doc/${docId}/folder`,
+      { folder_id: folderId },
+    ),
   flashcards: (filters?: { difficulty?: number; tags?: string }) => {
     const p = new URLSearchParams();
     if (filters?.difficulty) p.set("difficulty", String(filters.difficulty));

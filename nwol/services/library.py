@@ -5,15 +5,29 @@
 # sont en POINTS PDF (le client met à l'échelle selon le zoom d'affichage).
 from __future__ import annotations
 
+from config.settings import (
+    LIBRARY_MAX_DOCUMENTS,
+    LIBRARY_SEARCH_LIMIT,
+    LIBRARY_SEARCH_POOL,
+    LIBRARY_SEARCH_WEIGHT_FILENAME,
+    LIBRARY_SEARCH_WEIGHT_KEYWORD,
+    LIBRARY_SEARCH_WEIGHT_SUBJECT,
+    LIBRARY_SEARCH_WEIGHT_SUMMARY,
+)
 from db.chapters import get_chapters
 from db.documents import get_document as _get_document
+from db.documents import list_all_documents as _list_all
+from db.documents import list_documents_for_search as _list_for_search
 from db.documents import list_recent_documents as _list_recent
 from pdf_viewer.page_renderer import clear_reader_cache as _clear_reader_cache
 from pdf_viewer.page_renderer import render_page as _render_page
 from pdf_viewer.pdf_document import PdfDocument
+from utils.text import fold
 
 __all__ = [
     "list_recent_documents",
+    "list_all_documents",
+    "search_documents",
     "get_document",
     "render_page",
     "page_text",
@@ -26,6 +40,54 @@ __all__ = [
 
 def list_recent_documents(limit: int = 10) -> list[dict]:
     return [_summary(doc) for doc in _list_recent(limit)]
+
+
+def list_all_documents(limit: int = LIBRARY_MAX_DOCUMENTS) -> list[dict]:
+    return [_summary(doc) for doc in _list_all(limit)]
+
+
+def search_documents(query: str, limit: int = LIBRARY_SEARCH_LIMIT) -> list[dict]:
+    """Recherche globale : nom de fichier + résumé généré + mots-clés + matière.
+
+    Filtrage en Python et non en SQL : `LIKE` ne sait pas plier les accents, or
+    « equations » doit trouver « Équations différentielles ». La base est locale
+    (quelques centaines de documents), on parcourt un lot borné.
+
+    Classement calqué sur `pdf_rag.rank_chunks` : nombre de termes DISTINCTS
+    trouvés d'abord (un document qui répond à toute la requête passe devant un
+    document qui répète un seul mot), score pondéré ensuite, dernière ouverture
+    pour départager.
+    """
+    from services.brainstorm_search import extract_terms
+
+    terms = extract_terms(query, max_terms=6)
+    if not terms:
+        # « ia », « c++ », « rn » : requêtes courtes légitimes que le découpage
+        # en mots significatifs rejette.
+        folded = fold(query)
+        if len(folded) < 2:
+            return []
+        terms = [folded]
+
+    scored: list[tuple[int, int, str, dict]] = []
+    for doc in _list_for_search(LIBRARY_SEARCH_POOL):
+        haystacks = (
+            (fold(doc.get("filename") or ""), LIBRARY_SEARCH_WEIGHT_FILENAME),
+            (fold(" ".join(doc.get("keywords") or [])), LIBRARY_SEARCH_WEIGHT_KEYWORD),
+            (fold(doc.get("auto_summary") or ""), LIBRARY_SEARCH_WEIGHT_SUMMARY),
+            (fold(doc.get("subject") or ""), LIBRARY_SEARCH_WEIGHT_SUBJECT),
+        )
+        distinct = score = 0
+        for term in terms:
+            hit = sum(weight for (text, weight) in haystacks if term in text)
+            if hit:
+                distinct += 1
+                score += hit
+        if distinct:
+            scored.append((distinct, score, doc.get("last_opened") or "", doc))
+
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [_summary(doc) for (_d, _s, _o, doc) in scored[:limit]]
 
 
 def get_document(doc_id: int) -> dict | None:
@@ -119,4 +181,10 @@ def _summary(doc: dict) -> dict:
         "last_opened": doc.get("last_opened") or "",
         # Le frontend branche le lecteur en blocs (fichiers de code) sur ce champ.
         "extraction_engine": doc.get("extraction_engine"),
+        # Rangement et classification automatique (v26). Sans ces clés, rien
+        # n'atteint le frontend : ce dict EST le contrat d'API du document.
+        "folder_id": doc.get("folder_id"),
+        "summary": doc.get("auto_summary") or "",
+        "keywords": doc.get("keywords") or [],
+        "digest_status": doc.get("digest_status") or "none",
     }

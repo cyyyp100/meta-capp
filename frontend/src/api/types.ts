@@ -46,6 +46,26 @@ export interface DocumentSummary {
   last_opened: string;
   // "code" = document servi en blocs (lecteur texte), sinon PDF rendu en image.
   extraction_engine?: string | null;
+  // Rangement et classification automatique (schéma v26). Miroir exact de
+  // services/library._summary : ce dict EST le contrat d'API du document.
+  folder_id: number | null;
+  summary: string;
+  keywords: string[];
+  // "none" (jamais tenté) | "pending" (fiche en cours) | "done" | "failed".
+  digest_status: string;
+}
+
+/** Nœud de l'arbre de dossiers de la bibliothèque. */
+export interface FolderNode {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  position: number;
+  /** Documents directement dans ce dossier. */
+  doc_count: number;
+  /** Documents du sous-arbre — ce qu'affiche une ligne repliée. */
+  total_count: number;
+  children: FolderNode[];
 }
 
 /** Bloc de contenu d'une page servie en blocs. */

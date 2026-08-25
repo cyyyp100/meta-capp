@@ -5,7 +5,14 @@ import json
 import random
 
 import i18n as _i18n
-from config.settings import LANGUAGE_SCRIPTS, LATIN_SCRIPT, SCRIPT_HINTS, SCRIPTS, TONAL_LANGUAGES
+from config.settings import (
+    DOCUMENT_DIGEST_PROMPT_CHARS,
+    LANGUAGE_SCRIPTS,
+    LATIN_SCRIPT,
+    SCRIPT_HINTS,
+    SCRIPTS,
+    TONAL_LANGUAGES,
+)
 
 
 def _t(fr: str, en: str) -> str:
@@ -1819,10 +1826,46 @@ SUBJECT_KEYS = (
 )
 
 
-def build_subject_detection_prompt(doc_title: str, excerpt: str) -> str:
+def build_document_digest_prompt(doc_title: str, excerpt: str) -> str:
+    """Fiche d'un document à l'import : matière + résumé + mots-clés en un appel.
+
+    Le résumé est du texte VISIBLE par l'utilisateur : contrairement à l'ancienne
+    détection de matière (une simple clé), ce prompt doit suivre la langue de
+    l'interface.
+    """
     subjects = SUBJECT_KEYS
-    safe_excerpt = (excerpt or "").strip()[:700]
-    return f"""Tu es un classificateur de cours scolaires et universitaires.
+    safe_excerpt = (excerpt or "").strip()[:DOCUMENT_DIGEST_PROMPT_CHARS]
+    if _i18n.current_lang() == "en":
+        return f"""You are indexing a study document for a personal library.
+
+Document title: {doc_title or "unknown"}
+
+Beginning of the document:
+---
+{safe_excerpt or "Not available."}
+---
+
+Produce a card that lets someone find this document again without remembering
+its filename.
+
+Respond only in valid JSON, without Markdown, without any comment, in exactly
+this format:
+{{"subject": "<subject>", "summary": "<one sentence>", "keywords": ["<keyword>", "<keyword>"]}}
+
+Constraints:
+- "subject" MUST be exactly one of: {subjects}
+  Pick the most SPECIFIC one. If unsure, pick "culture".
+- "summary": ONE sentence of 12 to 30 words, 200 characters maximum, saying what
+  the document CONTAINS (topic and scope). Plain descriptive English.
+  Start directly with the subject matter, like this example:
+  "Photosynthesis in green plants, from the light phase to the Calvin cycle."
+  Do not judge; do not invent.
+- "keywords": 3 to 6 topics or notions actually covered, lowercase, 1 to 3 words
+  each, no duplicates. Banned vague words: "course", "chapter", "introduction",
+  "document", "notes".
+- Nothing outside the JSON."""
+
+    return f"""Tu indexes un document d'étude pour une bibliothèque personnelle.
 
 Titre du document : {doc_title or "inconnu"}
 
@@ -1831,14 +1874,26 @@ Début du document :
 {safe_excerpt or "Non disponible."}
 ---
 
-Détermine la matière principale de ce document.
-Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans commentaire :
-{{"subject": "<matière>"}}
+Produis une fiche qui permette de RETROUVER ce document sans se souvenir de son
+nom de fichier.
 
-La valeur de "subject" DOIT être exactement l'une de : {subjects}
-Choisis la matière la plus SPÉCIFIQUE qui décrit le document (par ex. "physique" plutôt que "sciences" si c'est de la physique).
-Si tu hésites ou si aucune matière ne correspond clairement, choisis "culture".
-Ne mets rien en dehors du JSON."""
+Réponds uniquement en JSON valide, sans Markdown, sans commentaire, exactement
+dans ce format :
+{{"subject": "<matière>", "summary": "<une phrase>", "keywords": ["<mot-clé>", "<mot-clé>"]}}
+
+Contraintes :
+- "subject" DOIT être exactement l'une de : {subjects}
+  Choisis la plus SPÉCIFIQUE (par ex. "physique" plutôt que "sciences").
+  Si tu hésites, choisis "culture".
+- "summary" : UNE phrase de 12 à 30 mots, 200 caractères maximum, qui dit ce que
+  le document CONTIENT (sujet et portée). Français simple et descriptif.
+  Commence directement par le sujet traité, comme dans cet exemple :
+  « La photosynthèse chez les plantes vertes, de la phase claire au cycle de Calvin. »
+  Ne juge pas ; n'invente rien.
+- "keywords" : 3 à 6 thèmes ou notions réellement traités, en minuscules, 1 à 3
+  mots chacun, sans doublon. Mots vagues interdits : « cours », « chapitre »,
+  « introduction », « document », « notes ».
+- Ne mets rien en dehors du JSON."""
 
 
 def build_quiz_session_analysis_prompt(

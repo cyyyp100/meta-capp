@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 25).
+-- (config.settings.DB_SCHEMA_VERSION = 26).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -94,7 +94,8 @@ CREATE TABLE documents (
     extraction_engine TEXT,
     has_toc          BOOLEAN DEFAULT 0,
     created_at       DATETIME DEFAULT (datetime('now'))
-, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT);
+, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL, auto_summary TEXT, keywords TEXT DEFAULT '[]', digest_status TEXT DEFAULT 'none');
+CREATE INDEX idx_documents_folder ON documents(folder_id);
 CREATE TABLE flashcards (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -216,6 +217,16 @@ CREATE TABLE lang_sessions (
             score       REAL
         , session_type TEXT DEFAULT 'dialogue_ecoute', lesson_id INTEGER REFERENCES lang_lessons(id) ON DELETE CASCADE, slot_index INTEGER, temps TEXT);
 CREATE INDEX idx_lang_sessions_profile ON lang_sessions(profile_id);
+CREATE TABLE library_folders (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL DEFAULT 1 REFERENCES user(id) ON DELETE CASCADE,
+            parent_id  INTEGER REFERENCES library_folders(id) ON DELETE CASCADE,
+            name       TEXT NOT NULL,
+            position   INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now'))
+        );
+CREATE INDEX idx_library_folders_parent
+            ON library_folders(user_id, parent_id, position);
 CREATE TABLE llm_pdf_cache (
     cache_key    TEXT NOT NULL,
     task_type    TEXT NOT NULL,

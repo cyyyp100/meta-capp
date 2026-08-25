@@ -13,6 +13,13 @@ def setup_logging(debug: bool = False) -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
+    # Idempotent : setup_logging() peut être appelé plusieurs fois dans le même
+    # process (main.py puis desktop/pywebview_main.py) — sans ça les handlers
+    # s'accumulent et chaque ligne de log est affichée en double.
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+        h.close()
+
     # S8 : caviarde toute valeur secrète connue (clés API…) dans les logs.
     try:
         from services.secrets_store import RedactSecretsFilter

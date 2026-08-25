@@ -83,3 +83,37 @@ export function IconMessage(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconFolder(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </Svg>
+  );
+}
+
+export function IconFolderOpen(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 21a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v2" />
+      <path d="M2 19l3-8h18l-3 8z" />
+    </Svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polyline points="9 18 15 12 9 6" />
+    </Svg>
+  );
+}
+
+export function IconSearch(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </Svg>
+  );
+}

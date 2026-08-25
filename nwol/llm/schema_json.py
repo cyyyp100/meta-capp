@@ -9,10 +9,11 @@ import string
 import unicodedata
 from typing import Any
 
+from config.settings import DOCUMENT_SUMMARY_MAX_CHARS
 from core.math_text import repair_common_inline_math_artifacts
 from i18n import t
 from metacog.reflection import normalize_meta_cognition_questions
-from utils.flashcard_tags import normalize_flashcard_tags
+from utils.tags import normalize_document_keywords, normalize_flashcard_tags
 
 logger = logging.getLogger("LLM.schema")
 
@@ -1321,6 +1322,63 @@ def parse_subject_detection(raw: str | dict) -> dict | None:
     if subject in _KNOWN_SUBJECTS:
         return {"subject": subject}
     return {"subject": "culture"}
+
+
+def parse_document_digest(raw: str | dict) -> dict | None:
+    """Fiche d'un document : {"subject", "summary", "keywords"}.
+
+    Ne renvoie JAMAIS None : un import ne doit pas échouer parce que le modèle a
+    bavardé. Chaque champ dégrade indépendamment — une matière valide avec un
+    résumé vide reste utile pour le classement.
+    """
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        data = {}
+    subject = (parse_subject_detection(data) or {}).get("subject") or "culture"
+    summary_raw = _coerce_text(
+        data.get("summary", data.get("resume", data.get("résumé", "")))
+    ) or ""
+    keywords_raw = _coerce_str_list(
+        data.get(
+            "keywords",
+            data.get("mots_cles", data.get("mots-clés", data.get("tags", []))),
+        )
+    )
+    return {
+        "subject": subject,
+        "summary": _clean_document_summary(summary_raw),
+        "keywords": normalize_document_keywords(keywords_raw),
+    }
+
+
+# Ouverture creuse que le modèle produit malgré la consigne du prompt (essayée en
+# formulation négative PUIS avec un exemple positif : gemma la remet quand même).
+# Elle mange une douzaine de caractères sur les 220 affichables et n'apprend rien
+# au lecteur, qui sait déjà qu'il regarde un document.
+_SUMMARY_FILLER_OPENING = re.compile(
+    r"^(?:ce document|ce cours|this document)\s+"
+    r"(?:explique|présente|presente|traite\s+de|traite|aborde|décrit|decrit|couvre|"
+    r"porte\s+sur|expose|explains|presents|covers|describes|discusses|introduces)\s+",
+    flags=re.I,
+)
+
+
+def _clean_document_summary(text: str) -> str:
+    """Une phrase propre : ni Markdown, ni préfixe « Résumé : », ni guillemet
+    orphelin, tronquée sur un mot à DOCUMENT_SUMMARY_MAX_CHARS."""
+    clean = " ".join(str(text or "").split())
+    clean = re.sub(r"^[*_`#>\s]+|[*_`\s]+$", "", clean)
+    clean = re.sub(r"^(résumé|resume|summary)\s*[:\-–]\s*", "", clean, flags=re.I)
+    clean = clean.strip(' "“”')
+    stripped = _SUMMARY_FILLER_OPENING.sub("", clean)
+    # On ne garde le retrait que s'il laisse une phrase, pas un moignon.
+    if len(stripped) >= 20:
+        clean = stripped[0].upper() + stripped[1:]
+    if len(clean) <= DOCUMENT_SUMMARY_MAX_CHARS:
+        return clean
+    cut = clean[:DOCUMENT_SUMMARY_MAX_CHARS]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 40 else cut).rstrip(" ,;:") + "…"
 
 
 def _normalize_subject_token(value: Any) -> str:

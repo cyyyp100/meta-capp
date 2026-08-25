@@ -605,9 +605,9 @@ def get_recent_flashcards_for_language(
 
 def _fold(text: str) -> str:
     """Repli accent-insensible/minuscule pour rapprocher un item d'une carte SR."""
-    import unicodedata
-    norm = unicodedata.normalize("NFD", (text or "").strip().lower())
-    return "".join(c for c in norm if unicodedata.category(c) != "Mn")
+    from utils.text import fold
+
+    return fold(text)
 
 
 def find_lang_flashcard_id(profile_id: int, language: str, text: str) -> int | None:

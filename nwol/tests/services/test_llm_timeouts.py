@@ -27,7 +27,7 @@ from services.llm_bridge import run_llm_sync
 
 def test_budget_grows_with_the_token_budget_of_the_task():
     """Une tâche qui demande plus de tokens obtient plus de temps."""
-    court = task_timeout_s("subject_detection")      # num_predict = 30
+    court = task_timeout_s("document_digest")        # num_predict = 260
     long = task_timeout_s("lang_curriculum")         # num_predict = 3000
     assert court == OLLAMA_TIMEOUT                   # plancher
     assert long > court
@@ -51,7 +51,7 @@ def test_wall_budget_covers_the_retries():
     """L'appelant attend la tâche ENTIÈRE. `_generate_json` peut rejouer une
     sortie non conforme : si l'attente ne couvrait qu'une tentative, la
     deuxième travaillerait pour un destinataire déjà parti."""
-    for task in ("subject_detection", "quiz_distractors", "lang_curriculum"):
+    for task in ("document_digest", "quiz_distractors", "lang_curriculum"):
         assert task_wall_timeout_s(task) > task_timeout_s(task)
         assert task_wall_timeout_s(task) <= OLLAMA_WALL_TIMEOUT_MAX
 
@@ -103,7 +103,7 @@ def test_abandoned_task_is_dropped_by_the_worker(monkeypatch):
 
     # 2) On enfile une tâche derrière, via le chemin réel, et on renonce.
     #    Le budget vient de la tâche : on le rend minuscule pour ce test plutôt
-    #    que d'attendre les 60 s réelles de `subject_detection`.
+    #    que d'attendre les 60 s réelles de `document_digest`.
     monkeypatch.setattr(ollama_client, "task_wall_timeout_s", lambda _task: 0.1)
     monkeypatch.setattr(
         ollama_client, "_generate_json",
@@ -112,7 +112,7 @@ def test_abandoned_task_is_dropped_by_the_worker(monkeypatch):
 
     def enqueue(on_success, on_error):
         ollama_client._run_json_async(
-            "subject_detection", "prompt", lambda raw: raw, on_success, on_error, "modele",
+            "document_digest", "prompt", lambda raw: raw, on_success, on_error, "modele",
         )
 
     with pytest.raises(TimeoutError):
@@ -139,7 +139,7 @@ def test_task_enqueued_outside_run_llm_sync_is_never_marked_abandoned(monkeypatc
         lambda *a, **kw: ran.set() or {"x": 1},
     )
     ollama_client._run_json_async(
-        "subject_detection", "prompt", lambda raw: raw, lambda r: None, lambda e: None, "modele",
+        "document_digest", "prompt", lambda raw: raw, lambda r: None, lambda e: None, "modele",
     )
     assert ran.wait(5)
 
@@ -182,7 +182,7 @@ def test_retry_loop_stops_at_the_wall_deadline(monkeypatch):
 
     with pytest.raises(ValueError):
         ollama_client._generate_json(
-            "subject_detection", "prompt", lambda raw: None, model="modele", retries=3,
+            "document_digest", "prompt", lambda raw: None, model="modele", retries=3,
         )
 
     # 4 tentatives étaient autorisées ; l'échéance en coupe l'essentiel.

@@ -135,6 +135,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 25)
         current = 25
 
+    if current < 26 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v26(conn)
+        _set_version(conn, 26)
+        current = 26
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -800,3 +805,52 @@ def _migrate_to_v25(conn) -> None:
     _ensure_column(conn, "documents", "content_hash", "TEXT")
     _ensure_column(conn, "reader_highlights", "anchor_json", "TEXT")
     logger.info("Migration SQLite v25 terminée")
+
+
+def _migrate_to_v26(conn) -> None:
+    """Bibliothèque : dossiers utilisateur (arbre) + fiche LLM des documents.
+
+    - `library_folders` porte l'arbre par auto-référence `parent_id`. SQLite ne
+      sait pas exprimer l'acyclicité : le garde-fou est dans `services/folders`,
+      la base n'assure que l'intégrité référentielle.
+    - Politique de suppression, volontairement asymétrique : `ON DELETE CASCADE`
+      sur `parent_id` (supprimer un dossier emporte son sous-arbre de dossiers),
+      mais `ON DELETE SET NULL` sur `documents.folder_id` — un document n'est
+      JAMAIS supprimé avec son dossier, il redevient « non classé ». C'est la
+      seule politique acceptable pour un rangement fait à la souris.
+    - `documents.auto_summary` / `keywords` / `digest_status` : sortie de la
+      tâche LLM `document_digest` jouée à l'import, qui remplace
+      `subject_detection`. `keywords` est un tableau JSON en TEXT, exactement
+      comme `flashcards.tags`, et passe par la même normalisation (`utils.tags`).
+    - Les documents déjà importés ne sont pas repris : ils restent en
+      `digest_status='none'`, sans résumé, et restent trouvables par leur nom.
+    """
+    logger.info("Migration SQLite v26 démarrée")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS library_folders (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL DEFAULT 1 REFERENCES user(id) ON DELETE CASCADE,
+            parent_id  INTEGER REFERENCES library_folders(id) ON DELETE CASCADE,
+            name       TEXT NOT NULL,
+            position   INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_library_folders_parent
+            ON library_folders(user_id, parent_id, position);
+        """
+    )
+    # `ALTER TABLE ... ADD COLUMN` avec clause REFERENCES : SQLite l'accepte tant
+    # que la valeur par défaut est NULL — c'est le cas de folder_id.
+    _ensure_column(
+        conn, "documents", "folder_id",
+        "INTEGER REFERENCES library_folders(id) ON DELETE SET NULL",
+    )
+    _ensure_column(conn, "documents", "auto_summary", "TEXT")
+    _ensure_column(conn, "documents", "keywords", "TEXT DEFAULT '[]'")
+    _ensure_column(conn, "documents", "digest_status", "TEXT DEFAULT 'none'")
+    # Index posé après l'ALTER : la colonne n'existe pas avant.
+    conn.executescript(
+        "CREATE INDEX IF NOT EXISTS idx_documents_folder ON documents(folder_id);"
+    )
+    logger.info("Migration SQLite v26 terminée")

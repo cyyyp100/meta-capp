@@ -530,6 +530,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.progress.phase_active": "Phase active",
         "lang.progress.back": "↩ Retour",
         "lang.progress.start_next": "▶ Commencer la leçon suivante",
+        # ── Bibliothèque : dossiers ───────────────────────────────────────
+        "folders.default_name": "Nouveau dossier",
+        "folders.missing": "Dossier introuvable.",
+        "folders.parent_missing": "Dossier de destination introuvable.",
+        "folders.document_missing": "Document introuvable.",
+        "folders.cycle": "Un dossier ne peut pas être déplacé dans l'un de ses sous-dossiers.",
+        "folders.too_deep": "Arborescence trop profonde (maximum {n} niveaux).",
     },
     "en": {
         # ── Home ──────────────────────────────────────────────────────────
@@ -1056,6 +1063,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.progress.phase_active": "Active phase",
         "lang.progress.back": "↩ Back",
         "lang.progress.start_next": "▶ Start next lesson",
+        # ── Library: folders ──────────────────────────────────────────────
+        "folders.default_name": "New folder",
+        "folders.missing": "Folder not found.",
+        "folders.parent_missing": "Destination folder not found.",
+        "folders.document_missing": "Document not found.",
+        "folders.cycle": "A folder cannot be moved into one of its own subfolders.",
+        "folders.too_deep": "Folder tree too deep (maximum {n} levels).",
     },
 }
 

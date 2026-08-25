@@ -50,7 +50,12 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "meta_cognition_analysis":  {"num_ctx": 4096, "num_predict": 320, "temperature": 0.1},
     "profile_analysis":         {"num_ctx": 4096, "num_predict": 360, "temperature": 0.2},
     "math_render":              {"num_ctx": 4096, "num_predict": 900, "temperature": 0.1},
-    "subject_detection":        {"num_ctx": 1024, "num_predict": 30,  "temperature": 0.1},
+    # Fiche d'un document à l'import : matière + résumé + mots-clés en UN appel.
+    # num_ctx 3072 : extrait de 2400 caractères (~700 tokens) + consigne + les 25
+    # matières. num_predict 260 : la sortie utile tient en ~130 tokens, on garde
+    # le double pour ne jamais tronquer. temperature 0.15 : la matière est une
+    # classification, mais le résumé doit rester une phrase lisible.
+    "document_digest":          {"num_ctx": 3072, "num_predict": 260, "temperature": 0.15},
     # num_ctx élargi : page visible (3500 car.) + passages RAG plein-document.
     "assistant_answer":         {"num_ctx": 6144, "num_predict": 560, "temperature": 0.1},
     "assistant_intervention":   {"num_ctx": 3072, "num_predict": 220, "temperature": 0.1},
@@ -290,6 +295,36 @@ READING_SPEED_INITIAL_MS = 500
 # Chapitres heuristiques (si pas de TOC)
 DEFAULT_PAGES_PER_CHAPTER = 10
 
+# ── Bibliothèque : dossiers utilisateur et classification automatique ────────
+# Profondeur maximale de l'arbre : au-delà, le rail latéral n'est plus lisible
+# et un déplacement à la souris devient irrattrapable.
+LIBRARY_MAX_FOLDER_DEPTH = 6
+LIBRARY_FOLDER_NAME_MAX = 80
+# Plafonds de listage. La bibliothèque est locale et mono-utilisateur : on sert
+# tout le catalogue d'un coup et le rail filtre côté client (un déplacement à la
+# souris doit être instantané, sans aller-retour réseau).
+LIBRARY_MAX_DOCUMENTS = 1000
+# Recherche : `LIKE` SQL ne sait pas plier les accents (« equations » doit
+# trouver « Équations »). On charge un lot borné et on filtre EN PYTHON, comme
+# services/brainstorm_search.
+LIBRARY_SEARCH_POOL = 500
+LIBRARY_SEARCH_LIMIT = 60
+# Poids de pertinence. Le nom de fichier est le signal le plus fort (ce que
+# l'utilisateur tape quand il SAIT), les mots-clés viennent juste après (ce
+# qu'il tape quand il ne sait pas), le résumé et la matière départagent.
+LIBRARY_SEARCH_WEIGHT_FILENAME = 3
+LIBRARY_SEARCH_WEIGHT_KEYWORD = 2
+LIBRARY_SEARCH_WEIGHT_SUMMARY = 1
+LIBRARY_SEARCH_WEIGHT_SUBJECT = 1
+
+# Fiche LLM d'un document (matière + résumé + mots-clés), jouée une seule fois à
+# l'import. Remplace l'ancienne détection de matière seule.
+DOCUMENT_DIGEST_EXCERPT_PAGES = 3
+DOCUMENT_DIGEST_EXCERPT_CHARS = 4000
+DOCUMENT_DIGEST_PROMPT_CHARS = 2400
+DOCUMENT_SUMMARY_MAX_CHARS = 220
+DOCUMENT_KEYWORDS_MAX = 6
+
 # Base de données, logs et assets : en app empaquetée (gelée) -> données
 # utilisateur de l'OS (persistent entre mises à jour, _MEIPASS est en lecture
 # seule) ; en dev -> arborescence du projet (inchangé). [F1]
@@ -303,7 +338,7 @@ else:
     DB_PATH = str(_PROJECT_ROOT / "data" / "nwol.db")
     LOG_FILE = str(_PROJECT_ROOT / "logs" / "nwol.log")
     ASSETS_DIR = str(_PROJECT_ROOT / "nwol" / "assets")
-DB_SCHEMA_VERSION = 25
+DB_SCHEMA_VERSION = 26
 
 # Logs
 LOG_MAX_BYTES = 1_000_000

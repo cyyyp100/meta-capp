@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 
 from db import get_connection
 from db.user import DEFAULT_USER_ID
+from utils.text import fold
 
 logger = logging.getLogger("services.brainstorm_search")
 
@@ -35,10 +35,9 @@ _MAX_SNIPPET = 280
 _CANDIDATE_POOL = 400
 
 
-def _fold(text: str) -> str:
-    """Minuscule + suppression des accents (comparaison robuste)."""
-    decomposed = unicodedata.normalize("NFKD", (text or "").lower())
-    return "".join(c for c in decomposed if not unicodedata.combining(c))
+# Repli d'accents : implémentation unique dans utils.text, réexportée ici parce
+# que services.pdf_rag importe `_fold` depuis ce module.
+_fold = fold
 
 
 def extract_terms(query: str, max_terms: int = 6) -> list[str]:

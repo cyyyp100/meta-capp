@@ -10,7 +10,7 @@ from pathlib import Path
 
 from db import get_connection
 from db.user import DEFAULT_USER_ID, ensure_default_user
-from utils.flashcard_tags import fallback_flashcard_tags, normalize_flashcard_tags
+from utils.tags import fallback_flashcard_tags, normalize_flashcard_tags
 
 logger = logging.getLogger("DB.flashcards")
 
