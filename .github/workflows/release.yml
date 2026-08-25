@@ -113,7 +113,7 @@ jobs:
           xcrun stapler staple dist_app/Meta-Capp.app
       - name: Archive de distribution
         run: ditto -c -k --keepParent dist_app/Meta-Capp.app "Meta-Capp-${GITHUB_REF_NAME}-macos.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Meta-Capp-macos
           path: Meta-Capp-*-macos.zip
@@ -171,7 +171,7 @@ jobs:
           Remove-Item cert.pfx
       - name: Archive de distribution
         run: Compress-Archive -Path dist_app\Meta-Capp -DestinationPath "Meta-Capp-$env:GITHUB_REF_NAME-windows.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Meta-Capp-windows
           path: Meta-Capp-*-windows.zip
