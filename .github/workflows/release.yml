@@ -26,7 +26,7 @@ jobs:
       NWOL_DISABLE_CONDA_REEXEC: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
           cache: pip
@@ -61,7 +61,7 @@ jobs:
       APPLE_ID_SET: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
       - uses: actions/setup-node@v4
@@ -127,7 +127,7 @@ jobs:
       HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
       - uses: actions/setup-node@v4

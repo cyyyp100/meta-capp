@@ -14,7 +14,7 @@ jobs:
       NWOL_DISABLE_CONDA_REEXEC: "1" # F9 : pas de conda en CI
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
           cache: pip
@@ -36,7 +36,7 @@ jobs:
       NWOL_DISABLE_CONDA_REEXEC: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
           cache: pip
@@ -73,7 +73,7 @@ jobs:
       # VRAI backend FastAPI (même montage qu'en production). Ollama est absent
       # en CI : les scénarios s'appuient sur les chemins de repli, déjà couverts
       # côté Python par tests/server/test_llm_fallback.py.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.9"
           cache: pip
