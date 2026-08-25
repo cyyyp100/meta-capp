@@ -190,7 +190,7 @@ jobs:
           pattern: Meta-Capp-*
           merge-multiple: true
       - name: Publication (canal beta si tag pré-release, sinon stable)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: Meta-Capp-*.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
