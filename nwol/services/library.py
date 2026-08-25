@@ -5,6 +5,8 @@
 # sont en POINTS PDF (le client met à l'échelle selon le zoom d'affichage).
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from config.settings import (
     LIBRARY_MAX_DOCUMENTS,
     LIBRARY_SEARCH_LIMIT,
@@ -170,6 +172,19 @@ def search_page(doc_id: int, page: int, needle: str) -> list[list[float]]:
         return [list(rect) for rect in pdf.search_text(page, needle)]
 
 
+def _local_import_date(created_at: str) -> str:
+    """`documents.created_at` vient du `datetime('now')` de SQLite, donc en UTC,
+    alors que `last_opened` est déjà local. Sans cette conversion, un import passé
+    après 22 h (heure d'été) s'afficherait la veille dans la bibliothèque."""
+    if not created_at:
+        return ""
+    try:
+        utc = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return created_at
+    return utc.astimezone().isoformat(timespec="seconds")
+
+
 def _summary(doc: dict) -> dict:
     return {
         "id": doc["id"],
@@ -179,6 +194,9 @@ def _summary(doc: dict) -> dict:
         "last_page": doc.get("last_page") or 1,
         "subject": doc.get("subject"),
         "last_opened": doc.get("last_opened") or "",
+        # `created_at` est absent du ON CONFLICT DO UPDATE de `upsert_document` :
+        # il date le PREMIER import et survit aux ré-ouvertures. D'où le nom exposé.
+        "imported_at": _local_import_date(doc.get("created_at") or ""),
         # Le frontend branche le lecteur en blocs (fichiers de code) sur ce champ.
         "extraction_engine": doc.get("extraction_engine"),
         # Rangement et classification automatique (v26). Sans ces clés, rien

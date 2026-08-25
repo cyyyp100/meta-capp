@@ -7,12 +7,18 @@ import { useNavigate } from "react-router-dom";
 
 import { pageImageUrl } from "../../api/client";
 import type { DocumentSummary } from "../../api/types";
-import { useT } from "../../i18n";
+import { useLangStore, useT } from "../../i18n";
 import { DOC_MIME } from "./dnd";
 import type { FlatFolder } from "./folderTree";
 import { useLibraryUi } from "./useLibraryUi";
 
-const MAX_VISIBLE_KEYWORDS = 3;
+/** Le service a déjà ramené l'horodatage en heure locale : on n'en garde que le
+ *  jour, sans re-parser un fuseau et risquer de le décaler une seconde fois. */
+function formatDay(value: string, lang: string): string {
+  const day = value.slice(0, 10);
+  const parsed = new Date(`${day}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? day : parsed.toLocaleDateString(lang);
+}
 
 export function DocumentCard({
   doc,
@@ -30,16 +36,20 @@ export function DocumentCard({
 }) {
   const navigate = useNavigate();
   const t = useT();
+  const lang = useLangStore((s) => s.lang);
   const dragging = useLibraryUi((s) => s.draggingDocId === doc.id);
   const setDraggingDocId = useLibraryUi((s) => s.setDraggingDocId);
 
   const progress = doc.page_count > 0 ? Math.round((doc.last_page / doc.page_count) * 100) : 0;
   const pending = doc.digest_status === "pending" && !doc.summary;
+  const importedOn = doc.imported_at ? formatDay(doc.imported_at, lang) : "";
   const showRibbon = Boolean(doc.summary) || doc.keywords.length > 0 || pending;
 
   return (
     <div
+      className="doc-card"
       draggable
+      data-dragging={dragging ? "true" : undefined}
       onDragStart={(e) => {
         e.dataTransfer.setData(DOC_MIME, String(doc.id));
         e.dataTransfer.setData("text/plain", doc.title);
@@ -49,15 +59,6 @@ export function DocumentCard({
       onDragEnd={() => setDraggingDocId(null)}
       onClick={() => navigate(`/reader/${doc.id}`)}
       style={{ ...card, opacity: dragging ? 0.45 : 1 }}
-      onMouseEnter={(e) => {
-        if (dragging) return;
-        e.currentTarget.style.boxShadow = "var(--shadow-md)";
-        e.currentTarget.style.transform = "translateY(-2px)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = "var(--shadow-sm)";
-        e.currentTarget.style.transform = "none";
-      }}
     >
       <div style={thumbnail}>
         {doc.extraction_engine === "code" ? (
@@ -79,23 +80,19 @@ export function DocumentCard({
         )}
 
         {showRibbon && (
-          <div style={ribbon}>
+          <div className="doc-ribbon" style={ribbon}>
             {pending ? (
               <div style={pendingText}>{t("library.digest_pending")}</div>
             ) : (
               <>
-                {doc.summary && (
-                  <div style={ribbonText} title={doc.summary}>
-                    {doc.summary}
-                  </div>
-                )}
+                {doc.summary && <div className="doc-summary" style={ribbonText}>{doc.summary}</div>}
                 {doc.keywords.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
-                    {doc.keywords.slice(0, MAX_VISIBLE_KEYWORDS).map((keyword) => (
+                    {doc.keywords.map((keyword) => (
                       <button
                         key={keyword}
+                        className="doc-chip"
                         type="button"
-                        title={keyword}
                         onClick={(e) => {
                           e.stopPropagation();
                           onKeyword(keyword);
@@ -105,13 +102,9 @@ export function DocumentCard({
                         {keyword}
                       </button>
                     ))}
-                    {doc.keywords.length > MAX_VISIBLE_KEYWORDS && (
-                      <span style={chipMuted}>
-                        {t("library.keywords_more", { n: doc.keywords.length - MAX_VISIBLE_KEYWORDS })}
-                      </span>
-                    )}
                   </div>
                 )}
+                {importedOn && <div style={importedText}>{t("library.imported_on", { date: importedOn })}</div>}
               </>
             )}
           </div>
@@ -166,11 +159,15 @@ export function DocumentCard({
   );
 }
 
+// Le survol (soulèvement, mise au premier plan, dépliage du ruban) vit dans
+// tokens.css (`.doc-card`) : lui seul peut atteindre les enfants et doubler le
+// `:hover` d'un `:focus-within` pour le clavier. Tout ce que ce survol modifie
+// (position, z-index, ombre) y est déclaré AUSSI au repos : un style inline
+// gagnerait contre la règle `:hover` et l'effet disparaîtrait.
 const card: React.CSSProperties = {
   background: "var(--surface)",
   border: "1px solid var(--border)",
   borderRadius: "var(--radius-md)",
-  boxShadow: "var(--shadow-sm)",
   overflow: "hidden",
   cursor: "pointer",
   transition: "box-shadow var(--anim-normal) var(--ease), transform var(--anim-normal) var(--ease), opacity var(--anim-fast) var(--ease)",
@@ -196,28 +193,26 @@ const codeThumb: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
 };
 
-// Ruban translucide : `color-mix` sur --surface le fait suivre le thème, et le
-// flou détache le texte de la page rendue en dessous sans la masquer.
+// Ruban translucide. Le fond (`color-mix` sur --surface, qui suit le thème) et
+// la borne de hauteur dépliée au survol sont dans tokens.css (`.doc-ribbon`) ;
+// seul le flou, qui détache le texte de la page rendue dessous, reste ici.
 const ribbon: React.CSSProperties = {
   position: "absolute",
   left: 0,
   right: 0,
   bottom: 0,
   padding: "8px 10px",
-  background: "color-mix(in srgb, var(--surface) 84%, transparent)",
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
   borderTop: "1px solid var(--border)",
 };
 
+// Le rognage à 2 lignes et sa levée au survol sont dans tokens.css
+// (`.doc-summary`) : ils doivent pouvoir se contredire.
 const ribbonText: React.CSSProperties = {
   fontSize: 11,
   lineHeight: 1.35,
   color: "var(--text-soft)",
-  display: "-webkit-box",
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: "vertical",
-  overflow: "hidden",
 };
 
 const pendingText: React.CSSProperties = {
@@ -226,6 +221,7 @@ const pendingText: React.CSSProperties = {
   fontStyle: "italic",
 };
 
+// Troncature au repos et libération au survol : tokens.css (`.doc-chip`).
 const chip: React.CSSProperties = {
   border: "none",
   background: "var(--accent-soft)",
@@ -235,17 +231,13 @@ const chip: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 600,
   cursor: "pointer",
-  maxWidth: 92,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
 };
 
-const chipMuted: React.CSSProperties = {
-  ...chip,
-  background: "transparent",
+// Ne devient lisible qu'une fois le ruban déplié : au repos il est sous la borne.
+const importedText: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 10,
   color: "var(--muted)",
-  cursor: "default",
 };
 
 const title: React.CSSProperties = {

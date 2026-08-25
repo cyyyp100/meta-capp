@@ -4,6 +4,8 @@ L'enjeu de la fonctionnalité est de retrouver un PDF SANS en connaître le nom 
 ces tests vérifient donc surtout que le résumé et les mots-clés générés par le
 LLM sont bien des points d'entrée, et que les accents ne bloquent rien.
 """
+import re
+
 import pytest
 
 
@@ -129,3 +131,17 @@ def test_summary_reaches_the_api_shape(fresh_db):
     assert doc["subject"] == "mathématiques"
     assert doc["digest_status"] == "done"
     assert doc["folder_id"] is None
+    assert re.match(r"^\d{4}-\d{2}-\d{2}", doc["imported_at"])
+
+
+def test_the_import_date_survives_a_reimport(fresh_db):
+    """`imported_at` date le PREMIER import : `upsert_document` laisse `created_at`
+    hors de son ON CONFLICT DO UPDATE, sinon rouvrir un PDF le rajeunirait."""
+    from services.library import list_all_documents
+
+    _document("cours.pdf")
+    first = list_all_documents()[0]["imported_at"]
+
+    _document("cours.pdf")  # même chemin : on retombe sur la branche UPDATE
+
+    assert list_all_documents()[0]["imported_at"] == first

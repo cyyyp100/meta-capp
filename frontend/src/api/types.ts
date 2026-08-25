@@ -44,6 +44,8 @@ export interface DocumentSummary {
   last_page: number;
   subject: string | null;
   last_opened: string;
+  // `documents.created_at` : date du PREMIER import, inchangée à la ré-ouverture.
+  imported_at: string;
   // "code" = document servi en blocs (lecteur texte), sinon PDF rendu en image.
   extraction_engine?: string | null;
   // Rangement et classification automatique (schéma v26). Miroir exact de

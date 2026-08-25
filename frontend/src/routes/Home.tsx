@@ -235,6 +235,9 @@ const main: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   overflowY: "auto",
+  // `overflowY: auto` rend aussi l'axe horizontal scrollable : sans cette marge,
+  // une carte agrandie au survol serait rognée sur les bords de la grille.
+  padding: "8px 6px",
 };
 
 const streakPill: React.CSSProperties = {

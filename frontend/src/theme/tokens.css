@@ -185,3 +185,69 @@ input[type="search"]::-webkit-search-cancel-button {
 .card-move:focus-visible {
   opacity: 1;
 }
+
+/* Carte de bibliothèque : au repos le résumé tient sur 2 lignes et les mots-clés
+   sont rognés, sinon la grille devient un mur de texte. Au survol la carte se
+   soulève, passe DEVANT ses voisines et déplie tout. En CSS et non dans un
+   onMouseEnter : seul le CSS peut piloter les enfants (ruban, chips) et doubler
+   le survol d'un `:focus-within`, qui rend le dépliage atteignable au clavier.
+
+   ATTENTION : chaque propriété que le survol relâche (box-shadow, max-height,
+   line-clamp, max-width) DOIT avoir son état de repos ici, jamais en style inline
+   dans DocumentCard.tsx — un style inline l'emporte sur ces règles et le survol
+   redeviendrait sans effet.
+   Le `z-index` n'agit que grâce au `position: relative` posé ici. */
+.doc-card {
+  position: relative;
+  z-index: 0;
+  box-shadow: var(--shadow-sm);
+}
+.doc-card:hover:not([data-dragging="true"]),
+.doc-card:focus-within:not([data-dragging="true"]) {
+  z-index: 3;
+  transform: translateY(-4px) scale(1.03);
+  box-shadow: var(--shadow-md);
+}
+
+/* Le ruban est ancré en bas d'une vignette déjà en `overflow: hidden` : déplié,
+   il monte dans l'image sans jamais déborder de la carte. `max-height` part
+   d'une valeur chiffrée, sinon la transition n'aurait rien à interpoler. */
+.doc-ribbon {
+  max-height: 45%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  transition: max-height var(--anim-normal) var(--ease), background var(--anim-normal) var(--ease);
+}
+.doc-card:hover:not([data-dragging="true"]) .doc-ribbon,
+.doc-card:focus-within:not([data-dragging="true"]) .doc-ribbon {
+  max-height: 100%;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+}
+
+/* `display: block` annule le `-webkit-box`, donc le clamp. Pas d'animation de
+   hauteur sur le texte : il se recomposerait en sautant ligne à ligne. */
+.doc-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.doc-card:hover:not([data-dragging="true"]) .doc-summary,
+.doc-card:focus-within:not([data-dragging="true"]) .doc-summary {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+/* Au repos un mot-clé long est tronqué pour que la ligne de chips en montre
+   plusieurs ; déplié, chacun s'affiche en entier. */
+.doc-chip {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-card:hover:not([data-dragging="true"]) .doc-chip,
+.doc-card:focus-within:not([data-dragging="true"]) .doc-chip {
+  max-width: none;
+}
