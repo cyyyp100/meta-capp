@@ -96,3 +96,56 @@ def test_truncated_question_json_is_completed():
     raw = '{"question": "Pourquoi ?", "expected_answer": "Parce que", "evaluation_criteria": ["a"'
     parsed = schema_json.parse_question(raw)
     assert parsed is None or parsed["question"] == "Pourquoi ?"
+
+
+# ── Types à widget : les choix ne veulent pas dire la même chose partout ────
+
+def _question(**overrides) -> dict:
+    payload = {
+        "question": "Remets les étapes dans l'ordre.",
+        "question_type": "ordering",
+        "choices": ["Poser les hypothèses", "Appliquer le théorème", "Conclure"],
+        "expected_answer": "1. Poser les hypothèses 2. Appliquer le théorème 3. Conclure",
+        "evaluation_criteria": ["ordre exact"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_ordering_keeps_its_steps_in_order():
+    parsed = schema_json.parse_question(_question())
+    assert parsed is not None
+    # Surtout : l'ordre reçu est la réponse, il ne doit pas être remanié ici.
+    assert parsed["choices"] == ["Poser les hypothèses", "Appliquer le théorème", "Conclure"]
+
+
+def test_ordering_without_enough_steps_is_rejected():
+    """Deux étapes ne font pas un exercice : mieux vaut régénérer la question."""
+    assert schema_json.parse_question(_question(choices=["Une", "Deux"])) is None
+
+
+def test_free_answer_types_drop_the_choices_gemma_adds_anyway():
+    parsed = schema_json.parse_question(
+        _question(question_type="teach_back", question="Explique en deux phrases.")
+    )
+    assert parsed is not None
+    assert parsed["choices"] == []
+
+
+def test_recall_requires_a_usable_mask():
+    """Sans masque, le passage reste lisible : la question n'a plus d'objet."""
+    assert schema_json.parse_question(_question(question_type="recall", choices=[])) is None
+    parsed = schema_json.parse_question(
+        _question(
+            question_type="recall",
+            choices=[],
+            paragraph_mask={
+                "enabled": True,
+                "start_char": 10,
+                "end_char": 120,
+                "placeholder": "passage masqué",
+            },
+        )
+    )
+    assert parsed is not None
+    assert parsed["paragraph_mask"]["enabled"] is True

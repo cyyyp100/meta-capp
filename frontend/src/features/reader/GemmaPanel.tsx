@@ -25,6 +25,9 @@ import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
+import { AnswerInput } from "../questions/AnswerInput";
+import { QuestionStem } from "../questions/QuestionStem";
+import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
 import { renderMathToHtml } from "./renderMath";
 
 interface Message {
@@ -36,6 +39,19 @@ interface Highlight {
   quote?: string;
   text?: string;
   purpose?: "key" | "explain" | "reference";
+}
+
+/** Passage à cacher dans la page pendant un rappel libre. */
+export interface QaMask {
+  quote: string;
+  placeholder?: string;
+}
+
+interface Qa {
+  question: string;
+  choices: string[] | null;
+  type: string;
+  mask: QaMask | null;
 }
 
 const MODES = ["discret", "normal", "coach"] as const;
@@ -77,6 +93,7 @@ export function GemmaPanel({
   contextChips,
   onRemoveContextChip,
   onGatedChange,
+  onMask,
 }: {
   docId: number;
   currentPage: number;
@@ -85,6 +102,8 @@ export function GemmaPanel({
   contextChips?: { id: number; page: number; text: string }[];
   onRemoveContextChip?: (id: number) => void;
   onGatedChange?: (active: boolean, page?: number) => void;
+  /** Passage à cacher dans la page (rappel libre), null pour le redécouvrir. */
+  onMask?: (mask: QaMask | null, page: number) => void;
 }) {
   const t = useT();
   // Gemma démarre fermé : l'utilisateur (ou une intervention) l'ouvre au besoin.
@@ -94,7 +113,7 @@ export function GemmaPanel({
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [mode, setMode] = useState<(typeof MODES)[number]>("normal");
-  const [qa, setQa] = useState<{ question: string; choices: string[] | null; type: string } | null>(null);
+  const [qa, setQa] = useState<Qa | null>(null);
   const [qaFeedback, setQaFeedback] = useState<{ verdict: string; feedback: string; hint?: string } | null>(null);
   const [qaDraft, setQaDraft] = useState("");
   // Question automatique bloquante : verrouille le scroll du lecteur (cf. onGatedChange).
@@ -117,6 +136,8 @@ export function GemmaPanel({
   onHighlightsRef.current = onHighlights;
   const onGatedChangeRef = useRef(onGatedChange);
   onGatedChangeRef.current = onGatedChange;
+  const onMaskRef = useRef(onMask);
+  onMaskRef.current = onMask;
   const contextChipsRef = useRef(contextChips);
   contextChipsRef.current = contextChips;
   const gatedRef = useRef(false);
@@ -126,6 +147,10 @@ export function GemmaPanel({
   function setGatedState(active: boolean, page?: number) {
     setGated(active);
     onGatedChangeRef.current?.(active, page);
+  }
+
+  function applyMask(mask: QaMask | null) {
+    onMaskRef.current?.(mask, pageRef.current);
   }
 
   useEffect(() => {
@@ -164,23 +189,26 @@ export function GemmaPanel({
         }
       } else if (evt.type === "system") {
         setMessages((m) => [...m, { role: "system", text: evt.message }]);
-      } else if (evt.type === "qa_question") {
+      } else if (evt.type === "qa_question" || evt.type === "gated_question") {
         setBusy(false);
         setQaFeedback(null);
         setQaDraft("");
-        setQa({ question: evt.question || "", choices: evt.choices ?? null, type: evt.question_type || "open" });
+        setQa({
+          question: evt.question || "",
+          choices: evt.choices ?? null,
+          type: evt.question_type || "open",
+          mask: evt.mask?.quote ? evt.mask : null,
+        });
+        // Rappel libre : le passage disparaît de la page le temps de répondre.
+        applyMask(evt.mask?.quote ? evt.mask : null);
         setOpen(true);
-      } else if (evt.type === "gated_question") {
         // Question automatique : verrouille le scroll sur la page-contexte.
-        setBusy(false);
-        setQaFeedback(null);
-        setQaDraft("");
-        setQa({ question: evt.question || "", choices: evt.choices ?? null, type: evt.question_type || "open" });
-        setOpen(true);
-        setGatedState(true, evt.page);
+        if (evt.type === "gated_question") setGatedState(true, evt.page);
       } else if (evt.type === "qa_feedback") {
         setBusy(false);
         setQaFeedback({ verdict: evt.verdict || "", feedback: evt.feedback || "", hint: evt.hint || "" });
+        // La réponse est donnée : on rend le passage masqué.
+        applyMask(null);
         if (Array.isArray(evt.highlights) && evt.highlights.length) {
           onHighlightsRef.current?.(evt.highlights, pageRef.current);
         }
@@ -463,6 +491,7 @@ export function GemmaPanel({
               onClose={() => {
                 setQa(null);
                 setQaFeedback(null);
+                applyMask(null);
               }}
             />
           )}
@@ -691,7 +720,7 @@ function QaCard({
   onNext,
   onClose,
 }: {
-  qa: { question: string; choices: string[] | null; type: string };
+  qa: Qa;
   feedback: { verdict: string; feedback: string; hint?: string } | null;
   draft: string;
   setDraft: (v: string) => void;
@@ -702,7 +731,6 @@ function QaCard({
   onClose: () => void;
 }) {
   const t = useT();
-  const hasChoices = Array.isArray(qa.choices) && qa.choices.length > 0;
   // Verrouillé + réponse fausse : seule issue = une nouvelle question (pas de sortie).
   const stayLocked = locked && feedback?.verdict === "incorrect";
   return (
@@ -718,32 +746,26 @@ function QaCard({
         gap: 8,
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-hover)", letterSpacing: 0.4 }}>{t("flash.q")}</div>
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{qa.question || "…"}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-hover)", letterSpacing: 0.4 }}>{t("flash.q")}</span>
+        <QuestionTypeBadge type={qa.type} />
+      </div>
+      <QuestionStem question={qa.question} type={qa.type} masked={Boolean(qa.mask)} />
 
-      {!feedback &&
-        (hasChoices ? (
-          <div style={{ display: "grid", gap: 6 }}>
-            {qa.choices!.map((c) => (
-              <button key={c} disabled={busy} onClick={() => onSubmit(c)} style={{ ...chip, textAlign: "left", borderRadius: "var(--radius-sm)" }}>
-                {c}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-            <AutoGrowTextarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onSubmit={() => onSubmit(draft)}
-              placeholder={t("gemma.your_answer")}
-              style={inputStyle}
-            />
-            <Button onClick={() => onSubmit(draft)} pending={busy} className="shrink-0">
-              OK
-            </Button>
-          </div>
-        ))}
+      {!feedback && (
+        <AnswerInput
+          // Une nouvelle question doit repartir d'un widget vierge (étapes
+          // remélangées, ordre remis à zéro) : la question sert de clé.
+          key={qa.question}
+          type={qa.type}
+          choices={qa.choices}
+          seed={qa.question}
+          draft={draft}
+          setDraft={setDraft}
+          busy={busy}
+          onSubmit={onSubmit}
+        />
+      )}
 
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

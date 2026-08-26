@@ -376,3 +376,10 @@ ASSISTANT_MAX_INTERVENTIONS = 6     # par session
 
 # Mode focus : interventions coupées pendant N minutes (déclenché depuis le panneau)
 FOCUS_DEFAULT_MIN = 25
+
+# ── Questions de lecture ────────────────────────────────────────────────────
+# La grille des types vit dans config/question_types.py (registre canonique).
+# Ici, seulement le levier de mise au point : forcer un type pour vérifier son
+# rendu de bout en bout. Vide = tirage adaptatif normal.
+#   MC_FORCE_QUESTION_TYPE=ordering python main.py mon.pdf
+FORCE_QUESTION_TYPE = os.getenv("MC_FORCE_QUESTION_TYPE", "").strip().lower()

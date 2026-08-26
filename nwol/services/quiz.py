@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import random
 
+from config import question_types
 from db.quiz_questions import (
     get_quiz_base_questions,
     get_quiz_subjects,
@@ -42,13 +43,24 @@ def build_quiz(subject: str | None = None, n: int = 10, user_id: int = DEFAULT_U
         return []
 
     # 1) Questions déjà munies de choix valides (≥4 dont la réponse) → réutilisées
-    #    telles quelles. Les autres sont envoyées au LLM pour générer les distracteurs.
+    #    telles quelles. Les autres sont envoyées au LLM pour générer les distracteurs,
+    #    sauf celles dont le type ne s'y prête pas : une remise en ordre garde ses
+    #    étapes, une production longue (explication, contre-exemple…) reste ouverte —
+    #    en faire un QCM trahirait le type affiché à l'apprenant.
     llm_items: list[dict] = []
     for q in base:
         answer = (q.get("answer") or "").strip()
+        qtype = _question_type(q)
+        if qtype == "ordering":
+            steps = _ordering_steps(q.get("choices"))
+            if steps is not None:
+                q["_choices"] = steps
+            continue
         existing = _valid_existing_choices(q.get("choices"), answer)
         if existing is not None:
             q["_choices"] = existing
+            continue
+        if not question_types.quiz_mcq_convertible(qtype):
             continue
         llm_items.append({
             "id": q["id"],
@@ -85,6 +97,10 @@ def build_quiz(subject: str | None = None, n: int = 10, user_id: int = DEFAULT_U
             "id": q["id"],
             "question": q.get("question") or "",
             "answer": answer,
+            # Le type pilote le widget de réponse côté UI (mêmes composants que
+            # la carte Q&R du lecteur) : sans lui, tout redevenait un QCM ou un
+            # champ texte anonyme.
+            "question_type": _question_type(q),
             "category": q.get("category") or "culture",
             "document": q.get("document"),
             "document_id": q.get("document_id"),
@@ -178,6 +194,24 @@ def analyze_session(answers_history: list[dict], user_id: int = DEFAULT_USER_ID)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _question_type(q: dict) -> str:
+    """Type stocké, normalisé. "open" pour les questions d'avant la grille typée."""
+    qtype = (q.get("question_type") or "").strip().lower()
+    return qtype if qtype in question_types.KEYS else "open"
+
+
+def _ordering_steps(choices) -> list[str] | None:
+    """Étapes d'une remise en ordre, DANS L'ORDRE CORRECT (l'UI les mélangera).
+
+    Contrairement à un QCM, on ne touche ni au nombre ni à l'ordre : c'est la
+    réponse elle-même. Sans assez d'étapes, la question repasse en réponse libre."""
+    if not isinstance(choices, list):
+        return None
+    minimum, maximum = question_types.choice_bounds("ordering")
+    steps = [str(c).strip() for c in choices if str(c).strip()]
+    return steps[:maximum] if len(steps) >= minimum else None
+
 
 def _short_context(q: dict) -> str:
     context = (q.get("source_context") or q.get("course_context") or "").strip()

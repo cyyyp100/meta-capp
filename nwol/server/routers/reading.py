@@ -8,6 +8,9 @@
 #                     {"type":"system","message"}
 #                     {"type":"scanning","active":bool}  # Gemma inspecte la page (décide
 #                       d'intervenir ou non) -> l'UI tourne la bulle vers le PDF
+#                     {"type":"qa_question"|"gated_question","question","choices",
+#                      "question_type","mask"}  # mask = {"quote","placeholder"} du
+#                       passage à cacher dans la page (rappel libre), sinon null
 from __future__ import annotations
 
 import asyncio
@@ -170,6 +173,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             "question": result.get("question", ""),
             "choices": result.get("choices"),
             "question_type": qtype,
+            # Passage à masquer dans la page (rappel libre) : citation + texte de
+            # remplacement, résolus par le service. None quand il n'y a rien à cacher.
+            "mask": assistant.resolve_paragraph_mask(
+                doc_id, page, result.get("paragraph_mask")
+            ),
         }
         if gated:
             state["gated"] = True
@@ -417,7 +425,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         "flashcard_created": flashcard_created,
                     })
 
-                assistant.evaluate_page_answer(doc_id, page, question, answer, on_eval, on_error)
+                assistant.evaluate_page_answer(
+                    doc_id, page, question, answer, on_eval, on_error,
+                    question_type=state.get("qa_question_type") or "",
+                    # La question persistée porte sa réponse canonique et ses
+                    # propositions : le service s'en sert pour corriger.
+                    question_id=qid,
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover

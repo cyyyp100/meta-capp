@@ -9,6 +9,7 @@ import string
 import unicodedata
 from typing import Any
 
+from config import question_types
 from config.settings import DOCUMENT_SUMMARY_MAX_CHARS
 from core.math_text import repair_common_inline_math_artifacts
 from i18n import t
@@ -26,50 +27,10 @@ CRITERIA = (
     "meta_cognition",
 )
 
-QUESTION_TYPES = (
-    "qcm",
-    "open",
-    "comprehension",
-    "application",
-    "curiosity",
-    "visualization",
-    "metacognition",
-    "anticipation",
-)
+# Grille des types : registre canonique (config/question_types.py), jamais recopiée.
+QUESTION_TYPES = question_types.KEYS
 
-_QUESTION_TYPE_ALIASES = {
-    "mcq": "qcm",
-    "multiple_choice": "qcm",
-    "qcm_verification_rapide_de_comprehension": "qcm",
-    "question_ouverte": "open",
-    "ouverte": "open",
-    "open_question": "open",
-    "reformulation": "open",
-    "question_de_comprehension": "comprehension",
-    "question_de_comprehension_textuelle": "comprehension",
-    "comprehension_textuelle": "comprehension",
-    "textual_comprehension": "comprehension",
-    "question_d_application": "application",
-    "question_application": "application",
-    "application_question": "application",
-    "mise_en_pratique": "application",
-    "question_de_curiosite": "curiosity",
-    "question_de_curiosite_inductive": "curiosity",
-    "curiosite": "curiosity",
-    "curiosite_inductive": "curiosity",
-    "inductive": "curiosity",
-    "question_inductive": "curiosity",
-    "visualisation": "visualization",
-    "exercice_de_visualisation": "visualization",
-    "visualization_exercise": "visualization",
-    "question_metacognitive": "metacognition",
-    "metacognitive": "metacognition",
-    "metacognitive_question": "metacognition",
-    "anticipation_auto_evaluation": "anticipation",
-    "auto_evaluation": "anticipation",
-    "self_evaluation": "anticipation",
-    "question_d_anticipation": "anticipation",
-}
+_QUESTION_TYPE_ALIASES = question_types.alias_map()
 
 _AMBIGUOUS_JSON_LATEX_ESCAPE_RE = re.compile(
     r"\\(?:"
@@ -140,14 +101,26 @@ def parse_question(raw: str | dict) -> dict | None:
         return None
     if not evaluation_criteria:
         evaluation_criteria = [t("qa.criteria_faithful")]
-    # gemma4 envoie des choices même pour les questions non-QCM → on normalise
-    if question_type != "qcm":
+    # gemma4 envoie des choices même pour les questions à réponse libre → on
+    # normalise. Seuls qcm (propositions), ordering (étapes dans l'ordre correct)
+    # et estimation (ordres de grandeur, facultatifs) en portent de signifiants.
+    if not question_types.allows_choices(question_type):
         choices = []
-    if question_type == "qcm":
-        if len(choices) < 3:
-            return None
-        choices = choices[:4]  # tronquer si > 4
+    else:
+        minimum, maximum = question_types.choice_bounds(question_type)
+        if len(choices) < minimum:
+            # Un ordering sans ses étapes n'est pas jouable : on rejette pour
+            # laisser la régénération repasser. Un QCM non plus (contrat existant).
+            if question_types.requires_choices(question_type) or question_type == "qcm":
+                return None
+            choices = []
+        else:
+            choices = choices[:maximum]
     if paragraph_mask is None:
+        return None
+    # "recall" repose sur le masquage du passage : sans masque exploitable, la
+    # question serait répondable en relisant le paragraphe.
+    if question_type == "recall" and not paragraph_mask.get("enabled"):
         return None
 
     question_clean = repair_common_inline_math_artifacts(question.strip())

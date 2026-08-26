@@ -136,3 +136,79 @@ def test_quiz_analysis_empty_history(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"analysis": "", "weak_subjects": [], "courses_to_review": []}
+
+
+# ── Réutilisation des types de lecture dans le quiz ─────────────────────────
+
+def _seed_typed_question(question_type: str, *, choices=None, subject: str = "maths") -> int:
+    from db.documents import upsert_document
+    from db.questions import save_question
+
+    doc_id = upsert_document(
+        path=f"/tmp/{subject}-{question_type}.pdf",
+        filename=f"{subject}.pdf",
+        page_count=4,
+        engine="test",
+        has_toc=False,
+        subject=subject,
+    )
+    return save_question(
+        doc_id, "page", "Page 1", 1, 1,
+        {
+            "question": f"Question de type {question_type} ?",
+            "question_type": question_type,
+            "choices": choices,
+            "answer": "La réponse attendue",
+            "source_context": "Un passage assez long pour rester exploitable hors lecture.",
+        },
+    )
+
+
+def test_quiz_exposes_the_reading_question_type(client, monkeypatch):
+    """Le type pilote le widget de réponse côté UI : il doit survivre au quiz."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    _seed_typed_question("comprehension")
+
+    quiz = client.get("/api/quiz/questions", params={"subject": "maths"}).json()
+    assert [q["question_type"] for q in quiz] == ["comprehension"]
+
+
+def test_ordering_keeps_its_steps_and_skips_the_distractor_llm(client, monkeypatch):
+    """Les étapes SONT la réponse : les mélanger à des distracteurs la détruirait."""
+    seen: list[dict] = []
+
+    def _spy(context, on_success, on_error, model=None):
+        seen.extend(context.get("items") or [])
+        on_success({})
+
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _spy)
+    steps = ["Poser les hypothèses", "Appliquer le théorème", "Conclure"]
+    _seed_typed_question("ordering", choices=steps)
+
+    quiz = client.get("/api/quiz/questions", params={"subject": "maths"}).json()
+    assert len(quiz) == 1
+    assert quiz[0]["question_type"] == "ordering"
+    assert quiz[0]["choices"] == steps
+    assert seen == []
+
+
+def test_reflexive_types_never_reach_the_quiz(client, monkeypatch):
+    """« Comment as-tu trouvé ta réponse ? » n'a aucun sens hors de la lecture."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    _seed_typed_question("metacognition", subject="philosophie")
+    _seed_typed_question("connection", subject="philosophie")
+    _seed_typed_question("application", subject="philosophie")
+
+    quiz = client.get("/api/quiz/questions", params={"subject": "philosophie"}).json()
+    assert [q["question_type"] for q in quiz] == ["application"]
+
+
+def test_long_production_types_stay_open_instead_of_becoming_mcq(client, monkeypatch):
+    """Un QCM sous un énoncé « explique en deux phrases » trahirait le type affiché."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    _seed_typed_question("teach_back", subject="chimie")
+
+    quiz = client.get("/api/quiz/questions", params={"subject": "chimie"}).json()
+    assert len(quiz) == 1
+    assert quiz[0]["choices"] is None
+    assert quiz[0]["answer"]

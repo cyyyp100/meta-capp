@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Callable
+from config import question_types
 from config.settings import (
     OLLAMA_KEEP_ALIVE,
     OLLAMA_MODEL,
@@ -237,6 +238,7 @@ def evaluate_answer_async(
         metacog_profile=context.get("metacog_profile") or {},
         history=context.get("history") or [],
         past_struggles=context.get("past_struggles") or [],
+        objective_verdict=context.get("objective_verdict") or "",
     )
     return _run_json_async(
         "evaluation",
@@ -1133,7 +1135,7 @@ Réécris-la en un unique objet JSON valide, sans Markdown, sans commentaire et 
 Garde le sens de la réponse précédente. Si elle est tronquée ou ambiguë, régénère depuis le prompt initial.
 Si une information optionnelle manque, utilise une valeur neutre.
 Pour une question, question_type doit être exactement une de ces valeurs :
-qcm, open, comprehension, application, curiosity, visualization, metacognition, anticipation.
+{question_types.keys_line()}.
 
 Tâche : {label}
 Format attendu :
@@ -1223,6 +1225,16 @@ def _closed_json_candidate(text: str) -> str:
     while stack:
         suffix += stack.pop()
     return stripped + suffix
+
+
+# Types que le repli hors-ligne sait vraiment fabriquer sans LLM : ceux dont la
+# consigne est générique. Sous-ensemble assumé du registre — « ordering » exige des
+# étapes réelles, « recall » un masque, « error_detection » une erreur plausible :
+# hors-ligne, on retombe alors sur la question dictée par le contenu de la page.
+_FALLBACK_PREFERRED_TYPES = frozenset({
+    "open", "comprehension", "curiosity", "metacognition", "anticipation",
+    "teach_back", "elaboration_why", "connection", "counterexample",
+})
 
 
 def _fallback_question_from_prompt(prompt: str) -> dict | None:
@@ -1340,7 +1352,7 @@ def _fallback_question_from_prompt(prompt: str) -> dict | None:
                 "Repère l'idée centrale",
                 "S'appuie sur le contenu du passage",
             ]
-    if preferred_type in {"open", "comprehension", "curiosity", "metacognition", "anticipation"} and not existing_question:
+    if preferred_type in _FALLBACK_PREFERRED_TYPES and not existing_question:
         question_type, question, expected, criteria = _fallback_preferred_question(
             preferred_type,
             topic_ref,
@@ -1368,10 +1380,7 @@ def _extract_preferred_question_type(prompt: str) -> str:
     if not match:
         return ""
     value = match.group(1).strip().lower()
-    return value if value in {
-        "qcm", "open", "comprehension", "application",
-        "curiosity", "visualization", "metacognition", "anticipation",
-    } else ""
+    return value if value in question_types.KEYS else ""
 
 
 def _fallback_preferred_question(
@@ -1436,6 +1445,62 @@ def _fallback_preferred_question(
             f"Quelle information explicite le passage donne-t-il sur {focus} ?",
             "Il faut extraire l'information directement fournie par le passage.",
             ["S'appuie sur une information explicite", "Répond de façon courte et fidèle"],
+        )
+    if preferred_type == "teach_back":
+        if english:
+            return (
+                "teach_back",
+                f"Explain {focus} in two sentences to someone who has never seen it, without technical jargon.",
+                "Reformulate the notion simply, without jargon, while staying faithful to the passage.",
+                ["Explanation understandable by a beginner", "No jargon", "Stays faithful to the passage"],
+            )
+        return (
+            "teach_back",
+            f"Explique {focus} en deux phrases à quelqu'un qui ne l'a jamais vu, sans jargon technique.",
+            "Il faut reformuler la notion simplement, sans jargon, en restant fidèle au passage.",
+            ["Explication compréhensible par un débutant", "Sans jargon", "Reste fidèle au passage"],
+        )
+    if preferred_type == "elaboration_why":
+        if english:
+            return (
+                "elaboration_why",
+                f"Why is what the passage states about {focus} true, rather than the opposite?",
+                "Justify with the mechanism or reason given in the passage.",
+                ["Gives a justification, not a restatement", "Relies on the passage"],
+            )
+        return (
+            "elaboration_why",
+            f"Pourquoi ce que le passage affirme sur {focus} est-il vrai, plutôt que l'inverse ?",
+            "Il faut justifier par le mécanisme ou la raison donnée dans le passage.",
+            ["Donne une justification, pas une reformulation", "S'appuie sur le passage"],
+        )
+    if preferred_type == "connection":
+        if english:
+            return (
+                "connection",
+                f"What does {focus} connect to in what you have already read or answered?",
+                "Name a link with an earlier notion and say what the two have in common.",
+                ["Names an explicit link", "Justifies what the two elements share"],
+            )
+        return (
+            "connection",
+            f"À quoi {focus} se relie-t-il dans ce que tu as déjà lu ou répondu ?",
+            "Il faut nommer un lien avec une notion antérieure et dire ce que les deux ont en commun.",
+            ["Nomme un lien explicite", "Justifie ce que les deux éléments partagent"],
+        )
+    if preferred_type == "counterexample":
+        if english:
+            return (
+                "counterexample",
+                f"Under what condition would what the passage states about {focus} stop being true?",
+                "Give a counterexample or name the condition that breaks the statement.",
+                ["Identifies a validity condition", "Stays grounded in the passage"],
+            )
+        return (
+            "counterexample",
+            f"Dans quel cas ce que le passage affirme sur {focus} cesserait-il d'être vrai ?",
+            "Il faut donner un contre-exemple ou nommer la condition qui casse l'affirmation.",
+            ["Identifie une condition de validité", "Reste ancré dans le passage"],
         )
     topic = topic_ref or _fallback_topic_from_paragraph(paragraph) or ("this passage" if english else "ce passage")
     if english:

@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { api, pageImageUrl } from "../api/client";
 import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
-import { GemmaPanel } from "../features/reader/GemmaPanel";
+import { GemmaPanel, type QaMask } from "../features/reader/GemmaPanel";
 import { BlockPages } from "../features/reader/BlockPages";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
@@ -124,6 +124,39 @@ export function Reader() {
   // Question automatique bloquante : scroll figé sur la page-contexte.
   const [locked, setLocked] = useState(false);
   const [lockedPage, setLockedPage] = useState(1);
+  // Rappel libre : passage caché sous un cache opaque le temps de répondre.
+  const [maskByPage, setMaskByPage] = useState<Record<number, number[][]>>({});
+
+  async function handleMask(mask: QaMask | null, page: number) {
+    if (!mask?.quote) {
+      setMaskByPage({});
+      setQuoteMarksByPage((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          next[Number(key)] = next[Number(key)].filter((m) => !m.masked);
+        }
+        return next;
+      });
+      return;
+    }
+    // Lecture reconstruite : on cache par marquage de texte, faute de géométrie.
+    if (isCode) {
+      setQuoteMarksByPage((prev) => ({
+        ...prev,
+        [page]: [...(prev[page] ?? []), { text: mask.quote, color: "var(--surface-soft)", masked: true }],
+      }));
+      return;
+    }
+    try {
+      const { rects_pts } = await api.searchPage(id, page, mask.quote);
+      const rects = mergeLineRects(rects_pts);
+      // Passage introuvable (extraction ≠ rendu) : plutôt que de cacher la page
+      // entière, on laisse la question posée — elle reste jouable, en plus facile.
+      if (rects.length) setMaskByPage({ [page]: rects });
+    } catch {
+      /* rien à masquer : dégradation silencieuse, comme pour les citations */
+    }
+  }
 
   async function handleHighlights(items: Highlight[], page: number) {
     // Lecture reconstruite : les citations sont localisées par recherche pliée
@@ -689,6 +722,31 @@ export function Reader() {
                       ))}
                     </svg>
                   ) : null}
+                  {/* Rappel libre : cache opaque sur le passage à restituer. Il
+                      recouvre le calque de texte, donc on ne peut ni le lire ni
+                      le sélectionner tant que la réponse n'est pas donnée. */}
+                  {maskByPage[n]?.length ? (
+                    <svg
+                      viewBox={`0 0 ${w} ${h}`}
+                      preserveAspectRatio="none"
+                      aria-label={t("qa.recall.masked")}
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 6 }}
+                    >
+                      {maskByPage[n].map((rect, ri) => (
+                        <rect
+                          key={ri}
+                          x={rect[0] - 1}
+                          y={rect[1] - 1}
+                          width={rect[2] - rect[0] + 2}
+                          height={rect[3] - rect[1] + 2}
+                          fill="var(--surface-soft)"
+                          stroke="var(--border-strong)"
+                          strokeDasharray="4 3"
+                          rx={3}
+                        />
+                      ))}
+                    </svg>
+                  ) : null}
                   {/* Calque de texte transparent : sélection native par-dessus l'image. */}
                   {words ? (
                     <div
@@ -871,6 +929,7 @@ export function Reader() {
         contextChips={contextChips}
         onRemoveContextChip={removeContextChip}
         onGatedChange={handleGatedChange}
+        onMask={handleMask}
       />
 
       {data && !entered && <EntrySas docId={id} title={data.title} onStart={() => setEntered(true)} />}

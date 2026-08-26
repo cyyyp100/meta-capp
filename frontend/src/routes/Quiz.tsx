@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { QuizAnswerRecord, QuizQuestion } from "../api/types";
-import { ArrowRight, Check, Eye, X } from "lucide-react";
+import { ArrowRight, Check, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { AnswerInput, serializeOrder } from "../features/questions/AnswerInput";
+import { QuestionStem } from "../features/questions/QuestionStem";
+import { QuestionTypeBadge } from "../features/questions/QuestionTypeBadge";
+import { answerWidget } from "../features/questions/registry";
 import { renderMathToHtml } from "../features/reader/renderMath";
 import { useT } from "../i18n";
 
@@ -252,7 +256,17 @@ function QuestionCard({
   const t = useT();
   const [picked, setPicked] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
-  const isMcq = Array.isArray(q.choices) && q.choices.length > 0;
+  // Ordre validé : conservé pour afficher l'ordre attendu ligne par ligne.
+  const [orderDone, setOrderDone] = useState(false);
+  const widget = answerWidget(q.question_type, q.choices);
+  const answered = picked !== null || revealed || orderDone;
+
+  /** Une remise en ordre se corrige sans LLM : `choices` EST la bonne séquence. */
+  function submitOrder(answer: string) {
+    if (orderDone) return;
+    setOrderDone(true);
+    onAnswered(answer === serializeOrder(q.choices ?? []), answer);
+  }
 
   function pick(choice: string) {
     if (picked !== null) return;
@@ -267,81 +281,62 @@ function QuestionCard({
 
   return (
     <div style={{ marginTop: "var(--space-lg)" }}>
-      <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 8 }}>{position} · {q.category}</div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+        <span>{position} · {q.category}</span>
+        <QuestionTypeBadge type={q.question_type} />
+      </div>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-sm)", padding: "var(--space-lg)" }}>
-        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }} dangerouslySetInnerHTML={{ __html: renderMathToHtml(q.question) }} />
+        <QuestionStem
+          question={q.question}
+          type={q.question_type}
+          // La consigne du type n'a de sens que si l'on écrit sa réponse ; devant
+          // une liste de choix, elle ne ferait que doubler l'évidence.
+          showHint={widget !== "choices"}
+          className="mb-4 [&>div:first-child]:text-lg"
+        />
 
-        {isMcq ? (
-          <div style={{ display: "grid", gap: 8 }}>
-            {q.choices!.map((choice) => {
-              const isCorrect = choice.trim() === q.answer.trim();
-              const isPicked = picked === choice;
-              let bg = "var(--surface-soft)";
-              let border = "var(--border)";
-              if (picked !== null) {
-                if (isCorrect) {
-                  bg = "var(--success-soft)";
-                  border = "var(--success)";
-                } else if (isPicked) {
-                  bg = "var(--danger-soft)";
-                  border = "var(--danger)";
-                }
-              }
-              return (
-                <button
-                  key={choice}
-                  onClick={() => pick(choice)}
-                  disabled={picked !== null}
-                  // Un choix non repondu doit reagir au survol : sans cela, rien
-                  // ne signale qu'il est cliquable.
-                  className="flex items-center justify-between gap-3 rounded-sm border p-[10px_14px] text-left text-sm text-foreground
-                             transition-[background-color,border-color,transform] duration-fast ease-brand
-                             enabled:cursor-pointer enabled:hover:border-border-strong enabled:active:scale-[0.995]
-                             focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none
-                             disabled:cursor-default"
-                  style={{ background: bg, borderColor: border }}
-                >
-                  <span dangerouslySetInnerHTML={{ __html: renderMathToHtml(choice) }} />
-                  {/* La bonne et la mauvaise reponse ne se distinguaient QUE par
-                      la couleur : illisible pour un daltonien. L'icone double
-                      l'information. */}
-                  {picked !== null && isCorrect && (
-                    <Check className="size-4 shrink-0 text-success" aria-label={t("verdict.correct")} />
-                  )}
-                  {picked !== null && isPicked && !isCorrect && (
-                    <X className="size-4 shrink-0 text-danger" aria-label={t("verdict.incorrect")} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div>
-            {revealed && <div style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }} dangerouslySetInnerHTML={{ __html: renderMathToHtml(q.answer) }} />}
-            {!revealed && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <Button
-                  variant="secondary"
-                  onClick={() => selfGrade(true)}
-                  className="border-success/50 text-success hover:border-success hover:bg-success-soft hover:text-success"
-                >
-                  <Check className="size-4" aria-hidden />
-                  {t("quiz.knew")}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => selfGrade(false)}
-                  className="border-danger/50 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
-                >
-                  <Eye className="size-4" aria-hidden />
-                  {t("quiz.reveal")}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+        <AnswerInput
+          key={q.id}
+          type={q.question_type}
+          choices={q.choices}
+          seed={q.id}
+          picked={picked}
+          expectedChoice={q.answer}
+          correctOrder={orderDone ? (q.choices ?? []) : null}
+          onSubmit={widget === "ordering" ? submitOrder : pick}
+          textFallback={
+            <div>
+              {revealed && (
+                <div
+                  style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }}
+                  dangerouslySetInnerHTML={{ __html: renderMathToHtml(q.answer) }}
+                />
+              )}
+              {!revealed && (
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => selfGrade(true)}
+                    className="border-success/50 text-success hover:border-success hover:bg-success-soft hover:text-success"
+                  >
+                    <Check className="size-4" aria-hidden />
+                    {t("quiz.knew")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => selfGrade(false)}
+                    className="border-danger/50 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
+                  >
+                    <Eye className="size-4" aria-hidden />
+                    {t("quiz.reveal")}
+                  </Button>
+                </div>
+              )}
+            </div>
+          }
+        />
 
-        {(picked !== null || revealed) && (
+        {answered && (
           <Button onClick={onNext} className="mt-4.5">
             {t("quiz.next")}
             <ArrowRight className="size-4" aria-hidden />

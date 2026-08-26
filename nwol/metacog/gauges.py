@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from config import question_types
 from db.metacog import CRITERIA
 
 SESSION_INHERITANCE_FACTOR = 0.8
@@ -11,17 +12,8 @@ PROFILE_SESSION_WEIGHT = 0.1
 # Jauge(s) principalement pilotée(s) par chaque type de question. Le signal LLM
 # de ces dimensions est amplifié, les autres atténués : une question de curiosité
 # fait surtout bouger `curiosity`, une de contexte surtout `context_comprehension`.
-# Source canonique partagée avec le prompt d'évaluation (prompts._EVAL_TYPE_DIMENSIONS).
-QUESTION_TYPE_TARGET_GAUGES: dict[str, tuple[str, ...]] = {
-    "qcm": ("retention", "attention"),
-    "open": ("context_comprehension", "creativity"),
-    "comprehension": ("context_comprehension",),
-    "application": ("context_comprehension", "retention"),
-    "curiosity": ("curiosity",),
-    "visualization": ("creativity", "context_comprehension"),
-    "metacognition": ("meta_cognition",),
-    "anticipation": ("meta_cognition", "attention"),
-}
+# Déclaré une seule fois dans config/question_types.py, avec le reste du type.
+QUESTION_TYPE_TARGET_GAUGES: dict[str, tuple[str, ...]] = question_types.target_gauges_map()
 _TYPE_TARGET_SCALE = 1.5  # amplification du signal sur la dimension visée
 _TYPE_OTHER_SCALE = 0.5   # atténuation des autres dimensions
 

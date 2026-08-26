@@ -138,8 +138,14 @@ def test_page_question_and_eval_context(client):
     assistant.generate_page_question(1, 1, lambda r: None, lambda m: None, generator=lambda ctx, ok, err: cap.update(q=ctx))
     assert "paragraph" in cap["q"] and cap["q"]["standalone"] is True
 
-    assistant.evaluate_page_answer(1, 1, "Q ?", "A", lambda r: None, lambda m: None, evaluator=lambda ctx, ok, err: cap.update(e=ctx))
-    assert cap["e"]["user_answer"] == "A" and cap["e"]["question"] == {"question": "Q ?"}
+    assistant.evaluate_page_answer(
+        1, 1, "Q ?", "A", lambda r: None, lambda m: None,
+        question_type="ordering",
+        evaluator=lambda ctx, ok, err: cap.update(e=ctx),
+    )
+    # Le type accompagne la question : il conditionne la consigne de correction.
+    assert cap["e"]["user_answer"] == "A"
+    assert cap["e"]["question"] == {"question": "Q ?", "question_type": "ordering"}
 
 
 def test_reader_websocket_error(client, monkeypatch):
@@ -354,3 +360,135 @@ def test_type_aware_gauges_differentiate(client):
     d_cur = gauges["curiosity"].value - before["curiosity"]
     d_ctx = gauges["context_comprehension"].value - before["context_comprehension"]
     assert d_cur > d_ctx
+
+
+def test_reader_ws_recall_sends_the_passage_to_hide(client, monkeypatch):
+    """Rappel libre : le client reçoit la CITATION à cacher, pas des indices de
+    caractères — c'est une citation que sait localiser le lecteur (search_page)."""
+    from services import assistant, library
+
+    page = "Le théorème de Rolle affirme qu'entre deux zéros d'une fonction dérivable, la dérivée s'annule."
+    monkeypatch.setattr(library, "page_text", lambda doc_id, p: page)
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({
+            "question": "Redonne l'énoncé masqué.",
+            "choices": None,
+            "question_type": "recall",
+            "expected_answer": "La dérivée s'annule entre deux zéros.",
+            "paragraph_mask": {
+                "enabled": True,
+                "start_char": 0,
+                "end_char": 96,
+                "placeholder": "énoncé masqué",
+            },
+        }),
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        assert q["type"] == "qa_question" and q["question_type"] == "recall"
+        assert q["mask"]["quote"].startswith("Le théorème de Rolle")
+        assert q["mask"]["placeholder"] == "énoncé masqué"
+
+
+def test_reader_ws_question_without_mask_says_so(client, monkeypatch):
+    """Sans masque, le champ vaut null : le lecteur ne cache rien."""
+    from services import assistant
+
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Idée clé ?", "choices": None, "question_type": "open"}),
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["mask"] is None
+
+
+# ── Correction : ce qui se juge tout seul ne passe plus par le LLM ──────────
+
+def _seed_question(monkeypatch, question_type: str, answer: str, choices=None) -> int:
+    """Question persistée + page factice (aucun PDF réel derrière ces tests)."""
+    from db.documents import upsert_document
+    from db.questions import save_question
+    from services import library
+
+    doc_id = upsert_document(
+        path=f"/tmp/eval-{question_type}.pdf", filename="eval.pdf", page_count=2,
+        engine="test", has_toc=False,
+    )
+    monkeypatch.setattr(library, "page_text", lambda d, p: "Le paragraphe source.")
+    return save_question(
+        doc_id, "page", "Page 1", 1, 1,
+        {"question": "La question ?", "question_type": question_type,
+         "choices": choices, "answer": answer},
+    )
+
+
+def test_evaluation_receives_the_stored_answer_and_choices(client, monkeypatch):
+    """Le LLM corrigeait sans voir la réponse attendue : il la redéduisait de la page."""
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, "qcm", "12 m/s", ["3 m/s", "12 m/s", "30 m/s"])
+    cap: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "12 m/s", lambda r: None, lambda m: None,
+        question_type="qcm", question_id=qid,
+        evaluator=lambda ctx, ok, err: cap.update(ctx=ctx),
+    )
+    assert cap["ctx"]["question"]["expected_answer"] == "12 m/s"
+    assert cap["ctx"]["question"]["choices"] == ["3 m/s", "12 m/s", "30 m/s"]
+    assert cap["ctx"]["objective_verdict"] == "correct"
+
+
+def test_wrong_qcm_choice_stays_wrong_even_if_the_llm_says_otherwise(client, monkeypatch):
+    """Une hallucination ne doit pas pouvoir valider un mauvais choix."""
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, "qcm", "12 m/s", ["3 m/s", "12 m/s", "30 m/s"])
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "3 m/s", lambda r: out.update(r), lambda m: None,
+        question_type="qcm", question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "correct", "feedback": "Bravo !", "hint": ""}),
+    )
+    assert out["verdict"] == "incorrect"
+
+
+def test_ordering_verdict_is_computed_from_the_stored_steps(client, monkeypatch):
+    from services import assistant
+
+    steps = ["Poser les hypothèses", "Appliquer le théorème", "Conclure"]
+    qid = _seed_question(monkeypatch, "ordering", "1. Poser 2. Appliquer 3. Conclure", steps)
+
+    def _evaluate(answer: str) -> str:
+        out: dict = {}
+        assistant.evaluate_page_answer(
+            1, 1, "La question ?", answer, lambda r: out.update(r), lambda m: None,
+            question_type="ordering", question_id=qid,
+            evaluator=lambda ctx, ok, err: ok({"verdict": "correct", "feedback": "…", "completion": "x"}),
+        )
+        return out["verdict"]
+
+    assert _evaluate("1. Poser les hypothèses\n2. Appliquer le théorème\n3. Conclure") == "correct"
+    # Deux étapes voisines permutées : la séquence est comprise, l'ordre non.
+    assert _evaluate("1. Appliquer le théorème\n2. Poser les hypothèses\n3. Conclure") == "partial"
+    assert _evaluate("1. Conclure\n2. Poser les hypothèses\n3. Appliquer le théorème") == "incorrect"
+
+
+def test_open_types_keep_the_llm_verdict(client, monkeypatch):
+    """Là où il y a un jugement à porter, c'est le LLM qui tranche — inchangé."""
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, "teach_back", "Une explication simple")
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "Mon explication", lambda r: out.update(r), lambda m: None,
+        question_type="teach_back", question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "partial", "feedback": "…", "completion": "précise"}),
+    )
+    assert out["verdict"] == "partial" and out["completion"] == "précise"

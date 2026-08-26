@@ -20,6 +20,11 @@ export interface TextMark {
   color: string;
   /** Id de surlignage persisté (clic = suppression) — absent pour une citation. */
   id?: number;
+  /**
+   * Cache le passage au lieu de le surligner (rappel libre) : le texte devient
+   * invisible mais garde sa place, donc la page ne se réagence pas sous les yeux.
+   */
+  masked?: boolean;
 }
 
 interface Folded {
@@ -130,9 +135,14 @@ function markSegment(segment: string, marks: TextMark[]): string {
     html += escapeHtml(segment.slice(cursor, span.start)).replace(/\n/g, "<br/>");
     const idAttr = span.mark.id != null ? ` data-hl="${span.mark.id}"` : "";
     const cursorStyle = span.mark.id != null ? "cursor:pointer;" : "";
+    // Masque : texte transparent et non sélectionnable — sinon un simple
+    // glisser-copier le révélerait, et le rappel n'en serait plus un.
+    const maskStyle = span.mark.masked
+      ? "color:transparent;user-select:none;-webkit-user-select:none;"
+      : "color:inherit;";
     html +=
       `<mark${idAttr} style="background:${span.mark.color};${cursorStyle}` +
-      `border-radius:2px;padding:0 1px;color:inherit">` +
+      `border-radius:2px;padding:0 1px;${maskStyle}">` +
       escapeHtml(segment.slice(span.start, span.end)).replace(/\n/g, "<br/>") +
       "</mark>";
     cursor = span.end;

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
+
+from config import question_types
 from db import get_connection
 
 logger = logging.getLogger("DB.quiz")
@@ -431,6 +433,14 @@ def get_quiz_base_questions(
     if subject:
         where_subject = "AND LOWER(COALESCE(d.subject, '')) = LOWER(?)"
         params.append(subject)
+    # Types réflexifs (« comment as-tu trouvé ta réponse ? ») : filtrés en SQL et
+    # non après coup, sinon ils consommeraient la limite `n` pour rien.
+    excluded = question_types.quiz_excluded_keys()
+    where_type = ""
+    if excluded:
+        placeholders = ", ".join("?" for _ in excluded)
+        where_type = f"AND COALESCE(q.question_type, '') NOT IN ({placeholders})"
+        params.extend(excluded)
     params.append(n)
     rows = conn.execute(
         f"""
@@ -448,6 +458,7 @@ def get_quiz_base_questions(
         WHERE q.scope_type = 'page'
           AND TRIM(COALESCE(q.question, '')) <> ''
           {where_subject}
+          {where_type}
         GROUP BY q.id
         ORDER BY failed DESC, q.created_at DESC
         LIMIT ?

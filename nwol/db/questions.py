@@ -125,6 +125,26 @@ def get_assistant_help_pages(session_id: int, top_n: int = 3) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_question(question_id: int) -> dict | None:
+    """Question stockée, `choices` déjà décodé.
+
+    Sert à l'évaluation : la réponse canonique et les propositions sont produites
+    à la génération et persistées ici — les redemander au LLM au moment de
+    corriger, c'est le laisser redécider de la vérité à chaque fois."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM questions WHERE id=?", (int(question_id),)).fetchone()
+    if row is None:
+        return None
+    question = dict(row)
+    raw_choices = question.pop("choices_json", None)
+    try:
+        choices = json.loads(raw_choices) if raw_choices else []
+    except (TypeError, ValueError):
+        choices = []
+    question["choices"] = [str(c) for c in choices] if isinstance(choices, list) else []
+    return question
+
+
 def get_questions_for_scope(doc_id: int, page_start: int, page_end: int) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(

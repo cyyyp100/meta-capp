@@ -117,6 +117,8 @@ export interface QuizQuestion {
   question: string;
   choices: string[] | null;
   answer: string;
+  /** Type pédagogique hérité de la lecture : pilote le widget de réponse. */
+  question_type?: string;
   category: string;
   document?: string | null;
   document_id?: number | null;

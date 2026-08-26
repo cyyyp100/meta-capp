@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import random
+import re
 
 import i18n as _i18n
+from config import question_types
 from config.settings import (
     DOCUMENT_DIGEST_PROMPT_CHARS,
     LANGUAGE_SCRIPTS,
@@ -20,107 +22,21 @@ def _t(fr: str, en: str) -> str:
     return en if _i18n.current_lang() == "en" else fr
 
 
-QUESTION_TYPE_GUIDE: tuple[tuple[str, str, str, str], ...] = (
-    (
-        "qcm",
-        "QCM",
-        "vérification rapide de compréhension factuelle",
-        "Choisis la bonne proposition parmi 3 ou 4 réponses.",
-    ),
-    (
-        "open",
-        "Question ouverte",
-        "expression libre, reformulation personnelle",
-        "Résume en une phrase l'idée principale du passage.",
-    ),
-    (
-        "comprehension",
-        "Question de compréhension textuelle",
-        "extraction d'une information explicitement donnée",
-        "Quelle définition est donnée pour cette notion ?",
-    ),
-    (
-        "application",
-        "Question d'application",
-        "mise en pratique sur un calcul, un exemple numérique ou un cas particulier",
-        "Applique la relation du passage à ce petit cas.",
-    ),
-    (
-        "curiosity",
-        "Question de curiosité / inductive",
-        "création d'un déséquilibre cognitif qui pousse à chercher le pourquoi",
-        "T'es-tu déjà demandé comment cette idée peut rester vraie dans ce cas ?",
-    ),
-    (
-        "visualization",
-        "Exercice de visualisation",
-        "vision dans l'espace, schéma mental, représentation d'un mécanisme",
-        "Trace mentalement la situation : que vois-tu changer ?",
-    ),
-    (
-        "metacognition",
-        "Question métacognitive",
-        "prise de conscience du raisonnement utilisé",
-        "Comment as-tu trouvé ta réponse ? Qu'as-tu modifié dans ton raisonnement ?",
-    ),
-    (
-        "anticipation",
-        "Anticipation / auto-évaluation",
-        "surveillance de la compréhension et repérage des difficultés possibles",
-        "Qu'est-ce qui pourrait te poser problème ici ?",
-    ),
-)
+# Guide injecté dans le prompt : (clé, libellé, but, exemple). Dérivé du registre
+# canonique config/question_types.py — ne jamais recopier la grille ici.
+QUESTION_TYPE_GUIDE: tuple[tuple[str, str, str, str], ...] = question_types.guide_rows("fr")
 
-QUESTION_TYPE_GUIDE_EN: tuple[tuple[str, str, str, str], ...] = (
-    (
-        "qcm",
-        "MCQ",
-        "quick factual comprehension check",
-        "Choose the correct answer from 3 or 4 options.",
-    ),
-    (
-        "open",
-        "Open question",
-        "free expression, personal reformulation",
-        "Summarize the main idea of the passage in one sentence.",
-    ),
-    (
-        "comprehension",
-        "Reading comprehension",
-        "extraction of explicitly stated information",
-        "What definition is given for this concept?",
-    ),
-    (
-        "application",
-        "Application question",
-        "practice on a calculation, numerical example, or specific case",
-        "Apply the formula from the passage to this small case.",
-    ),
-    (
-        "curiosity",
-        "Curiosity / inductive question",
-        "creating cognitive imbalance to push the learner to seek the why",
-        "Have you ever wondered how this idea can hold true in this case?",
-    ),
-    (
-        "visualization",
-        "Visualization exercise",
-        "spatial vision, mental diagram, representation of a mechanism",
-        "Mentally trace the situation: what do you see changing?",
-    ),
-    (
-        "metacognition",
-        "Metacognitive question",
-        "awareness of the reasoning process used",
-        "How did you arrive at your answer? What did you adjust in your reasoning?",
-    ),
-    (
-        "anticipation",
-        "Anticipation / self-assessment",
-        "monitoring comprehension and spotting possible difficulties ahead",
-        "What might be challenging for you here?",
-    ),
+QUESTION_TYPE_GUIDE_EN: tuple[tuple[str, str, str, str], ...] = question_types.guide_rows("en")
+
+# Types réflexifs : précieux mais indigestes en série (cf. cap de fréquence).
+_REFLEXIVE_TYPES = ("metacognition", "anticipation", "connection")
+# En dessous, masquer un passage ne laisse plus rien à lire autour.
+_MIN_CHARS_FOR_RECALL = 400
+_SEQUENCE_MARKERS = (
+    "d'abord", "ensuite", "enfin", "puis ", "étape", "etape", "successivement",
+    "first", "then ", "finally", "next ", "step ", "afterwards",
 )
+_NUMBERED_STEP_RE = re.compile(r"(?m)^\s*(?:\d+[.)]|[-•*])\s+\S")
 
 
 def _format_struggles(past_struggles: list[dict] | None) -> str:
@@ -238,6 +154,8 @@ def build_question_prompt(
         preferred_question_type=preferred_question_type,
         has_existing_question=has_existing_question,
         standalone=standalone,
+        # « connection » n'a de sens que s'il y a un déjà-lu auquel se raccrocher.
+        has_prior_context=bool(history or past_struggles or user_highlights),
     )
     sid = source_block_id or ""
 
@@ -316,7 +234,11 @@ def build_question_prompt(
         )
 
     _na = _t("non renseigné", "not specified")
-    _types_str = ", ".join(f'"{item[0]}"' for item in QUESTION_TYPE_GUIDE)
+    _lang = "en" if _i18n.current_lang() == "en" else "fr"
+    _types_str = ", ".join(f'"{key}"' for key in question_types.KEYS)
+    # Une ligne « Pour …, privilégie "x" » par type, déclarée avec le type lui-même.
+    _prefer_rules = "\n".join(f"- {rule}" for rule in question_types.prefer_rules(_lang))
+    _type_enum = question_types.json_enum(_lang)
 
     if _i18n.current_lang() == "en":
         _standalone_constraint = (
@@ -345,16 +267,12 @@ Available question types:
 
 Type selection rules:
 - Select exactly one question_type value from: {_types_str}.
-- For a definition or dense fact, prefer "qcm" or "comprehension".
-- For a central idea to reformulate, prefer "open".
-- For a formula, calculation, example, table, or specific case, prefer "application".
-- For a figure, diagram, spatial relation, or process to visualize, prefer "visualization".
-- To provoke an intuition or hypothesis from the paragraph, prefer "curiosity".
-- To make the student articulate their reasoning strategy, prefer "metacognition".
-- To anticipate a difficulty, uncertainty, or risk of error, prefer "anticipation".
+{_prefer_rules}
 - The chosen type must stay faithful to the paragraph: do not require external knowledge to answer.
 - For "curiosity", the question may open a lead, but the expected answer must remain grounded in the passage.
 - For "metacognition" and "anticipation", expected_answer describes elements expected in a good answer, not a single solution.
+- For "error_detection", the question itself must contain the wrong restatement, and expected_answer states the error plus its correction.
+- For "recall", paragraph_mask must be enabled on the exact passage to recall, and the question must not repeat its content.
 
 Mandatory adaptive rules:
 {_adaptive_instruction(adaptation)}
@@ -364,7 +282,7 @@ Adapt difficulty to the profile without making the question punitive.
 {history_instruction}{struggles_instruction}
 Respond only in valid JSON, without Markdown, in the exact format:
 {{
-  "question_type": "qcm" or "open" or "comprehension" or "application" or "curiosity" or "visualization" or "metacognition" or "anticipation",
+  "question_type": {_type_enum},
   "question": "question text",
   "choices": ["A", "B", "C", "D"],
   "expected_answer": "short but precise expected answer",
@@ -381,8 +299,10 @@ Respond only in valid JSON, without Markdown, in the exact format:
 
 Constraints:
 - Write every user-facing string in English: question, choices, expected_answer, evaluation_criteria, session_hint, and paragraph_mask.placeholder.
-- If question_type is not "qcm", choices must be [].
+- choices is only used by "qcm", "ordering" and "estimation"; for every other question_type it must be [].
 - If question_type is "qcm", choices contains 3 or 4 plausible options and expected_answer indicates the correct one.
+- If question_type is "ordering", choices contains 3 to 6 short steps IN THE CORRECT ORDER (the interface shuffles them), and expected_answer restates that order as "1. … 2. … 3. …".
+- If question_type is "estimation", choices may contain 3 or 4 orders of magnitude, or stay [] for a free answer.
 - If a target pedagogical type is indicated in the adaptive rules, use that question_type unless clearly incompatible with the paragraph content.
 - If session_hint is set, it must be a short sentence helping the student regulate their session, without replacing the question.
 - Always write mathematical expressions between $...$ (inline) or $$...$$ (display) in valid LaTeX.
@@ -392,8 +312,8 @@ Constraints:
 - If the paragraph contains [Table: ...] or a [Table N×M rows×columns] annotation, ask a question about the data or trends in the table.
 - If the paragraph mentions [Figure: ...] or [Figure on this page: ...], use the caption to contextualize your question.
 - An image is attached: it is the FULL PDF page the student is reading. The text below is its (imperfect) extraction. Treat the image as the primary source — base your question on what is actually visible on the page (text, formulas, figures, tables) and use the image to resolve any OCR ambiguity in the text.
-- paragraph_mask.enabled is true only if masking a short portion of the paragraph genuinely helps the student reason without copying.
-- If paragraph_mask.enabled is true, start_char and end_char are exact indices in the provided paragraph.
+- paragraph_mask.enabled is true only if masking a short portion of the paragraph genuinely helps the student reason without copying. It is MANDATORY for question_type "recall".
+- If paragraph_mask.enabled is true, start_char and end_char are exact indices in the provided paragraph, covering between 80 and 600 characters.
 {_standalone_constraint}"""
 
     _standalone_constraint_fr = (
@@ -422,16 +342,12 @@ Types de questions disponibles :
 
 Règles de choix du type :
 - Sélectionne exactement une valeur question_type parmi : {_types_str}.
-- Pour une définition ou un fait dense, privilégie "qcm" ou "comprehension".
-- Pour une idée centrale à reformuler, privilégie "open".
-- Pour une formule, un calcul, un exemple, un tableau ou un cas particulier, privilégie "application".
-- Pour une figure, un schéma, une relation spatiale ou un processus à se représenter, privilégie "visualization".
-- Pour provoquer une intuition ou une hypothèse à partir du paragraphe, privilégie "curiosity".
-- Pour faire expliciter la stratégie de réponse, privilégie "metacognition".
-- Pour faire repérer à l'avance une difficulté, une incertitude ou un risque d'erreur, privilégie "anticipation".
+{_prefer_rules}
 - Le type choisi doit rester fidèle au paragraphe : n'exige pas de connaissances externes pour répondre.
 - Pour "curiosity", la question peut ouvrir une piste, mais la réponse attendue doit rester ancrée dans le passage.
 - Pour "metacognition" et "anticipation", expected_answer décrit les éléments attendus dans une bonne réponse, pas une solution unique.
+- Pour "error_detection", la question elle-même contient la reformulation fausse, et expected_answer énonce l'erreur puis sa correction.
+- Pour "recall", paragraph_mask doit être activé sur le passage exact à restituer, et la question ne doit pas en répéter le contenu.
 
 Règles adaptatives obligatoires :
 {_adaptive_instruction(adaptation)}
@@ -441,7 +357,7 @@ Adapte la difficulté au profil sans rendre la question punitive.
 {history_instruction}{struggles_instruction}
 Réponds uniquement en JSON valide, sans Markdown, au format exact :
 {{
-  "question_type": "qcm" ou "open" ou "comprehension" ou "application" ou "curiosity" ou "visualization" ou "metacognition" ou "anticipation",
+  "question_type": {_type_enum},
   "question": "texte de la question",
   "choices": ["A", "B", "C", "D"],
   "expected_answer": "réponse attendue courte mais précise",
@@ -458,8 +374,10 @@ Réponds uniquement en JSON valide, sans Markdown, au format exact :
 
 Contraintes :
 - Écris tous les champs visibles par l'utilisateur en français : question, choices, expected_answer, evaluation_criteria, session_hint et paragraph_mask.placeholder.
-- Si question_type ne vaut pas "qcm", choices doit être [].
+- choices ne sert qu'à "qcm", "ordering" et "estimation" ; pour tout autre question_type il vaut [].
 - Si question_type vaut "qcm", choices contient 3 ou 4 choix plausibles et expected_answer indique le bon choix.
+- Si question_type vaut "ordering", choices contient 3 à 6 étapes courtes DANS L'ORDRE CORRECT (l'interface les mélangera), et expected_answer reprend cet ordre sous la forme « 1. … 2. … 3. … ».
+- Si question_type vaut "estimation", choices peut contenir 3 ou 4 ordres de grandeur, ou rester [] pour une réponse libre.
 - Si un Type pédagogique cible est indiqué dans les règles adaptatives, utilise ce question_type sauf contradiction manifeste avec le contenu du paragraphe.
 - Si session_hint est renseigné, il doit être une phrase courte qui aide l'étudiant à réguler sa session, sans remplacer la question.
 - Écris TOUJOURS les expressions mathématiques entre $...$ (inline) ou $$...$$ (display) en LaTeX valide.
@@ -469,8 +387,8 @@ Contraintes :
 - Si le paragraphe contient [Tableau: ...] ou une annotation [Tableau N×M lignes×colonnes], pose une question sur les données ou les tendances du tableau.
 - Si le paragraphe mentionne [Figure: ...] ou [Figure sur cette page : ...], utilise la légende pour contextualiser ta question.
 - Une image est jointe : c'est la PAGE PDF COMPLÈTE que lit l'étudiant. Le texte ci-dessous en est l'extraction (imparfaite). Considère l'image comme la source primaire — fonde ta question sur ce qui est réellement visible sur la page (texte, formules, figures, tableaux) et sers-toi de l'image pour lever toute ambiguïté OCR du texte.
-- paragraph_mask.enabled vaut true seulement si masquer une courte portion du paragraphe aide vraiment l'étudiant à raisonner sans recopier.
-- Si paragraph_mask.enabled vaut true, start_char et end_char sont des indices exacts dans le paragraphe fourni.
+- paragraph_mask.enabled vaut true seulement si masquer une courte portion du paragraphe aide vraiment l'étudiant à raisonner sans recopier. Il est OBLIGATOIRE pour le question_type "recall".
+- Si paragraph_mask.enabled vaut true, start_char et end_char sont des indices exacts dans le paragraphe fourni, couvrant entre 80 et 600 caractères.
 {_standalone_constraint_fr}"""
 
 
@@ -490,8 +408,9 @@ def _question_adaptation(
     preferred_question_type: str | None,
     has_existing_question: bool,
     standalone: bool,
+    has_prior_context: bool = False,
 ) -> dict:
-    valid_types = tuple(item[0] for item in QUESTION_TYPE_GUIDE)
+    valid_types = question_types.KEYS
     explicit = _normalize_question_type(preferred_question_type, valid_types)
     if explicit:
         return {
@@ -518,16 +437,16 @@ def _question_adaptation(
         }
 
     if attention < 45.0:
-        weights: dict[str, float] = {
-            "qcm": 1.0,
-            "open": 1.0,
-            "comprehension": 1.0,
-            "application": 0.85,
-            "curiosity": 0.8,
-            "visualization": 0.7,
-            "metacognition": 1.8,
-            "anticipation": 1.2,
-        }
+        # Attention basse : réveiller (repérage d'erreur), faire prendre du recul
+        # (métacognition), et écarter les formats longs qui demandent de l'élan.
+        weights: dict[str, float] = question_types.base_weights()
+        weights["error_detection"] = 2.0
+        weights["metacognition"] = 1.8
+        weights["anticipation"] = 1.2
+        weights["qcm"] = 1.2
+        for heavy in ("teach_back", "counterexample", "ordering", "recall", "elaboration_why"):
+            weights[heavy] = 0.3
+        _apply_type_prerequisites(weights, paragraph, has_prior_context)
         _apply_recent_penalty(weights, recent_question_types)
         preferred = _weighted_question_type(weights)
         return {
@@ -537,23 +456,19 @@ def _question_adaptation(
             "simplify": True,
         }
 
-    weights = {
-        "qcm": 1.0,
-        "open": 1.0,
-        "comprehension": 1.0,
-        "application": 0.85,
-        "curiosity": 0.8,
-        "visualization": 0.7,
-        "metacognition": 0.7,
-        "anticipation": 0.7,
-    }
+    weights = question_types.base_weights()
     lower = (paragraph or "").lower()
     if "$" in paragraph or "\\" in paragraph or any(sign in paragraph for sign in ("=", "≤", "≥", "≈", "≠", "∑", "∫")):
         weights["application"] += 1.8
+        # Un énoncé formel se prête aussi à ses limites et à l'ordre de grandeur.
+        weights["counterexample"] += 1.2
+        weights["estimation"] += 1.0
     if "[tableau" in lower or "|" in paragraph:
         weights["application"] += 1.5
     if "[figure" in lower or "schéma" in lower or "schema" in lower:
         weights["visualization"] += 2.0
+    if _looks_sequential(paragraph):
+        weights["ordering"] += 2.0
 
     strategy = _t("diversifier les types de questions", "diversify question types")
     if comprehension < 45.0:
@@ -561,6 +476,10 @@ def _question_adaptation(
         weights["comprehension"] += 2.2
         weights["application"] *= 0.65
         weights["visualization"] *= 0.75
+        # Les formats exigeants (production contrainte, limites, ordre) attendront
+        # que la compréhension du contexte soit revenue.
+        for demanding in ("teach_back", "counterexample", "elaboration_why", "ordering"):
+            weights[demanding] *= 0.65
         strategy = _t(
             "simplifier car la compréhension du contexte est basse",
             "simplify because context comprehension is low",
@@ -568,17 +487,23 @@ def _question_adaptation(
     if curiosity < 45.0:
         weights["curiosity"] += 3.4
         weights["open"] += 0.4
+        weights["counterexample"] += 0.6
+        weights["estimation"] += 0.5
         strategy = _t("relancer curiosité et créativité", "boost curiosity and creativity")
     if meta_cognition < 38.0:
         weights["metacognition"] += 1.2
         weights["anticipation"] += 0.5
+        weights["connection"] += 0.8
+        weights["teach_back"] += 0.6
         strategy = _t("renforcer la méta-cognition", "strengthen metacognition")
 
-    # cap de fréquence : pénalise fortement la métacognition si posée récemment
-    if any(t in ("metacognition", "anticipation") for t in recent_question_types[-2:]):
+    # cap de fréquence : pénalise fortement le réflexif s'il a été posé récemment
+    if any(t in _REFLEXIVE_TYPES for t in recent_question_types[-2:]):
         weights["metacognition"] *= 0.12
         weights["anticipation"] *= 0.25
+        weights["connection"] *= 0.25
 
+    _apply_type_prerequisites(weights, paragraph, has_prior_context)
     _apply_recent_penalty(weights, recent_question_types)
     preferred = _weighted_question_type(weights)
     return {
@@ -640,24 +565,46 @@ def _question_types_from_history(history: list[dict]) -> list[str]:
 
 
 def _normalize_recent_question_types(values: list[str]) -> list[str]:
-    valid = {item[0] for item in QUESTION_TYPE_GUIDE}
-    return [value for value in (_normalize_question_type(v, tuple(valid)) for v in values or []) if value]
+    return [
+        value
+        for value in (_normalize_question_type(v, question_types.KEYS) for v in values or [])
+        if value
+    ]
 
 
 def _normalize_question_type(value: str | None, valid_types: tuple[str, ...]) -> str:
     if not isinstance(value, str):
         return ""
     token = value.strip().lower().replace("é", "e").replace("è", "e")
-    aliases = {
-        "visualisation": "visualization",
-        "metacognition": "metacognition",
-        "meta_cognition": "metacognition",
-        "curiosite": "curiosity",
-        "question_ouverte": "open",
-        "comprehension_textuelle": "comprehension",
-    }
-    token = aliases.get(token, token)
+    token = question_types.alias_map().get(token, token)
     return token if token in valid_types else ""
+
+
+def _apply_type_prerequisites(
+    weights: dict[str, float], paragraph: str, has_prior_context: bool
+) -> None:
+    """Retire du tirage les types dont le pré-requis manque.
+
+    `recall` masque un passage : il faut un paragraphe assez long pour qu'il en
+    reste à lire. `connection` relie à ce qui a déjà été travaillé : sans réponse
+    antérieure ni difficulté passée, il n'a rien à relier."""
+    if len(paragraph or "") < _MIN_CHARS_FOR_RECALL:
+        weights.pop("recall", None)
+    if not has_prior_context:
+        weights.pop("connection", None)
+
+
+def _looks_sequential(paragraph: str) -> bool:
+    """Le paragraphe décrit-il un enchaînement (procédé, chronologie, démonstration) ?
+
+    Détermine si « ordering » a de la matière : sans étapes à remettre en ordre,
+    le LLM en inventerait."""
+    text = (paragraph or "").lower()
+    if len(text) < 200:
+        return False
+    markers = sum(1 for marker in _SEQUENCE_MARKERS if marker in text)
+    numbered = len(_NUMBERED_STEP_RE.findall(paragraph or ""))
+    return markers >= 2 or numbered >= 3
 
 
 def _apply_recent_penalty(weights: dict[str, float], recent_question_types: list[str]) -> None:
@@ -696,14 +643,7 @@ _EVAL_DIMENSION_LABELS = {
     "curiosity": ("la curiosité", "curiosity"),
     "meta_cognition": ("la métacognition", "metacognition"),
 }
-_EVAL_TYPE_DIMENSIONS = {
-    "qcm": ("retention", "attention"),
-    "open": ("context_comprehension", "creativity"),
-    "comprehension": ("context_comprehension",),
-    "application": ("context_comprehension", "retention"),
-    "curiosity": ("curiosity",),
-    "visualization": ("creativity", "context_comprehension"),
-}
+_EVAL_TYPE_DIMENSIONS = question_types.eval_dimensions_map()
 
 
 def _eval_dimension_hint(question_type: str) -> tuple[str, str]:
@@ -727,6 +667,77 @@ def _eval_dimension_hint(question_type: str) -> tuple[str, str]:
     return fr, en
 
 
+# Consigne de correction propre à certains types : sans elle, le LLM note un
+# ordre inversé comme « correct » ou ignore la contrainte d'un teach_back.
+_EVAL_TYPE_RULES: dict[str, tuple[str, str]] = {
+    "ordering": (
+        "- La réponse est une séquence numérotée : verdict \"correct\" seulement si l'ordre est"
+        " exactement celui d'expected_answer ; \"partial\" si seules deux étapes voisines sont"
+        " permutées ; \"incorrect\" au-delà.",
+        "- The answer is a numbered sequence: verdict \"correct\" only if the order exactly matches"
+        " expected_answer; \"partial\" if only two adjacent steps are swapped; \"incorrect\" beyond that.",
+    ),
+    "teach_back": (
+        "- Vérifie la contrainte énoncée dans la question (mot interdit, nombre de phrases) :"
+        " si elle est violée, le verdict ne peut pas être \"correct\". Juge la clarté pour un"
+        " débutant, pas l'exhaustivité.",
+        "- Check the constraint stated in the question (banned word, sentence count): if it is"
+        " violated, the verdict cannot be \"correct\". Judge clarity for a beginner, not exhaustiveness.",
+    ),
+    "error_detection": (
+        "- Verdict \"correct\" seulement si l'étudiant désigne l'erreur ET donne la correction ;"
+        " \"partial\" s'il la repère sans la corriger.",
+        "- Verdict \"correct\" only if the student names the error AND gives the correction;"
+        " \"partial\" if they spot it without correcting it.",
+    ),
+    "recall": (
+        "- Le passage était masqué pendant la réponse : sois indulgent sur la formulation,"
+        " strict sur les éléments restitués.",
+        "- The passage was hidden while answering: be lenient on wording, strict on the elements recalled.",
+    ),
+    "estimation": (
+        "- Juge l'ordre de grandeur et le raisonnement, pas la valeur exacte.",
+        "- Judge the order of magnitude and the reasoning, not the exact value.",
+    ),
+    "counterexample": (
+        "- Un contre-exemple valide OU l'énoncé exact de la condition qui casse l'affirmation"
+        " valent tous deux \"correct\".",
+        "- A valid counterexample OR the exact statement of the condition that breaks the claim"
+        " both count as \"correct\".",
+    ),
+    "connection": (
+        "- Tout lien pertinent et honnête compte : il n'y a pas de solution unique, expected_answer"
+        " ne décrit que des liens plausibles.",
+        "- Any relevant, honest link counts: there is no single solution, expected_answer only"
+        " describes plausible links.",
+    ),
+}
+
+
+def _eval_type_rule(question_type: str) -> tuple[str, str]:
+    """Consigne de correction spécifique au type, ou ('', '') s'il n'en a pas."""
+    return _EVAL_TYPE_RULES.get(question_type or "", ("", ""))
+
+
+def _eval_objective_verdict_rule(verdict: str) -> tuple[str, str]:
+    """Annonce le verdict déjà tranché côté serveur (cf. services.assistant)."""
+    if verdict not in ("correct", "partial", "incorrect"):
+        return "", ""
+    fr = (
+        f"- Le verdict est DÉJÀ établi par comparaison exacte avec la réponse attendue :"
+        f" \"{verdict}\". Reprends-le tel quel dans verdict, sans le rediscuter, et écris un"
+        " feedback qui explique POURQUOI — ce qui rendait la bonne réponse juste, ou ce que"
+        " l'étudiant a confondu."
+    )
+    en = (
+        f"- The verdict is ALREADY settled by exact comparison with the expected answer:"
+        f" \"{verdict}\". Repeat it as-is in verdict, without re-discussing it, and write"
+        " feedback explaining WHY — what made the right answer right, or what the student"
+        " confused it with."
+    )
+    return fr, en
+
+
 def build_evaluation_prompt(
     question: dict,
     user_answer: str,
@@ -734,6 +745,7 @@ def build_evaluation_prompt(
     metacog_profile: dict | None = None,
     history: list[dict] | None = None,
     past_struggles: list[dict] | None = None,
+    objective_verdict: str = "",
 ) -> str:
     history = history or []
     if history:
@@ -763,7 +775,12 @@ def build_evaluation_prompt(
 
     question_type = (question or {}).get("question_type", "")
     _dim_hint_fr, _dim_hint_en = _eval_dimension_hint(question_type)
-    if question_type in ("metacognition", "anticipation"):
+    _type_rule_fr, _type_rule_en = _eval_type_rule(question_type)
+    # Verdict déjà établi côté serveur (QCM, remise en ordre) : le LLM ne le
+    # rejuge pas, il commente. Sans cette annonce, son feedback féliciterait
+    # une réponse que le serveur vient de compter fausse.
+    _verdict_rule_fr, _verdict_rule_en = _eval_objective_verdict_rule(objective_verdict)
+    if not question_types.flashcard_eligible(question_type):
         _flashcard_constraint = _t(
             "- flashcard DOIT être null : les questions de type métacognitif et d'anticipation "
             "ne génèrent jamais de flashcard.",
@@ -862,6 +879,8 @@ Constraints:
 - If the answer goes beyond the minimum expected, makes connections, reformulates in their own words, proposes an analogy or a hypothesis, increase the creativity signal and set creativity_signals.
 - An image is attached: it is the full PDF page being read (the text is its extraction). Use it to confirm notation and stay faithful to what is actually on the page.
 {_dim_hint_en}
+{_type_rule_en}
+{_verdict_rule_en}
 {_flashcard_constraint}
 - Do not give the complete solution directly if verdict is incorrect."""
 
@@ -934,6 +953,8 @@ Contraintes :
 - Si la réponse dépasse le minimum attendu, fait des liens, reformule avec ses mots, propose une analogie ou une hypothèse, augmente le signal creativity et renseigne creativity_signals.
 - Une image est jointe : c'est la page PDF complète lue (le texte en est l'extraction). Utilise-la pour confirmer les notations et rester fidèle à ce qui figure réellement sur la page.
 {_dim_hint_fr}
+{_type_rule_fr}
+{_verdict_rule_fr}
 {_flashcard_constraint}
 - Ne donne pas directement la solution complète si verdict vaut incorrect."""
 
