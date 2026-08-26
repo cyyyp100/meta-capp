@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -15,12 +16,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { QuizExitSas } from "../features/quiz/QuizExitSas";
 import { AnswerInput, serializeOrder } from "../features/questions/AnswerInput";
 import { QuestionStem } from "../features/questions/QuestionStem";
 import { QuestionTypeBadge } from "../features/questions/QuestionTypeBadge";
 import { answerWidget } from "../features/questions/registry";
 import { renderMathToHtml } from "../features/reader/renderMath";
+import { formatDuration } from "../features/session/duration";
 import { useT } from "../i18n";
 
 // Code de matière (tel que stocké en base) -> clé i18n du libellé affiché.
@@ -55,6 +56,7 @@ const SUBJ_LABEL_KEY: Record<string, string> = {
 export function Quiz() {
   const t = useT();
   const navigate = useNavigate();
+  const reduce = useReducedMotion();
   const [subject, setSubject] = useState("");
   // Sujet libre : `topic` suit la frappe, `askedTopic` est celui de la session
   // en cours (figé au lancement, pour que le message d'absence de résultat parle
@@ -93,10 +95,11 @@ export function Quiz() {
   const [done, setDone] = useState(false);
   const [byCat, setByCat] = useState<Record<string, { correct: number; total: number }>>({});
   const [history, setHistory] = useState<QuizAnswerRecord[]>([]);
-  // Sas de sortie : ouvert dès la dernière question, refermable puis rappelable.
-  const [sasOpen, setSasOpen] = useState(false);
   const [durationS, setDurationS] = useState(0);
   const startedAt = useRef(0);
+  // Une session ne se clôt qu'une fois : garde-fou contre un double `/finalize`
+  // (qui compterait la session deux fois dans le profil long terme).
+  const finalized = useRef(false);
 
   const analysisQuery = useQuery({
     queryKey: ["quiz", "analysis", subject, askedTopic, runId],
@@ -123,8 +126,8 @@ export function Quiz() {
     setDone(false);
     setByCat({});
     setHistory([]);
-    setSasOpen(false);
     setDurationS(0);
+    finalized.current = false;
   }
 
   function answered(q: QuizQuestion, correct: boolean, userAnswer: string) {
@@ -148,11 +151,34 @@ export function Quiz() {
     void api.submitQuizAnswer(q.category, correct);
   }
 
+  // Clôture métacognitive de la session : même chemin serveur qu'une fin de lecture
+  // (`/api/quiz/finalize` → `nudge_metacog_profile`), pour qu'un quiz pèse sur le profil
+  // long terme. Sans questions de réflexion — le bilan est une page, plus un rituel.
+  // Déclenché depuis le handler et non un effet : l'app est montée en StrictMode.
+  function finalize(total: number, elapsed: number) {
+    if (finalized.current) return;
+    finalized.current = true;
+    void api
+      .quizFinalize({
+        responses: [],
+        score: total > 0 ? Math.round((100 * score) / total) : 0,
+        questions_answered: total,
+        correct: score,
+        duration_s: elapsed,
+        subject: subject || null,
+        topic: askedTopic || null,
+      })
+      .catch(() => {
+        /* la clôture ne doit jamais abîmer l'affichage du bilan */
+      });
+  }
+
   function next(total: number) {
     if (index + 1 >= total) {
-      setDurationS(Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)));
+      const elapsed = Math.max(0, Math.round((Date.now() - startedAt.current) / 1000));
+      setDurationS(elapsed);
       setDone(true);
-      setSasOpen(true);
+      finalize(total, elapsed);
     } else setIndex((i) => i + 1);
   }
 
@@ -257,6 +283,20 @@ export function Quiz() {
         <div style={{ marginTop: 32, textAlign: "center" }}>
           <div style={{ fontSize: 48, fontWeight: 700 }}>{score} / {data.length}</div>
           <p style={{ color: "var(--muted)" }}>{t("quiz.done")}</p>
+
+          <div className="mx-auto my-4.5 grid max-w-[360px] grid-cols-3 gap-3">
+            {[
+              { label: t("exit.duration"), value: formatDuration(durationS) },
+              { label: t("exit.questions"), value: `${score} / ${data.length}` },
+              {
+                label: t("exit.success"),
+                value: `${data.length > 0 ? Math.round((100 * score) / data.length) : 0}%`,
+              },
+            ].map((m, i) => (
+              <Metric key={m.label} label={m.label} value={m.value} index={i} reduce={reduce} />
+            ))}
+          </div>
+
           <div style={{ maxWidth: 360, margin: "16px auto", display: "grid", gap: 8, textAlign: "left" }}>
             {Object.entries(byCat).map(([cat, r]) => (
               <div key={cat} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
@@ -300,28 +340,35 @@ export function Quiz() {
 
           <div className="mt-5 flex flex-wrap justify-center gap-2.5">
             <Button onClick={restart}>{t("quiz.restart")}</Button>
-            {!sasOpen && (
-              <Button variant="secondary" onClick={() => setSasOpen(true)}>
-                {t("quiz.exit_show")}
-              </Button>
-            )}
           </div>
         </div>
       )}
-
-      {done && sasOpen && data && (
-        <QuizExitSas
-          correct={score}
-          total={data.length}
-          durationS={durationS}
-          analysis={analysisQuery.data?.analysis}
-          analysisLoading={analysisQuery.isFetching}
-          subject={subject}
-          topic={askedTopic}
-          onClose={() => setSasOpen(false)}
-        />
-      )}
     </div>
+  );
+}
+
+/** Tuile de métrique du bilan de fin de session (durée, questions, réussite). */
+function Metric({
+  label,
+  value,
+  index,
+  reduce,
+}: {
+  label: string;
+  value: string;
+  index: number;
+  reduce: boolean | null;
+}) {
+  return (
+    <motion.div
+      className="rounded-md bg-surface-soft px-2.5 py-3.5 text-center"
+      initial={reduce ? false : { opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.08 + index * 0.06, ease: [0.33, 1, 0.68, 1] }}
+    >
+      <div className="text-[22px] font-bold tabular-nums">{value}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
+    </motion.div>
   );
 }
 
