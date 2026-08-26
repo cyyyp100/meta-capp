@@ -132,6 +132,14 @@ export interface QuizSubject {
   count: number;
 }
 
+// Longueurs de session proposées par le serveur (il les borne aussi côté API).
+export interface QuizOptions {
+  lengths: number[];
+  default_length: number;
+  min_length: number;
+  max_length: number;
+}
+
 // Cours recommandé en fin de session (document à relire pour se renforcer).
 export interface QuizCourse {
   title: string;

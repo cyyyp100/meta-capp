@@ -7,6 +7,7 @@ import { useT } from "../../i18n";
 import { scoreColor } from "../stats/labels";
 import { WhyButton } from "../science/WhyButton";
 import { SKILL_ORDER } from "./skills";
+import { formatDuration } from "../session/duration";
 import { SasCard, SasOverlay } from "../session/SasOverlay";
 
 // Bilan de fin de séance de langue : métriques + décomposition par compétence +
@@ -148,12 +149,6 @@ function SkillBar({ label, value }: { label: string; value: number }) {
       </div>
     </div>
   );
-}
-
-function formatDuration(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
 const btn: React.CSSProperties = { borderRadius: "var(--radius-sm)", padding: "10px 20px", fontWeight: 600, cursor: "pointer" };

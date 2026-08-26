@@ -12,6 +12,7 @@ import type {
   PageWord,
   QuizAnalysis,
   QuizAnswerRecord,
+  QuizOptions,
   QuizQuestion,
   QuizSubject,
   ReaderBlock,
@@ -108,8 +109,17 @@ export const api = {
     }),
   importPdf: (path: string) => postJSON<DocumentDetail>("/api/library/import", { path }),
   quizSubjects: () => getJSON<QuizSubject[]>("/api/quiz/subjects"),
-  quizQuestions: (n = 10, subject?: string) =>
-    getJSON<QuizQuestion[]>(`/api/quiz/questions?n=${n}${subject ? `&subject=${encodeURIComponent(subject)}` : ""}`),
+  quizOptions: () => getJSON<QuizOptions>("/api/quiz/options"),
+  // `topic` : sujet libre de la session (« capitales », « révolution française »).
+  // `n` omis = longueur par défaut du serveur (cf. /api/quiz/options) : l'UI ne
+  // recopie pas une valeur que `config/settings.py` déclare déjà.
+  quizQuestions: (n?: number, subject?: string, topic?: string) => {
+    const params = new URLSearchParams();
+    if (n) params.set("n", String(n));
+    if (subject) params.set("subject", subject);
+    if (topic?.trim()) params.set("topic", topic.trim());
+    return getJSON<QuizQuestion[]>(`/api/quiz/questions?${params}`);
+  },
   submitQuizAnswer: (category: string | null, correct: boolean) =>
     postJSON<{ updated: boolean; level?: number; retention: number }>(
       "/api/quiz/answer", { category, correct },
@@ -120,6 +130,16 @@ export const api = {
   // Analyse LLM de fin de session de quiz + conseils de cours à renforcer.
   quizAnalysis: (answers: QuizAnswerRecord[]) =>
     postJSON<QuizAnalysis>("/api/quiz/analysis", { answers }),
+  // Sas de sortie du quiz : réflexions de métacognition + nudge du profil.
+  quizFinalize: (body: {
+    responses: string[];
+    score: number;
+    questions_answered: number;
+    correct: number;
+    duration_s: number;
+    subject?: string | null;
+    topic?: string | null;
+  }) => postJSON<{ ok: boolean; score: number }>("/api/quiz/finalize", body),
   searchPage: (docId: number, page: number, q: string) =>
     getJSON<{ rects_pts: number[][] }>(`/api/library/doc/${docId}/page/${page}/search?q=${encodeURIComponent(q)}`),
   pageBlocks: (docId: number, page: number) =>

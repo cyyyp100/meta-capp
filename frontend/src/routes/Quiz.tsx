@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { QuizAnswerRecord, QuizQuestion } from "../api/types";
-import { ArrowRight, Check, Eye } from "lucide-react";
+import { ArrowRight, Check, Eye, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { QuizExitSas } from "../features/quiz/QuizExitSas";
 import { AnswerInput, serializeOrder } from "../features/questions/AnswerInput";
 import { QuestionStem } from "../features/questions/QuestionStem";
 import { QuestionTypeBadge } from "../features/questions/QuestionTypeBadge";
@@ -55,6 +56,12 @@ export function Quiz() {
   const t = useT();
   const navigate = useNavigate();
   const [subject, setSubject] = useState("");
+  // Sujet libre : `topic` suit la frappe, `askedTopic` est celui de la session
+  // en cours (figé au lancement, pour que le message d'absence de résultat parle
+  // du sujet réellement joué et non de ce que l'on est en train de retaper).
+  const [topic, setTopic] = useState("");
+  const [askedTopic, setAskedTopic] = useState("");
+  const [length, setLength] = useState<number | null>(null);
   const [runId, setRunId] = useState(0);
   const [started, setStarted] = useState(false);
 
@@ -63,11 +70,21 @@ export function Quiz() {
     queryFn: () => api.quizSubjects(),
   });
 
+  // Longueurs proposées : c'est le serveur qui les déclare (config/settings.py),
+  // l'UI ne fait que les afficher — et se tait tant qu'elle ne les a pas.
+  const optionsQuery = useQuery({
+    queryKey: ["quiz", "options"],
+    queryFn: () => api.quizOptions(),
+    staleTime: Infinity,
+  });
+  const lengths = optionsQuery.data?.lengths ?? [];
+  const askedLength = length ?? optionsQuery.data?.default_length;
+
   // La génération LLM (un seul appel batch) n'est déclenchée qu'après un clic
-  // explicite sur « Lancer le quiz » : on laisse le temps de choisir la matière.
+  // explicite sur « Lancer le quiz » : on laisse le temps de régler la session.
   const { data, isFetching, isError } = useQuery({
-    queryKey: ["quiz", "questions", subject, runId],
-    queryFn: () => api.quizQuestions(10, subject || undefined),
+    queryKey: ["quiz", "questions", subject, askedTopic, askedLength, runId],
+    queryFn: () => api.quizQuestions(askedLength, subject || undefined, askedTopic || undefined),
     enabled: started,
   });
 
@@ -76,9 +93,13 @@ export function Quiz() {
   const [done, setDone] = useState(false);
   const [byCat, setByCat] = useState<Record<string, { correct: number; total: number }>>({});
   const [history, setHistory] = useState<QuizAnswerRecord[]>([]);
+  // Sas de sortie : ouvert dès la dernière question, refermable puis rappelable.
+  const [sasOpen, setSasOpen] = useState(false);
+  const [durationS, setDurationS] = useState(0);
+  const startedAt = useRef(0);
 
   const analysisQuery = useQuery({
-    queryKey: ["quiz", "analysis", subject, runId],
+    queryKey: ["quiz", "analysis", subject, askedTopic, runId],
     queryFn: () => api.quizAnalysis(history),
     enabled: done && history.length > 0,
   });
@@ -102,6 +123,8 @@ export function Quiz() {
     setDone(false);
     setByCat({});
     setHistory([]);
+    setSasOpen(false);
+    setDurationS(0);
   }
 
   function answered(q: QuizQuestion, correct: boolean, userAnswer: string) {
@@ -126,8 +149,11 @@ export function Quiz() {
   }
 
   function next(total: number) {
-    if (index + 1 >= total) setDone(true);
-    else setIndex((i) => i + 1);
+    if (index + 1 >= total) {
+      setDurationS(Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)));
+      setDone(true);
+      setSasOpen(true);
+    } else setIndex((i) => i + 1);
   }
 
   function changeSubject(code: string) {
@@ -138,7 +164,9 @@ export function Quiz() {
 
   function startQuiz() {
     resetState();
+    setAskedTopic(topic.trim());
     setRunId((r) => r + 1);
+    startedAt.current = Date.now();
     setStarted(true);
   }
 
@@ -152,22 +180,48 @@ export function Quiz() {
       <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>{t("quiz.title")}</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("quiz.subtitle")}</p>
 
-      <Select value={subject} onValueChange={changeSubject}>
-        <SelectTrigger className="mt-2 w-[260px]" aria-label={t("quiz.subject_label")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {subjectOptions.map((option) => (
-            <SelectItem key={option.code} value={option.code}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
       {!started && !done && (
-        <div style={{ marginTop: 28 }}>
-          <p style={{ color: "var(--muted)", marginBottom: 12 }}>{t("quiz.pickThemeHint")}</p>
+        <div className="mt-6 rounded-lg border border-border bg-surface p-5 shadow-e1">
+          <label className="text-[13px] font-semibold" htmlFor="quiz-topic">
+            {t("quiz.topic_label")}
+          </label>
+          <TopicInput value={topic} onChange={setTopic} onSubmit={startQuiz} />
+
+          <div className="mt-4 flex flex-wrap items-end gap-4">
+            <Field label={t("quiz.subject_label")}>
+              <Select value={subject} onValueChange={changeSubject}>
+                <SelectTrigger className="w-[240px]" aria-label={t("quiz.subject_label")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjectOptions.map((option) => (
+                    <SelectItem key={option.code} value={option.code}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            {lengths.length > 0 && askedLength != null && (
+              <Field label={t("quiz.length_label")}>
+                <Select value={String(askedLength)} onValueChange={(v) => setLength(Number(v))}>
+                  <SelectTrigger className="w-[160px]" aria-label={t("quiz.length_label")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {lengths.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {t("quiz.length_option", { n })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+          </div>
+
+          <p style={{ color: "var(--muted)", margin: "16px 0 12px" }}>{t("quiz.pickThemeHint")}</p>
           <Button size="lg" onClick={startQuiz}>
             {t("quiz.start")}
           </Button>
@@ -176,7 +230,18 @@ export function Quiz() {
 
       {isFetching && <p style={{ color: "var(--muted)" }}>{t("quiz.generating")}</p>}
       {isError && !isFetching && <p style={{ color: "var(--danger)" }}>{t("quiz.error")}</p>}
-      {!isFetching && data && data.length === 0 && <div style={{ marginTop: 32, color: "var(--muted)", fontStyle: "italic" }}>{t("quiz.none")}</div>}
+      {!isFetching && data && data.length === 0 && (
+        // Le panneau de réglages est masqué pendant une session : sans ce retour,
+        // un sujet sans résultat laissait l'écran dans une impasse.
+        <div style={{ marginTop: 32 }}>
+          <p style={{ color: "var(--muted)", fontStyle: "italic" }}>
+            {askedTopic ? t("quiz.noneForTopic", { topic: askedTopic }) : t("quiz.none")}
+          </p>
+          <Button variant="secondary" onClick={restart}>
+            {t("quiz.restart")}
+          </Button>
+        </div>
+      )}
 
       {!isFetching && data && data.length > 0 && !done && (
         <QuestionCard
@@ -233,11 +298,89 @@ export function Quiz() {
             </div>
           )}
 
-          <button onClick={restart} style={{ marginTop: 20, border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "10px 22px", fontWeight: 600, cursor: "pointer" }}>
-            {t("quiz.restart")}
-          </button>
+          <div className="mt-5 flex flex-wrap justify-center gap-2.5">
+            <Button onClick={restart}>{t("quiz.restart")}</Button>
+            {!sasOpen && (
+              <Button variant="secondary" onClick={() => setSasOpen(true)}>
+                {t("quiz.exit_show")}
+              </Button>
+            )}
+          </div>
         </div>
       )}
+
+      {done && sasOpen && data && (
+        <QuizExitSas
+          correct={score}
+          total={data.length}
+          durationS={durationS}
+          analysis={analysisQuery.data?.analysis}
+          analysisLoading={analysisQuery.isFetching}
+          subject={subject}
+          topic={askedTopic}
+          onClose={() => setSasOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Champ « sujet de la session » : un mot ou quelques mots, Entrée pour lancer. */
+function TopicInput({
+  value,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const t = useT();
+  return (
+    // Même coque que la recherche de bibliothèque : le champ n'a pas de focus
+    // propre, `focus-within` reporte l'anneau sur le conteneur.
+    <div
+      className="mt-1.5 flex items-center gap-1.5 rounded-sm border border-border bg-background px-2.5 py-2
+                 transition-[border-color,box-shadow] duration-fast ease-brand
+                 focus-within:border-brand focus-within:ring-[3px] focus-within:ring-ring/50
+                 hover:border-border-strong"
+    >
+      <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <input
+        id="quiz-topic"
+        type="text"
+        value={value}
+        placeholder={t("quiz.topic_placeholder")}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+          if (e.key === "Escape") onChange("");
+        }}
+        className="min-w-0 flex-1 border-none bg-transparent font-[inherit] text-sm text-foreground outline-none placeholder:text-muted-light"
+      />
+      {value && (
+        <button
+          type="button"
+          title={t("quiz.topic_clear")}
+          aria-label={t("quiz.topic_clear")}
+          onClick={() => onChange("")}
+          className="flex shrink-0 rounded-full p-0.5 text-muted-foreground
+                     transition-colors duration-fast ease-brand
+                     hover:bg-accent hover:text-accent-foreground
+                     focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[13px] font-semibold">{label}</span>
+      {children}
     </div>
   );
 }

@@ -383,3 +383,17 @@ FOCUS_DEFAULT_MIN = 25
 # rendu de bout en bout. Vide = tirage adaptatif normal.
 #   MC_FORCE_QUESTION_TYPE=ordering python main.py mon.pdf
 FORCE_QUESTION_TYPE = os.getenv("MC_FORCE_QUESTION_TYPE", "").strip().lower()
+
+# ── Quiz ─────────────────────────────────────────────────────────────────────
+# Longueur d'une session, choisie par l'apprenant dans l'écran de lancement.
+# Bornes serveur ET frontend : la liste déroulante propose QUIZ_LENGTH_CHOICES,
+# le routeur borne ce qui arrive vraiment.
+QUIZ_DEFAULT_QUESTIONS = 10
+QUIZ_MIN_QUESTIONS = 3
+QUIZ_MAX_QUESTIONS = 30
+QUIZ_LENGTH_CHOICES = (5, 10, 15, 20, 30)
+# Filtre par sujet libre (« capitales », « révolution française »). Comme la
+# recherche de bibliothèque, `LIKE` ne sait pas plier les accents : on charge un
+# lot borné et on filtre EN PYTHON (utils.text.fold).
+QUIZ_SEARCH_POOL = 400
+QUIZ_SEARCH_MAX_TERMS = 6

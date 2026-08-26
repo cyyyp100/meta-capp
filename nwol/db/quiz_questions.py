@@ -225,16 +225,244 @@ _STATIC_QUESTIONS: list[dict] = [
         "category": "informatique",
         "difficulty": 2,
     },
+    # ── Géographie : capitales (les pièges classiques, pas les évidences) ──
+    {
+        "question": "Quelle est la capitale du Canada ?",
+        "choices": ["Ottawa", "Toronto", "Montréal", "Vancouver"],
+        "answer": "Ottawa",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale du Brésil ?",
+        "choices": ["Brasília", "Rio de Janeiro", "São Paulo", "Salvador"],
+        "answer": "Brasília",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale de la Turquie ?",
+        "choices": ["Ankara", "Istanbul", "Izmir", "Bursa"],
+        "answer": "Ankara",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale de la Suisse ?",
+        "choices": ["Berne", "Zurich", "Genève", "Bâle"],
+        "answer": "Berne",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale du Maroc ?",
+        "choices": ["Rabat", "Casablanca", "Marrakech", "Fès"],
+        "answer": "Rabat",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale du Kazakhstan ?",
+        "choices": ["Astana", "Almaty", "Bichkek", "Tachkent"],
+        "answer": "Astana",
+        "category": "géographie",
+        "difficulty": 3,
+    },
+    {
+        "question": "Quelle est la capitale de la Nouvelle-Zélande ?",
+        "choices": ["Wellington", "Auckland", "Christchurch", "Dunedin"],
+        "answer": "Wellington",
+        "category": "géographie",
+        "difficulty": 2,
+    },
+    {
+        "question": "Quelle est la capitale du Nigéria ?",
+        "choices": ["Abuja", "Lagos", "Kano", "Ibadan"],
+        "answer": "Abuja",
+        "category": "géographie",
+        "difficulty": 3,
+    },
+    {
+        "question": "Quelle est la capitale de l'Inde ?",
+        "choices": ["New Delhi", "Bombay", "Calcutta", "Bangalore"],
+        "answer": "New Delhi",
+        "category": "géographie",
+        "difficulty": 1,
+    },
+    {
+        "question": "Quelle ville est le siège du gouvernement d'Afrique du Sud ?",
+        "choices": ["Pretoria", "Le Cap", "Johannesburg", "Durban"],
+        "answer": "Pretoria",
+        "category": "géographie",
+        "difficulty": 3,
+    },
+    # ── Histoire : dix dates repères ──────────────────────────────────────
+    {
+        "question": "En quelle année le mur de Berlin est-il tombé ?",
+        "choices": ["1989", "1985", "1991", "1987"],
+        "answer": "1989",
+        "category": "histoire",
+        "difficulty": 1,
+    },
+    {
+        "question": "En quelle année a eu lieu le débarquement de Normandie ?",
+        "choices": ["1944", "1942", "1943", "1945"],
+        "answer": "1944",
+        "category": "histoire",
+        "difficulty": 1,
+    },
+    {
+        "question": "En quelle année le traité de Versailles a-t-il été signé ?",
+        "choices": ["1919", "1918", "1920", "1921"],
+        "answer": "1919",
+        "category": "histoire",
+        "difficulty": 2,
+    },
+    {
+        "question": "En quelle année les États-Unis ont-ils déclaré leur indépendance ?",
+        "choices": ["1776", "1783", "1789", "1765"],
+        "answer": "1776",
+        "category": "histoire",
+        "difficulty": 2,
+    },
+    {
+        "question": "En quelle année Charlemagne a-t-il été couronné empereur ?",
+        "choices": ["800", "768", "843", "987"],
+        "answer": "800",
+        "category": "histoire",
+        "difficulty": 3,
+    },
+    {
+        "question": "Vers quelle année Gutenberg a-t-il mis au point l'imprimerie à caractères mobiles ?",
+        "choices": ["1450", "1350", "1550", "1650"],
+        "answer": "1450",
+        "category": "histoire",
+        "difficulty": 3,
+    },
+    {
+        "question": "En quelle année Constantinople est-elle tombée aux mains des Ottomans ?",
+        "choices": ["1453", "1204", "1492", "1517"],
+        "answer": "1453",
+        "category": "histoire",
+        "difficulty": 3,
+    },
+    {
+        "question": "En quelle année l'Homme a-t-il marché sur la Lune pour la première fois ?",
+        "choices": ["1969", "1961", "1965", "1972"],
+        "answer": "1969",
+        "category": "histoire",
+        "difficulty": 1,
+    },
+    {
+        "question": "En quelle année la Seconde Guerre mondiale s'est-elle terminée en Europe ?",
+        "choices": ["1945", "1943", "1944", "1946"],
+        "answer": "1945",
+        "category": "histoire",
+        "difficulty": 1,
+    },
+    {
+        "question": "En quelle année a eu lieu la bataille de Hastings ?",
+        "choices": ["1066", "987", "1099", "1215"],
+        "answer": "1066",
+        "category": "histoire",
+        "difficulty": 3,
+    },
+    # ── Langues : vocabulaire anglais (dont quelques faux amis) ───────────
+    {
+        "question": "Que signifie le mot anglais « to achieve » ?",
+        "choices": ["Accomplir", "Échouer", "Hériter", "Éviter"],
+        "answer": "Accomplir",
+        "category": "langues",
+        "difficulty": 1,
+    },
+    {
+        "question": "Que signifie le mot anglais « to borrow » ?",
+        "choices": ["Emprunter", "Prêter", "Acheter", "Rendre"],
+        "answer": "Emprunter",
+        "category": "langues",
+        "difficulty": 2,
+    },
+    {
+        "question": "Que signifie le mot anglais « to gather » ?",
+        "choices": ["Rassembler", "Disperser", "Oublier", "Réparer"],
+        "answer": "Rassembler",
+        "category": "langues",
+        "difficulty": 2,
+    },
+    {
+        "question": "Que signifie l'adjectif anglais « harmful » ?",
+        "choices": ["Nuisible", "Utile", "Inoffensif", "Agréable"],
+        "answer": "Nuisible",
+        "category": "langues",
+        "difficulty": 2,
+    },
+    {
+        "question": "Que signifie l'adverbe anglais « actually » ?",
+        "choices": ["En réalité", "Actuellement", "Activement", "Éventuellement"],
+        "answer": "En réalité",
+        "category": "langues",
+        "difficulty": 2,
+    },
+    {
+        "question": "Que signifie l'adverbe anglais « eventually » ?",
+        "choices": ["Finalement", "Éventuellement", "Rarement", "Immédiatement"],
+        "answer": "Finalement",
+        "category": "langues",
+        "difficulty": 3,
+    },
+    {
+        "question": "Que signifie le verbe anglais « to attend » ?",
+        "choices": ["Assister à", "Attendre", "Prétendre", "Tenter"],
+        "answer": "Assister à",
+        "category": "langues",
+        "difficulty": 2,
+    },
+    {
+        "question": "Que signifie le mot anglais « a library » ?",
+        "choices": ["Une bibliothèque", "Une librairie", "Un magasin", "Un laboratoire"],
+        "answer": "Une bibliothèque",
+        "category": "langues",
+        "difficulty": 1,
+    },
+    {
+        "question": "Que signifie le mot anglais « weather » ?",
+        "choices": ["Le temps qu'il fait", "Le temps qui passe", "Une tempête", "Un rassemblement"],
+        "answer": "Le temps qu'il fait",
+        "category": "langues",
+        "difficulty": 1,
+    },
+    {
+        "question": "Que signifie le verbe anglais « to spend » ?",
+        "choices": ["Dépenser (ou passer du temps)", "Économiser", "Suspendre", "Envoyer"],
+        "answer": "Dépenser (ou passer du temps)",
+        "category": "langues",
+        "difficulty": 2,
+    },
 ]
 
 
+# Les deux réservoirs de questions (`questions` de lecture et
+# `quiz_static_questions`) numérotent chacun depuis 1. Une session de quiz qui
+# mélange les deux se retrouvait donc avec deux questions de même id : clé React
+# dupliquée côté UI, et distracteurs LLM attribués à la mauvaise question.
+# L'offset rend l'id unique dans une session mixte.
+STATIC_ID_OFFSET = 1_000_000
+
+
 def seed_static_questions() -> None:
+    """Insère les questions statiques manquantes (idempotent, énoncé par énoncé).
+
+    On ne teste PAS « la table est-elle vide ? » : une base déjà installée n'aurait
+    alors jamais reçu les questions ajoutées au catalogue après son installation.
+    L'énoncé est la clé naturelle de ce catalogue figé.
+    """
     conn = get_connection()
-    row = conn.execute("SELECT COUNT(*) FROM quiz_static_questions").fetchone()
-    if row[0] > 0:
+    known = {row[0] for row in conn.execute("SELECT question FROM quiz_static_questions")}
+    missing = [q for q in _STATIC_QUESTIONS if q["question"] not in known]
+    if not missing:
         return
     with conn:
-        for q in _STATIC_QUESTIONS:
+        for q in missing:
             conn.execute(
                 """INSERT INTO quiz_static_questions (question, choices_json, answer, category, difficulty)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -246,7 +474,7 @@ def seed_static_questions() -> None:
                     q.get("difficulty", 2),
                 ),
             )
-    logger.info("Questions statiques seedées (%d questions)", len(_STATIC_QUESTIONS))
+    logger.info("Questions statiques seedées (%d ajoutées)", len(missing))
 
 
 def get_quiz_questions(user_id: int = 1, n: int = 10, subject: str | None = None) -> list[dict]:
@@ -416,6 +644,41 @@ def _page_label(page_start, page_end) -> str:
     return f"Page : {start}"
 
 
+def _course_search_text(
+    document_title: str | None,
+    subject: str | None,
+    chapter_title: str | None,
+    scope_label: str | None,
+    auto_summary: str | None,
+    keywords_json: str | None,
+) -> str:
+    """Identité du COURS dont la question est issue, pour la recherche par sujet.
+
+    Chercher « thermodynamique » ne peut pas dépendre du fait que le mot figure
+    dans l'énoncé : ce qui situe une question, c'est le cours où elle a été posée.
+    On remonte donc la fiche du document (nom de fichier, matière détectée,
+    chapitre, mots-clés et résumé LLM) — les mêmes champs que la recherche de
+    bibliothèque. Champ interne : `build_quiz` ne le renvoie pas au client.
+    """
+    keywords: list[str] = []
+    if keywords_json:
+        try:
+            loaded = json.loads(keywords_json)
+        except Exception:
+            loaded = None
+        if isinstance(loaded, list):
+            keywords = [str(k) for k in loaded]
+    parts = [
+        document_title or "",
+        subject or "",
+        chapter_title or "",
+        scope_label or "",
+        " ".join(keywords),
+        auto_summary or "",
+    ]
+    return " ".join(part for part in parts if part)
+
+
 def get_quiz_base_questions(
     user_id: int = 1, n: int = 10, subject: str | None = None
 ) -> list[dict]:
@@ -447,9 +710,11 @@ def get_quiz_base_questions(
         SELECT q.id, q.question, q.choices_json, q.answer, q.question_type,
                q.source_context, q.scope_label, q.page_start, q.page_end,
                q.document_id,
-               COALESCE(d.filename, '') AS document_title,
-               COALESCE(d.subject, '')  AS subject,
-               COALESCE(c.title, '')    AS chapter_title,
+               COALESCE(d.filename, '')     AS document_title,
+               COALESCE(d.subject, '')      AS subject,
+               COALESCE(d.auto_summary, '') AS doc_summary,
+               COALESCE(d.keywords, '')     AS doc_keywords,
+               COALESCE(c.title, '')        AS chapter_title,
                MAX(CASE WHEN a.verdict IN ('incorrect', 'partial') THEN 1 ELSE 0 END) AS failed
         FROM questions q
         LEFT JOIN documents d ON d.id = q.document_id
@@ -471,7 +736,7 @@ def get_quiz_base_questions(
         (
             qid, question, choices_json, answer, qtype, source_context,
             scope_label, page_start, page_end, document_id, document_title,
-            row_subject, chapter_title, _failed,
+            row_subject, doc_summary, doc_keywords, chapter_title, _failed,
         ) = row
         if _is_unusable_for_quiz(question, source_context):
             continue
@@ -501,16 +766,72 @@ def get_quiz_base_questions(
             "chapter_title": chapter_title or None,
             "source_context": source_context or "",
             "course_context": course_context,
+            "course_search": _course_search_text(
+                document_title, row_subject, chapter_title, scope_label,
+                doc_summary, doc_keywords,
+            ),
             "source": "reading",
         })
     return results
 
 
+def get_static_quiz_questions(n: int = 10, subject: str | None = None) -> list[dict]:
+    """Questions du catalogue statique, au format d'une question de session de quiz.
+
+    Complément — et non remplacement — des questions de lecture : une base neuve,
+    ou un thème dont aucun document n'a encore été lu, doit quand même pouvoir
+    lancer un quiz. Tirage aléatoire pour ne pas resservir le même bloc.
+    """
+    if n <= 0:
+        return []
+    conn = get_connection()
+    sql = """SELECT id, question, choices_json, answer, category
+             FROM quiz_static_questions
+             {where}
+             ORDER BY RANDOM()
+             LIMIT ?"""
+    if subject:
+        rows = conn.execute(
+            sql.format(where="WHERE LOWER(category) = LOWER(?)"), (subject, n),
+        ).fetchall()
+    else:
+        rows = conn.execute(sql.format(where=""), (n,)).fetchall()
+
+    results: list[dict] = []
+    for qid, question, choices_json, answer, category in rows:
+        choices = None
+        if choices_json:
+            try:
+                choices = json.loads(choices_json)
+            except Exception:
+                choices = None
+        results.append({
+            "id": STATIC_ID_OFFSET + int(qid),
+            "question": question,
+            "choices": choices,
+            "answer": answer or "",
+            # Le catalogue est écrit en QCM : le type le dit, pour que l'UI
+            # affiche le bon badge et le bon widget de réponse.
+            "question_type": "qcm" if choices else "open",
+            "category": (category or "culture").lower(),
+            "document": None,
+            "document_id": None,
+            "chapter_title": None,
+            "source_context": "",
+            "course_context": "",
+            "source": "static",
+        })
+    return results
+
+
 def get_quiz_subjects(user_id: int = 1) -> list[dict]:
-    """Matières ayant des questions de lecture exploitables pour le quiz.
+    """Matières ayant des questions exploitables pour le quiz (lecture + catalogue).
 
     Renvoie ``[{"subject": str, "count": int}]`` trié par effectif décroissant,
-    pour ne proposer dans le sélecteur que des thèmes réellement disponibles.
+    pour ne proposer dans le sélecteur que des thèmes réellement disponibles. Le
+    catalogue statique est compté avec les lectures parce que la session le
+    complète (cf. :func:`get_static_quiz_questions`) : l'omettre affichait un
+    sélecteur vide sur une base neuve, alors qu'un quiz était jouable.
     """
     conn = get_connection()
     rows = conn.execute(
@@ -529,6 +850,13 @@ def get_quiz_subjects(user_id: int = 1) -> list[dict]:
         if _is_unusable_for_quiz(question, source_context):
             continue
         counts[subject] = counts.get(subject, 0) + 1
+    for category, count in conn.execute(
+        """SELECT LOWER(category), COUNT(*)
+           FROM quiz_static_questions
+           WHERE TRIM(COALESCE(category, '')) <> ''
+           GROUP BY LOWER(category)""",
+    ).fetchall():
+        counts[category] = counts.get(category, 0) + int(count)
     return [
         {"subject": subject, "count": count}
         for subject, count in sorted(counts.items(), key=lambda kv: -kv[1])

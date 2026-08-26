@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 
@@ -6,33 +5,59 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { api } from "../../api/client";
-import type { SessionMetrics } from "../../api/types";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
-import { formatDuration } from "./duration";
-import { SasCard, SasOverlay } from "./SasOverlay";
+import { formatDuration } from "../session/duration";
+import { SasCard, SasOverlay } from "../session/SasOverlay";
 
-// Bilan de fin de session : analyse LLM + métriques + questions de réflexion métacognitive.
-export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose: () => void }) {
+// Bilan de fin de session de quiz : métriques + analyse LLM + questions de
+// métacognition. Même rituel que le sas de sortie d'une lecture ou d'une séance
+// de langue, et surtout la même finalisation côté serveur (`/api/quiz/finalize`
+// → `nudge_metacog_profile`) : un quiz mesure un apprentissage, il doit peser
+// sur le profil long terme au lieu de se terminer sur un simple score.
+export function QuizExitSas({
+  correct,
+  total,
+  durationS,
+  analysis,
+  analysisLoading,
+  subject,
+  topic,
+  onClose,
+}: {
+  correct: number;
+  total: number;
+  durationS: number;
+  /** Analyse LLM déjà chargée par l'écran de bilan — pas de second appel. */
+  analysis?: string;
+  analysisLoading?: boolean;
+  subject?: string;
+  topic?: string;
+  onClose: () => void;
+}) {
   const t = useT();
   const reduce = useReducedMotion();
-  const [responses, setResponses] = useState<string[]>(metrics.reflection_questions.map(() => ""));
+  const questions = [t("quiz.reflect_1"), t("quiz.reflect_2"), t("quiz.reflect_3")];
+  const [responses, setResponses] = useState<string[]>(questions.map(() => ""));
   const [saving, setSaving] = useState(false);
 
-  // Analyse LLM de la session (stats + jauges session + jauges profil), best-effort.
-  const { data: analysis, isLoading: analysisLoading } = useQuery({
-    queryKey: ["session-analysis", metrics.session_id],
-    queryFn: () => api.sessionAnalysis(metrics.session_id),
-    staleTime: Infinity,
-  });
+  const successRate = total > 0 ? Math.round((100 * correct) / total) : 0;
 
   async function finish() {
     setSaving(true);
     try {
-      await api.finalizeSession(metrics.session_id, responses);
+      await api.quizFinalize({
+        responses,
+        score: successRate,
+        questions_answered: total,
+        correct,
+        duration_s: durationS,
+        subject: subject || null,
+        topic: topic || null,
+      });
     } catch {
-      /* on ferme quand même */
+      /* on ferme quand même : le bilan ne doit jamais bloquer la sortie */
     }
     onClose();
   }
@@ -43,31 +68,28 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
         <div className="flex items-start justify-between gap-3.5">
           <div>
             <h2 className="m-0 mb-1 font-serif text-[26px] font-bold">{t("exit.title")}</h2>
-            <p className="m-0 text-muted-foreground">{t("exit.subtitle")}</p>
+            <p className="m-0 text-muted-foreground">{t("quiz.exit_subtitle")}</p>
           </div>
           <WhyButton whyKey="exit" />
         </div>
 
-        <div className="my-4.5 grid grid-cols-4 gap-3">
+        <div className="my-4.5 grid grid-cols-3 gap-3">
           {[
-            { label: t("exit.duration"), value: formatDuration(metrics.duration_s) },
-            { label: t("exit.pages"), value: String(metrics.pages_read) },
-            { label: t("exit.questions"), value: String(metrics.questions_answered) },
-            { label: t("exit.success"), value: `${metrics.success_rate}%` },
+            { label: t("exit.duration"), value: formatDuration(durationS) },
+            { label: t("exit.questions"), value: `${correct} / ${total}` },
+            { label: t("exit.success"), value: `${successRate}%` },
           ].map((m, i) => (
             <Metric key={m.label} label={m.label} value={m.value} index={i} reduce={reduce} />
           ))}
         </div>
 
-        {(analysisLoading || analysis?.analysis) && (
+        {(analysisLoading || analysis) && (
           <div className="mb-4 rounded-md bg-brand-soft px-4 py-3.5 text-accent-foreground">
             <div className="mb-1.5 text-[11px] font-bold tracking-wide">
               {t("exit.analysis_title")}
             </div>
             <div className="text-sm leading-relaxed text-foreground">
               {analysisLoading ? (
-                // C'était un texte gris en italique : rien ne bougeait, on ne
-                // savait pas si l'analyse arrivait ou si elle avait échoué.
                 <div className="flex flex-col gap-2" role="status" aria-busy="true">
                   <span className="sr-only">{t("exit.analysis_loading")}</span>
                   <Skeleton className="h-3.5 w-full" />
@@ -75,20 +97,20 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
                   <Skeleton className="h-3.5 w-[60%]" />
                 </div>
               ) : (
-                analysis?.analysis
+                analysis
               )}
             </div>
           </div>
         )}
 
         <div className="flex flex-col gap-3.5">
-          {metrics.reflection_questions.map((q, i) => (
-            <div key={i}>
-              <label className="text-[13px] font-semibold" htmlFor={`reflection-${i}`}>
+          {questions.map((q, i) => (
+            <div key={q}>
+              <label className="text-[13px] font-semibold" htmlFor={`quiz-reflection-${i}`}>
                 {q}
               </label>
               <AutoGrowTextarea
-                id={`reflection-${i}`}
+                id={`quiz-reflection-${i}`}
                 value={responses[i]}
                 onChange={(e) => setResponses((r) => r.map((v, j) => (j === i ? e.target.value : v)))}
                 style={{
@@ -112,8 +134,6 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
           <Button variant="secondary" onClick={onClose}>
             {t("exit.skip")}
           </Button>
-          {/* Le bouton affichait « … » pendant l'enregistrement : un indicateur
-              muet, indistinguable d'un libellé cassé. */}
           <Button onClick={finish} pending={saving}>
             {t("exit.finish")}
           </Button>

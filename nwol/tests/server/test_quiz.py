@@ -212,3 +212,123 @@ def test_long_production_types_stay_open_instead_of_becoming_mcq(client, monkeyp
     assert len(quiz) == 1
     assert quiz[0]["choices"] is None
     assert quiz[0]["answer"]
+
+
+# ── Réglages de session : sujet libre + longueur ────────────────────────────
+
+def test_quiz_completes_with_the_static_catalogue(client, monkeypatch):
+    """Sans aucune lecture en base, une session reste jouable (catalogue statique)."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+
+    quiz = client.get("/api/quiz/questions", params={"n": 5, "subject": "géographie"}).json()
+    assert len(quiz) == 5
+    assert {q["source"] for q in quiz} == {"static"}
+    for q in quiz:
+        assert q["answer"] in (q["choices"] or [])
+
+
+def test_static_catalogue_covers_the_three_families(client):
+    """Géographie, histoire et vocabulaire anglais : au moins dix questions chacun."""
+    subjects = {row["subject"]: row["count"] for row in client.get("/api/quiz/subjects").json()}
+    assert subjects.get("géographie", 0) >= 10
+    assert subjects.get("histoire", 0) >= 10
+    assert subjects.get("langues", 0) >= 10
+
+
+def test_static_ids_never_collide_with_reading_ids(client, monkeypatch):
+    """Deux réservoirs numérotés depuis 1 : sans décalage, une session mixte dupliquait un id."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    _seed_subject_questions("physique")
+
+    quiz = client.get("/api/quiz/questions", params={"n": 8}).json()
+    ids = [q["id"] for q in quiz]
+    assert len(ids) == len(set(ids))
+    assert {q["source"] for q in quiz} == {"reading", "static"}
+
+
+def test_quiz_length_follows_the_requested_count(client, monkeypatch):
+    """La longueur de session est celle demandée par l'apprenant."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+
+    assert len(client.get("/api/quiz/questions", params={"n": 3}).json()) == 3
+    assert len(client.get("/api/quiz/questions", params={"n": 12}).json()) == 12
+
+
+def test_quiz_length_is_clamped_to_the_server_bounds(client, monkeypatch):
+    """Le serveur borne : l'UI ne peut pas réclamer 999 questions."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    options = client.get("/api/quiz/options").json()
+
+    quiz = client.get("/api/quiz/questions", params={"n": 999}).json()
+    assert len(quiz) == options["max_length"]
+    assert options["default_length"] in options["lengths"]
+
+
+def test_topic_filters_the_static_catalogue(client, monkeypatch):
+    """Un mot suffit à donner un sujet de session."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+
+    quiz = client.get("/api/quiz/questions", params={"topic": "capitale", "n": 5}).json()
+    assert len(quiz) == 5
+    assert all("capitale" in q["question"].lower() for q in quiz)
+
+
+def test_topic_finds_questions_through_the_course_they_came_from(client, monkeypatch):
+    """Le sujet cherché est celui du COURS, pas forcément un mot de l'énoncé."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    from db.documents import update_document_digest
+
+    doc_id, _ = _seed_subject_questions("physique")
+    update_document_digest(
+        doc_id, "physique",
+        "Cours d'introduction à la thermodynamique et aux transferts de chaleur.",
+        ["thermodynamique", "entropie"],
+    )
+
+    quiz = client.get("/api/quiz/questions", params={"topic": "thermodynamique", "n": 5}).json()
+    assert len(quiz) == 2  # les deux questions du cours, et rien d'autre
+    assert {q["source"] for q in quiz} == {"reading"}
+    # Aucun énoncé ne contient le mot : c'est bien la fiche du document qui a servi.
+    assert all("thermodynamique" not in q["question"].lower() for q in quiz)
+
+
+def test_topic_without_any_match_returns_nothing(client, monkeypatch):
+    """Mieux vaut une session vide (et le dire) qu'un quiz hors sujet."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+
+    assert client.get("/api/quiz/questions", params={"topic": "cryptozoologie"}).json() == []
+
+
+def test_quiz_finalize_goes_through_the_shared_metacog_finalisation(client, monkeypatch):
+    """Le sas de sortie du quiz emprunte le MÊME chemin qu'une fin de lecture."""
+    seen: dict = {}
+
+    def _fake_nudge(user_id, score, responses, metrics, session_id=None, session_gauges=None):
+        seen.update(
+            user_id=user_id, score=score, responses=responses,
+            metrics=metrics, session_id=session_id,
+        )
+        return {}
+
+    monkeypatch.setattr("services.session.nudge_metacog_profile", _fake_nudge)
+
+    resp = client.post(
+        "/api/quiz/finalize",
+        json={
+            "responses": ["Les capitales", "Les dates", "En me relisant"],
+            "score": 80.0,
+            "questions_answered": 10,
+            "correct": 8,
+            "duration_s": 300,
+            "subject": "géographie",
+            "topic": "capitales",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "score": 80.0}
+    assert seen["session_id"] is None  # un quiz n'est pas une session de lecture
+    assert seen["score"] == 80.0
+    assert len(seen["responses"]) == 3
+    assert seen["metrics"]["questions_answered"] == 10
+    assert seen["metrics"]["success_rate"] == 80
+    assert seen["metrics"]["topic"] == "capitales"
