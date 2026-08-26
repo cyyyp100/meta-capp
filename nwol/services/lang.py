@@ -696,7 +696,12 @@ def lang_lesson_analysis(lesson_id: int, user_id: int = DEFAULT_USER_ID) -> dict
         return {"analysis": "", "skills": skills}
 
 
-def finalize_lang_lesson(lesson_id: int, responses: list, user_id: int = DEFAULT_USER_ID) -> dict:
+def finalize_lang_lesson(
+    lesson_id: int,
+    responses: list,
+    user_id: int = DEFAULT_USER_ID,
+    questions: list[str] | None = None,
+) -> dict:
     """Finalisation métacognitive d'une séance : réflexions + nudge du profil global.
 
     Comme la finalisation d'une session PDF, mais sans session de lecture
@@ -723,7 +728,10 @@ def finalize_lang_lesson(lesson_id: int, responses: list, user_id: int = DEFAULT
     try:
         from services.session import nudge_metacog_profile
 
-        nudge_metacog_profile(owner, score, list(responses or []), metrics, session_id=None)
+        nudge_metacog_profile(
+            owner, score, list(responses or []), metrics,
+            session_id=None, questions=list(questions or []),
+        )
     except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
         logger.debug("Nudge métacognitif (langue) ignoré", exc_info=True)
     return {"ok": True, "score": score}

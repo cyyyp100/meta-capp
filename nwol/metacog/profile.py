@@ -7,21 +7,41 @@ from metacog.gauges import clamp_gauge, update_profile_gauges_from_session
 K = 5
 ALPHA_MIN = 0.05
 QUIZ_RETENTION_WEIGHT = 0.08
+# Nombre de mesures (réponses évaluées + questions posées à l'assistant) au-delà
+# duquel une session pèse de tout son poids. En dessous, elle pèse au prorata :
+# une session de deux réponses ne doit pas déplacer le profil autant qu'une
+# session de dix, sinon une séance courte tire durablement le profil vers son
+# amorce (profil × 0,8).
+FULL_CONFIDENCE_MEASURES = 4
 
 
 def compute_alpha(sessions_count: int, k: int = K, alpha_min: float = ALPHA_MIN) -> float:
     return max(alpha_min, k / (k + max(0, sessions_count)))
 
 
+def compute_confidence(measures: int | None, full: int = FULL_CONFIDENCE_MEASURES) -> float:
+    """Part du poids de session réellement méritée par la quantité de mesure.
+
+    `None` = l'appelant ne sait pas compter (il affirme ses jauges) -> 1.0.
+    0 mesure -> 0.0 : le profil ne doit alors PAS bouger, et l'appelant est
+    censé s'arrêter avant (cf. `services.session.nudge_metacog_profile`)."""
+    if measures is None:
+        return 1.0
+    return max(0.0, min(1.0, float(measures) / max(1, int(full))))
+
+
 def update_profile(
     user_id: int,
     session_score: dict[str, float],
     session_id: int | None,
+    confidence: float = 1.0,
 ) -> dict:
     profile = ensure_profile(user_id)
     # Poids adaptatif : les premières sessions pèsent plus, puis l'apprentissage
-    # ralentit avec sessions_count (plancher ALPHA_MIN).
+    # ralentit avec sessions_count (plancher ALPHA_MIN). `confidence` corrige
+    # ensuite par la quantité de mesure de CETTE session (cf. compute_confidence).
     alpha = compute_alpha(int(profile.get("sessions_count") or 0))
+    alpha = max(0.0, min(1.0, alpha * max(0.0, min(1.0, float(confidence)))))
     updates = update_profile_gauges_from_session(profile, session_score, session_weight=alpha)
 
     for criterion in CRITERIA:

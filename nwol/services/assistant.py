@@ -236,6 +236,7 @@ def generate_page_question(
     *,
     session_gauges: dict | None = None,
     recent_question_types: list[str] | None = None,
+    history: list[dict] | None = None,
     generator: Callable = generate_question_async,
 ) -> None:
     doc = _get_document(doc_id) or {}
@@ -243,9 +244,13 @@ def generate_page_question(
         "paragraph": library.page_text(doc_id, page),
         "doc_title": doc.get("filename") or "",
         "chapter_title": chapter_title_for_page(doc_id, page),
+        # La question sera rejouée par le quiz : elle doit tenir sans le document.
         "standalone": True,
         "metacog_profile": _safe(ensure_profile, {}),
         "session_gauges": session_gauges or {},
+        # Q&R déjà jouées DANS cette session : le prompt sait s'y référer
+        # ("tu avais dit plus tôt que...") et éviter de reposer la même chose.
+        "history": list(history or []),
         # Anti-répétition + pilotage par jauges faibles (cf. _question_adaptation) :
         # avec recent_question_types fourni et preferred_question_type laissé vide,
         # le prompt choisit le type le plus utile et évite de répéter les récents.
@@ -291,6 +296,7 @@ def evaluate_page_answer(
     *,
     question_type: str = "",
     question_id: int | None = None,
+    history: list[dict] | None = None,
     evaluator: Callable = evaluate_answer_async,
 ) -> None:
     """Corrige une réponse : verdict objectif quand il existe, LLM sinon.
@@ -321,6 +327,9 @@ def evaluate_page_answer(
         "user_answer": answer,
         "paragraph": library.page_text(doc_id, page),
         "metacog_profile": _safe(ensure_profile, {}),
+        # Réponses précédentes de la session : le prompt d'évaluation sait les
+        # citer pour relier une erreur à ce que l'étudiant avait déjà compris.
+        "history": list(history or []),
         "past_struggles": _safe(lambda: get_recurring_struggles(doc_id=doc_id), []),
         "image_paths": _page_image_paths(doc_id, page),
         "objective_verdict": verdict,

@@ -377,6 +377,19 @@ ASSISTANT_MAX_INTERVENTIONS = 6     # par session
 # Mode focus : interventions coupées pendant N minutes (déclenché depuis le panneau)
 FOCUS_DEFAULT_MIN = 25
 
+# ── Attention passive : la jauge bouge PENDANT la lecture ────────────────────
+# Avant, `attention` ne bougeait qu'au retour d'une évaluation LLM : elle ne
+# mesurait donc que la performance, jamais l'attention. Ces constantes règlent la
+# dérive appliquée à chaque tick du lecteur à partir de ce qu'on observe vraiment
+# (fenêtre au premier plan, progression dans le document, stagnation sur une page).
+# Lues uniquement par `services/session.LiveGauges.apply_reading_behaviour`.
+ATTENTION_IDLE_GRACE_S = 90.0        # stagnation tolérée sur une page avant dérive
+ATTENTION_DRIFT_PER_MIN = 2.0        # points/min perdus au-delà de la grâce
+ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hors focus
+ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue
+ATTENTION_PASSIVE_FLOOR = 15.0       # plancher de la seule dérive passive
+ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives en base
+
 # ── Questions de lecture ────────────────────────────────────────────────────
 # La grille des types vit dans config/question_types.py (registre canonique).
 # Ici, seulement le levier de mise au point : forcer un type pour vérifier son

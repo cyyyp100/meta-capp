@@ -169,3 +169,88 @@ def test_fallback_moves_only_evidence_backed_criteria(fresh_db):
     after = ensure_profile(DEFAULT_USER_ID)
     for untouched in ("curiosity", "creativity", "meta_cognition"):
         assert float(after[untouched]) == pytest.approx(float(before[untouched]))
+
+
+# ── Attention : les signaux comportementaux (§ constats 1 et 2) ──────────────
+
+def test_attention_falls_on_slow_answer_and_error_streak():
+    """Le modèle d'attention attendait `response_time_ms` et la série d'erreurs.
+
+    Personne ne les lui passait : deux de ses quatre termes étaient inertes, et
+    `attention` n'était qu'un dérivé de la performance."""
+    from metacog.gauges import make_gauges, update_gauges_from_evaluation
+
+    evaluation = {"verdict": "partial", "metacog_signals": {c: 0.0 for c in CRITERIA}}
+
+    quick = make_gauges({c: 60.0 for c in CRITERIA})
+    update_gauges_from_evaluation(quick, dict(evaluation), response_time_ms=3000)
+
+    slow = make_gauges({c: 60.0 for c in CRITERIA})
+    update_gauges_from_evaluation(slow, dict(evaluation), response_time_ms=30000)
+    assert slow["attention"].value < quick["attention"].value
+
+    streak = make_gauges({c: 60.0 for c in CRITERIA})
+    update_gauges_from_evaluation(
+        streak, {"verdict": "incorrect", "metacog_signals": {}}, consecutive_incorrect=4
+    )
+    single = make_gauges({c: 60.0 for c in CRITERIA})
+    update_gauges_from_evaluation(
+        single, {"verdict": "incorrect", "metacog_signals": {}}, consecutive_incorrect=1
+    )
+    assert streak["attention"].value < single["attention"].value
+
+
+def test_reading_attention_delta_reads_behaviour_not_performance():
+    from metacog.gauges import reading_attention_delta
+
+    # Fenêtre masquée : l'étudiant n'est pas là.
+    assert reading_attention_delta(60.0, 10.0, 0, away=True) < 0
+    # Page immobile bien au-delà de la grâce : décrochage probable.
+    assert reading_attention_delta(60.0, 600.0, 0, away=False) < 0
+    # Lecture lente mais dans la grâce : on ne sanctionne pas.
+    assert reading_attention_delta(60.0, 30.0, 0, away=False) == 0.0
+    # La lecture avance : petit crédit.
+    assert reading_attention_delta(60.0, 600.0, 3, away=False) > 0
+
+
+def test_live_gauges_passive_drift_stops_at_the_floor(fresh_db):
+    """La seule dérive passive fait descendre l'attention, jamais la vider."""
+    from config.settings import ATTENTION_PASSIVE_FLOOR
+    from services.session import LiveGauges
+
+    gauges = LiveGauges()
+    for _ in range(400):  # ~33 minutes de fenêtre masquée
+        gauges.apply_reading_behaviour(
+            elapsed_s=5.0, stagnant_s=600.0, pages_progressed=0, away=True
+        )
+    assert gauges.snapshot()["attention"] == pytest.approx(ATTENTION_PASSIVE_FLOOR)
+    # Le crédit de progression, lui, s'applique toujours.
+    gauges.apply_reading_behaviour(
+        elapsed_s=5.0, stagnant_s=0.0, pages_progressed=2, away=False
+    )
+    assert gauges.snapshot()["attention"] > ATTENTION_PASSIVE_FLOOR
+
+
+# ── Confiance : le profil ne bouge qu'à hauteur de ce qui est mesuré ─────────
+
+def test_confidence_scales_the_session_weight():
+    from metacog.profile import FULL_CONFIDENCE_MEASURES, compute_confidence
+
+    assert compute_confidence(0) == 0.0
+    assert compute_confidence(None) == 1.0  # l'appelant affirme ses jauges
+    assert compute_confidence(FULL_CONFIDENCE_MEASURES) == 1.0
+    assert compute_confidence(FULL_CONFIDENCE_MEASURES * 10) == 1.0
+    assert 0.0 < compute_confidence(1) < 1.0
+
+
+def test_short_session_moves_the_profile_less_than_a_full_one(fresh_db):
+    from db.user import DEFAULT_USER_ID
+    from metacog.profile import FULL_CONFIDENCE_MEASURES, update_profile
+
+    gauges = {c: 100.0 for c in CRITERIA}
+    partial = update_profile(DEFAULT_USER_ID, gauges, None, confidence=0.25)
+    partial_value = float(partial["attention"])
+
+    full = update_profile(DEFAULT_USER_ID, gauges, None, confidence=1.0)
+    assert float(full["attention"]) > partial_value
+    assert FULL_CONFIDENCE_MEASURES >= 1

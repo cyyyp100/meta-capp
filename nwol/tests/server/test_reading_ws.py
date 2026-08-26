@@ -135,17 +135,48 @@ def test_page_question_and_eval_context(client):
     from services import assistant
 
     cap: dict = {}
-    assistant.generate_page_question(1, 1, lambda r: None, lambda m: None, generator=lambda ctx, ok, err: cap.update(q=ctx))
+    history = [{"question": "Q1 ?", "answer": "A1", "verdict": "partial", "question_type": "open"}]
+    assistant.generate_page_question(
+        1, 1, lambda r: None, lambda m: None,
+        history=history,
+        generator=lambda ctx, ok, err: cap.update(q=ctx),
+    )
     assert "paragraph" in cap["q"] and cap["q"]["standalone"] is True
+    # L'historique de la session voyage jusqu'au prompt : sans lui, les consignes
+    # « tu avais dit plus tôt que… » n'avaient jamais matière à s'appliquer.
+    assert cap["q"]["history"] == history
 
     assistant.evaluate_page_answer(
         1, 1, "Q ?", "A", lambda r: None, lambda m: None,
         question_type="ordering",
+        history=history,
         evaluator=lambda ctx, ok, err: cap.update(e=ctx),
     )
     # Le type accompagne la question : il conditionne la consigne de correction.
     assert cap["e"]["user_answer"] == "A"
     assert cap["e"]["question"] == {"question": "Q ?", "question_type": "ordering"}
+    assert cap["e"]["history"] == history
+
+
+def test_standalone_question_prompt_keeps_the_targeted_type(client):
+    """`standalone` ne doit imposer qu'une FORME autoportante.
+
+    Il portait en plus « tu reçois une question… reformule-la » (faux : le modèle
+    reçoit un paragraphe) et « qcm si possible », qui contredisait le type cible
+    tiré des jauges — d'où un biais QCM sur toutes les questions du lecteur."""
+    from llm.prompts import build_question_prompt
+
+    prompt = build_question_prompt(
+        paragraph="Un paragraphe de cours suffisamment long pour être questionné." * 5,
+        standalone=True,
+        preferred_question_type="teach_back",
+    )
+    assert "qcm si possible" not in prompt.lower()
+    assert "reformule-la" not in prompt.lower()
+    # La contrainte d'autoportance reste, l'ancrage dans le paragraphe aussi.
+    assert "selon le passage" in prompt
+    assert "ancrée dans le paragraphe fourni" in prompt
+    assert '"teach_back"' in prompt
 
 
 def test_reader_websocket_error(client, monkeypatch):

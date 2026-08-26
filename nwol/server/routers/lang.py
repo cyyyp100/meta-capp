@@ -59,6 +59,9 @@ class LessonCompleteBody(BaseModel):
 
 class LessonFinalizeBody(BaseModel):
     responses: list[str] = []
+    # Intitulés réellement affichés (le sas de langue a les siens, traduits) :
+    # sans eux, les réflexions seraient persistées sous les libellés du lecteur.
+    questions: list[str] = []
 
 
 class PlacementSubmitBody(BaseModel):
@@ -150,7 +153,7 @@ def lesson_analysis(lesson_id: int) -> dict:
 @router.post("/lesson/{lesson_id}/finalize")
 def lesson_finalize(lesson_id: int, body: LessonFinalizeBody) -> dict:
     """Réflexions de métacognition + nudge du profil métacognitif global."""
-    return finalize_lang_lesson(lesson_id, body.responses)
+    return finalize_lang_lesson(lesson_id, body.responses, questions=body.questions)
 
 
 # ── Test de niveau (placement) ────────────────────────────────────────────────

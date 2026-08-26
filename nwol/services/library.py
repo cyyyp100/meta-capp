@@ -5,6 +5,8 @@
 # sont en POINTS PDF (le client met à l'échelle selon le zoom d'affichage).
 from __future__ import annotations
 
+import os
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 from config.settings import (
@@ -121,17 +123,47 @@ def render_page(doc_id: int, page: int, zoom: float = 2.5) -> str | None:
     return _render_page(doc["path"], page, zoom)
 
 
+# Cache du texte de page : {(doc_id, page): (mtime, texte)}, borné, FIFO.
+# `page_text` est appelé plusieurs fois par question (contexte LLM, masque,
+# densité mathématique du tick d'intervention toutes les 5 s) et chaque appel
+# rouvrait le PDF entier via fitz. Le mtime garde le cache honnête si le
+# document est modifié ou réimporté sous le même chemin.
+_PAGE_TEXT_CACHE: OrderedDict[tuple[int, int], tuple[float, str]] = OrderedDict()
+_PAGE_TEXT_CACHE_MAX = 128
+
+
 def page_text(doc_id: int, page: int) -> str:
     """Texte d'une page — LE point d'alimentation de tout l'empilement LLM."""
     doc = _get_document(doc_id)
     if doc is None:
         return ""
+    key = (int(doc_id), int(page))
+    mtime = _mtime(doc.get("path"))
+    cached = _PAGE_TEXT_CACHE.get(key)
+    if cached is not None and cached[0] == mtime:
+        _PAGE_TEXT_CACHE.move_to_end(key)
+        return cached[1]
+
     if doc.get("extraction_engine") == "code":
         from services import code_reader
 
-        return code_reader.page_text(doc["path"], page)
-    with PdfDocument(doc["path"]) as pdf:
-        return pdf.raw_text(page)
+        text = code_reader.page_text(doc["path"], page)
+    else:
+        with PdfDocument(doc["path"]) as pdf:
+            text = pdf.raw_text(page)
+
+    _PAGE_TEXT_CACHE[key] = (mtime, text)
+    _PAGE_TEXT_CACHE.move_to_end(key)
+    while len(_PAGE_TEXT_CACHE) > _PAGE_TEXT_CACHE_MAX:
+        _PAGE_TEXT_CACHE.popitem(last=False)
+    return text
+
+
+def _mtime(path: str | None) -> float:
+    try:
+        return os.path.getmtime(str(path))
+    except OSError:
+        return 0.0
 
 
 def page_blocks(doc_id: int, page: int) -> list[dict] | None:
@@ -158,6 +190,8 @@ def page_words(doc_id: int, page: int) -> list[list]:
 
 def clear_reader_cache(doc_id: int) -> None:
     """Purge les pages rendues du doc (sauf la vignette) — fin de session lecture."""
+    for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
+        _PAGE_TEXT_CACHE.pop(key, None)
     doc = _get_document(doc_id)
     if doc and doc.get("path"):
         _clear_reader_cache(doc["path"])

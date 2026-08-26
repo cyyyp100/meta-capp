@@ -3,6 +3,8 @@
 # client -> serveur : {"type":"ask","question","page"} | {"type":"rephrase","page"}
 #                     {"type":"recap","page"} | {"type":"hook","page"}
 #                     {"type":"viewport","page"} | {"type":"mode","mode"} | {"type":"focus"}
+#                     {"type":"activity","hidden":bool}  # fenêtre masquée / app au
+#                       second plan -> alimente la dérive passive d'attention
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
 #                     {"type":"error","message"} | {"type":"intervention",...}
 #                     {"type":"system","message"}
@@ -41,6 +43,10 @@ router = APIRouter(tags=["reading"])
 
 _TICK_SECONDS = 5
 _FOCUS_DURATION_S = FOCUS_DEFAULT_MIN * 60
+# Q&R de la session relayées au LLM (génération ET évaluation) : assez pour qu'il
+# se réfère à ce qui vient d'être travaillé, assez peu pour ne pas gonfler le prompt.
+_MAX_HISTORY = 5
+_MAX_HISTORY_TEXT_CHARS = 240
 # Bornage des entrées client (S4) : longueurs maximales acceptées.
 _MAX_QUESTION_CHARS = 4000
 _MAX_SNIPPET_CHARS = 1000
@@ -54,9 +60,10 @@ class ReaderMessage(BaseModel):
 
     type: Literal[
         "viewport", "mode", "focus", "ask", "rephrase", "recap", "hook",
-        "start_qa", "qa_answer",
+        "start_qa", "qa_answer", "activity",
     ]
     page: int | None = None
+    hidden: bool = False
     session_id: int | None = None
     mode: str | None = None
     question: str | None = None
@@ -108,17 +115,25 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "focus_until": 0.0,
         "qa_qid": None,
         "qa_question_type": None,  # type de la question Q&R courante (jauges type-aware)
+        "qa_text": "",  # énoncé de la question Q&R courante (historique de session)
         "session_id": None,
         "exchanges": [],  # historique [{question, answer}] (6 derniers)
         "recent_qtypes": [],  # types de questions Q&R récents (anti-répétition, 5 max)
         "gated": False,  # question automatique bloquante en cours (scroll verrouillé côté UI)
         "live_gauges": None,  # jauges métacognitives live (services.session.LiveGauges)
+        "generating": False,  # une génération LLM est en vol (Gemma est occupée)
+        "away": False,  # fenêtre masquée / application au second plan
+        "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
+        "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
+        "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
+        "pages_seen": 0,  # pages distinctes vues au dernier tick (progression)
     }
     state["live_gauges"] = await loop.run_in_executor(None, session.LiveGauges)
     # Dwell / visites / questions par page : mémoire de session partagée, qui
     # alimente aussi la politique d'intervention (services/intervention.py).
     memory = SessionMemory()
     memory.on_page_view(1)
+    state["pages_seen"] = len(memory.pages_seen())
     # Nombre de pages du document (si connu) pour borner les entrées client (S4).
     doc_row = await loop.run_in_executor(None, get_document, doc_id)
     page_count = int(doc_row["page_count"] or 0) if doc_row else 0
@@ -131,8 +146,26 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         page = max(1, page)
         return min(page, page_count) if page_count else page
 
+    def refresh_busy() -> None:
+        """La politique se tait tant que Gemma travaille OU qu'une réponse est due.
+
+        Deux raisons distinctes, un seul drapeau : une génération en vol (réponse,
+        reformulation, question…) et une question bloquante en attente. Avant, seule
+        la seconde comptait — une décision d'intervention pouvait donc partir
+        pendant que l'étudiant attendait sa réponse."""
+        policy.set_busy(bool(state["generating"] or state["gated"]))
+
+    def start_generation() -> None:
+        state["generating"] = True
+        refresh_busy()
+
+    def end_generation() -> None:
+        state["generating"] = False
+        refresh_busy()
+
     def make_callbacks():
         def on_success(result: dict) -> None:
+            end_generation()
             push_threadsafe(loop, out, {
                 "type": "answer",
                 "answer": result.get("answer", ""),
@@ -140,6 +173,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             })
 
         def on_error(message: str) -> None:
+            end_generation()
             push_threadsafe(loop, out, {"type": "error", "message": str(message)})
 
         return on_success, on_error
@@ -166,8 +200,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         except Exception:  # pragma: no cover - persistance best-effort
             state["qa_qid"] = None
         state["qa_question_type"] = qtype
+        state["qa_text"] = result.get("question", "")
+        # Départ du chronomètre de réponse : il alimente le modèle d'attention
+        # (`response_time_ms`), qui l'attendait sans jamais le recevoir.
+        state["qa_sent_at"] = time.monotonic()
         state["recent_qtypes"].append(qtype)
         del state["recent_qtypes"][:-5]
+        state["generating"] = False
         event = {
             "type": "gated_question" if gated else "qa_question",
             "question": result.get("question", ""),
@@ -180,10 +219,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             ),
         }
         if gated:
-            state["gated"] = True
             # La politique se tait tant que l'étudiant doit répondre.
-            policy.set_busy(True)
+            state["gated"] = True
             event["page"] = page
+        # Un seul point de bascule : la génération est finie, le verrou est posé.
+        refresh_busy()
         push_threadsafe(loop, out, event)
 
     async def _sender() -> None:
@@ -230,12 +270,14 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         # l'intervention, et l'UI verrouille le scroll.
         if payload.get("kind") == "ask_question":
             gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+            start_generation()
             assistant.generate_page_question(
                 doc_id, page,
                 lambda result, p=page, s=state["session_id"]: emit_question(result, p, s, gated=True),
-                lambda _m: None,
+                lambda _m: end_generation(),
                 session_gauges=gauges,
                 recent_question_types=list(state["recent_qtypes"]),
+                history=list(state["qa_history"]),
             )
             return
         push_threadsafe(loop, out, {
@@ -260,10 +302,36 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         get_due_flashcard=lambda: next(iter(get_due_flashcards(doc_id=doc_id, limit=1) or []), None),
     )
 
+    def passive_attention(elapsed_s: float, now: float) -> None:
+        """Fait vivre la jauge d'attention à partir du COMPORTEMENT de lecture.
+
+        Sans elle, `attention` ne bougeait qu'au retour d'une évaluation LLM :
+        elle mesurait la performance, jamais l'attention, et le déclencheur
+        `low_attention` ne pouvait s'armer qu'après une série de mauvaises
+        réponses. Tourne à chaque tick, y compris en mode focus ou discret :
+        ces modes silencient les interventions, pas l'observation."""
+        gauges = state["live_gauges"]
+        if gauges is None:
+            return
+        seen = len(memory.pages_seen())
+        progressed = max(0, seen - int(state["pages_seen"]))
+        state["pages_seen"] = seen
+        gauges.apply_reading_behaviour(
+            elapsed_s=elapsed_s,
+            stagnant_s=memory.current_dwell(now),
+            pages_progressed=progressed,
+            away=bool(state["away"]),
+        )
+
     async def _ticker() -> None:
+        last_tick = time.monotonic()
         while True:
             await asyncio.sleep(_TICK_SECONDS)
-            if state["gated"] or time.monotonic() < state["focus_until"]:
+            now = time.monotonic()
+            elapsed, last_tick = now - last_tick, now
+            # Écrit (au plus une fois par minute) dans session_gauges : executor.
+            await loop.run_in_executor(None, passive_attention, elapsed, now)
+            if state["gated"] or now < state["focus_until"]:
                 # Question bloquante en cours ou mode focus : Gemma se tait.
                 continue
             # `tick` lit le texte de page et la DB : jamais dans la boucle asyncio.
@@ -287,10 +355,18 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 if sid:
                     state["session_id"] = sid
                     if state["live_gauges"] is not None:
-                        state["live_gauges"].session_id = sid
+                        # Fige l'amorce de la session en base : la finalisation
+                        # s'en sert pour ne remonter que les jauges exercées.
+                        state["live_gauges"].attach_session(sid)
                 if page != state["page"]:
                     state["page"] = page
                     memory.on_page_view(page)
+                continue
+
+            if kind == "activity":
+                # Fenêtre masquée ou application au second plan : l'étudiant n'est
+                # pas devant sa page. Seul signal d'absence dont on dispose.
+                state["away"] = bool(msg.hidden)
                 continue
 
             if kind == "mode":
@@ -325,6 +401,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 await out.put({"type": "loading"})
 
                 def on_ask_success(result: dict, _q=question, _page=page, _sid=state["session_id"]) -> None:
+                    end_generation()
                     if state["live_gauges"] is not None:
                         state["live_gauges"].apply(result)
                     answer = result.get("answer", "")
@@ -337,6 +414,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                             logger.debug("Persistance de l'échange assistant ignorée", exc_info=True)
                     on_success(result)
 
+                start_generation()
                 assistant.answer_question(
                     doc_id, page, question, on_ask_success, on_error,
                     recent_exchanges=recent_exchanges,
@@ -345,23 +423,28 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 )
             elif kind == "rephrase":
                 await out.put({"type": "loading"})
+                start_generation()
                 assistant.rephrase_page(doc_id, page, on_success, on_error)
             elif kind == "recap":
                 await out.put({"type": "loading"})
+                start_generation()
                 assistant.chapter_recap(doc_id, page, on_success, on_error)
             elif kind == "hook":
                 await out.put({"type": "loading"})
+                start_generation()
                 assistant.curiosity_hook(doc_id, page, on_success, on_error)
             elif kind == "start_qa":
                 sid = msg.session_id
                 await out.put({"type": "loading"})
                 qa_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+                start_generation()
                 assistant.generate_page_question(
                     doc_id, page,
                     lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
                     on_error,
                     session_gauges=qa_gauges,
                     recent_question_types=list(state["recent_qtypes"]),
+                    history=list(state["qa_history"]),
                 )
             elif kind == "qa_answer":
                 sid = msg.session_id
@@ -372,20 +455,46 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 qid = state.get("qa_qid")
                 await out.put({"type": "loading"})
 
-                def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page) -> None:
+                def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
+                    end_generation()
                     # Signaux dérivés de la FORME de la réponse (longueur, questions
                     # posées, connecteurs, analogies) : ils enrichissent curiosité et
                     # créativité que le LLM seul sous-estime.
                     ev = augment_evaluation_with_response_signals(ev, _answer)
                     # Type de la question -> jauges type-aware (curiosité ≠ contexte).
                     ev["question_type"] = state.get("qa_question_type")
+                    verdict = ev.get("verdict")
+                    # Deux signaux comportementaux que le modèle d'attention attend
+                    # depuis toujours et que personne ne lui donnait : le temps mis à
+                    # répondre, et la série d'erreurs en cours.
+                    sent_at = float(state.get("qa_sent_at") or 0.0)
+                    response_time_ms = (
+                        int(max(0.0, time.monotonic() - sent_at) * 1000) if sent_at else None
+                    )
+                    state["consecutive_incorrect"] = (
+                        int(state["consecutive_incorrect"]) + 1 if verdict == "incorrect" else 0
+                    )
                     if state["live_gauges"] is not None:
-                        state["live_gauges"].apply(ev)
-                    memory.on_answer(_page, ev.get("verdict"))
+                        state["live_gauges"].apply(
+                            ev,
+                            response_time_ms=response_time_ms,
+                            consecutive_incorrect=int(state["consecutive_incorrect"]),
+                        )
+                    memory.on_answer(_page, verdict)
+                    # Q&R de la session : relayée aux prochains prompts (génération
+                    # comme évaluation), qui la citaient sans jamais la recevoir.
+                    state["qa_history"].append({
+                        "question": str(_q or state.get("qa_text") or "")[:_MAX_HISTORY_TEXT_CHARS],
+                        "question_type": ev.get("question_type") or "",
+                        "answer": _answer[:_MAX_HISTORY_TEXT_CHARS],
+                        "verdict": verdict or "",
+                    })
+                    del state["qa_history"][:-_MAX_HISTORY]
                     try:
                         save_answer(
                             question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,
-                            verdict=ev.get("verdict"), feedback=ev.get("feedback"), session_id=_sid,
+                            verdict=verdict, feedback=ev.get("feedback"), session_id=_sid,
+                            response_time_ms=response_time_ms,
                         )
                     except Exception:  # persistance best-effort
                         logger.debug("Persistance de la réponse ignorée", exc_info=True)
@@ -410,9 +519,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         except Exception:  # persistance best-effort
                             logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
                     # Idée principale présente (correct/partial) -> fin du verrouillage.
-                    if ev.get("verdict") in ("correct", "partial"):
+                    if verdict in ("correct", "partial"):
                         state["gated"] = False
-                        policy.set_busy(False)
+                        refresh_busy()
                     push_threadsafe(loop, out, {
                         "type": "qa_feedback",
                         "verdict": ev.get("verdict", ""),
@@ -425,12 +534,14 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         "flashcard_created": flashcard_created,
                     })
 
+                start_generation()
                 assistant.evaluate_page_answer(
                     doc_id, page, question, answer, on_eval, on_error,
                     question_type=state.get("qa_question_type") or "",
                     # La question persistée porte sa réponse canonique et ses
                     # propositions : le service s'en sert pour corriger.
                     question_id=qid,
+                    history=list(state["qa_history"]),
                 )
     except WebSocketDisconnect:
         pass

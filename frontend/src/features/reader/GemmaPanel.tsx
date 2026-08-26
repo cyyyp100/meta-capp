@@ -222,8 +222,27 @@ export function GemmaPanel({
         }
       }
     };
+    // Présence : fenêtre masquée ou application passée au second plan. C'est le
+    // seul signal d'absence dont dispose la dérive passive d'attention côté
+    // serveur — sans lui, `attention` ne mesurait que la performance aux questions.
+    let away = false;
+    const reportPresence = () => {
+      const hidden = document.hidden || !document.hasFocus();
+      if (hidden === away || ws.readyState !== WebSocket.OPEN) return;
+      away = hidden;
+      ws.send(JSON.stringify({ type: "activity", hidden }));
+    };
+    document.addEventListener("visibilitychange", reportPresence);
+    window.addEventListener("blur", reportPresence);
+    window.addEventListener("focus", reportPresence);
+
     wsRef.current = ws;
-    return () => ws.close();
+    return () => {
+      document.removeEventListener("visibilitychange", reportPresence);
+      window.removeEventListener("blur", reportPresence);
+      window.removeEventListener("focus", reportPresence);
+      ws.close();
+    };
   }, [docId]);
 
   useEffect(() => {

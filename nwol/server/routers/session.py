@@ -27,6 +27,10 @@ class EndBody(BaseModel):
 
 class FinalizeBody(BaseModel):
     responses: list[str] = []
+    # Intitulés réellement affichés : les deux questions fixes plus celle que le
+    # LLM a générée avec l'analyse. Sans eux, la troisième réflexion serait
+    # persistée sous un libellé générique.
+    questions: list[str] = []
 
 
 @router.post("/start")
@@ -46,13 +50,16 @@ def metrics(session_id: int) -> dict:
 
 @router.get("/{session_id}/analysis")
 def analysis(session_id: int) -> dict:
-    """Analyse LLM de la session (best-effort) pour le sas de sortie."""
+    """Analyse LLM de la session + la 3e question de réflexion, générée.
+
+    Les deux arrivent ensemble parce qu'ils s'affichent ensemble : le sas montre
+    déjà ses deux questions fixes pendant que cet appel travaille."""
     return session_analysis(session_id)
 
 
 @router.post("/{session_id}/finalize")
 def finalize(session_id: int, body: FinalizeBody) -> dict:
-    return finalize_session(session_id, body.responses)
+    return finalize_session(session_id, body.responses, questions=body.questions)
 
 
 # Streak (séries de jours consécutifs), affiché sur l'accueil.

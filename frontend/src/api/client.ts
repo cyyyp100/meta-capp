@@ -18,6 +18,7 @@ import type {
   QuizSubject,
   ReaderBlock,
   SavedHighlight,
+  SessionAnalysis,
   SessionMetrics,
 } from "./types";
 
@@ -177,8 +178,10 @@ export const api = {
   startSession: (docId: number) => postJSON<{ session_id: number }>("/api/session/start", { doc_id: docId }),
   endSession: (sid: number, pagesRead: number, durationS: number) =>
     postJSON<SessionMetrics>(`/api/session/${sid}/end`, { pages_read: pagesRead, duration_s: durationS }),
-  finalizeSession: (sid: number, responses: string[]) =>
-    postJSON<{ ok: boolean; score: number }>(`/api/session/${sid}/finalize`, { responses }),
+  // `questions` = les intitulés réellement affichés (2 fixes + celle générée) :
+  // sans eux, la 3e réflexion serait persistée sous un libellé générique.
+  finalizeSession: (sid: number, responses: string[], questions: string[]) =>
+    postJSON<{ ok: boolean; score: number }>(`/api/session/${sid}/finalize`, { responses, questions }),
   streak: () => getJSON<{ streak: number }>("/api/streak"),
   languages: () =>
     getJSON<{ code: string; label: string; flag: string; script?: string; rtl?: boolean }[]>("/api/lang/languages"),
@@ -239,8 +242,11 @@ export const api = {
   langLessonAnalysis: (lessonId: number) =>
     getJSON<LangLessonAnalysis>(`/api/lang/lesson/${lessonId}/analysis`),
   // Finalisation métacognitive : réflexions + nudge du profil global.
-  langLessonFinalize: (lessonId: number, responses: string[]) =>
-    postJSON<{ ok: boolean; score: number }>(`/api/lang/lesson/${lessonId}/finalize`, { responses }),
+  langLessonFinalize: (lessonId: number, responses: string[], questions: string[]) =>
+    postJSON<{ ok: boolean; score: number }>(`/api/lang/lesson/${lessonId}/finalize`, {
+      responses,
+      questions,
+    }),
   languagePlacementStart: (language: string) =>
     postJSON<LangPlacementTest>("/api/lang/placement/start", { language }),
   languagePlacementSubmit: (language: string, answers: Record<string, string>) =>
@@ -253,8 +259,11 @@ export const api = {
   // Warm-up du SAS d'entrée : 5 cartes sélectionnées par pertinence (dues + récence/matière).
   sessionStartCards: (docId: number, limit = 5) =>
     getJSON<Flashcard[]>(`/api/flashcards/session-start?doc_id=${docId}&limit=${limit}`),
-  // Analyse LLM de la session (best-effort, "" si indisponible).
-  sessionAnalysis: (sid: number) => getJSON<{ analysis: string }>(`/api/session/${sid}/analysis`),
+  // Analyse LLM de la session + LA 3e question de réflexion, générée pour cette
+  // session. Les deux arrivent ensemble parce qu'ils s'affichent ensemble.
+  // Best-effort : analyse "" si indisponible, question toujours renseignée.
+  sessionAnalysis: (sid: number) =>
+    getJSON<SessionAnalysis>(`/api/session/${sid}/analysis`),
   // ── Brainstorming (chat libre + RAG sur la base utilisateur) ─────────────────
   brainstormDiscussions: () => getJSON<BrainstormDiscussion[]>("/api/brainstorming/discussions"),
   createDiscussion: (title?: string) =>

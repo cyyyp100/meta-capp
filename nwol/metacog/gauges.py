@@ -4,6 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config import question_types
+from config.settings import (
+    ATTENTION_AWAY_PER_MIN,
+    ATTENTION_DRIFT_PER_MIN,
+    ATTENTION_IDLE_GRACE_S,
+    ATTENTION_PROGRESS_BONUS,
+)
 from db.metacog import CRITERIA
 
 SESSION_INHERITANCE_FACTOR = 0.8
@@ -135,6 +141,34 @@ def _type_signal_scale(criterion: str, target_gauges: tuple[str, ...]) -> float:
     if not target_gauges:
         return 1.0
     return _TYPE_TARGET_SCALE if criterion in target_gauges else _TYPE_OTHER_SCALE
+
+
+def reading_attention_delta(
+    elapsed_s: float,
+    stagnant_s: float,
+    pages_progressed: int,
+    away: bool,
+) -> float:
+    """Dérive d'attention imputable au COMPORTEMENT de lecture, sur `elapsed_s`.
+
+    C'est le seul endroit du produit où `attention` bouge sans passer par le LLM.
+    Trois observations, et rien d'autre — le reste (vitesse de scroll, souris)
+    n'est pas mesuré, donc pas inventé ici :
+
+      * fenêtre masquée ou application au second plan -> l'étudiant n'est pas là ;
+      * plus de `ATTENTION_IDLE_GRACE_S` sur la même page sans avancer -> décrochage
+        probable (la lecture lente légitime est amortie par la grâce) ;
+      * pages nouvellement lues -> la lecture avance, petit crédit.
+
+    Renvoie un delta signé, à borner par l'appelant (cf. `LiveGauges`)."""
+    minutes = max(0.0, float(elapsed_s)) / 60.0
+    delta = 0.0
+    if away:
+        delta -= ATTENTION_AWAY_PER_MIN * minutes
+    elif float(stagnant_s) > ATTENTION_IDLE_GRACE_S:
+        delta -= ATTENTION_DRIFT_PER_MIN * minutes
+    delta += ATTENTION_PROGRESS_BONUS * max(0, int(pages_progressed))
+    return delta
 
 
 def snapshot(gauges: dict[str, GaugeState]) -> dict[str, float]:

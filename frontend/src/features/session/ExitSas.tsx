@@ -14,26 +14,62 @@ import { formatDuration } from "./duration";
 import { SasCard, SasOverlay } from "./SasOverlay";
 
 // Bilan de fin de session : analyse LLM + métriques + questions de réflexion métacognitive.
+//
+// Deux questions FIXES s'affichent tout de suite : l'étudiant écrit pendant que
+// Gemma travaille. La TROISIÈME est générée pour cette session et arrive avec
+// l'analyse — c'est le même appel qui porte les deux. Attendre le LLM pour poser
+// les trois faisait patienter devant un écran vide ; les figer toutes les trois
+// jetait une question personnalisée déjà payée.
 export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose: () => void }) {
   const t = useT();
   const reduce = useReducedMotion();
-  const [responses, setResponses] = useState<string[]>(metrics.reflection_questions.map(() => ""));
+  const fixedQuestions = metrics.reflection_questions;
+  const [responses, setResponses] = useState<string[]>(() =>
+    Array(fixedQuestions.length + 1).fill(""),
+  );
   const [saving, setSaving] = useState(false);
 
-  // Analyse LLM de la session (stats + jauges session + jauges profil), best-effort.
+  // Analyse LLM de la session (stats + jauges session + jauges profil) ET la
+  // question de réflexion personnalisée. Best-effort.
   const { data: analysis, isLoading: analysisLoading } = useQuery({
     queryKey: ["session-analysis", metrics.session_id],
     queryFn: () => api.sessionAnalysis(metrics.session_id),
     staleTime: Infinity,
   });
+  const generatedQuestion = analysis?.question ?? "";
+
+  function setResponse(index: number, value: string) {
+    setResponses((r) => r.map((v, j) => (j === index ? value : v)));
+  }
+
+  // Les intitulés partent avec les réponses : la 3e n'existe nulle part côté
+  // serveur, elle a été générée pour cette session.
+  function submitFinalize() {
+    return api.finalizeSession(metrics.session_id, responses, [
+      ...fixedQuestions,
+      generatedQuestion,
+    ]);
+  }
 
   async function finish() {
     setSaving(true);
     try {
-      await api.finalizeSession(metrics.session_id, responses);
+      await submitFinalize();
     } catch {
       /* on ferme quand même */
     }
+    onClose();
+  }
+
+  // « Passer » finalise AUSSI, sans attendre : la session a été mesurée (jauges,
+  // réponses évaluées), et jeter cette mesure parce que l'étudiant ne veut pas
+  // écrire de réflexion n'avait pas de sens. Les réponses partent telles quelles
+  // — vides, la métacognition n'est simplement pas notée (on ne note pas un
+  // silence), et une session sans aucune mesure ne déplace rien.
+  function skip() {
+    submitFinalize().catch(() => {
+      /* best-effort : la fermeture ne dépend pas du réseau */
+    });
     onClose();
   }
 
@@ -82,34 +118,45 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
         )}
 
         <div className="flex flex-col gap-3.5">
-          {metrics.reflection_questions.map((q, i) => (
-            <div key={i}>
-              <label className="text-[13px] font-semibold" htmlFor={`reflection-${i}`}>
-                {q}
-              </label>
-              <AutoGrowTextarea
-                id={`reflection-${i}`}
-                value={responses[i]}
-                onChange={(e) => setResponses((r) => r.map((v, j) => (j === i ? e.target.value : v)))}
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "8px 10px",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 13,
-                  minHeight: 52,
-                }}
-              />
-            </div>
+          {fixedQuestions.map((q, i) => (
+            <Reflection
+              key={i}
+              index={i}
+              question={q}
+              value={responses[i]}
+              onChange={(value) => setResponse(i, value)}
+            />
           ))}
+
+          {/* La question personnalisée : elle arrive avec l'analyse, d'où le
+              même état de chargement. Elle s'ajoute au bas de la liste plutôt
+              que de décaler les deux premières, déjà en cours de rédaction. */}
+          {analysisLoading ? (
+            <div className="flex flex-col gap-2" role="status" aria-busy="true">
+              <span className="sr-only">{t("exit.question_loading")}</span>
+              <Skeleton className="h-3.5 w-[70%]" />
+              <Skeleton className="h-[52px] w-full" />
+            </div>
+          ) : (
+            generatedQuestion && (
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: [0.33, 1, 0.68, 1] }}
+              >
+                <Reflection
+                  index={fixedQuestions.length}
+                  question={generatedQuestion}
+                  value={responses[fixedQuestions.length]}
+                  onChange={(value) => setResponse(fixedQuestions.length, value)}
+                />
+              </motion.div>
+            )
+          )}
         </div>
 
         <div className="mt-4.5 flex justify-end gap-2.5">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={skip}>
             {t("exit.skip")}
           </Button>
           {/* Le bouton affichait « … » pendant l'enregistrement : un indicateur
@@ -120,6 +167,43 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
         </div>
       </SasCard>
     </SasOverlay>
+  );
+}
+
+function Reflection({
+  index,
+  question,
+  value,
+  onChange,
+}: {
+  index: number;
+  question: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="text-[13px] font-semibold" htmlFor={`reflection-${index}`}>
+        {question}
+      </label>
+      <AutoGrowTextarea
+        id={`reflection-${index}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%",
+          marginTop: 6,
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
+          padding: "8px 10px",
+          background: "var(--bg)",
+          color: "var(--text)",
+          fontFamily: "var(--font-ui)",
+          fontSize: 13,
+          minHeight: 52,
+        }}
+      />
+    </div>
   );
 }
 

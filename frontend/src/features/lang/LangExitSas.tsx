@@ -44,7 +44,7 @@ export function LangExitSas({
   async function finish() {
     setSaving(true);
     try {
-      await api.langLessonFinalize(lessonId, responses);
+      await api.langLessonFinalize(lessonId, responses, questions);
     } catch {
       /* on ferme quand même */
     }

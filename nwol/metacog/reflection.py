@@ -114,6 +114,30 @@ def normalize_meta_cognition_questions(
     return selected[:3] or _DEFAULT_QUESTIONS
 
 
+def pick_reflection_question(
+    candidates: list[str] | None,
+    avoid: list[str] | None = None,
+    seed_context: str | int | None = None,
+) -> str:
+    """LA question de réflexion générée, à poser en plus des questions fixes.
+
+    Prend la première proposition du LLM qui ne redit pas une question déjà
+    posée (`avoid` = les questions fixes du sas + les questions récentes) ; à
+    défaut, pioche dans la banque locale en la faisant tourner sur `seed_context`
+    pour ne pas reposer la même à chaque session."""
+    avoid_keys = {_normalize_question(question) for question in avoid or []}
+    for question in candidates or []:
+        clean = _clean_question(question)
+        if clean and _normalize_question(clean) not in avoid_keys:
+            return clean
+    for question in normalize_meta_cognition_questions(
+        [], previous_questions=list(avoid or []), seed_context=seed_context
+    ):
+        if _normalize_question(question) not in avoid_keys:
+            return question
+    return _DEFAULT_QUESTIONS[-1]
+
+
 def fallback_meta_cognition_analysis(
     questions: list[str],
     answers: list[str],

@@ -63,3 +63,15 @@ def get_latest_gauges(session_id: int) -> dict[str, float]:
     for row in rows:
         latest[row["gauge_name"]] = float(row["value"])
     return latest
+
+
+def get_first_gauges(session_id: int) -> dict[str, float]:
+    """Première valeur enregistrée par jauge — l'AMORCE de la session.
+
+    Sert à distinguer une jauge mesurée d'une jauge restée à son amorce
+    (profil × 0,8) : sans ce repère, une jauge jamais exercée tirait le profil
+    vers le bas de 20 % à chaque session, par pure construction."""
+    first: dict[str, float] = {}
+    for row in get_session_gauges(session_id):  # déjà trié par t, id
+        first.setdefault(row["gauge_name"], float(row["value"]))
+    return first

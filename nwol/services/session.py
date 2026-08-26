@@ -7,6 +7,10 @@ from __future__ import annotations
 import logging
 import time
 
+from config.settings import (
+    ATTENTION_PASSIVE_FLOOR,
+    ATTENTION_PERSIST_EVERY_S,
+)
 from db.answers import get_answers_for_session
 from db.metacog import (
     CRITERIA,
@@ -16,8 +20,12 @@ from db.metacog import (
     set_general_analysis,
     update_profile_values,
 )
-from db.session_gauges import get_latest_gauges, record_gauges
-from db.session_reflections import save_session_reflection
+from db.questions import count_assistant_questions
+from db.session_gauges import get_first_gauges, get_latest_gauges, record_gauges
+from db.session_reflections import (
+    get_recent_reflection_questions,
+    save_session_reflection,
+)
 from db.sessions import end_session as _end_session
 from db.sessions import get_session
 from db.sessions import start_session as _start_session
@@ -25,10 +33,12 @@ from db.user import DEFAULT_USER_ID
 from metacog.gauges import (
     clamp_gauge,
     make_gauges,
+    reading_attention_delta,
     snapshot,
     update_gauges_from_evaluation,
 )
-from metacog.profile import compute_alpha, update_profile
+from metacog.profile import compute_alpha, compute_confidence, update_profile
+from metacog.reflection import fallback_meta_cognition_analysis, pick_reflection_question
 
 logger = logging.getLogger("services.session")
 
@@ -43,10 +53,14 @@ __all__ = [
     "LiveGauges",
 ]
 
+# Les questions FIXES du sas de sortie. Il y en a deux : l'étudiant commence à
+# écrire immédiatement, pendant que le LLM prépare la troisième (personnalisée,
+# livrée avec l'analyse de session — cf. `session_analysis`). Trois questions
+# figées faisaient attendre le modèle pour rien ; trois questions générées
+# faisaient attendre l'étudiant devant un écran vide.
 REFLECTION_QUESTIONS = [
     "Qu'as-tu compris de plus important dans cette session ?",
     "Quel point reste flou et mériterait d'être revu ?",
-    "Comment pourrais-tu réutiliser ce que tu viens d'apprendre ?",
 ]
 
 # Critères que le seul taux de réussite informe honnêtement, quand la séance n'a
@@ -58,26 +72,86 @@ _PROFILE_NUDGE_CRITERIA = ("attention", "context_comprehension", "retention")
 class LiveGauges:
     """Jauges métacognitives live d'une session de lecture web (en mémoire).
 
-    Même sémantique que le moteur Tk (`metacog.gauges`) : seed = profil long terme
-    × 0.8, mise à jour additive bornée à partir des `metacog_signals`/`verdict` que
-    chaque réponse d'assistant ou évaluation renvoie déjà. Persistance best-effort
-    dans `session_gauges` dès qu'un `session_id` est connu (alimente le radar de
-    stats) — un incident n'interrompt jamais la lecture."""
+    Seed = profil long terme × 0.8, puis deux sources de mouvement :
+
+      * `apply` — les `metacog_signals`/`verdict` que chaque réponse d'assistant
+        ou évaluation renvoie déjà, plus le temps de réponse et la série
+        d'erreurs (le modèle d'attention les attendait depuis toujours) ;
+      * `apply_reading_behaviour` — la dérive passive du comportement de lecture,
+        seul chemin par lequel `attention` bouge sans LLM.
+
+    Persistance best-effort dans `session_gauges` dès qu'un `session_id` est connu
+    (alimente le radar de stats) — un incident n'interrompt jamais la lecture."""
 
     def __init__(self, session_id: int | None = None, user_id: int = DEFAULT_USER_ID) -> None:
-        self.session_id = session_id
+        self.session_id = None
         try:
             profile = ensure_profile(user_id)
         except Exception:
             profile = {}
         self._gauges = make_gauges(profile)
         self._t0 = time.monotonic()
+        self._last_passive_record = 0.0
+        if session_id is not None:
+            self.attach_session(session_id)
+
+    def attach_session(self, session_id: int) -> None:
+        """Rattache la session et fige son AMORCE (profil × 0,8) en base.
+
+        Le lecteur ouvre son WebSocket avant de connaître le `session_id` : sans
+        ce rattachement explicite, la première ligne écrite dans `session_gauges`
+        était déjà une mesure, et plus rien ne disait d'où la session était partie.
+        La finalisation a besoin de ce repère pour ne remonter au profil que les
+        jauges réellement exercées (cf. `nudge_metacog_profile`)."""
+        if self.session_id is not None:
+            return
+        self.session_id = int(session_id)
         self._record()
 
-    def apply(self, evaluation: dict | None) -> dict[str, float]:
+    def apply(
+        self,
+        evaluation: dict | None,
+        response_time_ms: int | None = None,
+        consecutive_incorrect: int = 0,
+    ) -> dict[str, float]:
         """Intègre les signaux d'une réponse/évaluation puis renvoie l'état courant."""
-        update_gauges_from_evaluation(self._gauges, evaluation or {})
+        update_gauges_from_evaluation(
+            self._gauges,
+            evaluation or {},
+            response_time_ms=response_time_ms,
+            consecutive_incorrect=consecutive_incorrect,
+        )
         self._record()
+        return self.snapshot()
+
+    def apply_reading_behaviour(
+        self,
+        elapsed_s: float,
+        stagnant_s: float,
+        pages_progressed: int,
+        away: bool,
+    ) -> dict[str, float]:
+        """Dérive passive de l'attention (appelée à chaque tick du lecteur).
+
+        La dérive NÉGATIVE s'arrête à `ATTENTION_PASSIVE_FLOOR` : ne rien faire
+        pendant une lecture ne doit pas pouvoir vider la jauge, seulement la faire
+        descendre sous le seuil d'intervention. Un crédit positif, lui, s'applique
+        toujours. Persistance limitée à une écriture par minute : le tick tourne
+        toutes les 5 s, et six lignes par tick noieraient la table."""
+        delta = reading_attention_delta(elapsed_s, stagnant_s, pages_progressed, away)
+        gauge = self._gauges.get("attention")
+        if gauge is None or not delta:
+            return self.snapshot()
+        if delta < 0:
+            delta = max(delta, ATTENTION_PASSIVE_FLOOR - gauge.value)
+            if delta >= 0:
+                return self.snapshot()
+        gauge.apply_delta(delta)
+
+        now = time.monotonic()
+        if now - self._last_passive_record >= ATTENTION_PERSIST_EVERY_S:
+            self._last_passive_record = now
+            self._record()
         return self.snapshot()
 
     def snapshot(self) -> dict[str, float]:
@@ -120,12 +194,15 @@ def session_metrics(session_id: int) -> dict:
 
 
 def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
-    """Analyse LLM de la session : stats + jauges de session + jauges de profil.
+    """Analyse LLM de la session + LA question de réflexion personnalisée.
 
-    Best-effort : renvoie {"analysis": ""} si le LLM est indisponible. Réutilise le
-    « session summary » du moteur métacog (on n'en garde que le résumé qualitatif)."""
+    Best-effort : renvoie une analyse vide et une question de la banque locale si
+    le LLM est indisponible. Les deux voyagent ensemble parce qu'ils s'affichent
+    ensemble — le sas montre déjà ses deux questions fixes pendant ce temps."""
     metrics = session_metrics(session_id)
-    session_gauges = get_latest_gauges(session_id)
+    # Mêmes jauges que la finalisation : une jauge restée à son amorce n'a rien
+    # mesuré, et le prompt la commenterait comme un « net retrait » sur le profil.
+    session_gauges = _measured_gauges(session_id)
     try:
         profile = ensure_profile(user_id)
     except Exception:
@@ -140,6 +217,8 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
     }
     session_data = {**stats, "gauges": session_gauges, "profile": profile_gauges}
     context = {"session_data": session_data, "metacog_profile": profile_gauges}
+
+    summary: dict = {}
     try:
         from llm.ollama_client import generate_session_summary_async
         from services.llm_bridge import run_llm_sync
@@ -148,14 +227,91 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
             lambda ok, err: generate_session_summary_async(context, ok, err),
         )
         summary = (result or {}).get("session_summary") or {}
-        return {"analysis": str(summary.get("qualitative_summary") or "")}
     except Exception:  # pragma: no cover - best-effort, LLM indisponible
-        return {"analysis": ""}
+        logger.debug("Analyse de session ignorée (LLM indisponible)", exc_info=True)
+
+    recent = _safe(lambda: get_recent_reflection_questions(user_id), [])
+    return {
+        "analysis": str(summary.get("qualitative_summary") or ""),
+        "question": pick_reflection_question(
+            summary.get("metacognitive_questions") or [],
+            avoid=list(REFLECTION_QUESTIONS) + list(recent),
+            seed_context=session_id,
+        ),
+    }
+
+
+def _safe(fn, default):
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
+def _reflection_pairs(questions: list[str] | None, responses: list[str] | None) -> list[dict]:
+    """Apparie chaque réponse avec l'intitulé RÉELLEMENT posé.
+
+    Le sas envoie ses questions avec les réponses : la troisième est générée, on
+    ne peut donc plus la retrouver dans une constante. `questions` absent (appel
+    interne, séance de langue) -> on retombe sur les questions fixes."""
+    questions = list(questions or [])
+    pairs: list[dict] = []
+    for order, response in enumerate(responses or []):
+        if order < len(questions) and str(questions[order] or "").strip():
+            label = str(questions[order]).strip()
+        elif order < len(REFLECTION_QUESTIONS):
+            label = REFLECTION_QUESTIONS[order]
+        else:
+            label = f"Réflexion {order + 1}"
+        pairs.append({"question": label, "answer": str(response or "")})
+    return pairs
+
+
+def _measure_meta_cognition(
+    pairs: list[dict],
+    metrics: dict,
+    profile_gauges: dict,
+) -> float | None:
+    """Score de métacognition (0-100) tiré des réponses du sas de sortie.
+
+    C'est la mesure que les prompts d'évaluation annoncent depuis toujours
+    (« meta_cognition sera évaluée dans le sas de fin de session ») et qui
+    n'existait nulle part : `meta_cognition` ne bougeait que par micro-deltas.
+    Renvoie None si l'étudiant n'a rien écrit — on ne note pas un silence."""
+    questions = [pair["question"] for pair in pairs]
+    answers = [pair["answer"] for pair in pairs]
+    if not any(answer.strip() for answer in answers):
+        return None
+
+    context = {
+        "questions": questions,
+        "answers": answers,
+        "session_context": metrics or {},
+        "user_profile": profile_gauges or {},
+    }
+    analysis: dict | None = None
+    try:
+        from llm.ollama_client import analyze_meta_cognition_answers_async
+        from services.llm_bridge import run_llm_sync
+
+        analysis = run_llm_sync(
+            lambda ok, err: analyze_meta_cognition_answers_async(context, ok, err),
+        )
+    except Exception:  # LLM indisponible : l'analyse locale suffit à noter
+        logger.debug("Analyse métacognitive LLM ignorée", exc_info=True)
+    if not analysis:
+        analysis = fallback_meta_cognition_analysis(
+            questions, answers, metrics or {}, profile_gauges or {}
+        )
+    try:
+        return clamp_gauge(float(analysis.get("score", 50.0)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _update_general_analysis(
-    session_id: int,
-    responses: list[str],
+    session_id: int | None,
+    pairs: list[dict],
     metrics: dict,
     session_gauges: dict,
     user_id: int,
@@ -164,18 +320,11 @@ def _update_general_analysis(
     try:
         profile = get_profile(user_id) or {}
         profile_gauges = {k: float(profile.get(k, 50.0)) for k in CRITERIA}
-        reflections = [
-            {
-                "question": REFLECTION_QUESTIONS[i] if i < len(REFLECTION_QUESTIONS) else f"Réflexion {i + 1}",
-                "answer": str(r),
-            }
-            for i, r in enumerate(responses or [])
-        ]
         context = {
             "profile": profile_gauges,
             "session_metrics": metrics,
             "session_gauges": session_gauges or {},
-            "reflections": reflections,
+            "reflections": list(pairs),
             "previous_analysis": str(profile.get("general_analysis") or ""),
         }
         from llm.ollama_client import generate_profile_analysis_async
@@ -191,6 +340,45 @@ def _update_general_analysis(
         logger.debug("Analyse de profil ignorée (analyse précédente conservée)", exc_info=True)
 
 
+def _measured_gauges(session_id: int) -> dict[str, float]:
+    """Jauges de fin de session, AMPUTÉES de celles qui n'ont jamais bougé.
+
+    Une session démarre à profil × 0,8. Une jauge que la séance n'a pas exercée
+    finit donc exactement à son amorce — 20 % sous le profil — et la remonter
+    telle quelle tirait le profil vers le bas à chaque session, sans qu'aucune
+    mesure ne le justifie. On ne remonte que ce qui a bougé ; le moteur de profil
+    laisse les autres critères intacts (`update_profile_gauges_from_session`
+    retombe sur la valeur courante quand un critère est absent)."""
+    latest = get_latest_gauges(session_id)
+    seed = get_first_gauges(session_id)
+    measured = {
+        criterion: value
+        for criterion, value in latest.items()
+        if abs(value - seed.get(criterion, value)) > 1e-9
+    }
+    untouched = sorted(set(latest) - set(measured))
+    if untouched:
+        logger.info("Session %s : critères restés à l'amorce, non remontés : %s", session_id, untouched)
+    return measured
+
+
+def _session_measures(session_id: int | None, metrics: dict) -> int | None:
+    """Combien de fois cette séance a réellement MESURÉ l'apprenant.
+
+    Une mesure = une réponse évaluée ou une question posée à l'assistant, c'est-à-dire
+    un passage par le LLM qui a bougé les jauges. La dérive passive d'attention
+    n'en est pas une : elle observe la lecture, elle ne teste rien.
+
+    `None` quand l'appelant ne fournit rien à compter (il affirme alors ses jauges,
+    cf. `metacog.profile.compute_confidence`)."""
+    answered = metrics.get("questions_answered")
+    if session_id is None:
+        return int(answered) if answered is not None else None
+    total = int(answered or 0)
+    total += _safe(lambda: count_assistant_questions(int(session_id)), 0)
+    return total
+
+
 def nudge_metacog_profile(
     user_id: int,
     score: float,
@@ -198,52 +386,88 @@ def nudge_metacog_profile(
     metrics: dict,
     session_id: int | None = None,
     session_gauges: dict | None = None,
+    questions: list[str] | None = None,
+    measures: int | None = None,
 ) -> dict:
     """Finalisation métacognitive partagée (lecture PDF *et* séance de langue).
 
-    Persiste les réflexions, fait glisser le profil long terme vers le score de la
-    session (jauges live si dispo, sinon EMA des 3 critères clés vers le taux de
-    réussite), et régénère l'analyse générale de l'apprenant. `session_id=None` pour
-    une séance de langue (colonnes FK nullables) — la séance compte alors comme une
-    session normale dans le profil. Renvoie les nouvelles valeurs des critères.
+    Persiste les réflexions, note la métacognition à partir de ces réflexions,
+    fait glisser le profil long terme vers le score de la session (jauges live si
+    dispo, sinon EMA des 3 critères clés vers le taux de réussite), et régénère
+    l'analyse générale de l'apprenant. `session_id=None` pour une séance de langue
+    (colonnes FK nullables). Renvoie les nouvelles valeurs des critères.
+
+    **Le profil ne bouge qu'à hauteur de ce qui a été mesuré** : une séance sans
+    aucune mesure n'y touche pas (elle compte quand même comme une session), une
+    séance courte pèse au prorata (`compute_confidence`). Sans ce garde-fou, une
+    session où l'étudiant n'a répondu à rien tirait trois critères vers 0 — vers
+    exactement 0 à la première session, où alpha vaut 1.
     """
-    for order, response in enumerate(responses or []):
-        question = REFLECTION_QUESTIONS[order] if order < len(REFLECTION_QUESTIONS) else f"Réflexion {order + 1}"
-        save_session_reflection(session_id, question, str(response), user_id, order)
+    pairs = _reflection_pairs(questions, responses)
+    for order, pair in enumerate(pairs):
+        save_session_reflection(session_id, pair["question"], pair["answer"], user_id, order)
 
     profile = ensure_profile(user_id)
+    profile_gauges = {c: float(profile.get(c, 50.0)) for c in CRITERIA}
     if session_gauges is None and session_id is not None:
-        session_gauges = get_latest_gauges(session_id)
+        session_gauges = _measured_gauges(session_id)
+    if measures is None:
+        measures = _session_measures(session_id, metrics or {})
 
-    # Poids adaptatif : les premières sessions pèsent plus, puis l'apprentissage
-    # ralentit (plancher ALPHA_MIN). Un seul modèle pour tout le produit.
-    alpha = compute_alpha(int(profile.get("sessions_count") or 0))
+    if measures == 0:
+        # Rien n'a été mesuré : la session a eu lieu (elle compte), mais elle n'a
+        # aucune raison de déplacer le profil.
+        logger.info("Session %s finalisée sans aucune mesure : profil inchangé", session_id)
+        update_profile_values(user_id, {}, increment_sessions=True)
+        _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
+        return {}
+
+    confidence = compute_confidence(measures)
+    # La métacognition se mesure ici, et nulle part ailleurs : sur ce que
+    # l'étudiant écrit dans le sas de sortie.
+    meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges)
 
     if session_gauges:
         # Canal temps réel disponible : tout le profil (6 critères) glisse vers les
         # jauges live via le moteur unique `metacog.profile.update_profile`
         # (historique par critère + incrément du compteur de sessions inclus).
-        updated = update_profile(user_id, session_gauges, session_id)
+        session_score = dict(session_gauges)
+        if meta_score is not None:
+            session_score["meta_cognition"] = meta_score
+        updated = update_profile(user_id, session_score, session_id, confidence=confidence)
         new_values: dict[str, float] = {c: float(updated.get(c, 50.0)) for c in CRITERIA}
     else:
         # Repli (séance sans canal temps réel) : le taux de réussite n'informe
-        # honnêtement que ces trois critères. On ne bouge pas les autres plutôt que
-        # d'inventer une mesure — mais on utilise le MÊME alpha adaptatif.
+        # honnêtement que ces trois critères — plus la métacognition quand le sas
+        # a été rempli. On ne bouge pas les autres plutôt que d'inventer une
+        # mesure — mais on utilise le MÊME alpha adaptatif.
+        alpha = compute_alpha(int(profile.get("sessions_count") or 0)) * confidence
+        targets = {criterion: float(score) for criterion in _PROFILE_NUDGE_CRITERIA}
+        if meta_score is not None:
+            targets["meta_cognition"] = meta_score
         new_values = {}
-        for criterion in _PROFILE_NUDGE_CRITERIA:
+        for criterion, target in targets.items():
             before = float(profile.get(criterion, 50.0))
-            after = clamp_gauge(before * (1 - alpha) + score * alpha)
+            after = clamp_gauge(before * (1 - alpha) + target * alpha)
             new_values[criterion] = after
-            insert_history(user_id, session_id, criterion, before, after, score, alpha)
+            insert_history(user_id, session_id, criterion, before, after, target, alpha)
         update_profile_values(user_id, new_values, increment_sessions=True)
 
     # Analyse générale de l'apprenant (best-effort, après le nudge profil).
-    _update_general_analysis(session_id, responses, metrics, session_gauges, user_id)
+    _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
     return new_values
 
 
-def finalize_session(session_id: int, responses: list[str], user_id: int = DEFAULT_USER_ID) -> dict:
+def finalize_session(
+    session_id: int,
+    responses: list[str],
+    questions: list[str] | None = None,
+    user_id: int = DEFAULT_USER_ID,
+) -> dict:
     metrics = session_metrics(session_id)
     score = float(metrics["success_rate"])
-    nudge_metacog_profile(user_id, score, responses, metrics, session_id=session_id)
+    nudge_metacog_profile(
+        user_id, score, responses, metrics,
+        session_id=session_id, questions=questions,
+    )
     return {"ok": True, "score": score}

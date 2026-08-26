@@ -137,6 +137,11 @@ def build_question_prompt(
     preferred_question_type: str | None = None,
     source_block_id: str | None = None,
     has_existing_question: bool = False,
+    # `standalone` = la question devra tenir SANS le document (elle est rejouée
+    # plus tard par le quiz). Il ne pilote que la contrainte de forme en fin de
+    # prompt : il a longtemps porté en plus une consigne « reformule la question
+    # reçue… qcm si possible » qui n'avait aucun appelant légitime et qui
+    # contredisait le type cible calculé à partir des jauges.
     standalone: bool = False,
     past_struggles: list[dict] | None = None,
     user_highlights: list[str] | None = None,
@@ -189,26 +194,7 @@ def build_question_prompt(
         struggles_block = ""
         struggles_instruction = ""
 
-    if standalone:
-        question_instruction = _t(
-            "Tu reçois une question issue d'une session de lecture, avec sa réponse attendue. "
-            "Reformule-la en une question de révision totalement autonome, compréhensible sans "
-            "avoir lu le document source. "
-            "Remplace impérativement toute formule contextuelle ('selon le passage', "
-            "'d'après ce texte', 'dans ce paragraphe', 'le passage', 'd'après le texte') "
-            "par le concept ou la donnée précise. "
-            "Exemple : 'Selon le passage, qu'est-ce qu'une suite $u$ ?' → "
-            "'Donne la définition d'une suite numérique $u_n$.' "
-            "Choisis le question_type le plus adapté au contenu (qcm si possible).",
-            "You receive a question from a reading session with its expected answer. "
-            "Rephrase it as a fully standalone review question, understandable without having read the source document. "
-            "You must replace any contextual phrasing ('according to the passage', 'based on this text', "
-            "'in this paragraph', 'the passage', 'from the text') with the precise concept or data. "
-            "Example: 'According to the passage, what is a sequence $u$?' → "
-            "'Give the definition of a numerical sequence $u_n$.' "
-            "Choose the most suitable question_type for the content (qcm if possible).",
-        )
-    elif has_existing_question:
+    if has_existing_question:
         question_instruction = _t(
             "Le paragraphe contient déjà une ou plusieurs questions. "
             "Demande à l'étudiant d'y répondre directement. "
@@ -242,8 +228,9 @@ def build_question_prompt(
 
     if _i18n.current_lang() == "en":
         _standalone_constraint = (
-            "- The question must be understandable without any source document: never write "
-            "'according to the passage', 'based on this text', or any contextual reference."
+            "- The question must stay grounded in the paragraph provided (no external knowledge "
+            "required) BUT be worded to stand on its own: never write 'according to the passage', "
+            "'based on this text', or any contextual reference — name the concept instead."
             if standalone else
             "- The question must depend on the provided paragraph, not on external knowledge."
         )
@@ -317,8 +304,9 @@ Constraints:
 {_standalone_constraint}"""
 
     _standalone_constraint_fr = (
-        "- La question doit être compréhensible sans aucun document source : n'écris jamais 'selon le passage', "
-        "'d'après ce texte' ou toute référence contextuelle."
+        "- La question doit rester ancrée dans le paragraphe fourni (aucun savoir externe requis) MAIS "
+        "être formulée pour tenir seule : n'écris jamais 'selon le passage', 'd'après ce texte' ou toute "
+        "référence contextuelle — nomme le concept."
         if standalone else
         "- La question doit dépendre du paragraphe fourni, pas d'un savoir externe."
     )

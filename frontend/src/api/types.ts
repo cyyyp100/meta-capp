@@ -221,5 +221,13 @@ export interface SessionMetrics {
   questions_answered: number;
   correct: number;
   success_rate: number;
+  /** Les questions FIXES du sas (deux) : affichées immédiatement. */
   reflection_questions: string[];
+}
+
+export interface SessionAnalysis {
+  /** Bilan qualitatif de Gemma ("" si le LLM est indisponible). */
+  analysis: string;
+  /** 3e question de réflexion, générée pour cette session. Jamais vide. */
+  question: string;
 }
