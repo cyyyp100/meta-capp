@@ -4,8 +4,8 @@ import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
-import type { QuizAnswerRecord, QuizQuestion } from "../api/types";
-import { ArrowRight, Check, Eye, Search, X } from "lucide-react";
+import type { QuizAnswerRecord, QuizEvaluation, QuizQuestion, QuizVerdict } from "../api/types";
+import { ArrowRight, Check, Eye, Lightbulb, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +16,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { AnswerInput, serializeOrder } from "../features/questions/AnswerInput";
+import { AnswerInput } from "../features/questions/AnswerInput";
 import { QuestionStem } from "../features/questions/QuestionStem";
 import { QuestionTypeBadge } from "../features/questions/QuestionTypeBadge";
+import { VerdictBadge } from "../features/questions/VerdictBadge";
 import { answerWidget } from "../features/questions/registry";
 import { renderMathToHtml } from "../features/reader/renderMath";
 import { formatDuration } from "../features/session/duration";
@@ -52,6 +53,18 @@ const SUBJ_LABEL_KEY: Record<string, string> = {
   "religion": "subj.religion",
   "culture": "subj.culture",
 };
+
+/**
+ * Ce qu'une question rapporte à la session. Le verdict vient du serveur pour une
+ * réponse rédigée ou une remise en ordre, de la comparaison locale pour un QCM ;
+ * `score` en est le poids (1 / 0,5 / 0), un « partiel » valant un demi-point.
+ */
+type QuizOutcome = { verdict: QuizVerdict; score: number; userAnswer: string };
+
+/** Un demi-point doit rester lisible dans le bilan : « 3,5 » et pas « 3.5000 ». */
+function formatScore(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
 
 export function Quiz() {
   const t = useT();
@@ -130,17 +143,17 @@ export function Quiz() {
     finalized.current = false;
   }
 
-  function answered(q: QuizQuestion, correct: boolean, userAnswer: string) {
-    if (correct) setScore((s) => s + 1);
+  function answered(q: QuizQuestion, outcome: QuizOutcome) {
+    setScore((s) => s + outcome.score);
     const cat = q.category || "autre";
-    setByCat((b) => ({ ...b, [cat]: { correct: (b[cat]?.correct ?? 0) + (correct ? 1 : 0), total: (b[cat]?.total ?? 0) + 1 } }));
+    setByCat((b) => ({ ...b, [cat]: { correct: (b[cat]?.correct ?? 0) + outcome.score, total: (b[cat]?.total ?? 0) + 1 } }));
     setHistory((h) => [
       ...h,
       {
         question: q.question,
-        user_answer: userAnswer,
-        verdict: correct ? "correct" : "incorrect",
-        score: correct ? 1.0 : 0.0,
+        user_answer: outcome.userAnswer,
+        verdict: outcome.verdict,
+        score: outcome.score,
         category: cat,
         source: q.source,
         document: q.document ?? null,
@@ -148,7 +161,9 @@ export function Quiz() {
         chapter_title: q.chapter_title ?? null,
       },
     ]);
-    void api.submitQuizAnswer(q.category, correct);
+    // Le verdict accompagne le booléen : la rétention du profil distingue le
+    // « partiel », que `correct` seul écrasait en « incorrect ».
+    void api.submitQuizAnswer(q.category, outcome.verdict === "correct", outcome.verdict);
   }
 
   // Clôture métacognitive de la session : même chemin serveur qu'une fin de lecture
@@ -163,7 +178,7 @@ export function Quiz() {
         responses: [],
         score: total > 0 ? Math.round((100 * score) / total) : 0,
         questions_answered: total,
-        correct: score,
+        correct: Math.round(score),
         duration_s: elapsed,
         subject: subject || null,
         topic: askedTopic || null,
@@ -274,20 +289,20 @@ export function Quiz() {
           key={data[index].id}
           q={data[index]}
           position={`${index + 1} / ${data.length}`}
-          onAnswered={(correct, userAnswer) => answered(data[index], correct, userAnswer)}
+          onAnswered={(outcome) => answered(data[index], outcome)}
           onNext={() => next(data.length)}
         />
       )}
 
       {!isFetching && data && done && (
         <div style={{ marginTop: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 48, fontWeight: 700 }}>{score} / {data.length}</div>
+          <div style={{ fontSize: 48, fontWeight: 700 }}>{formatScore(score)} / {data.length}</div>
           <p style={{ color: "var(--muted)" }}>{t("quiz.done")}</p>
 
           <div className="mx-auto my-4.5 grid max-w-[360px] grid-cols-3 gap-3">
             {[
               { label: t("exit.duration"), value: formatDuration(durationS) },
-              { label: t("exit.questions"), value: `${score} / ${data.length}` },
+              { label: t("exit.questions"), value: `${formatScore(score)} / ${data.length}` },
               {
                 label: t("exit.success"),
                 value: `${data.length > 0 ? Math.round((100 * score) / data.length) : 0}%`,
@@ -302,7 +317,7 @@ export function Quiz() {
               <div key={cat} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                 <span style={{ color: "var(--text-soft)" }}>{cat}</span>
                 <span style={{ fontWeight: 700, color: r.correct === r.total ? "var(--success)" : "var(--warning)" }}>
-                  {r.correct}/{r.total}
+                  {formatScore(r.correct)}/{r.total}
                 </span>
               </div>
             ))}
@@ -440,34 +455,73 @@ function QuestionCard({
 }: {
   q: QuizQuestion;
   position: string;
-  onAnswered: (correct: boolean, userAnswer: string) => void;
+  onAnswered: (outcome: QuizOutcome) => void;
   onNext: () => void;
 }) {
   const t = useT();
   const [picked, setPicked] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState(false);
-  // Ordre validé : conservé pour afficher l'ordre attendu ligne par ligne.
-  const [orderDone, setOrderDone] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<QuizEvaluation | null>(null);
+  // Réponse rédigée que le serveur n'a pas pu corriger (LLM éteint) : l'apprenant
+  // tranche lui-même plutôt que de voir la session s'arrêter là.
+  const [selfGrading, setSelfGrading] = useState<string | null>(null);
   const widget = answerWidget(q.question_type, q.choices);
-  const answered = picked !== null || revealed || orderDone;
+  const settled = picked !== null || result !== null;
 
-  /** Une remise en ordre se corrige sans LLM : `choices` EST la bonne séquence. */
-  function submitOrder(answer: string) {
-    if (orderDone) return;
-    setOrderDone(true);
-    onAnswered(answer === serializeOrder(q.choices ?? []), answer);
+  /** QCM : la comparaison est locale et immédiate — aucun aller-retour à attendre. */
+  function pick(choice: string) {
+    if (settled) return;
+    setPicked(choice);
+    const correct = choice.trim() === q.answer.trim();
+    onAnswered({ verdict: correct ? "correct" : "incorrect", score: correct ? 1 : 0, userAnswer: choice });
   }
 
-  function pick(choice: string) {
-    if (picked !== null) return;
-    setPicked(choice);
-    onAnswered(choice.trim() === q.answer.trim(), choice);
+  /** Réponse rédigée ou remise en ordre : corrigée par le serveur, comme en lecture. */
+  async function submit(answer: string) {
+    const written = answer.trim();
+    if (busy || settled || selfGrading !== null || !written) return;
+    setBusy(true);
+    try {
+      const evaluation = await api.quizEvaluate({
+        question_id: q.id,
+        question: q.question,
+        user_answer: written,
+        question_type: q.question_type,
+        answer: q.answer,
+        choices: q.choices,
+      });
+      if (evaluation.graded && evaluation.verdict) {
+        setResult(evaluation);
+        onAnswered({ verdict: evaluation.verdict, score: evaluation.score, userAnswer: written });
+      } else setSelfGrading(written);
+    } catch {
+      setSelfGrading(written);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** « Je ne sais pas » : la réponse attendue s'affiche, la question compte pour zéro. */
+  function giveUp() {
+    if (settled) return;
+    setSelfGrading(null);
+    setResult(localVerdict(q.answer, "incorrect"));
+    onAnswered({ verdict: "incorrect", score: 0, userAnswer: "" });
   }
 
   function selfGrade(correct: boolean) {
-    setRevealed(true);
-    onAnswered(correct, correct ? q.answer : "");
+    const written = selfGrading ?? "";
+    setSelfGrading(null);
+    const verdict: QuizVerdict = correct ? "correct" : "incorrect";
+    setResult(localVerdict(q.answer, verdict));
+    onAnswered({ verdict, score: correct ? 1 : 0, userAnswer: written });
   }
+
+  // Une liste de choix et une remise en ordre portent leur propre verdict (couleurs,
+  // étapes marquées) : elles restent affichées. Le champ de rédaction, lui, cède la
+  // place à la correction.
+  const showInput = widget !== "text" || !(settled || selfGrading !== null);
 
   return (
     <div style={{ marginTop: "var(--space-lg)" }}>
@@ -485,48 +539,60 @@ function QuestionCard({
           className="mb-4 [&>div:first-child]:text-lg"
         />
 
-        <AnswerInput
-          key={q.id}
-          type={q.question_type}
-          choices={q.choices}
-          seed={q.id}
-          picked={picked}
-          expectedChoice={q.answer}
-          correctOrder={orderDone ? (q.choices ?? []) : null}
-          onSubmit={widget === "ordering" ? submitOrder : pick}
-          textFallback={
-            <div>
-              {revealed && (
-                <div
-                  style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }}
-                  dangerouslySetInnerHTML={{ __html: renderMathToHtml(q.answer) }}
-                />
-              )}
-              {!revealed && (
-                <div style={{ display: "flex", gap: 10 }}>
-                  <Button
-                    variant="secondary"
-                    onClick={() => selfGrade(true)}
-                    className="border-success/50 text-success hover:border-success hover:bg-success-soft hover:text-success"
-                  >
-                    <Check className="size-4" aria-hidden />
-                    {t("quiz.knew")}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => selfGrade(false)}
-                    className="border-danger/50 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
-                  >
-                    <Eye className="size-4" aria-hidden />
-                    {t("quiz.reveal")}
-                  </Button>
-                </div>
-              )}
-            </div>
-          }
-        />
+        {showInput && (
+          <AnswerInput
+            key={q.id}
+            type={q.question_type}
+            choices={q.choices}
+            seed={q.id}
+            draft={draft}
+            setDraft={setDraft}
+            busy={busy}
+            picked={picked}
+            expectedChoice={q.answer}
+            correctOrder={result && widget === "ordering" ? (q.choices ?? []) : null}
+            onSubmit={widget === "choices" ? pick : submit}
+          />
+        )}
 
-        {answered && (
+        {busy && <p className="mt-2 text-[13px] text-muted-foreground">{t("quiz.checking")}</p>}
+
+        {/* Sortie de secours d'une question à rédiger : voir la réponse sans tricher
+            sur le score. Devant une liste de choix, il suffit de cliquer. */}
+        {widget !== "choices" && !busy && !settled && selfGrading === null && (
+          <Button variant="ghost" size="sm" onClick={giveUp} className="mt-2 text-muted-foreground">
+            <Eye className="size-4" aria-hidden />
+            {t("quiz.reveal")}
+          </Button>
+        )}
+
+        {selfGrading !== null && (
+          <div className="mt-3 grid gap-2">
+            <p className="m-0 text-[13px] text-muted-foreground">{t("quiz.selfGrade")}</p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button
+                variant="secondary"
+                onClick={() => selfGrade(true)}
+                className="border-success/50 text-success hover:border-success hover:bg-success-soft hover:text-success"
+              >
+                <Check className="size-4" aria-hidden />
+                {t("quiz.knew")}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => selfGrade(false)}
+                className="border-danger/50 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
+              >
+                <X className="size-4" aria-hidden />
+                {t("quiz.didntKnow")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {result && <Correction result={result} />}
+
+        {settled && (
           <Button onClick={onNext} className="mt-4.5">
             {t("quiz.next")}
             <ArrowRight className="size-4" aria-hidden />
@@ -535,4 +601,50 @@ function QuestionCard({
       </div>
     </div>
   );
+}
+
+/** Correction affichée sous la question : verdict, retour de Gemma, réponse attendue. */
+function Correction({ result }: { result: QuizEvaluation }) {
+  const t = useT();
+  return (
+    <div className="mt-4 grid gap-2">
+      <VerdictBadge verdict={result.verdict} />
+      {result.feedback && <div className="text-[13px] text-[var(--text-soft)]">{result.feedback}</div>}
+      {result.completion && <div className="text-[13px] text-[var(--text-soft)]">{result.completion}</div>}
+      {result.hint && (
+        <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Lightbulb className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
+          {result.hint}
+        </div>
+      )}
+      {result.expected_answer && (
+        <div className="grid gap-1">
+          <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+            {t("quiz.expected")}
+          </span>
+          <div
+            style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }}
+            dangerouslySetInnerHTML={{ __html: renderMathToHtml(result.expected_answer) }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Verdict rendu sans le serveur — abandon (« je ne sais pas ») ou auto-évaluation
+ * hors ligne. Seule la réponse attendue est à montrer : il n'y a pas de retour
+ * rédigé à inventer.
+ */
+function localVerdict(expected: string, verdict: QuizVerdict): QuizEvaluation {
+  return {
+    verdict,
+    score: verdict === "correct" ? 1 : 0,
+    feedback: "",
+    hint: "",
+    completion: "",
+    expected_answer: expected,
+    graded: false,
+  };
 }

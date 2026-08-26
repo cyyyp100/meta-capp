@@ -1,4 +1,5 @@
-# services/quiz.py — Construction des QCM (distracteurs LLM) + analyse de session.
+# services/quiz.py — Construction d'une session de quiz (tous types de questions)
+# + correction des réponses rédigées + analyse de session.
 from __future__ import annotations
 
 import logging
@@ -12,7 +13,9 @@ from config.settings import (
     QUIZ_SEARCH_MAX_TERMS,
     QUIZ_SEARCH_POOL,
 )
+from db.questions import get_question
 from db.quiz_questions import (
+    STATIC_ID_OFFSET,
     get_quiz_base_questions,
     get_quiz_subjects,
     get_static_quiz_questions,
@@ -20,9 +23,11 @@ from db.quiz_questions import (
 from db.subjects import get_all_subjects, update_subject_from_answer
 from db.user import DEFAULT_USER_ID
 from llm.ollama_client import (
+    evaluate_answer_async,
     generate_quiz_distractors_async,
     generate_quiz_session_analysis_async,
 )
+from services.assistant import objective_verdict
 from services.llm_bridge import run_llm_sync
 from utils.text import fold
 
@@ -33,11 +38,18 @@ __all__ = [
     "clamp_quiz_length",
     "list_subjects",
     "submit_answer",
+    "evaluate_quiz_answer",
     "analyze_session",
     "finalize_quiz_session",
 ]
 
 _CONTEXT_MAX_CHARS = 500
+
+# Verdicts corrigibles et leur poids dans le score de session. Le « partiel »
+# vaut un demi-point : le renvoyer à zéro effacerait la moitié comprise, le
+# compter juste effacerait la moitié manquante.
+VERDICTS: tuple[str, ...] = ("correct", "partial", "incorrect")
+VERDICT_SCORES: dict[str, float] = {"correct": 1.0, "partial": 0.5, "incorrect": 0.0}
 
 
 def clamp_quiz_length(n) -> int:
@@ -60,7 +72,7 @@ def build_quiz(
     user_id: int = DEFAULT_USER_ID,
     topic: str | None = None,
 ) -> list[dict]:
-    """Construit une session de QCM : questions de lecture + catalogue statique.
+    """Construit une session de quiz : questions de lecture + catalogue statique.
 
     ``topic`` est le sujet libre tapé par l'apprenant (« capitales », « révolution
     française ») : il classe les questions selon le COURS dont elles proviennent
@@ -71,11 +83,18 @@ def build_quiz(
     jusqu'à ``n`` — sinon une base neuve, ou un thème sans document importé,
     n'aurait aucun quiz à jouer.
 
-    Les distracteurs des questions qui en ont besoin sont générés par le LLM en **un
-    seul** appel batch. Chaque QCM renvoyé contient 4 choix mélangés (dont la bonne
-    réponse). Une question dont on ne peut pas construire 4 choix est dégradée en
-    question ouverte (``choices=None``, auto-évaluation côté UI) si une réponse existe,
-    sinon écartée.
+    **Chaque question garde le type sous lequel elle a été posée pendant la
+    lecture**, et donc son widget de réponse (`config.question_types.widget`) :
+    QCM et ordre de grandeur en liste de choix, remise en ordre en étapes à
+    replacer, tout le reste en réponse rédigée corrigée par
+    :func:`evaluate_quiz_answer`. Transformer d'office ces types en QCM — ce que
+    faisait le quiz — affichait « explique à un débutant » au-dessus de quatre
+    boutons, et réduisait toute session à un questionnaire à choix multiples.
+
+    Seuls les types à liste de choix passent donc par le LLM, en **un seul** appel
+    batch, pour compléter leurs distracteurs (4 choix mélangés dont la bonne
+    réponse). Faute de choix constructibles, la question redevient une question à
+    rédiger si une réponse existe, sinon elle est écartée.
     """
     count = clamp_quiz_length(n)
     terms = _topic_terms(topic)
@@ -93,25 +112,28 @@ def build_quiz(
     if not base:
         return []
 
-    # 1) Questions déjà munies de choix valides (≥4 dont la réponse) → réutilisées
-    #    telles quelles. Les autres sont envoyées au LLM pour générer les distracteurs,
-    #    sauf celles dont le type ne s'y prête pas : une remise en ordre garde ses
-    #    étapes, une production longue (explication, contre-exemple…) reste ouverte —
-    #    en faire un QCM trahirait le type affiché à l'apprenant.
+    # 1) Préparation par widget. Les listes de choix déjà valides (≥4 dont la
+    #    réponse) sont réutilisées telles quelles ; les autres partent au LLM pour
+    #    leurs distracteurs. Une remise en ordre garde ses étapes — elles SONT la
+    #    réponse —, une question à rédiger n'a rien à préparer.
     llm_items: list[dict] = []
     for q in base:
         answer = (q.get("answer") or "").strip()
-        qtype = _question_type(q)
-        if qtype == "ordering":
+        widget = question_types.widget(_question_type(q))
+        if widget == question_types.WIDGET_ORDERING:
             steps = _ordering_steps(q.get("choices"))
-            if steps is not None:
+            if steps is None:
+                # Sans étapes, une remise en ordre n'est pas rejouable
+                # (`question_types.requires_choices`) : on l'écarte.
+                q["_skip"] = True
+            else:
                 q["_choices"] = steps
+            continue
+        if widget != question_types.WIDGET_CHOICES:
             continue
         existing = _valid_existing_choices(q.get("choices"), answer)
         if existing is not None:
             q["_choices"] = existing
-            continue
-        if not question_types.quiz_mcq_convertible(qtype):
             continue
         llm_items.append({
             "id": q["id"],
@@ -133,6 +155,8 @@ def build_quiz(
     # 2) Assemblage final
     quiz: list[dict] = []
     for q in base:
+        if q.pop("_skip", False):
+            continue
         choices = q.pop("_choices", None)
         stored_answer = (q.get("answer") or "").strip()
         llm = distractors_map.get(q["id"])
@@ -162,7 +186,8 @@ def build_quiz(
             item["choices"] = choices
             quiz.append(item)
         elif answer:
-            # Repli : pas de QCM possible mais une réponse existe → question ouverte.
+            # Type à rédiger, ou QCM dont les distracteurs ont manqué : la
+            # réponse attendue suffit à jouer et à corriger la question.
             item["choices"] = None
             quiz.append(item)
         # sinon (ni choix ni réponse) : question écartée.
@@ -175,20 +200,27 @@ def submit_answer(
     correct: bool,
     user_id: int = DEFAULT_USER_ID,
     session_id: int | None = None,
+    verdict: str | None = None,
 ) -> dict:
     """Met à jour la maîtrise de la matière ET la rétention permanente.
 
     Un quiz de révision est une mesure directe de la mémorisation : il fait donc
     bouger le critère `retention` du profil long terme, en plus du niveau de la
     matière. Les deux mises à jour sont indépendantes — une question sans matière
-    nourrit quand même la rétention."""
+    nourrit quand même la rétention.
+
+    ``verdict`` transporte la nuance des réponses rédigées : la rétention connaît
+    une cible « partial » (`metacog.profile`), que le booléen à lui seul écrasait
+    en « incorrect ». Sans verdict, il est déduit du booléen."""
     from metacog.profile import update_retention_from_quiz
 
-    retention = update_retention_from_quiz(
-        user_id, "correct" if correct else "incorrect", session_id=session_id,
-    )
+    graded = (verdict or "").strip().lower()
+    if graded not in VERDICTS:
+        graded = "correct" if correct else "incorrect"
+    retention = update_retention_from_quiz(user_id, graded, session_id=session_id)
     result = {
         "updated": bool(category),
+        "verdict": graded,
         "retention": float(retention.get("retention", 50.0)),
     }
     if not category:
@@ -196,6 +228,85 @@ def submit_answer(
     result["category"] = category
     result["level"] = update_subject_from_answer(user_id, category, bool(correct))
     return result
+
+
+def evaluate_quiz_answer(
+    question_id: int | None,
+    question: str,
+    user_answer: str,
+    question_type: str = "",
+    expected_answer: str = "",
+    choices: list[str] | None = None,
+    user_id: int = DEFAULT_USER_ID,
+) -> dict:
+    """Corrige une réponse de quiz : verdict objectif quand il existe, LLM sinon.
+
+    C'est le pendant, hors lecture, de `services.assistant.evaluate_page_answer` :
+    même verdict objectif partagé (`objective_verdict` — QCM, remise en ordre),
+    même prompt d'évaluation, mais le passage de référence est le contexte
+    persisté avec la question au lieu de la page ouverte. Sans lui, un quiz ne
+    pouvait poser que des QCM : une réponse rédigée n'aurait eu personne pour la
+    corriger.
+
+    La question de lecture persistée fait foi (réponse canonique, propositions,
+    type, passage) ; ce que la session envoie ne sert que pour le catalogue
+    statique, qui n'est pas dans la table `questions`.
+
+    Renvoie ``{verdict, score, feedback, hint, completion, expected_answer,
+    graded}``. ``graded=False`` signale que la correction n'a pas pu être faite
+    (LLM indisponible) : l'appelant repasse alors à l'auto-évaluation plutôt que
+    de bloquer la session.
+    """
+    stored = _stored_reading_question(question_id)
+    qtype = _question_type({"question_type": stored.get("question_type") or question_type})
+    expected = str(stored.get("answer") or expected_answer or "").strip()
+    options = [str(c).strip() for c in (stored.get("choices") or choices or []) if str(c).strip()]
+    given = (user_answer or "").strip()
+
+    # Rien à juger : ni le LLM ni l'apprenant n'ont à trancher une case vide
+    # (« je ne sais pas » de l'UI).
+    if not given:
+        return _evaluation("incorrect", expected)
+
+    verdict = objective_verdict(qtype, given, expected, options)
+    if verdict:
+        return _evaluation(verdict, expected)
+
+    question_block: dict = {
+        "question": str(stored.get("question") or question or ""),
+        "question_type": qtype,
+    }
+    if expected:
+        question_block["expected_answer"] = expected
+    if options:
+        question_block["choices"] = options
+    context = {
+        "question": question_block,
+        "user_answer": given,
+        # Le passage d'origine : le LLM corrige en le voyant, au lieu de juger la
+        # réponse sur sa seule culture générale.
+        "paragraph": str(stored.get("source_context") or ""),
+        "metacog_profile": _metacog_profile(user_id),
+        "objective_verdict": "",
+    }
+    try:
+        evaluation = run_llm_sync(
+            lambda ok, err: evaluate_answer_async(context, ok, err),
+        ) or {}
+    except Exception as exc:  # dégradation best-effort : auto-évaluation côté UI
+        logger.warning("Correction de la réponse de quiz échouée : %s", exc)
+        return _evaluation("", expected, graded=False)
+
+    verdict = str(evaluation.get("verdict") or "").strip().lower()
+    if verdict not in VERDICTS:
+        return _evaluation("", expected, graded=False)
+    return _evaluation(
+        verdict,
+        expected,
+        feedback=str(evaluation.get("feedback") or ""),
+        hint=str(evaluation.get("hint") or "") if verdict == "incorrect" else "",
+        completion=str(evaluation.get("completion") or "") if verdict == "partial" else "",
+    )
 
 
 def finalize_quiz_session(
@@ -327,6 +438,57 @@ def _rank_by_topic(items: list[dict], terms: list[str]) -> list[dict]:
     ]
     scored.sort(key=lambda row: (-row[0], row[1]))
     return [q for (_hits, _rank, q) in scored]
+
+
+def _evaluation(
+    verdict: str,
+    expected_answer: str,
+    *,
+    feedback: str = "",
+    hint: str = "",
+    completion: str = "",
+    graded: bool = True,
+) -> dict:
+    """Résultat de correction, tel que l'UI du quiz l'attend."""
+    return {
+        "verdict": verdict,
+        "score": VERDICT_SCORES.get(verdict, 0.0),
+        "feedback": feedback,
+        "hint": hint,
+        "completion": completion,
+        "expected_answer": expected_answer,
+        "graded": bool(graded and verdict in VERDICTS),
+    }
+
+
+def _stored_reading_question(question_id) -> dict:
+    """Question de lecture persistée, ou {} si l'id n'en désigne aucune.
+
+    Le catalogue statique porte des ids décalés (`STATIC_ID_OFFSET`) et ne vit pas
+    dans la table `questions` : pour lui, la correction s'en tient à ce que la
+    session a reçu."""
+    try:
+        qid = int(question_id)
+    except (TypeError, ValueError):
+        return {}
+    if qid <= 0 or qid >= STATIC_ID_OFFSET:
+        return {}
+    try:
+        return get_question(qid) or {}
+    except Exception:  # pragma: no cover - lecture best-effort
+        logger.debug("Lecture de la question %s ignorée", qid, exc_info=True)
+        return {}
+
+
+def _metacog_profile(user_id: int) -> dict:
+    """Profil long terme, pour que la correction s'adresse à CET apprenant."""
+    try:
+        from metacog.profile import ensure_profile
+
+        return ensure_profile(user_id) or {}
+    except Exception:  # pragma: no cover - le profil n'est qu'un contexte
+        logger.debug("Profil métacognitif indisponible pour la correction", exc_info=True)
+        return {}
 
 
 def _question_type(q: dict) -> str:

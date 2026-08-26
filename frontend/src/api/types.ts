@@ -126,6 +126,23 @@ export interface QuizQuestion {
   source: string;
 }
 
+/** Verdict d'une réponse. « partial » n'existe que pour les réponses rédigées. */
+export type QuizVerdict = "correct" | "partial" | "incorrect";
+
+// Correction d'une réponse de quiz (POST /api/quiz/evaluate).
+export interface QuizEvaluation {
+  /** "" quand la correction n'a pas pu être rendue (cf. `graded`). */
+  verdict: QuizVerdict | "";
+  /** Poids de la réponse dans le score de session (1 / 0.5 / 0). */
+  score: number;
+  feedback: string;
+  hint: string;
+  completion: string;
+  expected_answer: string;
+  /** false = LLM indisponible : l'UI repasse à l'auto-évaluation. */
+  graded: boolean;
+}
+
 // Matière disponible pour le quiz (avec son effectif de questions stockées).
 export interface QuizSubject {
   subject: string;
@@ -161,7 +178,7 @@ export interface QuizAnalysis {
 export interface QuizAnswerRecord {
   question: string;
   user_answer: string;
-  verdict: "correct" | "incorrect";
+  verdict: QuizVerdict;
   score: number;
   category: string;
   source: string;

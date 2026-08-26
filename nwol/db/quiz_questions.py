@@ -682,12 +682,13 @@ def _course_search_text(
 def get_quiz_base_questions(
     user_id: int = 1, n: int = 10, subject: str | None = None
 ) -> list[dict]:
-    """Questions de lecture (``scope_type='page'``) pour une session de quiz QCM.
+    """Questions de lecture (``scope_type='page'``) pour une session de quiz.
 
     Contrairement à :func:`get_quiz_questions`, on prend **toutes** les questions
-    de compréhension générées pendant les lectures (pas seulement celles ratées) et
-    **sans** complément de questions statiques : le nombre de QCM suit le stock réel
-    par thème (borné par ``n``). On priorise les questions déjà ratées puis les plus
+    générées pendant les lectures (pas seulement celles ratées) et **sans**
+    complément de questions statiques : la longueur suit le stock réel par thème
+    (borné par ``n``). Les types survivent au passage — le quiz les rejoue tels
+    quels (cf. `services.quiz.build_quiz`), et pas uniquement en QCM. On priorise les questions déjà ratées puis les plus
     récentes. ``document_id`` est exposé pour permettre le deep-link vers le reader.
     """
     conn = get_connection()

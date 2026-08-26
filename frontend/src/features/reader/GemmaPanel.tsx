@@ -28,6 +28,7 @@ import { useT } from "../../i18n";
 import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
+import { VerdictBadge } from "../questions/VerdictBadge";
 import { renderMathToHtml } from "./renderMath";
 
 interface Message {
@@ -606,12 +607,6 @@ const chipClose: React.CSSProperties = {
   border: "none", background: "transparent", color: "var(--accent-hover)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
 };
 
-const VERDICT_COLOR: Record<string, string> = {
-  correct: "var(--success)",
-  partial: "var(--warning)",
-  incorrect: "var(--danger)",
-};
-
 // ── Bulle Gemma : sphère 3D à deux yeux mobiles, déplaçable. ────────────────────
 // Au repos, les pupilles suivent le curseur. Pendant que Gemma inspecte la page
 // (`scanning`), la bulle se tourne vers le PDF et fixe son regard de ce côté.
@@ -769,19 +764,7 @@ function QaCard({
 
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span
-            style={{
-              alignSelf: "flex-start",
-              fontSize: 11,
-              fontWeight: 700,
-              padding: "3px 10px",
-              borderRadius: 999,
-              color: "#fff",
-              background: VERDICT_COLOR[feedback.verdict] ?? "var(--muted)",
-            }}
-          >
-            {t(`verdict.${feedback.verdict}`)}
-          </span>
+          <VerdictBadge verdict={feedback.verdict} />
           <div style={{ fontSize: 13, color: "var(--text-soft)" }}>{feedback.feedback}</div>
           {feedback.hint && feedback.verdict === "incorrect" && (
             <div className="flex items-start gap-1.5 text-xs text-muted-foreground">

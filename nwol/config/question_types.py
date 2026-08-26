@@ -40,10 +40,6 @@ class QuestionTypeSpec:
     eval_dimension_hint: bool = True  # False -> signal piloté par le verdict
     flashcard_eligible: bool = True
     quiz_eligible: bool = True
-    # Réponse assez courte et factuelle pour qu'un QCM soit fabriqué autour d'elle
-    # (distracteurs LLM du quiz). Faux pour les productions longues : en faire un
-    # QCM trahirait l'intention du type.
-    quiz_mcq_convertible: bool = False
     aliases: tuple[str, ...] = ()
 
 
@@ -66,7 +62,6 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("retention", "attention"),
         base_weight=1.0,
         widget=WIDGET_CHOICES,
-        quiz_mcq_convertible=True,
         aliases=("mcq", "multiple_choice", "qcm_verification_rapide_de_comprehension"),
     ),
     QuestionTypeSpec(
@@ -86,10 +81,9 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         ),
         target_gauges=("context_comprehension", "creativity"),
         base_weight=1.0,
+        # Type par défaut, et repli des questions d'avant la grille typée : sa
+        # réponse se rédige, dans le lecteur comme dans le quiz.
         widget=WIDGET_TEXT,
-        # Type par défaut (et repli des questions d'avant la grille typée) : sa
-        # réponse est une phrase courte, le quiz sait en faire un QCM.
-        quiz_mcq_convertible=True,
         aliases=("question_ouverte", "ouverte", "open_question", "reformulation"),
     ),
     QuestionTypeSpec(
@@ -110,7 +104,6 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("context_comprehension",),
         base_weight=1.0,
         widget=WIDGET_TEXT,
-        quiz_mcq_convertible=True,
         aliases=(
             "question_de_comprehension",
             "question_de_comprehension_textuelle",
@@ -138,7 +131,6 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("context_comprehension", "retention"),
         base_weight=1.0,
         widget=WIDGET_TEXT,
-        quiz_mcq_convertible=True,
         aliases=(
             "question_d_application",
             "question_application",
@@ -447,7 +439,6 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("curiosity", "context_comprehension"),
         base_weight=1.0,
         widget=WIDGET_CHOICES,
-        quiz_mcq_convertible=True,
         aliases=("ordre_de_grandeur", "estimate", "order_of_magnitude", "approximation"),
     ),
 )
@@ -545,8 +536,3 @@ def quiz_excluded_keys() -> tuple[str, ...]:
     return tuple(s.key for s in QUESTION_TYPE_SPECS if not s.quiz_eligible)
 
 
-def quiz_mcq_convertible(key: str) -> bool:
-    found = _BY_KEY.get(key)
-    # Type inconnu (question d'avant l'ajout du champ) : on garde l'ancien
-    # comportement, la question part au générateur de distracteurs.
-    return found.quiz_mcq_convertible if found else True

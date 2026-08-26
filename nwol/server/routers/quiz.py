@@ -15,6 +15,7 @@ from config.settings import (
 from services.quiz import (
     analyze_session,
     build_quiz,
+    evaluate_quiz_answer,
     finalize_quiz_session,
     list_subjects,
     submit_answer,
@@ -27,6 +28,20 @@ class AnswerBody(BaseModel):
     category: str | None = None
     correct: bool = False
     session_id: int | None = None
+    # Verdict rendu par la correction ("correct" / "partial" / "incorrect") :
+    # le booléen seul perdait le « partiel » des réponses rédigées.
+    verdict: str | None = None
+
+
+class EvaluateBody(BaseModel):
+    """Réponse à corriger. La question de lecture persistée prime sur ce corps."""
+
+    question_id: int | None = None
+    question: str = ""
+    user_answer: str = ""
+    question_type: str = ""
+    answer: str = ""                    # réponse attendue, telle que reçue par la session
+    choices: list[str] | None = None
 
 
 class AnalysisBody(BaseModel):
@@ -78,7 +93,26 @@ def questions(
 @router.post("/answer")
 def answer(body: AnswerBody) -> dict:
     """Enregistre une réponse : maîtrise de la matière + rétention du profil."""
-    return submit_answer(body.category, body.correct, session_id=body.session_id)
+    return submit_answer(
+        body.category, body.correct, session_id=body.session_id, verdict=body.verdict,
+    )
+
+
+@router.post("/evaluate")
+def evaluate(body: EvaluateBody) -> dict:
+    """Corrige une réponse rédigée (ou une remise en ordre) de la session.
+
+    C'est ce qui permet au quiz de rejouer TOUS les types de questions et pas
+    seulement les QCM : les types à rédiger sont corrigés ici, par le même
+    verdict objectif et le même prompt d'évaluation que pendant la lecture."""
+    return evaluate_quiz_answer(
+        body.question_id,
+        body.question,
+        body.user_answer,
+        question_type=body.question_type,
+        expected_answer=body.answer,
+        choices=body.choices,
+    )
 
 
 @router.post("/analysis")

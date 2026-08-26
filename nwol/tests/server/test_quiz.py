@@ -1,8 +1,13 @@
-# Tests de la refonte Quiz : QCM (distracteurs LLM) + analyse/conseil de cours.
+# Tests du Quiz : tous les types de questions (choix, remise en ordre, rédaction),
+# correction des réponses rédigées + analyse/conseil de cours.
 from __future__ import annotations
 
 
-def _seed_subject_questions(subject: str = "physique", with_answers: bool = True) -> tuple[int, list[int]]:
+def _seed_subject_questions(
+    subject: str = "physique",
+    with_answers: bool = True,
+    question_type: str = "open",
+) -> tuple[int, list[int]]:
     """Crée un document avec une matière + 2 questions de lecture (scope 'page')."""
     from db.documents import upsert_document
     from db.questions import save_question
@@ -26,7 +31,7 @@ def _seed_subject_questions(subject: str = "physique", with_answers: bool = True
                 i + 1,
                 {
                     "question": f"Quelle est la notion {i + 1} en {subject} ?",
-                    "question_type": "open",
+                    "question_type": question_type,
                     "answer": f"Réponse {i + 1}" if with_answers else "",
                     "source_context": f"Le passage {i + 1} explique en détail la notion étudiée.",
                 },
@@ -57,9 +62,9 @@ def test_quiz_subjects_lists_available(client):
 
 
 def test_quiz_questions_build_mcq(client, monkeypatch):
-    """Chaque QCM a 4 choix mélangés, uniques, contenant la bonne réponse."""
+    """Un QCM a 4 choix mélangés, uniques, contenant la bonne réponse."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
-    _seed_subject_questions("physique")
+    _seed_subject_questions("physique", question_type="qcm")
 
     resp = client.get("/api/quiz/questions", params={"subject": "physique"})
     assert resp.status_code == 200
@@ -74,17 +79,41 @@ def test_quiz_questions_build_mcq(client, monkeypatch):
         assert q["document_id"] is not None
 
 
+def test_written_types_stay_written_and_skip_the_distractor_llm(client, monkeypatch):
+    """Une question à rédiger reste à rédiger : le quiz n'en fait pas un QCM.
+
+    C'était le défaut du quiz : tout type à réponse courte était converti en
+    questionnaire à choix multiples, si bien qu'une session n'affichait jamais
+    autre chose que des QCM."""
+    seen: list[dict] = []
+
+    def _spy(context, on_success, on_error, model=None):
+        seen.extend(context.get("items") or [])
+        on_success({})
+
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _spy)
+    _seed_subject_questions("physique", question_type="open")
+
+    quiz = client.get("/api/quiz/questions", params={"subject": "physique"}).json()
+    assert len(quiz) == 2
+    for q in quiz:
+        assert q["question_type"] == "open"
+        assert q["choices"] is None
+        assert q["answer"]
+    assert seen == []
+
+
 def test_quiz_questions_fallback_on_llm_failure(client, monkeypatch):
-    """Si le LLM échoue, une question avec réponse stockée dégrade en question ouverte."""
+    """Si les distracteurs manquent, le QCM dégrade en question à rédiger."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fail_distractors)
-    _seed_subject_questions("physique", with_answers=True)
+    _seed_subject_questions("physique", with_answers=True, question_type="qcm")
 
     resp = client.get("/api/quiz/questions", params={"subject": "physique"})
     assert resp.status_code == 200
     quiz = resp.json()
     assert len(quiz) == 2
     for q in quiz:
-        assert q["choices"] is None  # repli question ouverte
+        assert q["choices"] is None  # repli : réponse rédigée
         assert q["answer"]
 
 
@@ -212,6 +241,176 @@ def test_long_production_types_stay_open_instead_of_becoming_mcq(client, monkeyp
     assert len(quiz) == 1
     assert quiz[0]["choices"] is None
     assert quiz[0]["answer"]
+
+
+def test_ordering_without_steps_is_dropped(client, monkeypatch):
+    """Une remise en ordre sans étapes ne se joue pas : mieux vaut l'écarter."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    _seed_typed_question("ordering", choices=None, subject="svt")
+
+    assert client.get("/api/quiz/questions", params={"subject": "svt"}).json() == []
+
+
+# ── Correction des réponses rédigées (POST /api/quiz/evaluate) ──────────────
+
+def _evaluator(verdict: str, **extra):
+    """Faux évaluateur LLM ; enregistre le contexte reçu dans `seen`."""
+    seen: list[dict] = []
+
+    def _call(context, on_success, on_error, model=None):
+        seen.append(context)
+        on_success({"verdict": verdict, "feedback": "Un retour utile.", **extra})
+
+    return _call, seen
+
+
+def test_evaluate_grades_a_written_answer_with_the_llm(client, monkeypatch):
+    """Sans cette correction, un type à rédiger n'aurait personne pour le juger."""
+    evaluator, seen = _evaluator("partial", completion="Il manque la contrainte.")
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", evaluator)
+    qid = _seed_typed_question("teach_back", subject="chimie")
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid,
+        "question": "Question de type teach_back ?",
+        "user_answer": "Ma tentative d'explication.",
+        "question_type": "teach_back",
+    }).json()
+
+    assert body["verdict"] == "partial"
+    assert body["score"] == 0.5
+    assert body["graded"] is True
+    assert body["feedback"] == "Un retour utile."
+    assert body["completion"] == "Il manque la contrainte."
+    assert body["expected_answer"] == "La réponse attendue"
+    assert len(seen) == 1
+
+
+def test_evaluate_corrects_from_the_stored_question_not_the_payload(client, monkeypatch):
+    """La question persistée fait foi : réponse canonique ET passage d'origine."""
+    evaluator, seen = _evaluator("correct")
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", evaluator)
+    qid = _seed_typed_question("elaboration_why", subject="chimie")
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid,
+        "question": "Énoncé réécrit par un client bavard",
+        "user_answer": "Parce que la condition est nécessaire.",
+        "answer": "Une réponse inventée côté client",
+    }).json()
+
+    assert body["verdict"] == "correct"
+    assert body["score"] == 1.0
+    context = seen[0]
+    assert context["question"]["expected_answer"] == "La réponse attendue"
+    assert context["question"]["question_type"] == "elaboration_why"
+    assert context["paragraph"].startswith("Un passage assez long")
+
+
+def test_evaluate_settles_a_choice_question_without_the_llm(client, monkeypatch):
+    """Un QCM se corrige en comparant : appeler le LLM serait du temps perdu."""
+
+    def _never(context, on_success, on_error, model=None):
+        raise AssertionError("le LLM ne doit pas être appelé pour un QCM")
+
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", _never)
+    choices = ["La réponse attendue", "Faux A", "Faux B", "Faux C"]
+    qid = _seed_typed_question("qcm", choices=choices, subject="physique")
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid, "user_answer": "La réponse attendue",
+    }).json()
+    assert body["verdict"] == "correct"
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid, "user_answer": "Faux B",
+    }).json()
+    assert body["verdict"] == "incorrect"
+    assert body["score"] == 0.0
+
+
+def test_evaluate_gives_partial_credit_to_an_adjacent_swap(client, monkeypatch):
+    """Séquence comprise, ordre non : même barème objectif que dans le lecteur."""
+
+    def _never(context, on_success, on_error, model=None):
+        raise AssertionError("une remise en ordre se corrige sans LLM")
+
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", _never)
+    steps = ["Poser les hypothèses", "Appliquer le théorème", "Conclure"]
+    qid = _seed_typed_question("ordering", choices=steps, subject="maths")
+
+    swapped = "1. Appliquer le théorème\n2. Poser les hypothèses\n3. Conclure"
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid, "user_answer": swapped,
+    }).json()
+    assert body["verdict"] == "partial"
+    assert body["score"] == 0.5
+
+
+def test_evaluate_falls_back_to_self_grading_when_the_llm_is_down(client, monkeypatch):
+    """Hors ligne, la session continue : l'UI reprend l'auto-évaluation."""
+
+    def _down(context, on_success, on_error, model=None):
+        on_error("Ollama injoignable")
+
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", _down)
+    qid = _seed_typed_question("recall", subject="histoire")
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid, "user_answer": "Ce dont je me souviens.",
+    }).json()
+    assert body["graded"] is False
+    assert body["verdict"] == ""
+    assert body["expected_answer"] == "La réponse attendue"
+
+
+def test_evaluate_counts_an_empty_answer_as_incorrect(client, monkeypatch):
+    """« Je ne sais pas » : rien à juger, et surtout rien à demander au LLM."""
+
+    def _never(context, on_success, on_error, model=None):
+        raise AssertionError("une réponse vide ne se soumet pas au LLM")
+
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", _never)
+    qid = _seed_typed_question("counterexample", subject="maths")
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": qid, "user_answer": "   ",
+    }).json()
+    assert body["verdict"] == "incorrect"
+    assert body["score"] == 0.0
+    assert body["expected_answer"] == "La réponse attendue"
+
+
+def test_evaluate_handles_a_static_catalogue_question(client, monkeypatch):
+    """Le catalogue statique n'est pas dans `questions` : le corps fait foi."""
+
+    def _never(context, on_success, on_error, model=None):
+        raise AssertionError("un QCM du catalogue se corrige sans LLM")
+
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", _never)
+    from db.quiz_questions import STATIC_ID_OFFSET
+
+    body = client.post("/api/quiz/evaluate", json={
+        "question_id": STATIC_ID_OFFSET + 1,
+        "question": "Quelle est la capitale de l'Australie ?",
+        "question_type": "qcm",
+        "answer": "Canberra",
+        "choices": ["Canberra", "Sydney", "Melbourne", "Brisbane"],
+        "user_answer": "Sydney",
+    }).json()
+    assert body["verdict"] == "incorrect"
+    assert body["expected_answer"] == "Canberra"
+
+
+def test_answer_keeps_the_partial_verdict(client):
+    """Le booléen seul écrasait le « partiel » en « incorrect » côté rétention."""
+    body = client.post(
+        "/api/quiz/answer", json={"category": "maths", "correct": False, "verdict": "partial"},
+    ).json()
+    assert body["verdict"] == "partial"
+
+    body = client.post("/api/quiz/answer", json={"category": "maths", "correct": True}).json()
+    assert body["verdict"] == "correct"  # sans verdict, il est déduit du booléen
 
 
 # ── Réglages de session : sujet libre + longueur ────────────────────────────

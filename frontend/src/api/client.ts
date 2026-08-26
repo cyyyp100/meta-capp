@@ -12,6 +12,7 @@ import type {
   PageWord,
   QuizAnalysis,
   QuizAnswerRecord,
+  QuizEvaluation,
   QuizOptions,
   QuizQuestion,
   QuizSubject,
@@ -120,10 +121,20 @@ export const api = {
     if (topic?.trim()) params.set("topic", topic.trim());
     return getJSON<QuizQuestion[]>(`/api/quiz/questions?${params}`);
   },
-  submitQuizAnswer: (category: string | null, correct: boolean) =>
-    postJSON<{ updated: boolean; level?: number; retention: number }>(
-      "/api/quiz/answer", { category, correct },
+  submitQuizAnswer: (category: string | null, correct: boolean, verdict?: string) =>
+    postJSON<{ updated: boolean; level?: number; retention: number; verdict: string }>(
+      "/api/quiz/answer", { category, correct, verdict },
     ),
+  // Correction d'une réponse rédigée (ou d'une remise en ordre) : c'est elle qui
+  // permet au quiz de rejouer autre chose que des QCM.
+  quizEvaluate: (body: {
+    question_id: number;
+    question: string;
+    user_answer: string;
+    question_type?: string;
+    answer?: string;
+    choices?: string[] | null;
+  }) => postJSON<QuizEvaluation>("/api/quiz/evaluate", body),
   // Langue du backend : pilote les prompts LLM, pas seulement les libellés.
   setBackendLang: (lang: string) =>
     postJSON<{ lang: string; supported: string[] }>("/api/preferences/lang", { lang }),
