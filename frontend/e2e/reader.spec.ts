@@ -74,11 +74,25 @@ test.describe("Lecture d'un document", () => {
       .toBeGreaterThan(0);
   });
 
+  /**
+   * Le TITRE de la carte, et rien d'autre.
+   *
+   * `getByText("echantillon")` attrapait n'importe quel élément contenant ce
+   * mot — y compris les puces de mots-clés du ruban, qui sont des boutons de
+   * RECHERCHE (`stopPropagation` + filtre) et non un lien vers le document.
+   * Ces puces viennent de la fiche LLM : avec Ollama elles portent des mots du
+   * texte, sans Ollama le repli retombe sur le nom du fichier — donc en CI la
+   * première correspondance était la puce « echantillon », le clic lançait une
+   * recherche, et la navigation n'avait jamais lieu.
+   *
+   * Le titre affiché est `echantillon.pdf` : l'exiger en correspondance EXACTE
+   * exclut la puce, quel que soit l'état d'Ollama.
+   */
+  const documentTitle = (page: Page) => page.getByText("echantillon.pdf", { exact: true });
+
   test("le document importé apparaît dans la bibliothèque", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText("echantillon", { exact: false }).first()).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(documentTitle(page).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("le SAS d'entrée retient avant la lecture puis laisse passer", async ({ page }) => {
@@ -87,8 +101,8 @@ test.describe("Lecture d'un document", () => {
     // de lire. On avance l'horloge plutôt que d'attendre pour de vrai.
     await page.clock.install();
     await page.goto("/");
-    await page.getByText("echantillon", { exact: false }).first().click();
-    await expect(page).toHaveURL(/\/reader\/\d+$/);
+    await documentTitle(page).first().click();
+    await expect(page).toHaveURL(/\/reader\/\d+$/, { timeout: 15_000 });
 
     const gate = page.getByRole("button", { name: /disponible dans|continuer/i });
     await expect(gate).toBeVisible({ timeout: 15_000 });

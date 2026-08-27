@@ -158,7 +158,13 @@ def test_explicit_timeout_is_only_a_fallback():
 
     started = time.monotonic()
     assert run_llm_sync(repond_apres_300ms, timeout=0.01) == {"ok": True}
-    assert time.monotonic() - started >= 0.3
+    # Marge de 50 ms : sous Windows, `threading.Timer` s'appuie sur
+    # `Event.wait()`, dont la granularité est celle de l'horloge système
+    # (~15,6 ms) — il rend la main quelques millisecondes AVANT l'échéance
+    # (mesuré : 0,297 s pour 0,3 s demandées). Ce qu'on prouve ici n'a pas
+    # besoin de cette précision : c'est que l'appel a attendu la tâche au lieu
+    # d'être tué à 0,01 s. 0,25 s reste 25 fois le timeout explicite.
+    assert time.monotonic() - started >= 0.25
 
     # Inversement, sans budget publié, le nombre de l'appelant s'applique.
     with pytest.raises(TimeoutError):
