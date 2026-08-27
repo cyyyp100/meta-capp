@@ -101,3 +101,52 @@ def test_brainstorm_ws_runs_db_search(client, monkeypatch):
     answer = events[-1]
     assert answer["sources"] and answer["sources"][0]["source_type"] == "highlight"
     assert "1 source" in answer["answer"]
+
+
+def test_brainstorm_question_is_bounded(client, monkeypatch):
+    """S4 : une question démesurée est TRONQUÉE, pas refusée.
+
+    Le WebSocket du lecteur borne ses entrées depuis toujours (`ReaderMessage`) ;
+    celui du brainstorming ne le faisait pas, et la chaîne partait telle quelle
+    dans un prompt. On tronque plutôt que de fermer le socket : une question trop
+    longue reste une question, et fermer ferait perdre la discussion."""
+    from server.routers import brainstorming as router
+    from services import brainstorm as svc
+
+    seen: dict = {}
+
+    def _capture(discussion_id, question, on_answer, on_error, on_scanning):
+        seen["question"] = question
+        on_answer({"answer": "ok", "sources": []})
+
+    monkeypatch.setattr(svc, "handle_message", _capture)
+
+    did = client.post("/api/brainstorming", json={"title": "Bornage"}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "a" * 10_000})
+        while ws.receive_json()["type"] != "answer":
+            pass
+
+    assert len(seen["question"]) == router._MAX_QUESTION_CHARS
+
+
+def test_brainstorm_ignores_non_dict_message(client, monkeypatch):
+    """Un message JSON qui n'est pas un objet ne doit pas faire tomber le socket.
+
+    `msg.get(...)` sur une liste lève un AttributeError qui remontait jusqu'au
+    gestionnaire d'exception du WebSocket et fermait le canal."""
+    from services import brainstorm as svc
+
+    def _answer(discussion_id, question, on_answer, on_error, on_scanning):
+        on_answer({"answer": "ok", "sources": []})
+
+    monkeypatch.setattr(svc, "handle_message", _answer)
+
+    did = client.post("/api/brainstorming", json={"title": "Robuste"}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json(["pas", "un", "objet"])   # ignoré
+        ws.send_json({"type": "inconnu"})      # ignoré
+        # Le socket est toujours vivant : un `ask` valide obtient sa réponse.
+        ws.send_json({"type": "ask", "question": "toujours là ?"})
+        while ws.receive_json()["type"] != "answer":
+            pass

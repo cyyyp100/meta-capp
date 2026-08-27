@@ -97,6 +97,20 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * Échappement pour une valeur d'ATTRIBUT (`style="…"`, `data-hl="…"`).
+ *
+ * `escapeHtml` suffit pour un nœud texte mais laisse passer les guillemets :
+ * interpolée dans un attribut, une valeur contenant `"` referme l'attribut et
+ * ouvre `onmouseover=…`. Les couleurs viennent aujourd'hui d'une table fixe
+ * (HL_COLORS), donc rien n'est exploitable — mais l'invariant S6 est « tout ce
+ * qui entre dans du HTML est échappé », et un futur appelant (couleur choisie
+ * par l'utilisateur, `purpose` renvoyé par le LLM) ne doit pas pouvoir le rompre.
+ */
+export function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/**
  * Rend `text` (échappé + math $...$ en KaTeX) avec les `marks` surlignés dans
  * les segments non-math. Une correspondance qui chevauche une formule n'est
  * marquée que sur sa partie textuelle (limitation assumée).
@@ -133,7 +147,7 @@ function markSegment(segment: string, marks: TextMark[]): string {
   for (const span of spans) {
     if (span.start < cursor) continue; // chevauchement : premier arrivé gagne
     html += escapeHtml(segment.slice(cursor, span.start)).replace(/\n/g, "<br/>");
-    const idAttr = span.mark.id != null ? ` data-hl="${span.mark.id}"` : "";
+    const idAttr = span.mark.id != null ? ` data-hl="${Number(span.mark.id)}"` : "";
     const cursorStyle = span.mark.id != null ? "cursor:pointer;" : "";
     // Masque : texte transparent et non sélectionnable — sinon un simple
     // glisser-copier le révélerait, et le rappel n'en serait plus un.
@@ -141,7 +155,7 @@ function markSegment(segment: string, marks: TextMark[]): string {
       ? "color:transparent;user-select:none;-webkit-user-select:none;"
       : "color:inherit;";
     html +=
-      `<mark${idAttr} style="background:${span.mark.color};${cursorStyle}` +
+      `<mark${idAttr} style="background:${escapeAttr(span.mark.color)};${cursorStyle}` +
       `border-radius:2px;padding:0 1px;${maskStyle}">` +
       escapeHtml(segment.slice(span.start, span.end)).replace(/\n/g, "<br/>") +
       "</mark>";

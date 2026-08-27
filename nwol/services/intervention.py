@@ -36,6 +36,11 @@ _MATH_CHARS_RE = re.compile(r"[=∑∫√±×÷≈≤≥∂∇λμσΩπθ^_{}\\
 _MATH_DENSITY_THRESHOLD = 0.02
 _MIN_DWELL_FOR_SOFT_TRIGGERS = 30.0
 _DECLINED_COOLDOWN = 90.0
+# Sentinelle « aucune intervention encore » : l'origine de time.monotonic()
+# est arbitraire (uptime de la machine), donc 0.0 ne veut PAS dire « il y a
+# très longtemps » — sur une machine fraîchement démarrée il vaut « à
+# l'instant » et tous les cooldowns bloquent la première intervention.
+_NEVER = float("-inf")
 
 
 class AssistantInterventionPolicy:
@@ -61,7 +66,7 @@ class AssistantInterventionPolicy:
 
         self._busy = False
         self._pending = False
-        self._last_global = 0.0
+        self._last_global = _NEVER
         self._last_by_page: dict[int, float] = {}
         self._fired_reasons: set[tuple[int, str]] = set()
         self._interventions_count = 0
@@ -80,7 +85,7 @@ class AssistantInterventionPolicy:
     def reset(self) -> None:
         self._busy = False
         self._pending = False
-        self._last_global = 0.0
+        self._last_global = _NEVER
         self._last_by_page.clear()
         self._fired_reasons.clear()
         self._interventions_count = 0
@@ -113,7 +118,7 @@ class AssistantInterventionPolicy:
         page = self._get_current_page()
         if page < 1:
             return
-        if now - self._last_by_page.get(page, 0.0) < ASSISTANT_PAGE_COOLDOWN.get(mode, 600.0):
+        if now - self._last_by_page.get(page, _NEVER) < ASSISTANT_PAGE_COOLDOWN.get(mode, 600.0):
             return
 
         reason = self._detect_trigger(page, mode, now)

@@ -68,6 +68,21 @@ def test_page_cooldown_blocks_second_intervention_on_same_page(monkeypatch):
     assert len(fired) == 1
 
 
+def test_first_intervention_fires_on_a_freshly_booted_machine(monkeypatch):
+    # Régression CI : `time.monotonic()` a une origine ARBITRAIRE (uptime de la
+    # machine). Sur un runner fraîchement démarré il vaut quelques centaines de
+    # secondes seulement ; une sentinelle « jamais encore intervenu » à 0.0
+    # rendait donc TOUS les cooldowns actifs et la toute première intervention
+    # de la session ne partait jamais. Sur un poste allumé depuis des heures le
+    # même code passait — d'où un test vert en local et rouge en CI.
+    monkeypatch.setattr(time, "monotonic", lambda: 12.0)
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, page_cooldown=3600.0, cooldown=240.0)
+
+    policy.tick()
+
+    assert len(fired) == 1
+
+
 def test_hard_page_trigger_on_math_density(monkeypatch):
     # Déclencheur `hard_page` (densité mathématique) : absent du chemin web.
     # dwell=inf neutralise `long_dwell` pour isoler le signal testé ; les

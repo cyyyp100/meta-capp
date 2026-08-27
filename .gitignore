@@ -44,6 +44,10 @@ desktop.ini
 # ── Documents de travail (jamais versionnés : poids et droits d'auteur) ───────
 /doc_test/
 *.pdf
+# Exception : la fixture des parcours de bout en bout DOIT être versionnée,
+# sinon la CI checkout sans elle et l'import répond 400 « Fichier introuvable »
+# (les trois scénarios de reader.spec.ts tombent en cascade).
+!frontend/e2e/fixtures/*.pdf
 
 # ── LLM and extraction caches ─────────────────────────────────────────────────
 nwol/llm/cache/

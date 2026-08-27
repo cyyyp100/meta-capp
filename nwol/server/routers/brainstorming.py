@@ -21,6 +21,11 @@ logger = logging.getLogger("server.brainstorming")
 
 router = APIRouter(prefix="/brainstorming", tags=["brainstorming"])
 
+# Bornage des entrées client (S4) — même seuil que le WebSocket du lecteur
+# (`routers/reading.py:_MAX_QUESTION_CHARS`). Sans lui, une question de taille
+# arbitraire partait directement dans un prompt.
+_MAX_QUESTION_CHARS = 4000
+
 
 class CreateBody(BaseModel):
     title: str | None = None
@@ -88,9 +93,11 @@ async def brainstorm_stream(ws: WebSocket, discussion_id: int) -> None:
     try:
         while True:
             msg = await ws.receive_json()
-            if msg.get("type") != "ask":
+            if not isinstance(msg, dict) or msg.get("type") != "ask":
                 continue
-            question = str(msg.get("question") or "").strip()
+            # S4 : on tronque plutôt que de refuser — une question trop longue
+            # reste une question, et fermer le socket ferait perdre la discussion.
+            question = str(msg.get("question") or "").strip()[:_MAX_QUESTION_CHARS]
             if not question:
                 continue
             await out.put({"type": "loading"})

@@ -5,11 +5,24 @@
 // indicateur d'attente). La fiche de classification arrive en tâche de fond et
 // reste `pending` sans Ollama, ce que l'interface doit savoir montrer.
 
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page } from "@playwright/test";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/echantillon.pdf", import.meta.url));
+
+// La fixture est versionnée par une EXCEPTION dans .gitignore (`*.pdf` l'excluait,
+// la CI clonait donc sans elle). Sans ce garde-fou, son absence se manifestait par
+// un import qui répond 400 « Fichier introuvable », un toast déjà disparu et trois
+// scénarios en timeout de 30 s — trente minutes de diagnostic pour un fichier manquant.
+test.beforeAll(() => {
+  if (!existsSync(FIXTURE)) {
+    throw new Error(
+      `Fixture absente : ${FIXTURE}\nElle doit être versionnée (voir l'exception \`!frontend/e2e/fixtures/*.pdf\` dans .gitignore).`,
+    );
+  }
+});
 
 /**
  * Le sélecteur de fichier natif passe par le pont pywebview, absent d'un

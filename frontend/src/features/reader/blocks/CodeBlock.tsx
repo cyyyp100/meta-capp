@@ -1,4 +1,4 @@
-import { findFolded, type TextMark } from "../anchorText";
+import { escapeAttr, findFolded, type TextMark } from "../anchorText";
 
 /**
  * Rendu d'un bloc de CODE (document ouvert comme fichier source). Monospace,
@@ -151,10 +151,10 @@ function renderCode(code: string, lang: string, marks: TextMark[]): string {
   for (const s of spans) {
     if (s.start < cursor) continue; // chevauchement : premier arrivé gagne
     html += highlight(code.slice(cursor, s.start), lang);
-    const idAttr = s.mark.id != null ? ` data-hl="${s.mark.id}"` : "";
+    const idAttr = s.mark.id != null ? ` data-hl="${Number(s.mark.id)}"` : "";
     const cur = s.mark.id != null ? "cursor:pointer;" : "";
     html +=
-      `<mark${idAttr} style="background:${s.mark.color};${cur}border-radius:2px;color:inherit">` +
+      `<mark${idAttr} style="background:${escapeAttr(s.mark.color)};${cur}border-radius:2px;color:inherit">` +
       escape(code.slice(s.start, s.end)) +
       "</mark>";
     cursor = s.end;
