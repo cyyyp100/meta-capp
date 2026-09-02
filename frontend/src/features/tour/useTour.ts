@@ -42,6 +42,7 @@ interface TourState {
   dismiss: () => void;
   release: () => void;
   skip: () => void;
+  restart: () => void;
 }
 
 function indexOf(step: TourStep | null): number {
@@ -93,7 +94,28 @@ export const useTour = create<TourState>((set, get) => ({
     set({ active: null, done: true });
     void api.setPreferences({ tour_done: true }).catch(() => undefined);
   },
+
+  // « Aide ▸ Tutoriel » : la seule façon de revenir sur une visite terminée ou
+  // refusée. On efface les DEUX préférences, sinon `request()` refuserait la
+  // première étape au motif qu'elle est déjà la plus avancée vue.
+  //
+  // La première bulle est posée ici plutôt que laissée à `request("import")` :
+  // l'écran d'accueil peut être DÉJÀ monté quand on clique dans le menu, et son
+  // effet ne se rejouerait pas. Si sa cible n'est pas encore là (on arrivait
+  // d'un autre écran), `Coachmark` patiente ~2 s puis relâche l'étape, qui
+  // reste due — c'est exactement le comportement voulu.
+  restart: () => {
+    set({ done: false, furthest: null, active: TOUR_ORDER[0], hydrated: true });
+    void api.setPreferences({ tour_done: false, tour_step: "none" }).catch(() => undefined);
+  },
 }));
+
+// Barre de menu native (« Aide ▸ Tutoriel »). Le menu vit côté Python : il ne
+// peut pas appeler le store, il émet cet événement — même pont que le thème
+// (`metacapp:theme`, cf. theme/useTheme.ts).
+window.addEventListener("metacapp:tour", () => {
+  useTour.getState().restart();
+});
 
 /** Convertit la préférence stockée en étape. Une valeur inconnue vaut « aucune ». */
 export function toStep(value: string | undefined): TourStep | null {

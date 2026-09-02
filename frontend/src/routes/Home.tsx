@@ -191,8 +191,9 @@ export function Home() {
                     // La flamme prend la MARQUE et non `--warning` : une série
                     // en cours est une progression, pas une alerte. Elle
                     // empruntait l'or de l'avertissement du temps où les deux
-                    // se ressemblaient ; `--warning` est violet désormais, et
-                    // une flamme violette ne veut rien dire.
+                    // se ressemblaient. `--warning` est de nouveau chaud
+                    // (terre cuite), donc la distinction compte plus que
+                    // jamais : la série prend la marque, pas l'avertissement.
                     className="gap-1 border-brand/30 bg-brand-soft font-bold text-brand-ink"
                   >
                     <Flame className="size-3.5" aria-hidden />

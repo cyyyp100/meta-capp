@@ -15,6 +15,7 @@ from db.answers import get_answers_for_session
 from db.metacog import (
     CRITERIA,
     ensure_profile,
+    get_history_by_criterion,
     get_profile,
     insert_history,
     set_general_analysis,
@@ -309,6 +310,28 @@ def _measure_meta_cognition(
         return None
 
 
+def _criteria_trends(user_id: int) -> dict[str, dict]:
+    """Tendance longitudinale par critère, sur TOUT l'historique du profil.
+
+    L'analyse de profil décrivait la dernière séance parce qu'elle ne recevait
+    que la dernière séance. Ce résumé lui donne la trajectoire : d'où part
+    chaque critère, où il en est, et sur combien de sessions mesurées."""
+    trends: dict[str, dict] = {}
+    for criterion, rows in get_history_by_criterion(user_id).items():
+        values = [float(value) for (_sid, value, _at) in rows]
+        if not values:
+            continue
+        recent = values[-5:]
+        trends[criterion] = {
+            "first": round(values[0], 1),
+            "current": round(values[-1], 1),
+            "delta_total": round(values[-1] - values[0], 1),
+            "recent": [round(v, 1) for v in recent],
+            "sessions_measured": len(values),
+        }
+    return trends
+
+
 def _update_general_analysis(
     session_id: int | None,
     pairs: list[dict],
@@ -316,12 +339,17 @@ def _update_general_analysis(
     session_gauges: dict,
     user_id: int,
 ) -> None:
-    """Met à jour l'analyse générale (évolutive) de l'apprenant — best-effort."""
+    """Met à jour l'analyse générale (évolutive) de l'apprenant — best-effort.
+
+    Le portrait porte sur l'apprenant, pas sur la séance : la séance qui vient de
+    s'achever n'est qu'un indice de plus, versé à côté de l'historique complet."""
     try:
         profile = get_profile(user_id) or {}
         profile_gauges = {k: float(profile.get(k, 50.0)) for k in CRITERIA}
         context = {
             "profile": profile_gauges,
+            "sessions_count": int(profile.get("sessions_count") or 0),
+            "criteria_trends": _safe(lambda: _criteria_trends(user_id), {}) or {},
             "session_metrics": metrics,
             "session_gauges": session_gauges or {},
             "reflections": list(pairs),

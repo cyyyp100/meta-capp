@@ -84,6 +84,14 @@ export function Stats() {
             >
               {t(`trend.${data.trend.category}`)}
             </span>
+            {/* Le lien vers les sources vivait dans « Évolution », où il ne
+                concernait qu'un graphe. Il fonde TOUT le profil : sa place est
+                sous le score global, dès le premier bloc. */}
+            <div>
+              <Link to="/stats/science" style={scienceLink}>
+                {t("science.sources")}
+              </Link>
+            </div>
           </div>
         </div>
       </Card>
@@ -125,17 +133,27 @@ export function Stats() {
 
       {/* Évolution */}
       <Card style={{ marginBottom: "var(--space-lg)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <SectionTitle>{t("stats.evolution")}</SectionTitle>
-          <Link
-            to="/stats/science"
-            style={{ color: "var(--accent-ink)", cursor: "pointer", fontSize: 13, fontWeight: 700, textDecoration: "underline" }}
-          >
-            {t("science.sources")}
-          </Link>
-        </div>
+        <SectionTitle>{t("stats.evolution")}</SectionTitle>
         <EvolutionPanel criteria={data.criteria} />
       </Card>
+
+      {/* La porte vers l'historique, juste sous l'évolution : le radar dit OÙ on
+          en est, la courbe COMMENT ça bouge, la progression D'OÙ ça vient. Elle
+          fermait la page ; elle appartient à ce fil-là. */}
+      <Link to="/stats/progress" style={progressLink}>
+        <span style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <LineChart className="size-5 shrink-0" style={{ color: "var(--accent-ink)" }} aria-hidden />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>
+              {t("progress.title")}
+            </span>
+            <span style={{ display: "block", fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
+              {t("progress.subtitle")}
+            </span>
+          </span>
+        </span>
+        <ArrowRight className="size-4.5 shrink-0" style={{ color: "var(--muted)" }} aria-hidden />
+      </Link>
 
       {/* Matières */}
       <Card>
@@ -201,28 +219,21 @@ export function Stats() {
       {/* Le bloc « Mes données » (export, restauration, purge) vivait ici, au
           bas du profil : un écran de lecture qui se terminait par des actions
           destructrices. Il a sa place dans Réglages ▸ Données, où il est
-          désormais seul à vivre.
-
-          À sa place, la porte vers l'historique. C'est le prolongement naturel
-          de cet écran : le radar dit OÙ on en est, la progression dit COMMENT on
-          y est arrivé. */}
-      <Link to="/stats/progress" style={progressLink}>
-        <span style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <LineChart className="size-5 shrink-0" style={{ color: "var(--accent-ink)" }} aria-hidden />
-          <span style={{ minWidth: 0 }}>
-            <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>
-              {t("progress.title")}
-            </span>
-            <span style={{ display: "block", fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-              {t("progress.subtitle")}
-            </span>
-          </span>
-        </span>
-        <ArrowRight className="size-4.5 shrink-0" style={{ color: "var(--muted)" }} aria-hidden />
-      </Link>
+          désormais seul à vivre. */}
     </div>
   );
 }
+
+/** Le lien vers les sources scientifiques, sous le score global. */
+const scienceLink: React.CSSProperties = {
+  display: "inline-block",
+  marginTop: 10,
+  color: "var(--accent-ink)",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 700,
+  textDecoration: "underline",
+};
 
 /** Le lien vers la progression : une carte pleine largeur, pas un lien de texte.
  *  C'est la seule porte vers l'historique depuis que « Progression » a quitté la
@@ -232,7 +243,7 @@ const progressLink: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 16,
-  marginTop: "var(--space-lg)",
+  marginBottom: "var(--space-lg)",
   padding: "var(--space-lg)",
   background: "var(--surface)",
   border: "1px solid var(--border)",

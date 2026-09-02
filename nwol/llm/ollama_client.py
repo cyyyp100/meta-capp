@@ -424,6 +424,8 @@ def generate_profile_analysis_async(
     """Analyse générale (évolutive) de l'apprenant, affichée sur la page profil."""
     prompt = build_profile_analysis_prompt(
         profile=context.get("profile") or {},
+        criteria_trends=context.get("criteria_trends") or {},
+        sessions_count=int(context.get("sessions_count") or 0),
         session_metrics=context.get("session_metrics") or {},
         session_gauges=context.get("session_gauges") or {},
         reflections=context.get("reflections") or [],

@@ -121,7 +121,7 @@ function targetDir(rtl?: boolean): "rtl" | "auto" {
 function ToneBadge({ tone }: { tone?: string }) {
   if (!tone) return null;
   return (
-    <span style={{ fontSize: 11, fontWeight: 700, color: "#b45309", background: "#f59e0b22", padding: "1px 6px", borderRadius: 999, marginLeft: 6 }}>
+    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-ink)", background: "var(--accent-soft)", padding: "1px 6px", borderRadius: 999, marginLeft: 6 }}>
       {tone}
     </span>
   );
@@ -268,7 +268,11 @@ function QcmItem({ q, onScore }: { q: LangQcm; onScore: (s: number) => void }) {
     <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: 12, marginBottom: 10 }}>
       <div style={{ fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
         {q.depth === "inference" && (
-          <span title={t("lang.inference_hint")} style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "#7c3aed", background: "#7c3aed22", padding: "2px 7px", borderRadius: 999 }}>
+          // Marqueur « question plus profonde », pas un statut : il prend la
+          // MARQUE (encre + lavis d'accent), comme la pastille de série sur
+          // l'accueil. Il posait un violet en dur, hors de tout jeton — donc
+          // hors du thème sombre, et hors de la seule palette du produit.
+          <span title={t("lang.inference_hint")} style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--accent-ink)", background: "var(--accent-soft)", padding: "2px 7px", borderRadius: 999 }}>
             🧠 {t("lang.inference")}
           </span>
         )}

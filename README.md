@@ -4,7 +4,7 @@
 
 ### The AI-native cognitive learning companion for educational PDFs
 
-**Your PDF, exactly as its author designed it — with a living AI reading companion beside it that watches how you learn, answers in context, and speaks up only when it actually helps.**
+**Your PDF, exactly as its author designed it but with a living AI reading companion beside it that watches how you learn, answers in context, and speaks up only when it actually helps.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg?style=flat-square)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/cyyyp100/meta-capp/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/cyyyp100/meta-capp/actions/workflows/ci.yml)

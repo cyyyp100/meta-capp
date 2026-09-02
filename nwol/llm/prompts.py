@@ -1415,6 +1415,8 @@ Contraintes :
 
 def build_profile_analysis_prompt(
     profile: dict | None = None,
+    criteria_trends: dict | None = None,
+    sessions_count: int = 0,
     session_metrics: dict | None = None,
     session_gauges: dict | None = None,
     reflections: list[dict] | None = None,
@@ -1422,64 +1424,86 @@ def build_profile_analysis_prompt(
 ) -> str:
     """Analyse générale (évolutive) de l'apprenant, affichée sur la page profil.
 
-    Synthétise le profil métacognitif long terme, la session qui vient de s'achever
-    (métriques + jauges) et les réponses de réflexion, en tenant compte de l'analyse
-    précédente pour faire évoluer le portrait plutôt que repartir de zéro."""
+    C'est un PORTRAIT, pas un compte rendu de séance : le profil long terme et la
+    trajectoire par critère (`criteria_trends`) sont la matière principale ; la
+    session qui vient de s'achever n'est que l'indice le plus récent, versé au
+    portrait précédent. Sans ce cadrage, le modèle racontait la dernière séance —
+    c'est exactement ce que la page profil ne doit pas afficher."""
     if _i18n.current_lang() == "en":
         return f"""You are the metacognitive coach of MetaC-App, keeping an evolving portrait of the learner.
 
-Long-term metacognitive profile (0–100 per criterion):
+This portrait describes the LEARNER across all their sessions ({sessions_count} so far) — it is
+not a report on the session that just ended.
+
+Long-term metacognitive profile (0–100 per criterion) — the main material:
 {_json(profile or {})}
 
-Session that just ended (statistics):
-{_json(session_metrics or {})}
+Trajectory per criterion over the whole history (first value, current value, total change,
+last measured values, number of measured sessions):
+{_json(criteria_trends or {})}
 
-Session gauges (0–100):
-{_json(session_gauges or {})}
-
-Learner's reflection answers:
-{_json(reflections or [])}
-
-Previous general analysis (may be empty):
+Previous general analysis (may be empty) — the portrait to evolve:
 {previous_analysis or "(none)"}
 
-Update the GENERAL analysis of the learner: evolve the previous portrait with what this
-session and these reflections reveal — do not restart from scratch.
+Latest evidence only — the session that just ended (statistics):
+{_json(session_metrics or {})}
+
+Latest evidence only — gauges of that session (0–100):
+{_json(session_gauges or {})}
+
+Latest evidence only — the learner's reflection answers in that session:
+{_json(reflections or [])}
+
+Update the GENERAL analysis of the learner: keep what the previous portrait got right, adjust
+what this latest evidence confirms or contradicts — do not restart from scratch.
 
 Respond only in valid JSON, without Markdown, in the exact format:
 {{"analysis": "..."}}
 
 Constraints:
 - analysis: 3 to 5 sentences in English, addressed to the learner ("you").
-- Cover strengths, recurring difficulties, and trends across criteria; give one concrete suggestion.
+- Describe lasting traits: strengths, recurring difficulties, trends per criterion over time;
+  end with one concrete suggestion.
+- NEVER narrate the last session: no "this session", "today", "just now", no one-off numbers
+  from it. Use it only as evidence about who the learner is.
 - Be factual and personalized; never invent data absent from the inputs."""
 
     return f"""Tu es le coach métacognitif de MetaC-App ; tu tiens un portrait évolutif de l'apprenant.
 
-Profil métacognitif long terme (0–100 par critère) :
+Ce portrait décrit L'APPRENANT sur l'ensemble de ses séances ({sessions_count} à ce jour) — ce
+n'est pas un compte rendu de la séance qui vient de s'achever.
+
+Profil métacognitif long terme (0–100 par critère) — la matière principale :
 {_json(profile or {})}
 
-Session qui vient de s'achever (statistiques) :
-{_json(session_metrics or {})}
+Trajectoire par critère sur tout l'historique (valeur de départ, valeur actuelle, écart total,
+dernières valeurs mesurées, nombre de sessions mesurées) :
+{_json(criteria_trends or {})}
 
-Jauges de la session (0–100) :
-{_json(session_gauges or {})}
-
-Réponses de réflexion de l'apprenant :
-{_json(reflections or [])}
-
-Analyse générale précédente (peut être vide) :
+Analyse générale précédente (peut être vide) — le portrait à faire évoluer :
 {previous_analysis or "(aucune)"}
 
-Mets à jour l'analyse GÉNÉRALE de l'apprenant : fais évoluer le portrait précédent avec ce
-que cette session et ces réflexions révèlent — ne repars pas de zéro.
+Indice le plus récent seulement — la séance qui vient de s'achever (statistiques) :
+{_json(session_metrics or {})}
+
+Indice le plus récent seulement — jauges de cette séance (0–100) :
+{_json(session_gauges or {})}
+
+Indice le plus récent seulement — réponses de réflexion de cette séance :
+{_json(reflections or [])}
+
+Mets à jour l'analyse GÉNÉRALE de l'apprenant : garde ce que le portrait précédent avait juste,
+ajuste ce que ce dernier indice confirme ou contredit — ne repars pas de zéro.
 
 Réponds uniquement en JSON valide, sans Markdown, au format exact :
 {{"analysis": "..."}}
 
 Contraintes :
 - analysis : 3 à 5 phrases en français, adressées à l'apprenant (« tu »).
-- Couvre les forces, les difficultés récurrentes et les tendances par critère ; donne une suggestion concrète.
+- Décris des traits durables : forces, difficultés récurrentes, tendances par critère dans le
+  temps ; termine par une suggestion concrète.
+- NE RACONTE JAMAIS la dernière séance : pas de « cette séance », « aujourd'hui », « à l'instant »,
+  ni de chiffre ponctuel qui en vient. Elle ne sert qu'à savoir qui est l'apprenant.
 - Reste factuel et personnalisé ; n'invente jamais de données absentes des entrées."""
 
 

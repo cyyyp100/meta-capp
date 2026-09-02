@@ -552,8 +552,8 @@ const FR: Record<string, string> = {
   "tour.intervention.body": "Personne ne lui a demandé d'intervenir. Elle a vu que tu ralentissais ici — c'est ce genre d'observation qu'elle accumule.",
   "tour.exit.title": "Trois questions, à la fin",
   "tour.exit.body": "C'est le moment qui fait tenir une lecture : reformuler ce que tu viens de lire vaut plus que le relire.",
-  "tour.profile.title": "Six jauges que tu ne pilotes pas",
-  "tour.profile.body": "Elles se remplissent en te lisant, session après session. Au bout de quelques semaines, elles savent sur ta façon d'apprendre des choses que tu ignores.",
+  "tour.profil.title": "Six jauges que tu ne pilotes pas",
+  "tour.profil.body": "Elles se remplissent en te lisant, session après session. Au bout de quelques semaines, elles savent sur ta façon d'apprendre des choses que tu ignores.",
   // ── Récap de session (phase 7) ─────────────────────────────────────────────
   "recap.weekly": "Ta semaine",
   "recap.weekly_hint": "Ce que tu as lu, ce qui a bougé, ce qu'il reste à revoir.",
@@ -1093,8 +1093,8 @@ const EN: Record<string, string> = {
   "tour.intervention.body": "Nobody asked her to step in. She saw you slowing down here — that is the kind of observation she accumulates.",
   "tour.exit.title": "Three questions, at the end",
   "tour.exit.body": "This is the moment that makes a reading stick: putting it in your own words beats reading it again.",
-  "tour.profile.title": "Six gauges you do not steer",
-  "tour.profile.body": "They fill up by reading you, session after session. After a few weeks they know things about how you learn that you do not.",
+  "tour.profil.title": "Six gauges you do not steer",
+  "tour.profil.body": "They fill up by reading you, session after session. After a few weeks they know things about how you learn that you do not.",
   // ── Session recap (phase 7) ────────────────────────────────────────────────
   "recap.weekly": "Your week",
   "recap.weekly_hint": "What you read, what moved, what is left to review.",

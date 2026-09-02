@@ -131,8 +131,10 @@ test.describe("Pont tokens.css -> Tailwind", () => {
 
   test("les couleurs de marque pointent bien sur les tokens", async ({ page }) => {
     const brand = await computed(page, "bg-brand");
-    // --accent = #f59e0b (ambre doré). Il ne change PAS entre les deux thèmes :
-    // c'est une propriété de cette identité, vérifiée plus bas.
+    // --accent = #f59e0b (ambre doré) en thème CLAIR — c'est ce que mesure ce
+    // test (le beforeEach force `light`). Le thème sombre en prend une version
+    // assombrie et désaturée, #d98a19 : l'ambre plein brûlait sur le bleu nuit.
+    // Ce qui reste vrai des deux côtés, c'est le RATIO, vérifié plus bas.
     expect(brand.background).toBe("rgb(245, 158, 11)");
 
     const surface = await computed(page, "bg-surface");
@@ -171,7 +173,7 @@ test.describe("Pont tokens.css -> Tailwind", () => {
     });
 
     const after = await computed(page, "bg-background");
-    expect(after.background).toBe("rgb(11, 18, 32)"); // --bg sombre (#0b1220)
+    expect(after.background).toBe("rgb(8, 13, 23)"); // --bg sombre (#080d17)
   });
 
   test("le texte posé sur l'accent garde un contraste suffisant dans les deux thèmes", async ({
@@ -183,9 +185,9 @@ test.describe("Pont tokens.css -> Tailwind", () => {
     // et qui survivra à la prochaine identité.
     //
     // C'est ce test qui a attrapé le piège de cette palette : du blanc sur
-    // #f97316 ne fait que 2,80:1. L'encre est donc le bleu nuit (6,68:1), et
-    // comme l'orange ne bouge pas d'un thème à l'autre, elle est la même dans
-    // les deux — ce qu'aucune palette précédente ne permettait.
+    // #f97316 ne fait que 2,80:1. L'encre est donc le bleu nuit, et elle reste
+    // la même dans les deux thèmes — 8,72:1 sur l'ambre clair, 6,78:1 sur
+    // l'ambre assombri du thème sombre.
     for (const theme of ["light", "dark"] as const) {
       await page.evaluate((t) => {
         document.documentElement.dataset.theme = t;

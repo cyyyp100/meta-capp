@@ -67,22 +67,53 @@
      barre « à travailler » et la barre « en progression » auraient été la même
      couleur, et la jauge n'aurait plus rien dit.
 
-     Le violet est le seul candidat mesuré qui s'écarte nettement des DEUX
-     signaux voisins : 134° de l'ambre, 100° du rouge (le rose n'était qu'à 28°
-     du rouge, l'olive à 30° de l'ambre). Et il reste juste ici : dans cette
-     app, `--warning` ne signifie jamais « danger » — il signifie « partiel », « à
-     revoir », « à travailler ». Le vrai danger a son propre jeton.
+     ELLE Y REVIENT POURTANT — en terre cuite, `#935339`, et c'est un choix
+     assumé contre le paragraphe ci-dessus. Deux détours ont eu lieu entre-temps
+     (`#6d28d9` violet, puis `#1a5cb0` bleu) : les deux étaient parfaitement
+     séparés en teinte et les deux se lisaient comme une couleur étrangère au
+     produit. Sur l'échelle de score, le palier bas doit être un cran de la MÊME
+     rampe que l'ambre, pas une autre famille. Inutile de les réessayer.
+
+     Ce qui distingue `#935339` du `#8a6a12` qui a échoué n'est pas la teinte
+     (17°, donc à 21° de l'ambre — l'or était à 6°) : c'est la SATURATION. 0,44
+     contre 0,92 pour `--accent`. Mesuré en ΔE, l'écart est franc partout :
+
+       vs `--accent`      (#f59e0b)  ΔE 57,0   aucun risque
+       vs `--accent-ink`  (#b45309)  ΔE 30,3   le voisin le plus serré
+       vs `--danger`      (#b3261e)  ΔE 33,9
+
+     `--accent-ink` est le voisin qui compte, et on l'oublie : c'est lui qui
+     ÉCRIT le palier médian, dans la même colonne que `--warning` sur l'écran
+     Profil (« À améliorer » en ambre, « En progrès » en terre cuite, l'un sous
+     l'autre). 30,3 tient — mais c'est la marge à surveiller si l'un des deux
+     bouge encore.
+
+     LA VALEUR EST COINCÉE PAR LE BAS, et c'est ce qui interdit un rouge plus
+     clair et plus doux : `--warning` REMPLIT (barre, pastille de verdict) mais
+     il ÉCRIT aussi (`scoreInk`, features/stats/labels.ts). L'éclaircir pour
+     l'éloigner de `--danger` le ferait passer sous 4,5:1 sur blanc. `--accent`
+     a résolu ce conflit avec un second jeton (`--accent-ink`) ; tant que
+     `--warning` n'en a qu'un, il doit tenir les deux rôles, donc rester sombre.
+
+     Les trois jetons chauds se touchent réellement à deux endroits, tous deux
+     vérifiés : la rampe de difficulté des flashcards (vert / ambre / terre cuite
+     / rouge, routes/Flashcards.tsx) et les pastilles de verdict (correct /
+     partiel / incorrect, features/questions/VerdictBadge.tsx).
+
+     Le sens, lui, n'a jamais bougé : dans cette app, `--warning` ne signifie
+     jamais « danger » — il signifie « partiel », « à revoir », « à travailler ».
+     Le vrai danger a son propre jeton.
 
      `--on-status` est l'encre posée sur ces TROIS remplissages, et elle ne peut
      pas être `--on-accent` : le bleu nuit sur le rouge ne fait que 2,67:1, et
      3,80:1 sur le vert. Un seul jeton suffit pour les trois parce qu'ils varient
      ensemble — sombres en thème clair (encre blanche), clairs en thème sombre
-     (encre bleu nuit). Vérifié : 4,92 / 5,06 / 6,54 en clair, 9,74 / 10,07 /
-     6,77 en sombre. */
+     (encre bleu nuit). Vérifié : 4,92 / 5,94 / 6,54 en clair, 9,74 / 9,33 /
+     6,96 en sombre. */
   --success: #12805c;
   --success-soft: #e6f4ee;
-  --warning: #6d28d9;
-  --warning-soft: #f0e9fd;
+  --warning: #935339;
+  --warning-soft: #f7e9e3;
   --danger: #b3261e;
   --danger-soft: #fdeceb;
   --on-status: #ffffff;
@@ -95,7 +126,8 @@
   /* Coloration syntaxique (lecteur de code) */
   /* Aucun de ces quatre ne doit friser l'ambre de la marque : un mot-clé qu'on
      prend pour un élément d'interface est pire qu'un mot-clé terne. Le violet
-     qu'occupait `keyword` est parti à `--warning` ; magenta, bleu, sarcelle et
+     qu'occupait `keyword` est parti à `--warning`, lequel a beaucoup bougé depuis
+     (voir plus haut) sans jamais repasser par ici ; magenta, bleu, sarcelle et
      gris froid restent distincts entre eux, de l'accent et des sémantiques.
      Le gris de commentaire est assombri pour passer 4,5:1 — un commentaire est
      du texte discret, pas du texte illisible. */
@@ -142,31 +174,51 @@
 
 [data-theme="dark"] {
   /* Le thème sombre est le bleu nuit de l'identité, pas un gris neutre : c'est
-     ici que #0b1220 est réellement la couleur du produit. */
-  --bg: #0b1220;
-  --bg-alt: #0f1729;
-  --surface: #131c30;
-  --surface-soft: #1a2438;
-  --border: #24304a;
-  --border-strong: #33415f;
+     ici que #0b1220 est réellement la couleur du produit.
+
+     LA RAMPE A ÉTÉ DESCENDUE D'ENVIRON 2,5 POINTS DE CLARTÉ (teinte et
+     saturation inchangées : ~221°, on reste dans le même bleu). Le fond était
+     assez clair pour que l'ambre lui saute dessus ; il fait désormais nuit pour
+     de bon, et l'accent — assombri lui aussi, voir plus bas — s'y pose au lieu
+     d'y crier. Les deux mouvements vont ensemble : n'en refaire qu'un seul
+     ramènerait le heurt.
+
+     `#0b1220` reste l'encre (`--on-accent`, `--on-status`) : c'est la valeur
+     d'identité, elle n'a pas à suivre le fond. */
+  --bg: #080d17;
+  --bg-alt: #0b121f;
+  --surface: #0f1626;
+  --surface-soft: #161e2e;
+  --border: #1f293f;
+  --border-strong: #2d3953;
 
   --text: #f8fafc;
   --text-soft: #cbd5e1;
   --muted: #94a3b8;
   --muted-light: #64748b;
 
-  /* L'accent NE CHANGE PAS de valeur entre les deux thèmes — c'est nouveau, et
-     c'est voulu : sur bleu nuit, #f97316 tient déjà 6,68:1. La marque garde donc
-     exactement la même couleur partout, ce qu'aucun accent teal ou terre cuite
-     ne permettait. `--accent-ink` s'éclaircit, lui : c'est du texte, et il doit
-     se lire sur le fond sombre. */
-  --accent: #f59e0b;
-  --accent-hover: #fbbf24;
-  --accent-ink: #fbbf24;
-  --accent-soft: #2e2109;
+  /* L'accent A FINI PAR CHANGER de valeur entre les deux thèmes. Il gardait
+     exactement `#f59e0b` partout — élégant sur le papier, agressif à l'écran :
+     un ambre à 92 % de saturation sur un fond de nuit, c'est un phare, et le
+     bleu ne tenait plus l'écran face à lui.
+
+     Ici il descend d'un cran et se désature (hsl 35° 79 % 48 % contre 38° 92 %
+     50 %) : la marque reste immédiatement reconnaissable, elle cesse de brûler.
+     Le contraste ne paie pas l'opération — 6,78:1 avec l'encre bleu nuit
+     `--on-accent`, très au-dessus du seuil de 4,5:1 que le test e2e
+     « texte posé sur l'accent » vérifie dans les deux thèmes.
+
+     `--accent-hover` reste UN CRAN PLUS CLAIR que `--accent` : en sombre, le
+     survol s'éclaire. `--accent-ink` est du texte et se lit sur le fond sombre
+     (9,03:1 sur `--bg`, 7,75:1 sur `--surface-soft`) ; il suit l'accent vers le
+     bas sans passer sous le seuil. Le lavis suit la rampe de fonds. */
+  --accent: #d98a19;
+  --accent-hover: #eb9c2a;
+  --accent-ink: #e5a531;
+  --accent-soft: #261b07;
   --on-accent: #0b1220;
 
-  --hover-surface: #1c2740;
+  --hover-surface: #172136;
   --hover-ink: #f8fafc;
 
   --code-comment: #7c8aa3;
@@ -176,8 +228,8 @@
 
   --success: #34d399;
   --success-soft: #0e2b23;
-  --warning: #a78bfa;
-  --warning-soft: #1e1633;
+  --warning: #eba883;
+  --warning-soft: #221510;
   /* Rose-rouge et non rouge pur : mesuré, l'ancien `#f87171` n'était qu'à 37,7°
      de teinte de l'ambre de la marque et à 1,29:1 — deux pastilles voisines s'y
      confondaient dans le thème sombre. Celui-ci ouvre l'écart à 46,4° sans rien

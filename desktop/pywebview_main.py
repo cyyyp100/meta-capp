@@ -150,6 +150,24 @@ class NativeApi:
         except Exception:  # pragma: no cover - dépend de la coque native
             logger.debug("Plein écran ignoré", exc_info=True)
 
+    def start_tour(self) -> None:
+        """« Aide ▸ Tutoriel » : rejoue la visite guidée du premier lancement.
+
+        Deux gestes, dans cet ordre : on ramène l'accueil (la première bulle
+        s'ancre sur son bouton d'import), PUIS on émet l'événement. Le menu ne
+        remet pas les préférences à zéro lui-même — il le demande au store, qui
+        est le seul à savoir ce qu'une visite « recommencée » veut dire
+        (`frontend/src/features/tour/useTour.ts`)."""
+        if self.window is None:
+            return
+        self.navigate("/")
+        try:
+            self.window.evaluate_js(
+                "window.dispatchEvent(new CustomEvent('metacapp:tour'));"
+            )
+        except Exception:  # pragma: no cover - dépend de la coque native
+            logger.debug("Relance de la visite ignorée", exc_info=True)
+
     def open_releases_page(self) -> None:
         """Ouvre la page de téléchargement — l'URL EN DUR, jamais une URL reçue.
 
@@ -190,6 +208,7 @@ def _build_menu(api: NativeApi) -> list[Menu]:
             MenuAction(t("menu.fullscreen"), api.toggle_fullscreen),
         ]),
         Menu(t("menu.help"), [
+            MenuAction(t("menu.tutorial"), api.start_tour),
             MenuAction(t("menu.report_issue"), lambda: api.navigate("/settings/help")),
             MenuAction(t("menu.rate"), api.open_releases_page),
             MenuAction(t("menu.check_updates"), lambda: api.navigate("/settings/updates")),
