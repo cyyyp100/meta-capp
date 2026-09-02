@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, date, timedelta
+from datetime import date, datetime
 
 from db import get_connection
 
@@ -60,38 +60,97 @@ def save_user_speed(user_id: int, speed_ms: int) -> None:
         conn.execute("UPDATE user SET speed_ms=? WHERE id=?", (int(speed_ms), user_id))
 
 
-def record_login_and_get_streak(user_id: int = DEFAULT_USER_ID) -> int:
-    conn = get_connection()
-    today = date.today().isoformat()
+# Un jour manqué ne casse pas la série. C'est une décision de produit, pas un
+# réglage : l'identité de Meta-Capp est bienveillante, et un streak qui punit
+# retient mal les adultes — il fait surtout abandonner ceux qui viennent de
+# rater une journée. Deux jours d'affilée sans lire, en revanche, sont une
+# rupture de rythme : la série repart.
+STREAK_GRACE_DAYS = 1
 
+
+def get_streak(user_id: int = DEFAULT_USER_ID) -> dict:
+    """Série d'étude, en LECTURE PURE. Aucun effet de bord.
+
+    `GET /api/streak` incrémentait la série : ouvrir l'app comptait comme une
+    journée d'étude, et un simple rechargement de page pouvait la faire vivre
+    indéfiniment. La série n'avance plus que dans `record_study_day`, appelée à
+    la fin d'une session réellement terminée."""
+    conn = get_connection()
     row = conn.execute(
-        "SELECT streak, last_login FROM login_streak WHERE user_id=?", (user_id,)
+        "SELECT streak, longest_streak, last_study_day FROM login_streak WHERE user_id=?",
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        return {"streak": 0, "longest_streak": 0, "last_study_day": None, "active": False}
+
+    streak = int(row["streak"] or 0)
+    last = row["last_study_day"]
+    # Une série dont le dernier jour est trop ancien est FINIE : on l'affiche à
+    # zéro sans rien écrire (l'écriture appartient à record_study_day). Une date
+    # illisible compte comme trop ancienne — on n'invente pas une série.
+    gap = _days_since(last)
+    if gap is None or gap > STREAK_GRACE_DAYS + 1:
+        streak = 0
+    return {
+        "streak": streak,
+        "longest_streak": max(int(row["longest_streak"] or 0), streak),
+        "last_study_day": last,
+        "active": streak > 0,
+    }
+
+
+def record_study_day(user_id: int = DEFAULT_USER_ID) -> dict:
+    """Enregistre AUJOURD'HUI comme jour d'étude et fait avancer la série.
+
+    Appelée une seule fois par session terminée (`services/session.py`). Le même
+    jour compté deux fois ne bouge rien."""
+    ensure_default_user()
+    today = date.today()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT streak, longest_streak, last_study_day FROM login_streak WHERE user_id=?",
+        (user_id,),
     ).fetchone()
 
     if row is None:
         with conn:
             conn.execute(
-                "INSERT INTO login_streak (user_id, streak, last_login) VALUES (?, 1, ?)",
-                (user_id, today),
+                """INSERT INTO login_streak (user_id, streak, longest_streak, last_study_day)
+                   VALUES (?, 1, 1, ?)""",
+                (user_id, today.isoformat()),
             )
-        return 1
+        return get_streak(user_id)
 
-    last_login = row["last_login"]
-    streak = row["streak"]
+    last = row["last_study_day"]
+    if last == today.isoformat():
+        return get_streak(user_id)
 
-    if last_login == today:
-        return streak
-
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    new_streak = streak + 1 if last_login == yesterday else 1
+    gap = _days_since(last)
+    if gap is not None and gap <= STREAK_GRACE_DAYS + 1:
+        streak = int(row["streak"] or 0) + 1
+    else:
+        streak = 1
+    longest = max(int(row["longest_streak"] or 0), streak)
 
     with conn:
         conn.execute(
-            "UPDATE login_streak SET streak=?, last_login=? WHERE user_id=?",
-            (new_streak, today, user_id),
+            """UPDATE login_streak
+               SET streak=?, longest_streak=?, last_study_day=?
+               WHERE user_id=?""",
+            (streak, longest, today.isoformat(), user_id),
         )
-    logger.info("Streak utilisateur id=%s : %s jour(s)", user_id, new_streak)
-    return new_streak
+    logger.info("Série d'étude user=%s : %s jour(s) (record %s)", user_id, streak, longest)
+    return get_streak(user_id)
+
+
+def _days_since(day: str | None) -> int | None:
+    """Nombre de jours entre `day` (ISO) et aujourd'hui. None si illisible."""
+    if not day:
+        return None
+    try:
+        return (date.today() - date.fromisoformat(str(day))).days
+    except ValueError:
+        return None
 
 
 def get_user_lang(user_id: int = DEFAULT_USER_ID) -> str:

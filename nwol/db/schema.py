@@ -276,9 +276,12 @@ CREATE INDEX IF NOT EXISTS idx_subject_history_user ON subject_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_subject_history_subject ON subject_history(user_id, subject);
 
 CREATE TABLE IF NOT EXISTS login_streak (
-    user_id    INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
-    streak     INTEGER DEFAULT 1,
-    last_login TEXT NOT NULL
+    user_id        INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
+    streak         INTEGER DEFAULT 1,
+    longest_streak INTEGER DEFAULT 0,
+    -- Jour de la dernière SESSION terminée, pas de la dernière ouverture de
+    -- l'app : c'est une série d'étude (cf. migration v27).
+    last_study_day TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS brainstorm_discussions (

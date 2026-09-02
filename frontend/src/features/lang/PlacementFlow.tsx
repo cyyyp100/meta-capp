@@ -94,17 +94,17 @@ export function PlacementFlow({
   if (step === "gate") {
     return (
       <div style={card}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent-ink)" }}>
           {t("lang.placement_title")}
         </div>
-        <h2 style={{ fontSize: 22, margin: "8px 0 4px" }}>{t("lang.placement_gate", { language: label })}</h2>
+        <h2 style={{ fontSize: "var(--text-h2)", margin: "8px 0 4px" }}>{t("lang.placement_gate", { language: label })}</h2>
         <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("lang.placement_gate_sub")}</p>
         {error && <p style={{ color: "var(--danger)" }}>{t("lang.placement_error")}</p>}
         <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
           <button onClick={skip} disabled={busy} style={btn("var(--surface)", "var(--text)")}>
             {t("lang.placement_never")}
           </button>
-          <button onClick={startTest} disabled={busy} style={btn("var(--accent)", "#fff")}>
+          <button onClick={startTest} disabled={busy} style={btn("var(--accent)", "var(--on-accent)")}>
             {busy ? "…" : t("lang.placement_yes")}
           </button>
         </div>
@@ -131,12 +131,12 @@ export function PlacementFlow({
   if (step === "result" && result) {
     return (
       <div style={card}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent-ink)" }}>
           {t("lang.placement_result")}
         </div>
         <div style={{ fontSize: 40, fontWeight: 800, margin: "6px 0" }}>{result.level ?? "A1"}</div>
         {result.comment && <p style={{ color: "var(--text-soft)" }}>{result.comment}</p>}
-        <button onClick={onDone} style={{ ...btn("var(--success)", "#fff"), marginTop: 16 }}>
+        <button onClick={onDone} style={{ ...btn("var(--success)", "var(--on-status)"), marginTop: 16 }}>
           {t("lang.placement_start_lesson")}
         </button>
       </div>
@@ -147,10 +147,10 @@ export function PlacementFlow({
   const allAnswered = items.every((it) => (answers[String(it.id)] ?? "").trim().length > 0);
   return (
     <div style={card}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent)" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent-ink)" }}>
         {t("lang.placement_title")}
       </div>
-      <h2 style={{ fontSize: 20, margin: "8px 0 16px" }}>{label}</h2>
+      <h2 style={{ fontSize: "var(--text-h3)", margin: "8px 0 16px" }}>{label}</h2>
       {error && <p style={{ color: "var(--danger)" }}>{t("lang.placement_error")}</p>}
       <div style={{ display: "grid", gap: 14 }}>
         {items.map((it, i) => (
@@ -163,7 +163,7 @@ export function PlacementFlow({
           />
         ))}
       </div>
-      <button onClick={submit} disabled={busy || !allAnswered} style={{ ...btn("var(--accent)", "#fff"), marginTop: 18, opacity: allAnswered ? 1 : 0.5 }}>
+      <button onClick={submit} disabled={busy || !allAnswered} style={{ ...btn("var(--accent)", "var(--on-accent)"), marginTop: 18, opacity: allAnswered ? 1 : 0.5 }}>
         {t("lang.placement_submit")}
       </button>
     </div>

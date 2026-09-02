@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MessageSquare, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
@@ -44,13 +45,20 @@ export function Brainstorming() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "var(--space-lg)", gap: "var(--space-md)" }}>
       <header>
-        <h1 style={{ margin: 0, fontSize: 22 }}>💭 {t("brainstorm.title")}</h1>
+        <h1
+          style={{ margin: 0, fontSize: "var(--text-h2)", fontFamily: "var(--font-title)" }}
+          className="flex items-center gap-2.5"
+        >
+          <MessageSquare className="size-5 shrink-0 text-brand-ink" aria-hidden />
+          {t("brainstorm.title")}
+        </h1>
         <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>{t("brainstorm.subtitle")}</p>
       </header>
 
       <div style={{ display: "flex", gap: "var(--space-lg)", flex: 1, minHeight: 0 }}>
         <aside style={{ width: 260, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
           <button onClick={createDiscussion} disabled={creating} style={newBtn}>
+            {!creating && <Plus className="size-4" aria-hidden />}
             {creating ? t("common.loading") : t("brainstorm.new")}
           </button>
           <DiscussionList
@@ -80,7 +88,7 @@ export function Brainstorming() {
 const newBtn: React.CSSProperties = {
   border: "1px solid var(--accent)",
   background: "var(--accent-soft)",
-  color: "var(--accent-hover)",
+  color: "var(--accent-ink)",
   borderRadius: "var(--radius-sm)",
   padding: "9px 12px",
   cursor: "pointer",

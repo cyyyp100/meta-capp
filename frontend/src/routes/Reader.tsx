@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { Highlighter, Plus } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -11,6 +13,7 @@ import { GemmaPanel, type QaMask } from "../features/reader/GemmaPanel";
 import { BlockPages } from "../features/reader/BlockPages";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
+import { useTour } from "../features/tour/useTour";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
 import { useT } from "../i18n";
 
@@ -60,6 +63,9 @@ function mergeLineRects(rects: number[][]): number[][] {
 }
 
 const selBtn: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
   border: "1px solid var(--border)",
   background: "var(--surface-soft)",
   color: "var(--text)",
@@ -76,6 +82,9 @@ export function Reader() {
   const navigate = useNavigate();
   const t = useT();
   const confirm = useConfirm();
+  // `prefers-reduced-motion` est neutralisé en CSS, mais Motion anime en JS :
+  // la règle CSS ne l'atteint pas (même raison que dans AppLayout).
+  const reduceMotion = useReducedMotion();
   const id = Number(docId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -263,6 +272,21 @@ export function Reader() {
   // Fichier de code : lecteur en blocs (monospace + numéros de ligne), sans PDF
   // ni image de page. Un PDF reste rendu tel quel, en images.
   const isCode = data?.extraction_engine === "code";
+
+  // Étape 2 de la visite guidée : la bulle Gemma, une fois qu'on est vraiment
+  // dans le lecteur et que le SAS d'entrée est franchi — sinon la bulle
+  // s'ancrerait derrière le voile du SAS. Elle se joue sur le PREMIER document
+  // importé par l'utilisateur, pas sur un PDF d'exemple embarqué : on découvre
+  // l'assistante sur son propre contenu, ce qui est autrement plus convaincant.
+  const requestTour = useTour((s) => s.request);
+  useEffect(() => {
+    if (entered && data) requestTour("gemma");
+  }, [entered, data, requestTour]);
+
+  // Étape 4 : le sas de sortie, à l'instant où il s'affiche.
+  useEffect(() => {
+    if (exitMetrics) requestTour("exit");
+  }, [exitMetrics, requestTour]);
 
   // Marque-page : on fige la page de reprise au tout premier chargement (valeur de la
   // session précédente, écrite en fin de session côté backend). On ignore la page 1
@@ -869,56 +893,81 @@ export function Reader() {
         }}
       />
 
-      {/* Barre flottante au-dessus d'une sélection de texte. */}
-      {selection && (
-        <div
-          ref={toolbarRef}
-          style={{
-            position: "absolute",
-            left: clamp(selection.x, 80, (rootRef.current?.clientWidth ?? 800) - 80),
-            top: Math.max(8, selection.y - 44),
-            transform: "translateX(-50%)",
-            display: "flex",
-            gap: 6,
-            padding: 4,
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-md)",
-            boxShadow: "var(--shadow-lg)",
-            zIndex: 60,
-          }}
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          <button style={selBtn} onClick={addSelectionToContext}>
-            {t("reader.add_context")}
-          </button>
-          <button style={selBtn} onClick={highlightSelection}>
-            {t("reader.highlight")}
-          </button>
-        </div>
-      )}
+      {/* Barre flottante au-dessus d'une sélection de texte.
 
-      {/* Bannière de question bloquante. */}
-      {locked && (
-        <div
-          style={{
-            position: "absolute",
-            top: 64,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "8px 16px",
-            background: "var(--accent)",
-            color: "#fff",
-            borderRadius: 999,
-            fontSize: 13,
-            fontWeight: 600,
-            boxShadow: "var(--shadow-md)",
-            zIndex: 40,
-          }}
-        >
-          {t("reader.gated_banner")}
-        </div>
-      )}
+          `AnimatePresence` et non un simple montage : ces trois éléments (barre
+          de sélection, bandeau de blocage, panneau Gemma) apparaissaient et
+          disparaissaient d'un coup, en plein milieu d'un écran de lecture par
+          ailleurs entièrement animé. `motion` est déjà une dépendance de l'app :
+          le coût est de six lignes.
+
+          `transform` reste dans le style inline (le centrage), Motion n'anime
+          que l'opacité et un décalage vertical — mélanger les deux ferait sauter
+          la barre hors de l'axe de la sélection. */}
+      <AnimatePresence>
+        {selection && (
+          <motion.div
+            ref={toolbarRef}
+            initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
+            transition={{ duration: 0.14, ease: [0.33, 1, 0.68, 1] }}
+            style={{
+              position: "absolute",
+              left: clamp(selection.x, 80, (rootRef.current?.clientWidth ?? 800) - 80),
+              top: Math.max(8, selection.y - 44),
+              transform: "translateX(-50%)",
+              display: "flex",
+              gap: 6,
+              padding: 4,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-lg)",
+              zIndex: 60,
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <button style={selBtn} onClick={addSelectionToContext}>
+              <Plus className="size-3.5" aria-hidden />
+              {t("reader.add_context")}
+            </button>
+            <button style={selBtn} onClick={highlightSelection}>
+              <Highlighter className="size-3.5" aria-hidden />
+              {t("reader.highlight")}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bannière de question bloquante. Elle DESCEND dans l'écran : le blocage
+          vient d'en haut, comme la barre d'outils à laquelle elle s'accroche. */}
+      <AnimatePresence>
+        {locked && (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+            style={{
+              position: "absolute",
+              top: 64,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "8px 16px",
+              background: "var(--accent)",
+              color: "var(--on-accent)",
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 600,
+              boxShadow: "var(--shadow-md)",
+              zIndex: 40,
+            }}
+          >
+            {t("reader.gated_banner")}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Assistant déplaçable connecté à Gemma */}
       <GemmaPanel

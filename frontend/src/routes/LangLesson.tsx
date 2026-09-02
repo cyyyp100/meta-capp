@@ -31,11 +31,15 @@ interface LessonState {
   plan: LangLessonSlot[];
 }
 
+// Les quatre temps de l'arc, colorés par des JETONS et non par des littéraux :
+// ces pastilles vivent dans la même barre que le reste de l'UI, elles doivent
+// suivre le thème. `--hl-explain` est le seul bleu du système ; il sert ici de
+// couleur d'exposition, ce qui est exactement son rôle ailleurs.
 const TEMPS_COLOR: Record<string, string> = {
-  ancrage: "#8b5cf6",
-  exposition: "#2563eb",
-  manipulation: "#0891b2",
-  cloture: "#16a34a",
+  ancrage: "var(--accent)",
+  exposition: "var(--hl-explain)",
+  manipulation: "var(--warning)",
+  cloture: "var(--success)",
 };
 
 export function LangLesson() {
@@ -247,7 +251,7 @@ export function LangLesson() {
       {lesson && (
         <div style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <h1 style={{ fontFamily: "var(--font-title)", fontSize: 26, margin: 0 }}>{lesson.theme}</h1>
+            <h1 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h2)", margin: 0 }}>{lesson.theme}</h1>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               {typeof lesson.difficulty === "number" && <DifficultyGauge value={lesson.difficulty} />}
               <span style={{ fontSize: 13, color: "var(--muted)" }}>{lesson.level}</span>
@@ -355,7 +359,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 const primaryBtn: React.CSSProperties = {
   border: "none",
   background: "var(--accent)",
-  color: "#fff",
+  color: "var(--on-accent)",
   borderRadius: "var(--radius-sm)",
   padding: "10px 20px",
   fontWeight: 600,

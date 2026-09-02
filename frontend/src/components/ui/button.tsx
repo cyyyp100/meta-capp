@@ -51,7 +51,7 @@ const buttonVariants = cva(
           "bg-destructive text-primary-foreground shadow-e1 hover:brightness-110 focus-visible:ring-destructive/40",
         // Raccourcis de Gemma (Reformuler / Récap / Curiosité) — l'ancien `chip`.
         chip: "rounded-full border border-border bg-surface-soft px-3 text-xs font-medium text-text-soft hover:border-brand hover:bg-brand-soft hover:text-accent-foreground",
-        link: "text-brand underline-offset-4 hover:underline",
+        link: "text-brand-ink underline-offset-4 hover:underline",
       },
       size: {
         // Une seule échelle, là où le code en comptait quatre non concertées.

@@ -63,7 +63,7 @@ export function DocumentGrid({
           transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
         />
         <div className="relative flex flex-col items-center gap-4 p-14 text-center">
-          <div className="flex size-14 items-center justify-center rounded-full bg-brand-soft text-brand">
+          <div className="flex size-14 items-center justify-center rounded-full bg-brand-soft text-brand-ink">
             <FileText className="size-7" aria-hidden />
           </div>
           <p className="m-0 max-w-md text-muted-foreground">{emptyMessage}</p>

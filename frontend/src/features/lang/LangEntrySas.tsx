@@ -64,20 +64,20 @@ export function LangEntrySas({
   return (
     <SasOverlay contained>
       <div style={{ textAlign: "center", maxWidth: 520, padding: "var(--space-xl)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>{t("entry.label")}</div>
-        <h2 style={{ fontFamily: "var(--font-title)", fontSize: 24, margin: "0 0 10px", color: "var(--text)" }}>{label}</h2>
+        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent-ink)", marginBottom: 12 }}>{t("entry.label")}</div>
+        <h2 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h2)", margin: "0 0 10px", color: "var(--text)" }}>{label}</h2>
         <p style={{ color: "var(--text-soft)", lineHeight: 1.6 }}>{t("lang.entry_text")}</p>
         <div style={{ marginTop: 12 }}>
           <WhyButton whyKey="entry" />
         </div>
 
         {theme && (
-          <div style={{ margin: "16px auto", maxWidth: 460, background: "var(--accent-soft)", color: "var(--accent-hover)", borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, lineHeight: 1.5 }}>
+          <div style={{ margin: "16px auto", maxWidth: 460, background: "var(--accent-soft)", color: "var(--accent-ink)", borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, lineHeight: 1.5 }}>
             💡 {theme}
           </div>
         )}
 
-        <div style={{ margin: "22px auto", width: 84, height: 84, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 30, fontWeight: 700, color: "var(--accent-hover)", background: "var(--accent-soft)", border: "2px solid var(--accent)" }}>
+        <div style={{ margin: "22px auto", width: 84, height: 84, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 30, fontWeight: 700, color: "var(--accent-ink)", background: "var(--accent-soft)", border: "2px solid var(--accent)" }}>
           {left}
         </div>
 
@@ -85,7 +85,7 @@ export function LangEntrySas({
           <button
             onClick={() => setPhase("review")}
             disabled={!canSkip}
-            style={{ border: "none", background: canSkip ? "var(--accent)" : "var(--muted-light)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "10px 22px", fontWeight: 600, cursor: canSkip ? "pointer" : "not-allowed" }}
+            style={{ border: "none", background: canSkip ? "var(--accent)" : "var(--muted-light)", color: "var(--on-accent)", borderRadius: "var(--radius-sm)", padding: "10px 22px", fontWeight: 600, cursor: canSkip ? "pointer" : "not-allowed" }}
           >
             {canSkip ? t("entry.continue") : t("entry.skip_in", { n: left - 15 })}
           </button>

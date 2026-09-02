@@ -5,10 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Meta-Capp</title>
     <script>
-      // Applique le thème avant le premier rendu (évite un flash sombre ; clair par défaut).
+      // Applique le thème AVANT le premier rendu (sinon l'app clignote en clair
+      // au démarrage de quelqu'un qui l'a réglée en sombre). Le choix stocké
+      // peut valoir "system" : il faut alors résoudre contre l'OS ici même —
+      // attendre React, c'est déjà avoir affiché la mauvaise couleur.
+      //
+      // `localStorage` n'est qu'un CACHE d'amorçage : l'autorité est
+      // `app_settings` côté serveur (cf. src/theme/useTheme.ts), qui survit à
+      // une restauration de sauvegarde. Ce script ne fait que devancer la
+      // première réponse de l'API.
       (function () {
         var saved = localStorage.getItem("metacapp-theme");
-        document.documentElement.dataset.theme = saved === "dark" ? "dark" : "light";
+        var dark =
+          saved === "dark" ||
+          (saved === "system" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
       })();
     </script>
   </head>

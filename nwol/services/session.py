@@ -29,7 +29,7 @@ from db.session_reflections import (
 from db.sessions import end_session as _end_session
 from db.sessions import get_session
 from db.sessions import start_session as _start_session
-from db.user import DEFAULT_USER_ID
+from db.user import DEFAULT_USER_ID, get_streak, record_study_day
 from metacog.gauges import (
     clamp_gauge,
     make_gauges,
@@ -407,6 +407,12 @@ def nudge_metacog_profile(
     for order, pair in enumerate(pairs):
         save_session_reflection(session_id, pair["question"], pair["answer"], user_id, order)
 
+    # La série d'étude avance ICI, à l'unique point par lequel passent les trois
+    # finalisations (lecture, séance de langue, quiz) — et pas dans un `GET`.
+    # Best-effort : une série non enregistrée ne doit pas faire échouer une
+    # finalisation qui, elle, a bien eu lieu.
+    _safe(lambda: record_study_day(user_id), None)
+
     profile = ensure_profile(user_id)
     profile_gauges = {c: float(profile.get(c, 50.0)) for c in CRITERIA}
     if session_gauges is None and session_id is not None:
@@ -470,4 +476,6 @@ def finalize_session(
         user_id, score, responses, metrics,
         session_id=session_id, questions=questions,
     )
-    return {"ok": True, "score": score}
+    # La série a déjà avancé dans `nudge_metacog_profile` : on la relit pour que
+    # le sas de sortie puisse l'annoncer sans un aller-retour de plus.
+    return {"ok": True, "score": score, "streak": _safe(lambda: get_streak(user_id), {})}

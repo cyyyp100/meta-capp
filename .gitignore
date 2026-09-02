@@ -94,6 +94,9 @@ ancien_script/
 /architecture/
 /docs/
 /CLAUDE.md
+# Contient le positionnement produit et la stratégie de monétisation : ce dépôt
+# est l'édition open source, ce document n'a rien à y faire une fois publié.
+/PLAN-refonte-ux-et-retention.md
 
 # ── Packaging artifacts (PyInstaller) ─────────────────────────────────────────
 /dist_app/

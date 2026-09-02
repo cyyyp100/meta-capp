@@ -190,7 +190,7 @@ const input: React.CSSProperties = {
 
 const sendBtn: React.CSSProperties = {
   border: "none",
-  color: "#fff",
+  color: "var(--on-accent)",
   borderRadius: "var(--radius-sm)",
   padding: "0 16px",
   height: 40,

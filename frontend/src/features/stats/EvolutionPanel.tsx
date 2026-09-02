@@ -2,7 +2,7 @@ import { Line, LineChart, ResponsiveContainer, YAxis } from "recharts";
 
 import type { CriterionEntry } from "../../api/types";
 import { useT } from "../../i18n";
-import { scoreColor } from "./labels";
+import { scoreColor, scoreInk } from "./labels";
 
 export function EvolutionPanel({ criteria }: { criteria: CriterionEntry[] }) {
   const t = useT();
@@ -23,7 +23,7 @@ export function EvolutionPanel({ criteria }: { criteria: CriterionEntry[] }) {
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <span style={{ width: 36, textAlign: "right", fontWeight: 700, color: scoreColor(c.value) }}>{Math.round(c.value)}</span>
+          <span style={{ width: 36, textAlign: "right", fontWeight: 700, color: scoreInk(c.value) }}>{Math.round(c.value)}</span>
         </div>
       ))}
     </div>

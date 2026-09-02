@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import { SKILL_ORDER } from "../features/lang/skills";
-import { scoreColor } from "../features/stats/labels";
+import { scoreColor, scoreInk } from "../features/stats/labels";
 import { useT } from "../i18n";
 
 export function Lang() {
@@ -65,7 +65,7 @@ export function Lang() {
 
   return (
     <div style={{ maxWidth: 880, margin: "0 auto", padding: "var(--space-xl)" }}>
-      <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>{t("lang.title")}</h1>
+      <h1 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h1)", margin: "0 0 4px" }}>{t("lang.title")}</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("lang.subtitle")}</p>
 
       <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-md)", marginTop: "var(--space-lg)" }}>
@@ -92,7 +92,7 @@ export function Lang() {
               <div style={{ gridColumn: "1 / -1", background: "var(--surface)", border: "1px solid var(--accent)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-sm)", padding: "var(--space-lg)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h2 style={{ fontSize: 16, margin: 0 }}>{selectedLang?.label}</h2>
-                  <button onClick={startLesson} style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>
+                  <button onClick={startLesson} style={{ border: "none", background: "var(--accent)", color: "var(--on-accent)", borderRadius: "var(--radius-sm)", padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>
                     {t("lang.start_lesson")}
                   </button>
                 </div>
@@ -142,7 +142,7 @@ function SkillBar({ label, value }: { label: string; value: number }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
         <span>{label}</span>
-        <span style={{ color: scoreColor(v), fontWeight: 700 }}>{Math.round(v)}</span>
+        <span style={{ color: scoreInk(v), fontWeight: 700 }}>{Math.round(v)}</span>
       </div>
       <div style={{ height: 8, borderRadius: 999, background: "var(--border)", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${v}%`, background: scoreColor(v), borderRadius: 999 }} />

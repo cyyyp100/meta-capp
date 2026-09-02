@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flame, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -17,10 +17,12 @@ import { DocumentGrid } from "../features/library/DocumentGrid";
 import { FolderRail } from "../features/library/FolderRail";
 import type { FolderRowHandlers } from "../features/library/FolderRow";
 import { ancestorIds, findFolder, flattenFolders } from "../features/library/folderTree";
+import { ResumeCard } from "../features/library/ResumeCard";
 import { SearchBox } from "../features/library/SearchBox";
 import { useDebounced } from "../features/library/useDebounced";
 import { useLibraryUi } from "../features/library/useLibraryUi";
 import { useT } from "../i18n";
+import { useTour } from "../features/tour/useTour";
 
 /** Nombre de documents de l'entrée « Récents » (le catalogue est déjà trié). */
 const RECENT_COUNT = 12;
@@ -163,6 +165,13 @@ export function Home() {
     },
   };
 
+  // Étape 1 de la visite : le bouton d'import, sur l'écran qu'on a vraiment
+  // sous les yeux au premier lancement — une bibliothèque vide.
+  const requestTour = useTour((s) => s.request);
+  useEffect(() => {
+    if (documents) requestTour("import");
+  }, [documents, requestTour]);
+
   const emptyMessage =
     selection.kind === "folder" && !searching ? t("library.folder_empty_docs") : t("home.empty");
 
@@ -171,7 +180,7 @@ export function Home() {
       <div style={header}>
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="m-0 font-serif text-[32px] leading-tight font-bold">
+            <h1 className="m-0 font-serif text-h1 font-bold">
               {t("home.title")}
             </h1>
             {streak && streak.streak > 0 && (
@@ -179,13 +188,20 @@ export function Home() {
                 <TooltipTrigger asChild>
                   <Badge
                     variant="outline"
-                    className="gap-1 border-warning/30 bg-warning-soft font-bold text-warning"
+                    // La flamme prend la MARQUE et non `--warning` : une série
+                    // en cours est une progression, pas une alerte. Elle
+                    // empruntait l'or de l'avertissement du temps où les deux
+                    // se ressemblaient ; `--warning` est violet désormais, et
+                    // une flamme violette ne veut rien dire.
+                    className="gap-1 border-brand/30 bg-brand-soft font-bold text-brand-ink"
                   >
                     <Flame className="size-3.5" aria-hidden />
                     {streak.streak}
                   </Badge>
                 </TooltipTrigger>
-                <TooltipContent>{t("home.streak", { n: streak.streak })}</TooltipContent>
+                <TooltipContent>
+                  {t("home.streak", { n: streak.streak })} · {t("streak.grace")}
+                </TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -193,7 +209,7 @@ export function Home() {
         </div>
         <div className="flex items-center gap-2">
           <SearchBox value={rawQuery} onChange={setRawQuery} />
-          <Button onClick={handleImport} pending={importing}>
+          <Button data-tour="import" onClick={handleImport} pending={importing}>
             {!importing && <Plus className="size-4" aria-hidden />}
             {importing ? t("home.importing") : t("home.import")}
           </Button>
@@ -220,6 +236,15 @@ export function Home() {
           <Button variant="secondary" size="sm" onClick={() => void refreshLibrary()}>
             {t("common.retry")}
           </Button>
+        </div>
+      )}
+
+      {/* La reprise passe AVANT la grille : c'est le geste que quelqu'un qui
+          revient veut faire, et le seul qui n'exige aucune décision. Elle
+          disparaît en recherche — on cherche alors autre chose que la suite. */}
+      {documents && documents.length > 0 && !searching && selection.kind !== "folder" && (
+        <div className="mt-5.5">
+          <ResumeCard documents={allDocuments} />
         </div>
       )}
 

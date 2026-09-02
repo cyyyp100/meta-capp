@@ -70,9 +70,29 @@ export function subjectLabel(subject: string): string {
 }
 
 // Couleur selon le score (miroir de score_color côté Tk).
+/**
+ * Couleur de REMPLISSAGE d'un score : barre de progression, trait de courbe,
+ * pastille. Le palier médian est l'orange de la marque — c'est exactement le
+ * rôle qu'on lui donne : montrer une progression.
+ */
 export function scoreColor(value: number): string {
   if (value >= 75) return "var(--success)";
   if (value >= 45) return "var(--accent)";
+  return "var(--warning)";
+}
+
+/**
+ * La même échelle, mais pour ÉCRIRE le score en toutes lettres.
+ *
+ * Une seule fonction servait aux deux, et le palier médian rendait « 62 » en
+ * `--accent` : lisible tant que l'accent était sombre, mais l'orange de marque
+ * ne fait que 2,80:1 sur une surface claire. Les deux usages ont des exigences
+ * différentes ; ils ont donc deux fonctions, sur la MÊME échelle de paliers —
+ * un chiffre et sa barre ne doivent jamais désigner deux paliers différents.
+ */
+export function scoreInk(value: number): string {
+  if (value >= 75) return "var(--success)";
+  if (value >= 45) return "var(--accent-ink)";
   return "var(--warning)";
 }
 

@@ -31,7 +31,7 @@ export function WarmUp({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
   return (
     <SasOverlay contained>
       <div style={{ textAlign: "center", width: "min(820px, 92vw)", padding: "var(--space-xl)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent-ink)", marginBottom: 12 }}>
           {t("entry.warmup_title")} · {i + 1}/{cards.length}
         </div>
         <div style={{ margin: "0 0 14px" }}>

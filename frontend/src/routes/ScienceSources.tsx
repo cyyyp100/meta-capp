@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 
 import { Card } from "../components/Card";
 import { scienceContent, type ScienceCard } from "../features/science/metacogContent";
@@ -12,11 +13,12 @@ export function ScienceSources() {
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto", padding: "var(--space-xl)" }}>
       <Link to="/stats" style={backLink}>
-        {t("science.back")}
+        <ArrowLeft className="size-4" aria-hidden />
+          {t("science.back")}
       </Link>
 
       <header style={{ margin: "22px 0 var(--space-lg)" }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent)", letterSpacing: 1, textTransform: "uppercase" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent-ink)", letterSpacing: 1, textTransform: "uppercase" }}>
           {t("science.label")}
         </div>
         <h1 style={{ fontFamily: "var(--font-title)", fontSize: 34, lineHeight: 1.12, margin: "8px 0 12px" }}>
@@ -115,7 +117,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 const backLink: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  color: "var(--accent-hover)",
+  color: "var(--accent-ink)",
   textDecoration: "none",
   fontWeight: 800,
   fontSize: 13,
@@ -176,7 +178,7 @@ const flowNumber: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   background: "var(--accent-soft)",
-  color: "var(--accent-hover)",
+  color: "var(--accent-ink)",
   fontWeight: 800,
   fontSize: 12,
 };
@@ -191,7 +193,7 @@ const referenceCard: React.CSSProperties = {
 const doiLink: React.CSSProperties = {
   display: "inline-block",
   marginTop: 5,
-  color: "var(--accent-hover)",
+  color: "var(--accent-ink)",
   fontWeight: 700,
   fontSize: 12,
   overflowWrap: "anywhere",

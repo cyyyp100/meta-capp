@@ -22,10 +22,12 @@ from server.routers import (
     lang,
     library,
     preferences,
+    progress,
     quiz,
     reading,
     session,
     stats,
+    updates,
 )
 
 logger = logging.getLogger("server")
@@ -93,10 +95,12 @@ def create_app() -> FastAPI:
     app.include_router(quiz.router, prefix="/api")
     app.include_router(session.router, prefix="/api")
     app.include_router(session.streak_router, prefix="/api")
+    app.include_router(progress.router, prefix="/api")
     app.include_router(preferences.router, prefix="/api")
     app.include_router(lang.router, prefix="/api")
     app.include_router(brainstorming.router, prefix="/api")
     app.include_router(data.router, prefix="/api")
+    app.include_router(updates.router, prefix="/api")
 
     # En production, sert le frontend compilé depuis la même origine.
     if FRONTEND_DIST.is_dir():

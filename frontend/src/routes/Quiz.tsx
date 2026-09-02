@@ -218,7 +218,7 @@ export function Quiz() {
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "var(--space-xl)" }}>
-      <h1 style={{ fontFamily: "var(--font-title)", fontSize: 32, margin: "0 0 4px" }}>{t("quiz.title")}</h1>
+      <h1 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h1)", margin: "0 0 4px" }}>{t("quiz.title")}</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("quiz.subtitle")}</p>
 
       {!started && !done && (
@@ -623,7 +623,7 @@ function Correction({ result }: { result: QuizEvaluation }) {
             {t("quiz.expected")}
           </span>
           <div
-            style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-hover)" }}
+            style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-ink)" }}
             dangerouslySetInnerHTML={{ __html: renderMathToHtml(result.expected_answer) }}
           />
         </div>

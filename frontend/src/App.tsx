@@ -15,6 +15,8 @@ const Lang = lazy(() => import("./routes/Lang").then((m) => ({ default: m.Lang }
 const LangLesson = lazy(() => import("./routes/LangLesson").then((m) => ({ default: m.LangLesson })));
 const Brainstorming = lazy(() => import("./routes/Brainstorming").then((m) => ({ default: m.Brainstorming })));
 const Reader = lazy(() => import("./routes/Reader").then((m) => ({ default: m.Reader })));
+const Progress = lazy(() => import("./routes/Progress").then((m) => ({ default: m.Progress })));
+const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.Settings })));
 
 /**
  * Aucune animation à ce niveau : elle emporterait la barre latérale avec elle,
@@ -32,11 +34,21 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Home />} />
           <Route path="/stats" element={<Stats />} />
+          {/* La progression est une EXTENSION du profil, pas une destination
+              autonome : le radar dit où on en est, elle dit comment on y est
+              arrivé. Son adresse le dit aussi — et c'est le bas de /stats qui y
+              mène, là où traînait autrefois l'export de données. */}
+          <Route path="/stats/progress" element={<Progress />} />
           <Route path="/stats/science" element={<ScienceSources />} />
           <Route path="/flashcards" element={<Flashcards />} />
           <Route path="/quiz" element={<Quiz />} />
           <Route path="/lang" element={<Lang />} />
           <Route path="/brainstorming" element={<Brainstorming />} />
+          {/* La SECTION vit dans l'URL : la barre de menu native ouvre
+              directement /settings/updates ou /settings/about, ce qu'un
+              dialogue — sans adresse — ne saurait pas faire. */}
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/:section" element={<Settings />} />
         </Route>
         {/* Le Reader et la séance de langue sont plein écran (pas de barre latérale). */}
         <Route path="/reader/:docId" element={<Reader />} />

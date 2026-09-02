@@ -47,7 +47,7 @@ export function SessionView({
   return (
     <div style={{ marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent)", background: "var(--accent-soft)", padding: "3px 10px", borderRadius: 999 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent-ink)", background: "var(--accent-soft)", padding: "3px 10px", borderRadius: 999 }}>
           {t("lang.style_today")} · {session.label}
         </span>
       </div>
@@ -63,7 +63,7 @@ export function SessionView({
         <button
           onClick={finish}
           disabled={finished}
-          style={{ border: "none", background: finished ? "var(--border)" : "var(--success)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "10px 18px", fontWeight: 600, cursor: finished ? "default" : "pointer" }}
+          style={{ border: "none", background: finished ? "var(--border)" : "var(--success)", color: finished ? "var(--text)" : "var(--on-status)", borderRadius: "var(--radius-sm)", padding: "10px 18px", fontWeight: 600, cursor: finished ? "default" : "pointer" }}
         >
           {finished ? t("lang.finished") : t("lang.finish")}
         </button>
@@ -205,13 +205,13 @@ function AttemptItem({
           dir="auto"
           style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)" }}
         />
-        <button onClick={check} disabled={checking || !value.trim()} style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontWeight: 600, cursor: checking ? "default" : "pointer" }}>
+        <button onClick={check} disabled={checking || !value.trim()} style={{ border: "none", background: "var(--accent)", color: "var(--on-accent)", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontWeight: 600, cursor: checking ? "default" : "pointer" }}>
           {checking ? t("lang.checking") : t("lang.validate")}
         </button>
       </div>
       {result && !result.error && <CorrectionFeedback result={result} />}
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        <button onClick={() => { setRevealed((v) => !v); onDone?.(); }} style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
+        <button onClick={() => { setRevealed((v) => !v); onDone?.(); }} style={{ border: "none", background: "none", color: "var(--accent-ink)", cursor: "pointer", padding: 0 }}>
           {t("lang.reveal")}
         </button>
         {hint && <span style={{ color: "var(--muted)", marginLeft: 10 }}>💡 {hint}</span>}
@@ -237,7 +237,7 @@ function CorrectionFeedback({ result }: { result: LangCorrection }) {
       {result.corrections?.map((c, i) => (
         <div key={i} style={{ color: "var(--muted)", marginTop: 2 }}>
           {c.error_type && (
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--accent)", background: "var(--accent-soft)", padding: "1px 6px", borderRadius: 999, marginRight: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--accent-ink)", background: "var(--accent-soft)", padding: "1px 6px", borderRadius: 999, marginRight: 6 }}>
               {c.error_type}
             </span>
           )}
@@ -377,7 +377,7 @@ function ReadingView({ content, rtl, onScore }: { content: Extract<LangSessionCo
       {content.title && <div style={{ fontWeight: 700, marginBottom: 10 }} dir={targetDir(rtl)}>{content.title}</div>}
       <Section title={t("lang.text")}>
         <p style={{ lineHeight: 1.6 }} dir={targetDir(rtl)}>{content.text_target}</p>
-        <button onClick={() => setShowTrans((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", padding: 0, fontSize: 12 }}>
+        <button onClick={() => setShowTrans((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent-ink)", cursor: "pointer", padding: 0, fontSize: 12 }}>
           {t("lang.translation")}
         </button>
         {showTrans && <p style={{ color: "var(--text-soft)", fontSize: 13, lineHeight: 1.6 }}>{content.text_translation}</p>}
@@ -633,7 +633,7 @@ function ProductionTwoStep({ content, language, onScore }: { content: Extract<La
 function StepLabel({ n, text }: { n: number; text: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 6px" }}>
-      <span style={{ width: 20, height: 20, borderRadius: 999, background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
+      <span style={{ width: 20, height: 20, borderRadius: 999, background: "var(--accent)", color: "var(--on-accent)", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
       <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.3 }}>{text}</span>
     </div>
   );
@@ -696,18 +696,18 @@ function FreeProductionItem({ step, language, onScore }: { step: LangProductionS
           dir="auto"
           style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)" }}
         />
-        <button onClick={check} disabled={checking || !value.trim()} style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontWeight: 600, cursor: checking ? "default" : "pointer" }}>
+        <button onClick={check} disabled={checking || !value.trim()} style={{ border: "none", background: "var(--accent)", color: "var(--on-accent)", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontWeight: 600, cursor: checking ? "default" : "pointer" }}>
           {checking ? t("lang.checking") : t("lang.validate")}
         </button>
       </div>
       {result && !result.error && <CorrectionFeedback result={result} />}
       {canRetry && (
-        <button onClick={retry} style={{ marginTop: 10, border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent)", borderRadius: "var(--radius-sm)", padding: "7px 14px", fontWeight: 600, cursor: "pointer" }}>
+        <button onClick={retry} style={{ marginTop: 10, border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent-ink)", borderRadius: "var(--radius-sm)", padding: "7px 14px", fontWeight: 600, cursor: "pointer" }}>
           ↻ {t("lang.retry_improve")}
         </button>
       )}
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        <button onClick={() => setRevealed((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
+        <button onClick={() => setRevealed((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent-ink)", cursor: "pointer", padding: 0 }}>
           {t("lang.reveal")}
         </button>
         {step.hint && <span style={{ color: "var(--muted)", marginLeft: 10 }}>💡 {step.hint}</span>}
@@ -1056,7 +1056,7 @@ function TransformItem({ item, language, onScore }: { item: Extract<LangSessionC
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: 12, marginBottom: 10 }}>
       <div style={{ fontWeight: 600 }} dir="auto">{item.source}</div>
-      {item.focus && <div style={{ fontSize: 12, color: "var(--accent)", marginBottom: 6 }}>→ {item.focus}</div>}
+      {item.focus && <div style={{ fontSize: 12, color: "var(--accent-ink)", marginBottom: 6 }}>→ {item.focus}</div>}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
         <AutoGrowTextarea
           value={value}
@@ -1078,7 +1078,7 @@ function TransformItem({ item, language, onScore }: { item: Extract<LangSessionC
         </div>
       )}
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        <button onClick={() => setRevealed((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
+        <button onClick={() => setRevealed((v) => !v)} style={{ border: "none", background: "none", color: "var(--accent-ink)", cursor: "pointer", padding: 0 }}>
           {t("lang.reveal")}
         </button>
         {item.hint && <span style={{ color: "var(--muted)", marginLeft: 10 }}>💡 {item.hint}</span>}
@@ -1089,7 +1089,7 @@ function TransformItem({ item, language, onScore }: { item: Extract<LangSessionC
 }
 
 const smallBtn: React.CSSProperties = {
-  border: "none", background: "var(--accent)", color: "#fff",
+  border: "none", background: "var(--accent)", color: "var(--on-accent)",
   borderRadius: "var(--radius-sm)", padding: "7px 14px", fontWeight: 600, cursor: "pointer",
 };
 

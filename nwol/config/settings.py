@@ -349,7 +349,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 26
+DB_SCHEMA_VERSION = 27
 
 # Logs
 LOG_MAX_BYTES = 1_000_000

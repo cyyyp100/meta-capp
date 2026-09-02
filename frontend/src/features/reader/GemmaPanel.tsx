@@ -29,6 +29,7 @@ import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
 import { VerdictBadge } from "../questions/VerdictBadge";
+import { useTour } from "../tour/useTour";
 import { renderMathToHtml } from "./renderMath";
 
 interface Message {
@@ -184,6 +185,10 @@ export function GemmaPanel({
         if (text) {
           setOpen(true);
           setMessages((m) => [...m, { role: "assistant", text }]);
+          // Étape 3 de la visite : elle ne peut se jouer QUE sur une vraie
+          // intervention autonome. C'est le moment où le produit se montre —
+          // personne n'a rien demandé, et elle a remarqué quelque chose.
+          useTour.getState().request("intervention");
         }
         if (Array.isArray(evt.highlights) && evt.highlights.length) {
           onHighlightsRef.current?.(evt.highlights, pageRef.current);
@@ -443,7 +448,7 @@ export function GemmaPanel({
                   size="icon-sm"
                   aria-label={layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
                   onClick={() => setLayout(layout === "dockRight" ? "float" : "dockRight")}
-                  className={layout === "dockRight" ? "text-brand" : undefined}
+                  className={layout === "dockRight" ? "text-brand-ink" : undefined}
                 >
                   {layout === "dockRight" ? (
                     <Maximize2 className="size-4" aria-hidden />
@@ -469,7 +474,10 @@ export function GemmaPanel({
           </div>
         </div>
 
-        <div ref={bodyRef} style={bodyStyle}>
+        {/* `data-tour="intervention"` : l'étape 3 de la visite s'ancre ici, sur
+            le fil de conversation que l'intervention vient d'ouvrir. Sans cette
+            ancre, l'étape restait active sans jamais rien afficher. */}
+        <div ref={bodyRef} data-tour="intervention" style={bodyStyle}>
           {messages.map((m, i) =>
             m.role === "system" ? (
               <div key={i} style={{ alignSelf: "center", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
@@ -487,7 +495,7 @@ export function GemmaPanel({
                   <button
                     onClick={() => makeFlashcard(i)}
                     title={t("gemma.flashcard_hint")}
-                    className="mt-1 rounded-[4px] border-none bg-transparent p-0 text-[11px] text-brand
+                    className="mt-1 rounded-[4px] border-none bg-transparent p-0 text-[11px] text-brand-ink
                                underline-offset-2 transition-colors duration-fast ease-brand
                                hover:text-accent-foreground hover:underline
                                focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
@@ -619,11 +627,11 @@ const chip: React.CSSProperties = {
 };
 const contextChipStyle: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%",
-  background: "var(--accent-soft)", color: "var(--accent-hover)", border: "1px solid var(--border)",
+  background: "var(--accent-soft)", color: "var(--accent-ink)", border: "1px solid var(--border)",
   borderRadius: 999, padding: "3px 8px", fontSize: 11,
 };
 const chipClose: React.CSSProperties = {
-  border: "none", background: "transparent", color: "var(--accent-hover)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
+  border: "none", background: "transparent", color: "var(--accent-ink)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
 };
 
 // ── Bulle Gemma : sphère 3D à deux yeux mobiles, déplaçable. ────────────────────
@@ -669,7 +677,10 @@ function GemmaBubble({ scanning, onOpen, title }: { scanning: boolean; onOpen: (
       style={{ zIndex: 50 }}
     >
       <style>{BUBBLE_KEYFRAMES}</style>
-      <div style={{ width: SIZE, height: SIZE, perspective: 320, animation: "gemmaFloat 4.2s ease-in-out infinite" }}>
+      <div
+        data-tour="gemma"
+        style={{ width: SIZE, height: SIZE, perspective: 320, animation: "gemmaFloat 4.2s ease-in-out infinite" }}
+      >
         {/* C'était un <div onClick> : la seule façon d'ouvrir Gemma était un clic
             souris — pas de tabulation, pas d'Entrée, rien d'annoncé. Un vrai
             <button> rend l'assistant atteignable au clavier, et `movedRef`
@@ -715,6 +726,9 @@ const sphereStyle: React.CSSProperties = {
   transformStyle: "preserve-3d",
   transition: "transform 0.5s cubic-bezier(0.2,0.8,0.2,1)",
 };
+// Le blanc de l'œil reste un blanc littéral, et NON `var(--on-accent)` : c'est
+// un trait du personnage, pas du texte posé sur l'accent. En sombre `--on-accent`
+// vaut une encre presque noire — Gemma s'y retrouverait avec des yeux noirs.
 const eyeWhiteStyle: React.CSSProperties = {
   width: 17, height: 17, borderRadius: "50%", background: "#fff",
   display: "grid", placeItems: "center", boxShadow: "inset 0 1px 2px rgba(0,0,0,0.25)",
@@ -761,7 +775,7 @@ function QaCard({
       }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-hover)", letterSpacing: 0.4 }}>{t("flash.q")}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-ink)", letterSpacing: 0.4 }}>{t("flash.q")}</span>
         <QuestionTypeBadge type={qa.type} />
       </div>
       <QuestionStem question={qa.question} type={qa.type} masked={Boolean(qa.mask)} />
@@ -792,7 +806,7 @@ function QaCard({
             </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-hover)" }}>
+            <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
               {stayLocked ? t("gemma.retry_question") : t("gemma.new_question")}
             </button>
             {!stayLocked && (

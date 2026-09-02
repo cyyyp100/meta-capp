@@ -51,6 +51,13 @@ async function advanceSeconds(page: Page, seconds: number) {
 }
 
 test.describe("Lecture d'un document", () => {
+  test.beforeEach(async ({ page }) => {
+    // La visite guidée pose un voile sur l'écran au premier lancement. C'est
+    // voulu, et c'est ce qui rendrait ces scénarios ininterprétables : on la
+    // déclare faite par l'API, celle-là même qu'utilise « Passer la visite ».
+    await page.request.post("/api/preferences", { data: { tour_done: true } });
+  });
+
   test("importe un PDF, l'ouvre et affiche ses pages", async ({ page }) => {
     await stubDesktopFilePicker(page, FIXTURE);
     await page.goto("/");
@@ -87,8 +94,14 @@ test.describe("Lecture d'un document", () => {
    *
    * Le titre affiché est `echantillon.pdf` : l'exiger en correspondance EXACTE
    * exclut la puce, quel que soit l'état d'Ollama.
+   *
+   * Le titre est cherché DANS la grille (`.doc-card`) : depuis l'ajout de la
+   * carte « Reprendre » en tête de bibliothèque, le même titre apparaît deux
+   * fois sur l'accueil, et le premier des deux est un `<h2>` inerte — un clic
+   * dessus ne mène nulle part et le scénario échouait en timeout d'URL.
    */
-  const documentTitle = (page: Page) => page.getByText("echantillon.pdf", { exact: true });
+  const documentTitle = (page: Page) =>
+    page.locator(".doc-card").getByText("echantillon.pdf", { exact: true });
 
   test("le document importé apparaît dans la bibliothèque", async ({ page }) => {
     await page.goto("/");

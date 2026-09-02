@@ -40,7 +40,7 @@ export function WhyButton({ whyKey }: { whyKey: WhyKey }) {
 
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[620px]">
         <DialogHeader>
-          <DialogTitle className="pr-8 font-serif text-[23px] leading-tight">
+          <DialogTitle className="pr-8 font-serif text-h2">
             {content.title}
           </DialogTitle>
         </DialogHeader>
@@ -66,7 +66,7 @@ export function WhyButton({ whyKey }: { whyKey: WhyKey }) {
           <Link
             to="/stats/science"
             className="rounded-sm font-extrabold text-accent-foreground underline underline-offset-2
-                       transition-colors duration-fast ease-brand hover:text-brand
+                       transition-colors duration-fast ease-brand hover:text-brand-ink
                        focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             {t("why.full_page")}

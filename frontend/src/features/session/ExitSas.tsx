@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 
@@ -21,6 +21,7 @@ import { SasCard, SasOverlay } from "./SasOverlay";
 // les trois faisait patienter devant un écran vide ; les figer toutes les trois
 // jetait une question personnalisée déjà payée.
 export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose: () => void }) {
+  const queryClient = useQueryClient();
   const t = useT();
   const reduce = useReducedMotion();
   const fixedQuestions = metrics.reflection_questions;
@@ -45,10 +46,18 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
   // Les intitulés partent avec les réponses : la 3e n'existe nulle part côté
   // serveur, elle a été générée pour cette session.
   function submitFinalize() {
-    return api.finalizeSession(metrics.session_id, responses, [
-      ...fixedQuestions,
-      generatedQuestion,
-    ]);
+    return api
+      .finalizeSession(metrics.session_id, responses, [...fixedQuestions, generatedQuestion])
+      .then((result) => {
+        // La finalisation change trois choses que d'autres écrans affichent
+        // déjà : la série d'étude, l'historique de progression et le profil.
+        // Sans cette invalidation, l'accueil annonce encore la série d'hier et
+        // la frise ignore la session qu'on vient de terminer.
+        void queryClient.invalidateQueries({ queryKey: ["streak"] });
+        void queryClient.invalidateQueries({ queryKey: ["progress"] });
+        void queryClient.invalidateQueries({ queryKey: ["stats"] });
+        return result;
+      });
   }
 
   async function finish() {
@@ -78,7 +87,7 @@ export function ExitSas({ metrics, onClose }: { metrics: SessionMetrics; onClose
       <SasCard className="max-h-[88vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3.5">
           <div>
-            <h2 className="m-0 mb-1 font-serif text-[26px] font-bold">{t("exit.title")}</h2>
+            <h2 data-tour="exit" className="m-0 mb-1 font-serif text-h2 font-bold">{t("exit.title")}</h2>
             <p className="m-0 text-muted-foreground">{t("exit.subtitle")}</p>
           </div>
           <WhyButton whyKey="exit" />

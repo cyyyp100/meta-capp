@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -92,7 +92,7 @@ export function Flashcards() {
     <div className="mx-auto max-w-[900px] p-8.5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="m-0 mb-1 font-serif text-[32px] leading-tight font-bold">
+          <h1 className="m-0 mb-1 font-serif text-h1 font-bold">
             {t("flash.title")}
           </h1>
           <p className="mt-0 text-muted-foreground">
@@ -233,6 +233,7 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
     <div className="mx-auto flex min-h-full max-w-[980px] flex-col items-center p-8.5">
       <div className="flex w-full items-center justify-between gap-4">
         <Button variant="ghost" size="sm" onClick={onDone}>
+          <ArrowLeft className="size-4" aria-hidden />
           {t("common.quit")}
         </Button>
         {/* Une progression chiffrée seule ne se lit pas d'un coup d'œil : la
@@ -262,7 +263,7 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
       >
         <motion.div
           className="relative grid min-h-[min(68vh,560px)] w-full place-items-center rounded-lg
-                     border border-border p-12 text-center font-serif text-[26px] shadow-e2"
+                     border border-border p-12 text-center font-serif text-h2 shadow-e2"
           animate={{
             rotateX: reduce ? 0 : flipped ? 180 : 0,
             backgroundColor: flipped ? "var(--warning-soft)" : "var(--surface)",

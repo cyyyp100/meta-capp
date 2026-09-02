@@ -76,7 +76,7 @@ export function EntrySas({ docId, title, onStart }: { docId: number; title: stri
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.33, 1, 0.68, 1] }}
       >
-        <div className="mb-3 text-[13px] font-bold tracking-[1px] text-brand uppercase">
+        <div className="mb-3 text-[13px] font-bold tracking-[1px] text-brand-ink uppercase">
           {t("entry.label")}
         </div>
         <h2 className="m-0 mb-2.5 font-serif text-2xl font-bold text-foreground">{title}</h2>

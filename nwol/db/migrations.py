@@ -140,6 +140,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 26)
         current = 26
 
+    if current < 27 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v27(conn)
+        _set_version(conn, 27)
+        current = 27
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -854,3 +859,33 @@ def _migrate_to_v26(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_documents_folder ON documents(folder_id);"
     )
     logger.info("Migration SQLite v26 terminée")
+
+
+def _migrate_to_v27(conn) -> None:
+    """Série d'ÉTUDE (et non de connexion) : record + tolérance d'un jour.
+
+    Trois défauts de la v1 corrigés ensemble, parce qu'ils ne sont qu'un :
+
+    - la série s'incrémentait dans un `GET /api/streak` — ouvrir l'app suffisait
+      à « étudier ». Elle s'incrémente désormais à la FIN d'une session
+      (`services/session.finalize_session`), d'où le renommage de la colonne :
+      `last_login` mentait sur ce qu'elle mesure ;
+    - aucun record n'était conservé : casser sa série effaçait toute trace de
+      l'avoir tenue. `longest_streak` la garde ;
+    - un seul jour manqué remettait le compteur à 1. La tolérance d'un jour vit
+      dans `db/user.record_study_day`, pas ici — la base ne stocke que la date.
+
+    `RENAME COLUMN` (SQLite ≥ 3.25) sous garde de `PRAGMA table_info` : rejouer
+    la migration sur une base déjà migrée ne fait rien."""
+    logger.info("Migration SQLite v27 démarrée")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(login_streak)")}
+    if "last_study_day" not in columns and "last_login" in columns:
+        with conn:
+            conn.execute("ALTER TABLE login_streak RENAME COLUMN last_login TO last_study_day")
+    _ensure_column(conn, "login_streak", "longest_streak", "INTEGER DEFAULT 0")
+    # Une base existante a déjà une série en cours : elle EST le record connu.
+    conn.execute(
+        "UPDATE login_streak SET longest_streak=streak "
+        "WHERE longest_streak IS NULL OR longest_streak < streak"
+    )
+    logger.info("Migration SQLite v27 terminée")

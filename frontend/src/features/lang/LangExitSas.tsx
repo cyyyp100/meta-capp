@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "../../api/client";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
-import { scoreColor } from "../stats/labels";
+import { scoreColor, scoreInk } from "../stats/labels";
 import { WhyButton } from "../science/WhyButton";
 import { SKILL_ORDER } from "./skills";
 import { formatDuration } from "../session/duration";
@@ -56,7 +56,7 @@ export function LangExitSas({
       <SasCard className="max-h-[88vh] overflow-y-auto">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
           <div>
-            <h2 style={{ fontFamily: "var(--font-title)", fontSize: 26, margin: "0 0 4px" }}>{t("exit.title")}</h2>
+            <h2 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h2)", margin: "0 0 4px" }}>{t("exit.title")}</h2>
             <p style={{ color: "var(--muted)", margin: 0 }}>{t("lang.exit_subtitle")}</p>
           </div>
           <WhyButton whyKey="exit" />
@@ -82,7 +82,7 @@ export function LangExitSas({
         )}
 
         {(analysisLoading || analysis?.analysis) && (
-          <div style={{ background: "var(--accent-soft)", color: "var(--accent-hover)", borderRadius: "var(--radius-md)", padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ background: "var(--accent-soft)", color: "var(--accent-ink)", borderRadius: "var(--radius-md)", padding: "14px 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>{t("exit.analysis_title")}</div>
             <div style={{ fontSize: 14, lineHeight: 1.55, color: "var(--text)" }}>
               {analysisLoading ? <span style={{ fontStyle: "italic", color: "var(--muted)" }}>{t("exit.analysis_loading")}</span> : analysis?.analysis}
@@ -118,7 +118,7 @@ export function LangExitSas({
           <button onClick={onClose} style={{ ...btn, background: "var(--surface-soft)", color: "var(--text-soft)", border: "1px solid var(--border)" }}>
             {t("exit.skip")}
           </button>
-          <button onClick={finish} disabled={saving} style={{ ...btn, background: "var(--accent)", color: "#fff", border: "none" }}>
+          <button onClick={finish} disabled={saving} style={{ ...btn, background: "var(--accent)", color: "var(--on-accent)", border: "none" }}>
             {saving ? "…" : t("exit.finish")}
           </button>
         </div>
@@ -142,7 +142,7 @@ function SkillBar({ label, value }: { label: string; value: number }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
         <span>{label}</span>
-        <span style={{ color: scoreColor(v), fontWeight: 700 }}>{Math.round(v)}</span>
+        <span style={{ color: scoreInk(v), fontWeight: 700 }}>{Math.round(v)}</span>
       </div>
       <div style={{ height: 7, borderRadius: 999, background: "var(--border)", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${v}%`, background: scoreColor(v), borderRadius: 999 }} />

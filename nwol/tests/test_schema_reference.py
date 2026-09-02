@@ -64,7 +64,7 @@ def test_reference_schema_covers_every_table_of_the_live_database(monkeypatch, t
     assert not manquantes, f"tables absentes de schema_reference.sql : {manquantes}"
 
 
-@pytest.mark.parametrize("table", ("app_settings", "llm_pdf_cache", "ocr_pages"))
+@pytest.mark.parametrize("table", ("llm_pdf_cache", "ocr_pages"))
 def test_tables_without_code_are_documented_as_such(table):
     """Ces tables existent en base et aucun code de cette édition ne les touche.
     Un nouveau venu doit l'apprendre du fichier, pas d'un grep infructueux."""

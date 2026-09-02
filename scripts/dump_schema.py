@@ -25,7 +25,9 @@ OUTPUT = NWOL_DIR / "db" / "schema_reference.sql"
 # Tables créées par une migration mais qu'aucun code de cette édition ne lit ni
 # n'écrit. Elles sont conservées parce qu'une migration ne se réécrit pas : une
 # base existante doit rester rejouable de bout en bout.
-TABLES_SANS_CODE = ("app_settings", "llm_pdf_cache", "ocr_pages")
+# `app_settings` a quitté cette liste : `db/app_settings.py` la lit et l'écrit
+# désormais (réglages d'application, cf. services/preferences.py).
+TABLES_SANS_CODE = ("llm_pdf_cache", "ocr_pages")
 
 
 def dump_schema() -> str:

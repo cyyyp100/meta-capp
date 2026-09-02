@@ -170,5 +170,20 @@ def test_finalize_persists_the_generated_question_text(client, tmp_path):
     assert generated in stored
 
 
-def test_streak_endpoint(client):
-    assert client.get("/api/streak").json()["streak"] >= 1
+def test_streak_is_a_pure_read_and_only_a_finished_session_advances_it(client, tmp_path):
+    """`GET /api/streak` n'écrit rien : ouvrir l'app n'est pas étudier.
+
+    C'est le défaut que la v27 corrige — la série s'incrémentait dans ce GET, et
+    un rechargement de page suffisait à la faire vivre."""
+    before = client.get("/api/streak").json()
+    assert before["streak"] == 0
+    assert client.get("/api/streak").json()["streak"] == 0  # toujours pas d'écriture
+
+    doc_id = _import_doc(client, tmp_path)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 30})
+    client.post(f"/api/session/{sid}/finalize", json={"responses": ["r1"], "questions": ["Q1 ?"]})
+
+    after = client.get("/api/streak").json()
+    assert after["streak"] == 1
+    assert after["longest_streak"] == 1

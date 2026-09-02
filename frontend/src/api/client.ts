@@ -182,7 +182,9 @@ export const api = {
   // sans eux, la 3e réflexion serait persistée sous un libellé générique.
   finalizeSession: (sid: number, responses: string[], questions: string[]) =>
     postJSON<{ ok: boolean; score: number }>(`/api/session/${sid}/finalize`, { responses, questions }),
-  streak: () => getJSON<{ streak: number }>("/api/streak"),
+  // Série d'ÉTUDE : ce GET est une lecture pure — la série avance à la fin
+  // d'une session, plus à l'ouverture de l'app (cf. nwol/db/user.py).
+  streak: () => getJSON<StudyStreak>("/api/streak"),
   languages: () =>
     getJSON<{ code: string; label: string; flag: string; script?: string; rtl?: boolean }[]>("/api/lang/languages"),
   languageProfile: (language: string) =>
@@ -286,7 +288,132 @@ export const api = {
     }),
   // Effacement total (S10/RGPD) : le serveur exige la confirmation exacte.
   purgeData: () => postJSON<{ purged: boolean }>("/api/data/purge", { confirm: "EFFACER" }),
+
+  // ── Réglages d'application (app_settings) ────────────────────────────────
+  // Persistés côté serveur et NON dans le localStorage : ils doivent survivre à
+  // « Restaurer une sauvegarde », ce que le stockage du webview ne fait pas.
+  preferences: () => getJSON<PreferencesPayload>("/api/preferences"),
+  setPreferences: (patch: Partial<Record<PreferenceKey, string | boolean>>) =>
+    postJSON<{ preferences: Preferences }>("/api/preferences", patch),
+  setUserName: (name: string) =>
+    postJSON<{ user: { id: number; name: string } }>("/api/preferences/name", { name }),
+
+  // ── Mises à jour ─────────────────────────────────────────────────────────
+  // Opt-in strict : tant que `updates_check` est faux, cet appel ne déclenche
+  // AUCUNE requête sortante côté serveur (cf. nwol/services/updates.py).
+  checkUpdates: () => getJSON<UpdateStatus>("/api/updates/check"),
+
+  // ── Ma progression (historique longitudinal) ─────────────────────────────
+  progressSessions: (limit = 40) =>
+    getJSON<ProgressTimeline>(`/api/progress/sessions?limit=${limit}`),
+  progressSession: (sessionId: number) =>
+    getJSON<ProgressSession>(`/api/progress/session/${sessionId}`),
+  // Bilan de la semaine — le rendez-vous récurrent, pas un cumul depuis toujours.
+  weeklyRecap: () => getJSON<WeeklyRecap>("/api/progress/weekly"),
 };
+
+// ── Réglages ──────────────────────────────────────────────────────────────────
+export type PreferenceKey =
+  | "theme"
+  | "density"
+  | "text_size"
+  | "updates_check"
+  | "tour_done"
+  | "tour_step";
+export type Preferences = Record<PreferenceKey, string>;
+
+export interface PreferencesPayload {
+  preferences: Preferences;
+  choices: Record<PreferenceKey, string[]>;
+  lang: string;
+  supported_langs: string[];
+  user: { id: number; name: string };
+}
+
+/** `checked: false` = la vérification n'a rien donné (hors ligne, panne, option
+ *  coupée). L'interface n'affiche alors rien : un échec de vérification n'est
+ *  pas un événement pour l'utilisateur. */
+export interface UpdateStatus {
+  enabled: boolean;
+  current: string;
+  latest: string | null;
+  update_available: boolean;
+  url: string;
+  checked: boolean;
+}
+
+// ── Progression ───────────────────────────────────────────────────────────────
+export interface ProgressSessionRow {
+  session_id: number;
+  document_id: number | null;
+  document_title: string;
+  started_at: string;
+  ended_at: string;
+  duration_s: number;
+  pages_read: number;
+  completed: boolean;
+  criteria_moved: number;
+  profile_delta: number;
+  has_reflections: boolean;
+}
+
+export interface ProgressTimeline {
+  sessions: ProgressSessionRow[];
+  total: number;
+  criteria: string[];
+}
+
+export interface WeeklyRecap {
+  since: string;
+  sessions: number;
+  duration_s: number;
+  pages_read: number;
+  documents: string[];
+  movers: { criterion: string; delta: number }[];
+  /** Le texte que Gemma réécrit à chaque finalisation — jamais régénéré ici. */
+  analysis: string;
+  analysis_updated_at: string;
+  cards: { id: number; front: string; back: string }[];
+}
+
+export interface ProgressChange {
+  criterion: string;
+  before: number;
+  after: number;
+  delta: number;
+  recorded_at: string;
+}
+
+export interface GaugePoint {
+  t: number;
+  value: number;
+}
+
+export interface ProgressSession {
+  session_id: number;
+  document: { id: number | null; title: string; subject: string };
+  started_at: string;
+  ended_at: string;
+  completed: boolean;
+  metrics: SessionMetrics;
+  gauges: {
+    seed: Record<string, number>;
+    series: Record<string, GaugePoint[]>;
+    /** Jauges que la séance a réellement exercées — les autres sont restées à
+     *  leur amorce et ne veulent rien dire. */
+    measured: string[];
+  };
+  profile_changes: ProgressChange[];
+  reflections: { question: string; answer: string; created_at: string }[];
+  page_dwell: { page: number; dwell_s: number; visits: number }[];
+}
+
+export interface StudyStreak {
+  streak: number;
+  longest_streak: number;
+  last_study_day: string | null;
+  active: boolean;
+}
 
 export interface BrainstormSource {
   source_type: "highlight" | "qa" | "flashcard" | "document";

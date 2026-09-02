@@ -235,7 +235,7 @@ const pendingText: React.CSSProperties = {
 const chip: React.CSSProperties = {
   border: "none",
   background: "var(--accent-soft)",
-  color: "var(--accent-hover)",
+  color: "var(--accent-ink)",
   borderRadius: 999,
   padding: "2px 7px",
   fontSize: 10,

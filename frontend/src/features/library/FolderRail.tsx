@@ -3,7 +3,7 @@
 // Trois entrées pseudo en tête (Tous / Récents / Non classés) puis l'arbre.
 // « Tous » et « Non classés » sont aussi des cibles de dépôt : c'est par elles
 // qu'on sort un document d'un dossier à la souris.
-import { Clock, File, Files, FolderPlus, type LucideIcon } from "lucide-react";
+import { Clock, File, Files, FolderPlus, Plus, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -112,6 +112,7 @@ export function FolderRail({
                      focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <FolderPlus className="size-3.5 shrink-0" aria-hidden />
+          <Plus className="size-4" aria-hidden />
           {t("library.new_folder")}
         </button>
       )}

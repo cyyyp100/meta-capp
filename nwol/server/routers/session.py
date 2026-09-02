@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from db.user import record_login_and_get_streak
+from db.user import get_streak
 from services.session import (
     end_session,
     finalize_session,
@@ -62,10 +62,12 @@ def finalize(session_id: int, body: FinalizeBody) -> dict:
     return finalize_session(session_id, body.responses, questions=body.questions)
 
 
-# Streak (séries de jours consécutifs), affiché sur l'accueil.
+# Série d'étude (jours consécutifs avec une session terminée), affichée sur
+# l'accueil. LECTURE PURE : ce GET n'écrit rien. La série avance dans
+# `services/session.finalize_session`.
 streak_router = APIRouter(tags=["home"])
 
 
 @streak_router.get("/streak")
 def streak() -> dict:
-    return {"streak": record_login_and_get_streak()}
+    return get_streak()

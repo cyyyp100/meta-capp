@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, LineChart } from "lucide-react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api/client";
 import { Card } from "../components/Card";
-import { DataSection } from "../components/DataSection";
 import { EvolutionPanel } from "../features/stats/EvolutionPanel";
 import { RadarPanel } from "../features/stats/RadarPanel";
-import { scoreColor, subjectLabel } from "../features/stats/labels";
+import { scoreColor, scoreInk, subjectLabel } from "../features/stats/labels";
+import { useTour } from "../features/tour/useTour";
 import { useT } from "../i18n";
 
 export function Stats() {
@@ -16,6 +18,14 @@ export function Stats() {
     queryFn: api.statsOverview,
   });
   const { data: langStats } = useQuery({ queryKey: ["lang", "stats"], queryFn: api.langStats });
+
+  // Dernière étape de la visite, et la plus importante : le radar. C'est là
+  // qu'on montre que le produit observe — donc le seul endroit où demander
+  // quoi que ce soit a du sens.
+  const requestTour = useTour((s) => s.request);
+  useEffect(() => {
+    if (data) requestTour("profil");
+  }, [data, requestTour]);
 
   const del = (d: number) => (d > 2 ? `+${Math.round(d)}` : d < -2 ? `${Math.round(d)}` : t("trend.stable"));
 
@@ -32,8 +42,16 @@ export function Stats() {
     );
   }
 
-  const trendColor =
-    data.trend.delta > 2 ? "var(--success)" : data.trend.delta < -2 ? "var(--warning)" : "var(--accent)";
+  // La pastille de tendance porte SA propre paire encre/lavis. Elle mélangeait
+  // une encre sémantique et un lavis d'accent : dans le cas « stable », ça
+  // donnait de l'orange de marque sur un lavis orange — 2,7:1, illisible. Une
+  // pastille se lit à deux, pas à un.
+  const trend =
+    data.trend.delta > 2
+      ? { ink: "var(--success)", wash: "var(--success-soft)" }
+      : data.trend.delta < -2
+        ? { ink: "var(--warning)", wash: "var(--warning-soft)" }
+        : { ink: "var(--accent-ink)", wash: "var(--accent-soft)" };
 
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto", padding: "var(--space-xl)" }}>
@@ -41,7 +59,7 @@ export function Stats() {
       <Card style={{ marginBottom: "var(--space-lg)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <h1 style={{ fontFamily: "var(--font-title)", fontSize: 30, margin: 0 }}>{t("stats.title")}</h1>
+            <h1 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h1)", margin: 0 }}>{t("stats.title")}</h1>
             <div style={{ fontWeight: 600, marginTop: 8 }}>{data.user.name}</div>
             <div style={{ color: "var(--muted)", fontSize: 13 }}>
               {t("stats.sessions", { n: data.sessions_count, date: formatDate(data.updated_at) })}
@@ -58,8 +76,8 @@ export function Stats() {
                 marginTop: 6,
                 padding: "4px 12px",
                 borderRadius: 999,
-                background: "var(--accent-soft)",
-                color: trendColor,
+                background: trend.wash,
+                color: trend.ink,
                 fontWeight: 700,
                 fontSize: 12,
               }}
@@ -82,7 +100,9 @@ export function Stats() {
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: "var(--space-lg)", marginBottom: "var(--space-lg)" }}>
         <Card>
           <SectionTitle>{t("stats.overview")}</SectionTitle>
-          <RadarPanel criteria={data.criteria} />
+          <div data-tour="profil">
+            <RadarPanel criteria={data.criteria} />
+          </div>
         </Card>
         <Card>
           <SectionTitle>{t("stats.criteria")}</SectionTitle>
@@ -91,7 +111,7 @@ export function Stats() {
               <div key={c.key}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
                   <span style={{ fontWeight: 600 }}>{t(`crit.${c.key}`)}</span>
-                  <span style={{ color: scoreColor(c.value), fontWeight: 700 }}>
+                  <span style={{ color: scoreInk(c.value), fontWeight: 700 }}>
                     {Math.round(c.value)}{" "}
                     <span style={{ color: "var(--muted)", fontWeight: 500 }}>· {del(c.delta)}</span>
                   </span>
@@ -109,7 +129,7 @@ export function Stats() {
           <SectionTitle>{t("stats.evolution")}</SectionTitle>
           <Link
             to="/stats/science"
-            style={{ color: "var(--accent-hover)", cursor: "pointer", fontSize: 13, fontWeight: 700, textDecoration: "underline" }}
+            style={{ color: "var(--accent-ink)", cursor: "pointer", fontSize: 13, fontWeight: 700, textDecoration: "underline" }}
           >
             {t("science.sources")}
           </Link>
@@ -128,7 +148,7 @@ export function Stats() {
               <Card key={s.subject} soft>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontWeight: 700 }}>{subjectLabel(s.subject)}</span>
-                  <span style={{ color: scoreColor(s.level), fontSize: 18, fontWeight: 700 }}>
+                  <span style={{ color: scoreInk(s.level), fontSize: 18, fontWeight: 700 }}>
                     {Math.round(s.level)}
                   </span>
                 </div>
@@ -137,7 +157,7 @@ export function Stats() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
                   <span>{t("stats.updates", { n: s.updates })}</span>
-                  <span style={{ color: scoreColor(s.level), fontWeight: 700 }}>
+                  <span style={{ color: scoreInk(s.level), fontWeight: 700 }}>
                     {t(`rec.${s.recommendation}`)}
                   </span>
                 </div>
@@ -161,7 +181,7 @@ export function Stats() {
                     <span style={{ marginRight: 8 }}>{l.flag}</span>
                     {l.label}
                   </span>
-                  <span style={{ color: scoreColor(l.global_score), fontSize: 18, fontWeight: 700 }}>
+                  <span style={{ color: scoreInk(l.global_score), fontSize: 18, fontWeight: 700 }}>
                     {Math.round(l.global_score)}
                   </span>
                 </div>
@@ -170,7 +190,7 @@ export function Stats() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
                   <span>{t("lang.lessons")} · {l.total_lessons}</span>
-                  <span style={{ fontWeight: 700, color: "var(--accent-hover)" }}>{l.level}</span>
+                  <span style={{ fontWeight: 700, color: "var(--accent-ink)" }}>{l.level}</span>
                 </div>
               </Card>
             ))}
@@ -178,12 +198,49 @@ export function Stats() {
         )}
       </Card>
 
-      {/* Sauvegarde / restauration des données locales (export DB, logs). */}
-      <DataSection />
+      {/* Le bloc « Mes données » (export, restauration, purge) vivait ici, au
+          bas du profil : un écran de lecture qui se terminait par des actions
+          destructrices. Il a sa place dans Réglages ▸ Données, où il est
+          désormais seul à vivre.
 
+          À sa place, la porte vers l'historique. C'est le prolongement naturel
+          de cet écran : le radar dit OÙ on en est, la progression dit COMMENT on
+          y est arrivé. */}
+      <Link to="/stats/progress" style={progressLink}>
+        <span style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <LineChart className="size-5 shrink-0" style={{ color: "var(--accent-ink)" }} aria-hidden />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>
+              {t("progress.title")}
+            </span>
+            <span style={{ display: "block", fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
+              {t("progress.subtitle")}
+            </span>
+          </span>
+        </span>
+        <ArrowRight className="size-4.5 shrink-0" style={{ color: "var(--muted)" }} aria-hidden />
+      </Link>
     </div>
   );
 }
+
+/** Le lien vers la progression : une carte pleine largeur, pas un lien de texte.
+ *  C'est la seule porte vers l'historique depuis que « Progression » a quitté la
+ *  barre latérale — elle doit se voir. */
+const progressLink: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  marginTop: "var(--space-lg)",
+  padding: "var(--space-lg)",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-lg)",
+  boxShadow: "var(--shadow-sm)",
+  textDecoration: "none",
+  color: "inherit",
+};
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 14px" }}>{children}</h2>;

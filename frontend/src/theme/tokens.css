@@ -11,35 +11,81 @@
 @source "../";
 
 :root {
-  /* Neutres */
-  --bg: #f4f7f8;
-  --bg-alt: #eaf1f3;
+  /* Neutres — bleu nuit et gris bleutés. L'identité est BLEUE à 80-90 % : ces
+     jetons-là portent presque tout l'écran, et l'orange n'intervient que par
+     touches (cf. le bloc « Accent » plus bas). */
+  --bg: #f8fafc;
+  --bg-alt: #eef2f7;
   --surface: #ffffff;
-  --surface-soft: #f8fbfc;
-  --border: #d6e1e6;
-  --border-strong: #b9cbd3;
+  --surface-soft: #f1f5f9;
+  --border: #dfe6ee;
+  --border-strong: #c3cedc;
 
   /* Texte */
-  --text: #20303a;
-  --text-soft: #344b58;
-  --muted: #667985;
-  --muted-light: #93a3ac;
+  --text: #0b1220;
+  --text-soft: #27364b;
+  --muted: #64748b;
+  --muted-light: #94a3b8;
 
-  /* Accent (teal) */
-  --accent: #2f7d8c;
-  --accent-hover: #266979;
-  --accent-soft: #e4f2f4;
-  /* Texte posé SUR l'accent. Blanc en clair ; en sombre l'accent s'éclaircit,
-     du blanc dessus tomberait sous le seuil de contraste -> encre foncée. */
-  --on-accent: #ffffff;
+  /* ── Accent (ambre doré) — LE 10-20 % ─────────────────────────────────────
+     Trois jetons et non un, parce que l'ambre ne se comporte pas pareil selon
+     qu'il REMPLIT ou qu'il ÉCRIT :
 
-  /* Sémantiques */
-  --success: #2f8a66;
-  --success-soft: #e3f3ec;
-  --warning: #9a6b22;
-  --warning-soft: #f6ecd9;
-  --danger: #b65a4a;
-  --danger-soft: #f6e3df;
+       --accent      #f59e0b  le remplissage. Boutons principaux, jauges, barres
+                              de progression, anneau de focus, pastilles de
+                              notification. C'est lui, l'ambre de la marque.
+       --accent-ink  #b45309  l'ambre QUAND IL EST DU TEXTE ou une petite icône
+                              sur fond clair. #f59e0b y tombe à 2,3:1 — sous le
+                              seuil lisible ; celui-ci tient 4,80:1.
+       --accent-soft #fef3e2  le lavis, pour un fond de badge de marque.
+
+     `--on-accent` est l'ENCRE BLEU NUIT et non du blanc : du blanc sur #f59e0b
+     ne fait que 1,9:1, le bleu nuit en fait 8,72:1.
+
+     Bleu nuit + or est une combinaison éditoriale (presse, papeterie), peu
+     employée en EdTech — et sensiblement plus posée que l'orange vif, qui
+     tirait le produit vers le registre startup. */
+  --accent: #f59e0b;
+  --accent-hover: #d97706;
+  --accent-ink: #b45309;
+  --accent-soft: #fef3e2;
+  --on-accent: #0b1220;
+
+  /* Surface de SURVOL des menus et onglets — bleutée, pas orangée. C'est ce qui
+     fait tenir le ratio 80-90/10-20 : sans ce jeton, chaque survol de menu et
+     chaque onglet actif teintait l'écran en orange, et la marque se diluait
+     dans l'interface au lieu de s'y détacher. */
+  --hover-surface: #eef2f7;
+  --hover-ink: #0b1220;
+
+  /* Sémantiques. `--danger` doit rester franchement ROUGE : à côté d'un accent
+     chaud, un rouge tirant vers l'orangé ne se lit plus comme une alerte.
+
+     `--warning` A DÛ QUITTER L'OR. C'est la conséquence directe du choix d'un
+     accent ambre : mesuré, l'ancien `#8a6a12` n'était qu'à **6° de teinte** de
+     `#f59e0b` en clair et à **1,15:1** en sombre — sur l'échelle de score, la
+     barre « à travailler » et la barre « en progression » auraient été la même
+     couleur, et la jauge n'aurait plus rien dit.
+
+     Le violet est le seul candidat mesuré qui s'écarte nettement des DEUX
+     signaux voisins : 134° de l'ambre, 100° du rouge (le rose n'était qu'à 28°
+     du rouge, l'olive à 30° de l'ambre). Et il reste juste ici : dans cette
+     app, `--warning` ne signifie jamais « danger » — il signifie « partiel », « à
+     revoir », « à travailler ». Le vrai danger a son propre jeton.
+
+     `--on-status` est l'encre posée sur ces TROIS remplissages, et elle ne peut
+     pas être `--on-accent` : le bleu nuit sur le rouge ne fait que 2,67:1, et
+     3,80:1 sur le vert. Un seul jeton suffit pour les trois parce qu'ils varient
+     ensemble — sombres en thème clair (encre blanche), clairs en thème sombre
+     (encre bleu nuit). Vérifié : 4,92 / 5,06 / 6,54 en clair, 9,74 / 10,07 /
+     6,77 en sombre. */
+  --success: #12805c;
+  --success-soft: #e6f4ee;
+  --warning: #6d28d9;
+  --warning-soft: #f0e9fd;
+  --danger: #b3261e;
+  --danger-soft: #fdeceb;
+  --on-status: #ffffff;
 
   /* Surlignage lecture */
   --hl-key: #f2c12e;
@@ -47,10 +93,16 @@
   --hl-reference: #5fbf77;
 
   /* Coloration syntaxique (lecteur de code) */
-  --code-comment: #7a8a6f;
-  --code-string: #a85d2b;
-  --code-keyword: #2f7d8c;
-  --code-number: #9a6b22;
+  /* Aucun de ces quatre ne doit friser l'ambre de la marque : un mot-clé qu'on
+     prend pour un élément d'interface est pire qu'un mot-clé terne. Le violet
+     qu'occupait `keyword` est parti à `--warning` ; magenta, bleu, sarcelle et
+     gris froid restent distincts entre eux, de l'accent et des sémantiques.
+     Le gris de commentaire est assombri pour passer 4,5:1 — un commentaire est
+     du texte discret, pas du texte illisible. */
+  --code-comment: #6b7789;
+  --code-string: #0f766e;
+  --code-keyword: #a21caf;
+  --code-number: #0369a1;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Les rayons vivent dans le `@theme` statique plus bas : ils ne changent pas
@@ -64,10 +116,11 @@
   --space-lg: 22px;
   --space-xl: 34px;
 
-  /* Élévation */
-  --shadow-sm: 0 1px 2px rgba(32, 48, 58, 0.06), 0 2px 8px rgba(32, 48, 58, 0.05);
-  --shadow-md: 0 4px 12px rgba(32, 48, 58, 0.08), 0 12px 32px rgba(32, 48, 58, 0.06);
-  --shadow-lg: 0 8px 24px rgba(32, 48, 58, 0.12), 0 24px 64px rgba(32, 48, 58, 0.10);
+  /* Élévation — teintée du bleu nuit : une ombre neutre sur un fond bleuté
+     paraît sale, une ombre à la teinte du texte s'y fond. */
+  --shadow-sm: 0 1px 2px rgba(11, 18, 32, 0.06), 0 2px 8px rgba(11, 18, 32, 0.05);
+  --shadow-md: 0 4px 12px rgba(11, 18, 32, 0.08), 0 12px 32px rgba(11, 18, 32, 0.06);
+  --shadow-lg: 0 8px 24px rgba(11, 18, 32, 0.12), 0 24px 64px rgba(11, 18, 32, 0.10);
 
   /* Mouvement */
   --anim-fast: 120ms;
@@ -88,34 +141,51 @@
 }
 
 [data-theme="dark"] {
-  --bg: #11181c;
-  --bg-alt: #161f24;
-  --surface: #1a242a;
-  --surface-soft: #202c33;
-  --border: #2b3a42;
-  --border-strong: #3b4e58;
+  /* Le thème sombre est le bleu nuit de l'identité, pas un gris neutre : c'est
+     ici que #0b1220 est réellement la couleur du produit. */
+  --bg: #0b1220;
+  --bg-alt: #0f1729;
+  --surface: #131c30;
+  --surface-soft: #1a2438;
+  --border: #24304a;
+  --border-strong: #33415f;
 
-  --text: #e7eef1;
-  --text-soft: #b9cbd3;
-  --muted: #8fa3ad;
-  --muted-light: #6c7e88;
+  --text: #f8fafc;
+  --text-soft: #cbd5e1;
+  --muted: #94a3b8;
+  --muted-light: #64748b;
 
-  --accent: #4fb3c4;
-  --accent-hover: #69c4d3;
-  --accent-soft: #173238;
-  --on-accent: #0d1518;
+  /* L'accent NE CHANGE PAS de valeur entre les deux thèmes — c'est nouveau, et
+     c'est voulu : sur bleu nuit, #f97316 tient déjà 6,68:1. La marque garde donc
+     exactement la même couleur partout, ce qu'aucun accent teal ou terre cuite
+     ne permettait. `--accent-ink` s'éclaircit, lui : c'est du texte, et il doit
+     se lire sur le fond sombre. */
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-ink: #fbbf24;
+  --accent-soft: #2e2109;
+  --on-accent: #0b1220;
 
-  --code-comment: #7f9483;
-  --code-string: #d69a63;
-  --code-keyword: #7fd0dd;
-  --code-number: #d2a24f;
+  --hover-surface: #1c2740;
+  --hover-ink: #f8fafc;
 
-  --success: #4cb98a;
-  --success-soft: #142b22;
-  --warning: #d2a24f;
-  --warning-soft: #2e2515;
-  --danger: #d98373;
-  --danger-soft: #2e1c18;
+  --code-comment: #7c8aa3;
+  --code-string: #5eead4;
+  --code-keyword: #f0abfc;
+  --code-number: #7dd3fc;
+
+  --success: #34d399;
+  --success-soft: #0e2b23;
+  --warning: #a78bfa;
+  --warning-soft: #1e1633;
+  /* Rose-rouge et non rouge pur : mesuré, l'ancien `#f87171` n'était qu'à 37,7°
+     de teinte de l'ambre de la marque et à 1,29:1 — deux pastilles voisines s'y
+     confondaient dans le thème sombre. Celui-ci ouvre l'écart à 46,4° sans rien
+     perdre en lisibilité (6,96:1 avec l'encre bleu nuit). */
+  --danger: #fb7185;
+  --danger-soft: #2e1620;
+  /* Les trois statuts s'éclaircissent en sombre : c'est l'encre qui fonce. */
+  --on-status: #0b1220;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.3);
@@ -126,6 +196,49 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   DENSITÉ ET TAILLE DU TEXTE — les deux réglages d'Apparence, appliqués ici et
+   nulle part ailleurs. Les attributs sont posés sur <html> par
+   `theme/useDisplayPreferences.ts`, sur le modèle de `data-theme`.
+
+   Taille du texte : on agit sur la taille de police RACINE, pas seulement sur
+   `body`. Tous les utilitaires Tailwind sont en `rem` (`text-sm`, `p-4`, `gap-3`,
+   `w-58`) : les faire suivre demande de bouger la racine, sinon le réglage ne
+   toucherait que les rares endroits qui lisent `--text-body`. Les jetons
+   typographiques sont mis à l'échelle en plus, pour les écrans qui posent encore
+   `fontSize: var(--text-h1)` en style inline.
+
+   LIMITE CONNUE, à lever avec la migration Tailwind (phase 9) : les écrans
+   encore stylés en `style={{ fontSize: 13 }}` ne suivent aucun des deux
+   réglages. Ils rétréciront au fur et à mesure de leur migration ; le réglage
+   n'attend pas qu'elle soit finie pour être juste là où il s'applique.
+   --------------------------------------------------------------------------- */
+:root {
+  --text-scale: 1;
+  --density-scale: 1;
+}
+:root[data-text-size="small"] {
+  --text-scale: 0.92;
+}
+:root[data-text-size="large"] {
+  --text-scale: 1.12;
+}
+/* En compacte, l'échelle typographique ne bouge PAS : on resserre l'espace, on
+   ne rend pas le texte plus petit. Ce sont deux réglages distincts justement
+   pour qu'on puisse vouloir l'un sans l'autre. */
+:root[data-density="compact"] {
+  --density-scale: 0.78;
+  --space-xs: 3px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+}
+
+html {
+  font-size: calc(16px * var(--text-scale));
 }
 
 /* ---------------------------------------------------------------------------
@@ -158,12 +271,19 @@
   --color-secondary-foreground: var(--text-soft);
   --color-muted: var(--surface-soft);
   --color-muted-foreground: var(--muted);
-  /* Chez shadcn `accent` désigne la surface de survol des menus, pas la couleur
-     de marque : on la branche donc sur --accent-soft. La marque, c'est `brand`. */
-  --color-accent: var(--accent-soft);
-  --color-accent-foreground: var(--accent-hover);
+  /* Chez shadcn `accent` désigne la SURFACE DE SURVOL des menus, pas la couleur
+     de marque. Elle pointait sur `--accent-soft` par commodité — et c'est ce qui
+     teintait en orange chaque survol de menu, chaque onglet actif, chaque item
+     de liste déroulante. Sur une identité où l'orange ne doit occuper que
+     10-20 %, cette commodité coûtait la moitié du budget.
+     Elle pointe désormais sur des jetons dédiés, bleutés. La marque, c'est
+     `brand` — et elle se réserve aux boutons, jauges et anneaux de focus. */
+  --color-accent: var(--hover-surface);
+  --color-accent-foreground: var(--hover-ink);
   --color-destructive: var(--danger);
-  --color-destructive-foreground: var(--on-accent);
+  /* Son PROPRE jeton d'encre, et non `--on-accent` : l'encre bleu nuit posée sur
+     le rouge ne ferait que 2,67:1. Les deux ne peuvent pas partager. */
+  --color-destructive-foreground: var(--on-status);
   --color-border: var(--border);
   --color-input: var(--border);
   --color-ring: var(--accent);
@@ -172,6 +292,12 @@
   --color-brand: var(--accent);
   --color-brand-hover: var(--accent-hover);
   --color-brand-soft: var(--accent-soft);
+  /* `text-brand-ink` : l'orange quand il ÉCRIT. `text-brand` reste le
+     remplissage — l'utiliser comme couleur de texte sur fond clair descend à
+     2,68:1. Les deux existent pour qu'on n'ait pas à choisir entre la marque et
+     la lisibilité. */
+  --color-brand-ink: var(--accent-ink);
+  --color-on-status: var(--on-status);
   --color-surface: var(--surface);
   --color-surface-soft: var(--surface-soft);
   --color-canvas-alt: var(--bg-alt);
@@ -225,6 +351,28 @@
   --radius-md: 16px;
   --radius-lg: 22px;
   --radius-xl: 30px;
+
+  /* Échelle typographique — MÊME raison que les rayons d'être ici : une taille
+     de titre ne change pas avec le thème, et `--text-*` est l'espace de noms
+     Tailwind des tailles de police. `@theme` sans `inline` émet de vraies
+     valeurs dans `:root` : `var(--text-h1)` résout ET `text-h1` existe comme
+     utilitaire. Une seule source, pas deux.
+
+     Avant ce bloc l'app avait SIX tailles de `h1` différentes (22/26/30/32/32/34)
+     posées à la main écran par écran. Ce sont désormais les seules autorisées ;
+     un `text-[32px]` ou un `fontSize: 30` est un bug de style. */
+  --text-display: calc(34px * var(--text-scale, 1));
+  --text-display--line-height: 1.1;
+  --text-h1: calc(30px * var(--text-scale, 1));
+  --text-h1--line-height: 1.15;
+  --text-h2: calc(24px * var(--text-scale, 1));
+  --text-h2--line-height: 1.25;
+  --text-h3: calc(19px * var(--text-scale, 1));
+  --text-h3--line-height: 1.35;
+  --text-body: calc(15px * var(--text-scale, 1));
+  --text-body--line-height: 1.55;
+  --text-small: calc(13px * var(--text-scale, 1));
+  --text-small--line-height: 1.45;
 }
 
 * {
@@ -242,8 +390,11 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 14px;
-  line-height: 1.5;
+  /* 15 px et non 14 : tout le produit consiste à rester longtemps devant du
+     texte. `--text-body` porte la même valeur, pour que les écrans qui posent
+     explicitement leur taille de corps tombent sur celle-ci. */
+  font-size: var(--text-body);
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 

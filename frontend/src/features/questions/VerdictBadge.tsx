@@ -24,7 +24,10 @@ export function VerdictBadge({ verdict }: { verdict: string }) {
         fontWeight: 700,
         padding: "3px 10px",
         borderRadius: 999,
-        color: "#fff",
+        // Le fond est un remplissage de STATUT (succès / avertissement /
+        // danger), pas l'accent : son encre est `--on-status`. Avec
+        // `--on-accent`, le bleu nuit tombait à 2,67:1 sur le rouge.
+        color: "var(--on-status)",
         background: VERDICT_COLOR[verdict] ?? "var(--muted)",
       }}
     >

@@ -28,10 +28,10 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
   return (
     <SasOverlay>
       <div style={{ textAlign: "center", maxWidth: 560, padding: "var(--space-xl)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent)", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "var(--accent-ink)", marginBottom: 12 }}>
           {t("post_exit_rest.label")}
         </div>
-        <h2 style={{ fontFamily: "var(--font-title)", fontSize: 26, margin: "0 0 10px", color: "var(--text)" }}>
+        <h2 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h2)", margin: "0 0 10px", color: "var(--text)" }}>
           {t("post_exit_rest.title")}
         </h2>
         <p style={{ color: "var(--text-soft)", lineHeight: 1.6, margin: "0 auto", maxWidth: 500 }}>
@@ -46,7 +46,7 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
             margin: "18px auto",
             maxWidth: 500,
             background: "var(--accent-soft)",
-            color: "var(--accent-hover)",
+            color: "var(--accent-ink)",
             borderRadius: "var(--radius-md)",
             padding: "12px 16px",
             fontSize: 14,
@@ -75,7 +75,7 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
               display: "grid",
               placeItems: "center",
               background: "var(--bg)",
-              color: "var(--accent-hover)",
+              color: "var(--accent-ink)",
               fontSize: 30,
               fontWeight: 700,
             }}
@@ -90,7 +90,7 @@ export function PostExitRestSas({ onDone }: { onDone: () => void }) {
           style={{
             border: "none",
             background: canSkip ? "var(--accent)" : "var(--surface-soft)",
-            color: canSkip ? "#fff" : "var(--muted)",
+            color: canSkip ? "var(--on-accent)" : "var(--muted)",
             borderRadius: "var(--radius-sm)",
             padding: "10px 22px",
             fontWeight: 600,

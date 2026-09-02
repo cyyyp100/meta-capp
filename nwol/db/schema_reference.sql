@@ -1,11 +1,11 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 26).
+-- (config.settings.DB_SCHEMA_VERSION = 27).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
--- dans cette édition : app_settings, llm_pdf_cache, ocr_pages.
+-- dans cette édition : llm_pdf_cache, ocr_pages.
 
 CREATE TABLE answers (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,9 +239,12 @@ CREATE TABLE llm_pdf_cache (
 );
 CREATE INDEX idx_llm_pdf_cache_task ON llm_pdf_cache(task_type);
 CREATE TABLE login_streak (
-    user_id    INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
-    streak     INTEGER DEFAULT 1,
-    last_login TEXT NOT NULL
+    user_id        INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
+    streak         INTEGER DEFAULT 1,
+    longest_streak INTEGER DEFAULT 0,
+    -- Jour de la dernière SESSION terminée, pas de la dernière ouverture de
+    -- l'app : c'est une série d'étude (cf. migration v27).
+    last_study_day TEXT NOT NULL
 );
 CREATE TABLE metacog_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
