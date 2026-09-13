@@ -88,6 +88,14 @@ export const DEMO_QUESTION = {
   feedbackKey: "demo.qa_feedback",
 } as const;
 
+/** Temps de « réflexion » simulé (ms) avant qu'une réplique de Gemma n'arrive.
+ *
+ *  Il couvre le changement d'étape de la visite — sortie de la bulle quittée
+ *  puis entrée de la suivante, cf. `tour/Coachmark.tsx` — avec de la marge : la
+ *  réponse doit tomber une fois la bulle qui l'explique posée et lisible, pas
+ *  au milieu de son apparition. C'était 700 ms, et elle arrivait en plein fondu. */
+export const DEMO_THINKING_MS = 1400;
+
 /** Les répliques jouées, dans l'ordre où les étapes les déclenchent. */
 export const DEMO_BEATS: Record<DemoBeat, { userKey?: string; assistantKey?: string }> = {
   // L'utilisateur pose une question, Gemma répond en citant la page.

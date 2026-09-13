@@ -30,7 +30,7 @@ import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
 import { VerdictBadge } from "../questions/VerdictBadge";
-import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, type DemoBeat } from "./demoScript";
+import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
 import { renderMathToHtml } from "./renderMath";
 
 interface QaFeedback {
@@ -469,7 +469,7 @@ export function GemmaPanel({
           ],
           pageRef.current,
         );
-      }, 700);
+      }, DEMO_THINKING_MS);
     },
     [t],
   );

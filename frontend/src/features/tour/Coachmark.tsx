@@ -18,8 +18,8 @@
 // CLIC (`TourHost`), pas d'un calque qui avale tout. Un calque qui avale tout
 // gèle aussi le défilement de la page et le glissé du PDF, c'est-à-dire les
 // gestes qu'on est justement en train d'expliquer.
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +35,20 @@ import { TOUR_STEPS, useTour } from "./useTour";
 /** Marge autour de la découpe : coller au pixel près donne un halo qui « pince »
  *  l'élément. */
 const PADDING = 8;
+
+/** Les deux temps d'un changement d'étape, en secondes.
+ *
+ *  L'étape quittée SORT, puis l'étape suivante ENTRE — jamais les deux à la
+ *  fois (`mode="wait"` sur l'`AnimatePresence`). C'était un fondu enchaîné de
+ *  280 ms : deux voiles superposés le temps du croisement, et deux bulles à
+ *  l'écran, l'ancienne encore pleine sous la nouvelle. Une visite qui explique
+ *  l'écran ne peut pas se permettre d'en montrer deux versions à la fois.
+ *
+ *  La sortie est plus courte que l'entrée : on efface ce qu'on a fini de lire,
+ *  on prend le temps de poser ce qu'on va lire. Même courbe que `tokens.css`. */
+const LEAVE_S = 0.32;
+const ENTER_S = 0.5;
+const EASE: [number, number, number, number] = [0.33, 1, 0.68, 1];
 
 /** Sondages infructueux (500 ms chacun) avant de renoncer à une cible.
  *
@@ -182,96 +196,131 @@ export function Coachmark({ step, index }: { step: TourStepDef; index: number })
 
   // Cible pas encore là : on n'affiche pas une bulle orpheline au milieu de
   // nulle part. Le sondage ci-dessus tranchera dans un sens ou dans l'autre.
+  //
+  // L'`AnimatePresence` reste monté et c'est son ENFANT qui est conditionnel :
+  // un `return null` ici démontait le tout, et le voile de l'étape quittée
+  // disparaissait d'un coup dès que la suivante changeait de route, avant même
+  // que sa cible ait pu être cherchée.
   const rect = rects[0];
-  if (!rect || rect.width === 0) return null;
+  const visible = rect !== undefined && rect.width > 0;
 
   const isLast = index === TOUR_STEPS.length - 1;
-  // Un identifiant par étape : pendant la transition d'`AnimatePresence`, deux
-  // voiles coexistent une fraction de seconde et un id partagé ferait résoudre
-  // le masque du nouveau sur les rectangles de l'ancien.
+  // Un identifiant par étape. `mode="wait"` fait que deux voiles ne coexistent
+  // jamais, mais un id partagé lierait le masque de l'un aux rectangles de
+  // l'autre le jour où ils se recouvriraient — autant ne pas laisser le piège.
   const maskId = `tour-veil-${step.id}`;
   const side = step.side ?? "right";
-  const anchor = anchorFor(rect, side);
+  const anchor = visible ? anchorFor(rect, side) : null;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        key={step.id}
-        className="pointer-events-none fixed inset-0 z-[120]"
-        initial={reduce ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={reduce ? undefined : { opacity: 0 }}
-        transition={{ duration: 0.28, ease: [0.33, 1, 0.68, 1] }}
-      >
-        {/* Le voile et ses découpes. Le masque est en blanc (= opaque, on
-            assombrit) percé de noir (= transparent, on laisse en clair). */}
-        <svg aria-hidden className="absolute inset-0 size-full">
-          <defs>
-            <mask id={maskId}>
-              <rect x="0" y="0" width="100%" height="100%" fill="white" />
-              {rects.map((r, i) => (
-                <rect
-                  key={i}
-                  x={r.left - PADDING}
-                  y={r.top - PADDING}
-                  width={r.width + PADDING * 2}
-                  height={r.height + PADDING * 2}
-                  rx="6"
-                  fill="black"
-                  // Les propriétés géométriques SVG sont animables en CSS : la
-                  // découpe glisse d'une étape à l'autre au lieu de sauter.
-                  style={{ transition: "x 0.2s, y 0.2s, width 0.2s, height 0.2s" }}
-                />
-              ))}
-            </mask>
-          </defs>
-          <rect x="0" y="0" width="100%" height="100%" fill="rgba(0,0,0,0.55)" mask={`url(#${maskId})`} />
-        </svg>
+    <AnimatePresence mode="wait">
+      {visible && anchor && (
+        <motion.div
+          key={step.id}
+          className="pointer-events-none fixed inset-0 z-[120]"
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: ENTER_S, ease: EASE } }}
+          exit={reduce ? undefined : { opacity: 0, transition: { duration: LEAVE_S, ease: EASE } }}
+        >
+          {/* Le voile et ses découpes. Le masque est en blanc (= opaque, on
+              assombrit) percé de noir (= transparent, on laisse en clair). */}
+          <svg aria-hidden className="absolute inset-0 size-full">
+            <defs>
+              <mask id={maskId}>
+                <rect x="0" y="0" width="100%" height="100%" fill="white" />
+                {rects.map((r, i) => (
+                  <rect
+                    key={i}
+                    x={r.left - PADDING}
+                    y={r.top - PADDING}
+                    width={r.width + PADDING * 2}
+                    height={r.height + PADDING * 2}
+                    rx="6"
+                    fill="black"
+                    // Les propriétés géométriques SVG sont animables en CSS : la
+                    // découpe glisse d'une étape à l'autre au lieu de sauter.
+                    style={{ transition: "x 0.2s, y 0.2s, width 0.2s, height 0.2s" }}
+                  />
+                ))}
+              </mask>
+            </defs>
+            <rect x="0" y="0" width="100%" height="100%" fill="rgba(0,0,0,0.55)" mask={`url(#${maskId})`} />
+          </svg>
 
-        <Popover open>
-          <PopoverAnchor asChild>
-            <span
-              aria-hidden
-              className="absolute"
-              style={{ top: anchor.top, left: anchor.left, width: anchor.width, height: anchor.height }}
-            />
-          </PopoverAnchor>
-          <PopoverContent
-            side={side}
-            align="start"
-            sideOffset={16}
-            collisionPadding={16}
-            // Radix rendrait le focus au déclencheur en se fermant : ici il n'y
-            // a pas de déclencheur, et voler le focus retirerait le curseur du
-            // champ dans lequel quelqu'un était peut-être en train d'écrire.
-            onOpenAutoFocus={(event) => event.preventDefault()}
-            onCloseAutoFocus={(event) => event.preventDefault()}
-            // Radix PORTE la bulle dans `body` : elle sort du conteneur de la
-            // coach mark et ne profite pas de son `z-120`. Avec le `z-50` par
-            // défaut du primitif, elle passait donc SOUS le voile — dont
-            // l'ombre de 9999 px la repeignait à 55 % de noir, texte compris —
-            // et sous les sas (`z-100`), qui la masquaient entièrement pendant
-            // les étapes du lecteur. Elle doit être au-dessus des deux.
-            className="pointer-events-auto z-[130] w-80"
-          >
-            <p className="m-0 text-[11px] font-bold tracking-wide text-muted-foreground uppercase">
-              {t(`tour.chapter.${step.chapter}`)} · {t("tour.step", { n: index + 1, total: TOUR_STEPS.length })}
-            </p>
-            <h3 className="mt-1.5 mb-0 font-serif text-h3 font-bold">{t(`tour.${step.id}.title`)}</h3>
-            <p className="mt-2 mb-0 text-sm leading-relaxed text-text-soft">{t(`tour.${step.id}.body`)}</p>
-            <div className="mt-4 flex items-center justify-between gap-3">
-              {/* La visite est interruptible à TOUT moment, et le bouton pour en
-                  sortir est aussi visible que celui pour continuer. */}
-              <Button variant="ghost" size="sm" onClick={skip}>
-                {t("tour.skip")}
-              </Button>
-              <Button size="sm" onClick={next}>
-                {isLast ? t("tour.done") : t("tour.next")}
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-      </motion.div>
+          <Popover open>
+            <PopoverAnchor asChild>
+              <span
+                aria-hidden
+                className="absolute"
+                style={{ top: anchor.top, left: anchor.left, width: anchor.width, height: anchor.height }}
+              />
+            </PopoverAnchor>
+            <PopoverContent
+              side={side}
+              align="start"
+              sideOffset={16}
+              collisionPadding={16}
+              // Radix rendrait le focus au déclencheur en se fermant : ici il n'y
+              // a pas de déclencheur, et voler le focus retirerait le curseur du
+              // champ dans lequel quelqu'un était peut-être en train d'écrire.
+              onOpenAutoFocus={(event) => event.preventDefault()}
+              onCloseAutoFocus={(event) => event.preventDefault()}
+              // Radix PORTE la bulle dans `body` : elle sort du conteneur de la
+              // coach mark et ne profite pas de son `z-120`. Avec le `z-50` par
+              // défaut du primitif, elle passait donc SOUS le voile — dont
+              // l'ombre de 9999 px la repeignait à 55 % de noir, texte compris —
+              // et sous les sas (`z-100`), qui la masquaient entièrement pendant
+              // les étapes du lecteur. Elle doit être au-dessus des deux.
+              className="pointer-events-auto z-[130] w-80"
+            >
+              <BubbleBody reduce={reduce}>
+                <p className="m-0 text-[11px] font-bold tracking-wide text-muted-foreground uppercase">
+                  {t(`tour.chapter.${step.chapter}`)} · {t("tour.step", { n: index + 1, total: TOUR_STEPS.length })}
+                </p>
+                <h3 className="mt-1.5 mb-0 font-serif text-h3 font-bold">{t(`tour.${step.id}.title`)}</h3>
+                <p className="mt-2 mb-0 text-sm leading-relaxed text-text-soft">{t(`tour.${step.id}.body`)}</p>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  {/* La visite est interruptible à TOUT moment, et le bouton pour en
+                      sortir est aussi visible que celui pour continuer. */}
+                  <Button variant="ghost" size="sm" onClick={skip}>
+                    {t("tour.skip")}
+                  </Button>
+                  <Button size="sm" onClick={next}>
+                    {isLast ? t("tour.done") : t("tour.next")}
+                  </Button>
+                </div>
+              </BubbleBody>
+            </PopoverContent>
+          </Popover>
+        </motion.div>
+      )}
     </AnimatePresence>
+  );
+}
+
+/**
+ * Le contenu de la bulle, qui fond au même rythme que le voile.
+ *
+ * Radix PORTE la bulle dans `body` : elle n'est pas un descendant DOM du calque
+ * animé, et l'opacité de celui-ci ne l'atteint pas. La bulle de l'étape quittée
+ * restait donc pleine jusqu'à son démontage, pendant que celle de la suivante
+ * s'affichait par-dessus. Le contexte de présence de Motion, lui, traverse le
+ * portail : ce `motion.div` joue la même sortie que le voile, et
+ * l'`AnimatePresence` attend les deux avant de passer à l'étape suivante.
+ *
+ * Pendant la sortie, la bulle ne prend plus les clics : un second « Suivant »
+ * sur une bulle en train de s'effacer avancerait l'étape une fois de trop.
+ */
+function BubbleBody({ reduce, children }: { reduce: boolean | null; children: ReactNode }) {
+  const present = useIsPresent();
+  return (
+    <motion.div
+      initial={reduce ? false : { opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: ENTER_S, ease: EASE } }}
+      exit={reduce ? undefined : { opacity: 0, transition: { duration: LEAVE_S, ease: EASE } }}
+      style={{ pointerEvents: present ? "auto" : "none" }}
+    >
+      {children}
+    </motion.div>
   );
 }
