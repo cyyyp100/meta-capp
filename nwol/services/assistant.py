@@ -26,6 +26,7 @@ from llm.ollama_client import (
     make_standalone_flashcard_async,
 )
 from services import library, pdf_rag, selection
+from utils.text import fold
 
 __all__ = [
     "build_answer_context",
@@ -36,6 +37,7 @@ __all__ = [
     "curiosity_hook",
     "generate_page_question",
     "resolve_paragraph_mask",
+    "resolve_question_zone",
     "evaluate_page_answer",
     "objective_verdict",
     "build_intervention_context",
@@ -51,6 +53,18 @@ _ASSISTANT_IMAGE_ZOOM = 1.5
 # En dessous, le passage masqué est trop court pour être retrouvé de façon fiable
 # sur la page (et masquer trois mots n'exige aucun effort de rappel).
 _MIN_MASK_CHARS = 40
+
+# Zone visée par une question : bornes de la citation qu'on rend au lecteur.
+# Trop courte, elle n'est pas retrouvée sur la page ; trop longue, ce n'est
+# plus une zone mais la page (et le prompt demandait 60 à 400 caractères).
+_MIN_ZONE_CHARS = 40
+_MAX_ZONE_CHARS = 600
+# Part minimale des mots du passage LLM qu'une fenêtre de phrases de la page
+# doit contenir pour qu'on la retienne à sa place.
+_ZONE_SNAP_MIN_OVERLAP = 0.6
+_ZONE_SNAP_MAX_SENTENCES = 3
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;:])\s+")
+_WORD_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 
 
 def _safe(fn, default):
@@ -306,6 +320,73 @@ def resolve_paragraph_mask(doc_id: int, page: int, mask: dict | None) -> dict | 
     if len(quote) < _MIN_MASK_CHARS:
         return None
     return {"quote": quote, "placeholder": (mask.get("placeholder") or "").strip()}
+
+
+def resolve_question_zone(doc_id: int, page: int, result: dict | None) -> dict | None:
+    """Zone précise de la page visée par une question → citation localisable.
+
+    Le LLM recopie le passage sur lequel porte sa question (`source_excerpt`).
+    Le lecteur, lui, cadre une zone à partir d'une CITATION qu'il retrouve sur la
+    page (`library.search_page`, même chemin que les surlignages et le masque).
+    Entre les deux : on vérifie que la citation est bien dans le texte de la
+    page — un modèle « recopie » parfois de mémoire — et, sinon, on la recale sur
+    la fenêtre de phrases de la page qui lui ressemble le plus. Sans passage
+    exploitable, le passage masqué d'un rappel libre fait zone ; sans lui,
+    None : le lecteur se rabat sur le haut de la page."""
+    result = result or {}
+    text = library.page_text(doc_id, page) or ""
+    quote = _snap_excerpt_to_page(str(result.get("source_excerpt") or ""), text)
+    if quote is None:
+        mask = resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+        quote = mask["quote"] if mask else None
+    if not quote:
+        return None
+    return {"quote": _cut_at_word(quote, _MAX_ZONE_CHARS)}
+
+
+def _snap_excerpt_to_page(excerpt: str, page_text: str) -> str | None:
+    """Ramène le passage recopié par le LLM à une sous-chaîne réelle de la page."""
+    excerpt = " ".join(excerpt.split())
+    flat = " ".join(page_text.split())
+    if len(excerpt) < _MIN_ZONE_CHARS or not flat:
+        return None
+    index = flat.lower().find(excerpt.lower())
+    if index >= 0:
+        # Les caractères de la page, pas ceux du modèle : la recherche PDFium
+        # ne tolère que la casse.
+        return flat[index:index + len(excerpt)]
+    wanted = set(_WORD_RE.findall(fold(excerpt)))
+    if not wanted:
+        return None
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(flat) if s.strip()]
+    best: tuple[float, str] | None = None
+    for start in range(len(sentences)):
+        for width in range(1, _ZONE_SNAP_MAX_SENTENCES + 1):
+            window = " ".join(sentences[start:start + width])
+            if len(window) > 2.5 * len(excerpt) + 80:
+                break
+            found = set(_WORD_RE.findall(fold(window)))
+            if not found:
+                continue
+            common = len(wanted & found)
+            recall = common / len(wanted)
+            if recall < _ZONE_SNAP_MIN_OVERLAP:
+                continue
+            # La précision départage : à mots retrouvés égaux, la fenêtre la
+            # plus serrée l'emporte — une zone, pas trois phrases pour une.
+            score = recall + 0.5 * (common / len(found))
+            if best is None or score > best[0]:
+                best = (score, window)
+    if best is None or len(best[1]) < _MIN_ZONE_CHARS:
+        return None
+    return best[1]
+
+
+def _cut_at_word(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text.rfind(" ", 0, limit)
+    return text[: cut if cut > limit // 2 else limit].rstrip()
 
 
 def evaluate_page_answer(

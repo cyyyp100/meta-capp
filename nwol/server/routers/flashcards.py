@@ -8,6 +8,7 @@ from services.flashcards import (
     create_flashcard,
     delete_flashcards,
     due_flashcards,
+    find_flashcard,
     list_flashcards,
     review_flashcard,
     session_start_cards,
@@ -64,6 +65,11 @@ def session_start(doc_id: int | None = None, limit: int = 5) -> list[dict]:
 
 @router.post("")
 def create(body: CreateBody) -> dict:
+    """Crée une carte. `created: false` = elle existait déjà (même recto/verso
+    au sens près) ; c'est alors son id qui est renvoyé, rien n'est écrit."""
+    existing = find_flashcard(body.front, body.back)
+    if existing is not None:
+        return {"id": existing, "created": False}
     card_id = create_flashcard(
         front=body.front,
         back=body.back,
@@ -71,7 +77,7 @@ def create(body: CreateBody) -> dict:
         difficulty=body.difficulty,
         source=body.source,
     )
-    return {"id": card_id}
+    return {"id": card_id, "created": True}
 
 
 @router.post("/from-exchange")
@@ -80,11 +86,18 @@ def from_exchange(body: FromExchangeBody) -> dict:
 
     Le LLM réécrit le recto en question autonome (remplace « selon ce texte » par
     le concept). Repli sur les textes bruts si le LLM est indisponible.
+
+    DOUBLON : l'échange BRUT est la clé (la réécriture LLM change à chaque
+    appel). Un second « + Flashcard » sur la même réponse rend la carte
+    existante (`created: false`) sans même solliciter le LLM.
     """
     from services.assistant import make_flashcard
     from services.llm_bridge import run_llm_sync
 
     front, back = body.front, body.back
+    existing = find_flashcard(front, back)
+    if existing is not None:
+        return {"id": existing, "front": front, "back": back, "created": False}
     card: dict | None = None
     try:
         result = run_llm_sync(
@@ -104,8 +117,9 @@ def from_exchange(body: FromExchangeBody) -> dict:
         difficulty=(card or {}).get("difficulty") or 2,
         source="manual",
         document_id=body.doc_id,
+        origin=(front, back),
     )
-    return {"id": card_id, "front": final_front, "back": final_back}
+    return {"id": card_id, "front": final_front, "back": final_back, "created": True}
 
 
 @router.post("/{card_id}/review")

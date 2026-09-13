@@ -150,6 +150,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 28)
         current = 28
 
+    if current < 29 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v29(conn)
+        _set_version(conn, 29)
+        current = 29
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -925,3 +930,51 @@ def _migrate_to_v28(conn) -> None:
             "ON quiz_exposures(user_id, last_served_at)"
         )
     logger.info("Migration SQLite v28 terminée")
+
+
+def _migrate_to_v29(conn) -> None:
+    """Doublons de flashcards : une clé, un index UNIQUE, et le ménage.
+
+    Rien n'empêchait d'enregistrer deux fois la même carte : « + Flashcard »
+    cliqué deux fois sous la même réponse de Gemma, une carte auto créée à la
+    bonne réponse puis recréée à la main, la même question tapée deux fois.
+    Chaque doublon revenait ensuite deux fois dans l'échauffement et faussait
+    la répétition espacée (deux échéances pour un seul souvenir).
+
+    `dedup_key` est l'empreinte de la SOURCE de la carte (`utils.text.fingerprint`
+    du recto et du verso — ou, pour une carte réécrite par le LLM depuis un
+    échange, de l'échange brut : la réécriture n'est pas déterministe, elle ne
+    peut pas servir de clé). L'index UNIQUE (utilisateur, clé) est la garantie ;
+    `db.flashcards.save_flashcard` s'y appuie (`ON CONFLICT DO NOTHING`).
+
+    Reprise de l'existant : la clé est calculée depuis le recto/verso, et parmi
+    les cartes qui partagent une clé on garde celle qui a le plus d'historique
+    de révision (puis la plus ancienne) — c'est elle que la répétition espacée
+    connaît. Les autres partent, sinon l'index ne pourrait pas être posé."""
+    from utils.text import fingerprint
+
+    logger.info("Migration SQLite v29 démarrée")
+    _ensure_column(conn, "flashcards", "dedup_key", "TEXT")
+    rows = conn.execute(
+        """SELECT id, user_id, front, back FROM flashcards
+           ORDER BY COALESCE(review_count, 0) DESC, id ASC"""
+    ).fetchall()
+    kept: set[tuple[int, str]] = set()
+    removed = 0
+    with conn:
+        for row in rows:
+            key = fingerprint(row["front"] or "", row["back"] or "")
+            slot = (int(row["user_id"]), key)
+            if slot in kept:
+                conn.execute("DELETE FROM flashcards WHERE id=?", (row["id"],))
+                removed += 1
+                continue
+            kept.add(slot)
+            conn.execute("UPDATE flashcards SET dedup_key=? WHERE id=?", (key, row["id"]))
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_flashcards_dedup "
+            "ON flashcards(user_id, dedup_key)"
+        )
+    if removed:
+        logger.info("Migration v29 : %s flashcard(s) en doublon supprimée(s)", removed)
+    logger.info("Migration SQLite v29 terminée")

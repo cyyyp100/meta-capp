@@ -1,11 +1,12 @@
 # server/routers/session.py — Cycle de vie d'une session de lecture.
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from db.user import get_streak
 from services.session import (
+    abandon_session,
     end_session,
     finalize_session,
     session_analysis,
@@ -41,6 +42,16 @@ def start(body: StartBody) -> dict:
 @router.post("/{session_id}/end")
 def end(session_id: int, body: EndBody) -> dict:
     return end_session(session_id, pages_read=body.pages_read, duration_s=body.duration_s)
+
+
+@router.post("/{session_id}/abandon")
+def abandon(session_id: int) -> dict:
+    """Retour à la bibliothèque depuis le sas d'entrée : la session n'a pas eu
+    lieu, elle est effacée plutôt que close (cf. services.session)."""
+    try:
+        return abandon_session(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/{session_id}/metrics")

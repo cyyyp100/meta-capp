@@ -41,7 +41,16 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "curiosity_hook":           {"num_ctx": 2048, "num_predict": 180, "temperature": 0.1},
     "flashcard_tags":           {"num_ctx": 2048, "num_predict": 140, "temperature": 0.1},
     "session_summary":          {"num_ctx": 3072, "num_predict": 360, "temperature": 0.1},
-    "question":                 {"num_ctx": 4096, "num_predict": 700, "temperature": 0.1},
+    # num_ctx 6144 (mesuré sur gemma4:e4b, 2026-09-10) : squelette du prompt
+    # (guide des types + règles + schéma) ~2300 tokens + paragraphe [:3500] ~950
+    # + contexte dynamique (5 dernières réponses en JSON, profil, jauges,
+    # difficultés, surlignages) jusqu'à ~1200 + image de page 268 + num_predict
+    # 700 ≈ 5400. À 4096, l'image était refusée (exceed_context_size_error →
+    # repli texte) ET, dès la 3e page d'une session, le prompt texte seul
+    # dépassait aussi : Ollama tronque alors silencieusement le DÉBUT du prompt
+    # (rôle, contexte, profil). Les autres tâches avec image gardent ≥ 1200
+    # tokens de marge à 4096.
+    "question":                 {"num_ctx": 6144, "num_predict": 700, "temperature": 0.1},
     "evaluation":               {"num_ctx": 4096, "num_predict": 680, "temperature": 0.1},
     "rephrasing":               {"num_ctx": 4096, "num_predict": 560, "temperature": 0.1},
     "follow_up":                {"num_ctx": 4096, "num_predict": 560, "temperature": 0.1},
@@ -300,6 +309,10 @@ DEFAULT_PAGES_PER_CHAPTER = 10
 # et un déplacement à la souris devient irrattrapable.
 LIBRARY_MAX_FOLDER_DEPTH = 6
 LIBRARY_FOLDER_NAME_MAX = 80
+# Titre d'un document renommé depuis la bibliothèque (clic droit → Renommer).
+# Même plafond qu'un nom de dossier : les deux s'affichent dans les mêmes
+# colonnes (rail, cartes, recherche).
+LIBRARY_DOCUMENT_TITLE_MAX = 120
 # Plafonds de listage. La bibliothèque est locale et mono-utilisateur : on sert
 # tout le catalogue d'un coup et le rail filtre côté client (un déplacement à la
 # souris doit être instantané, sans aller-retour réseau).
@@ -349,7 +362,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 28
+DB_SCHEMA_VERSION = 29
 
 # Logs
 LOG_MAX_BYTES = 1_000_000

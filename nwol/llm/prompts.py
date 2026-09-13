@@ -275,6 +275,7 @@ Respond only in valid JSON, without Markdown, in the exact format:
   "expected_answer": "short but precise expected answer",
   "evaluation_criteria": ["validation criterion 1", "validation criterion 2"],
   "session_hint": "",
+  "source_excerpt": "the exact sentences of the paragraph the question is about, copied verbatim",
   "source_block_id": "{sid}",
   "paragraph_mask": {{
     "enabled": false,
@@ -286,6 +287,7 @@ Respond only in valid JSON, without Markdown, in the exact format:
 
 Constraints:
 - Write every user-facing string in English: question, choices, expected_answer, evaluation_criteria, session_hint, and paragraph_mask.placeholder.
+- The question targets ONE precise passage of the paragraph (one to three consecutive sentences, a formula, a table row), not the page as a whole. source_excerpt copies that passage VERBATIM from the paragraph (same words, same order, 60 to 400 characters, no ellipsis, no paraphrase): the reader frames it on screen while the student answers.
 - choices is only used by "qcm", "ordering" and "estimation"; for every other question_type it must be [].
 - If question_type is "qcm", choices contains 3 or 4 plausible options and expected_answer indicates the correct one.
 - If question_type is "ordering", choices contains 3 to 6 short steps IN THE CORRECT ORDER (the interface shuffles them), and expected_answer restates that order as "1. … 2. … 3. …".
@@ -351,6 +353,7 @@ Réponds uniquement en JSON valide, sans Markdown, au format exact :
   "expected_answer": "réponse attendue courte mais précise",
   "evaluation_criteria": ["critère de validation 1", "critère de validation 2"],
   "session_hint": "",
+  "source_excerpt": "les phrases exactes du paragraphe sur lesquelles porte la question, recopiées telles quelles",
   "source_block_id": "{sid}",
   "paragraph_mask": {{
     "enabled": false,
@@ -362,6 +365,7 @@ Réponds uniquement en JSON valide, sans Markdown, au format exact :
 
 Contraintes :
 - Écris tous les champs visibles par l'utilisateur en français : question, choices, expected_answer, evaluation_criteria, session_hint et paragraph_mask.placeholder.
+- La question porte sur UN passage précis du paragraphe (une à trois phrases consécutives, une formule, une ligne de tableau), pas sur la page entière. source_excerpt recopie ce passage MOT POUR MOT depuis le paragraphe (mêmes mots, même ordre, 60 à 400 caractères, sans points de suspension ni paraphrase) : le lecteur le cadre à l'écran pendant que l'étudiant répond.
 - choices ne sert qu'à "qcm", "ordering" et "estimation" ; pour tout autre question_type il vaut [].
 - Si question_type vaut "qcm", choices contient 3 ou 4 choix plausibles et expected_answer indique le bon choix.
 - Si question_type vaut "ordering", choices contient 3 à 6 étapes courtes DANS L'ORDRE CORRECT (l'interface les mélangera), et expected_answer reprend cet ordre sous la forme « 1. … 2. … 3. … ».

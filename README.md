@@ -282,6 +282,9 @@ cd frontend && npm run build && cd ..            # build the UI first
 pyinstaller desktop/metacapp.spec --noconfirm    # output in dist_app/
 ```
 
+On macOS, `./scripts/build_app.sh` does both, smoke-tests the frozen binary and
+installs it (`--desktop` puts it on the Desktop, `--no-install` just builds).
+
 </details>
 
 ---

@@ -85,6 +85,18 @@ export const api = {
       `/api/library/doc/${docId}/folder`,
       { folder_id: folderId },
     ),
+  // Renomme le TITRE du document (clic droit → Renommer) — jamais le fichier.
+  renameDocument: (docId: number, title: string) =>
+    postJSON<{ ok: boolean; document: DocumentSummary }>(
+      `/api/library/doc/${docId}/rename`,
+      { title },
+    ),
+  // Retire le document de la bibliothèque — jamais le fichier de l'utilisateur.
+  deleteDocument: (docId: number) =>
+    fetch(`/api/library/doc/${docId}`, { method: "DELETE" }).then(async (r) => {
+      if (!r.ok) throw new Error(await errorMessage(r));
+      return r.json() as Promise<{ deleted: boolean; id: number }>;
+    }),
   flashcards: (filters?: { difficulty?: number; tags?: string }) => {
     const p = new URLSearchParams();
     if (filters?.difficulty) p.set("difficulty", String(filters.difficulty));
@@ -94,11 +106,13 @@ export const api = {
   },
   reviewFlashcard: (id: number, verdict: string) =>
     postJSON<{ ok: boolean }>(`/api/flashcards/${id}/review`, { verdict }),
+  // `created: false` = la carte existait déjà (même recto/verso) : rien d'écrit.
   createFlashcard: (front: string, back: string, source = "manual") =>
-    postJSON<{ id: number }>("/api/flashcards", { front, back, source }),
+    postJSON<{ id: number; created: boolean }>("/api/flashcards", { front, back, source }),
   // Flashcard intelligente (autoportante) : le LLM réécrit recto/verso côté serveur.
+  // Le serveur reconnaît un échange déjà transformé et rend la carte existante.
   createFlashcardFromExchange: (front: string, back: string, docId?: number, page?: number) =>
-    postJSON<{ id: number; front: string; back: string }>("/api/flashcards/from-exchange", {
+    postJSON<{ id: number; front: string; back: string; created: boolean }>("/api/flashcards/from-exchange", {
       front,
       back,
       doc_id: docId ?? null,
@@ -179,6 +193,9 @@ export const api = {
       return r.json();
     }),
   startSession: (docId: number) => postJSON<{ session_id: number }>("/api/session/start", { doc_id: docId }),
+  // Retour à la bibliothèque depuis le sas d'entrée : la session n'a pas eu
+  // lieu, elle est effacée plutôt que close (409 si elle a déjà été jouée).
+  abandonSession: (sid: number) => postJSON<{ abandoned: boolean }>(`/api/session/${sid}/abandon`, {}),
   endSession: (sid: number, pagesRead: number, durationS: number) =>
     postJSON<SessionMetrics>(`/api/session/${sid}/end`, { pages_read: pagesRead, duration_s: durationS }),
   // `questions` = les intitulés réellement affichés (2 fixes + celle générée) :

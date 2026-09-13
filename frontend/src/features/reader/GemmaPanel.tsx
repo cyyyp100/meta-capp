@@ -33,9 +33,40 @@ import { VerdictBadge } from "../questions/VerdictBadge";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, type DemoBeat } from "./demoScript";
 import { renderMathToHtml } from "./renderMath";
 
+interface QaFeedback {
+  verdict: string;
+  feedback: string;
+  hint?: string;
+}
+
+/**
+ * Une question de Gemma, DANS le fil, à sa place chronologique. C'est le même
+ * encadré qui se répond (question en jeu), qui se corrige, et qui reste
+ * ensuite comme trace : ce qui vient après — une autre question, une
+ * conversation — s'écrit à la suite, jamais au-dessus. Un seul encadré est
+ * « en jeu » à la fois (`liveQaId`) ; les autres sont en lecture seule.
+ */
+interface QaRecord {
+  id: number;
+  question: string;
+  type: string;
+  choices: string[] | null;
+  mask: QaMask | null;
+  /** Conseil de régulation de séance (`session_hint`), vide la plupart du temps. */
+  hint?: string;
+  /** Page-contexte de la question. */
+  page: number;
+  /** Réponse envoyée à la correction — vide tant qu'on n'a pas répondu. */
+  answer: string;
+  /** Verdict et correction ; null tant que Gemma n'a pas corrigé. */
+  feedback: QaFeedback | null;
+}
+
 interface Message {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "qa";
   text: string;
+  /** Renseigné pour `role === "qa"` : l'encadré de question. */
+  qa?: QaRecord;
 }
 
 interface Highlight {
@@ -48,15 +79,6 @@ interface Highlight {
 export interface QaMask {
   quote: string;
   placeholder?: string;
-}
-
-interface Qa {
-  question: string;
-  choices: string[] | null;
-  type: string;
-  mask: QaMask | null;
-  /** Conseil de régulation de séance (`session_hint`), vide la plupart du temps. */
-  hint?: string;
 }
 
 /** Pause proposée par Gemma (intervention `suggest_pause`). */
@@ -122,6 +144,7 @@ export function GemmaPanel({
   onRemoveContextChip,
   onGatedChange,
   onMask,
+  onZone,
   demo = false,
   onDemoReady,
 }: {
@@ -134,6 +157,11 @@ export function GemmaPanel({
   onGatedChange?: (active: boolean, page?: number) => void;
   /** Passage à cacher dans la page (rappel libre), null pour le redécouvrir. */
   onMask?: (mask: QaMask | null, page: number) => void;
+  /**
+   * Zone précise de la page visée par la question (citation), null quand la
+   * carte se referme. Le lecteur la retrouve sur la page et la cadre entière.
+   */
+  onZone?: (quote: string | null, page: number) => void;
   /**
    * Séance de démonstration de la visite guidée : AUCUN WebSocket n'est ouvert
    * et le contenu affiché est écrit d'avance (`demoScript.ts`). C'est ce qui
@@ -151,9 +179,16 @@ export function GemmaPanel({
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [mode, setMode] = useState<(typeof MODES)[number]>("normal");
-  const [qa, setQa] = useState<Qa | null>(null);
-  const [qaFeedback, setQaFeedback] = useState<{ verdict: string; feedback: string; hint?: string } | null>(null);
+  // L'encadré de question en jeu (à répondre, puis à clore) ; les encadrés
+  // eux-mêmes vivent dans `messages`, à leur place dans le fil.
+  const [liveQaId, setLiveQaId] = useState<number | null>(null);
+  const qaSeq = useRef(0);
   const [qaDraft, setQaDraft] = useState("");
+  // Flashcards demandées depuis une réponse du fil, par index de message :
+  // un « + Flashcard » ne part qu'une fois — ni pendant que la précédente se
+  // crée, ni une fois créée. Le serveur refuse de toute façon le doublon,
+  // mais le bouton ne doit pas non plus laisser croire qu'il le ferait.
+  const [flashcardState, setFlashcardState] = useState<Record<number, "pending" | "done">>({});
   // Question automatique bloquante : verrouille le scroll du lecteur (cf. onGatedChange).
   const [gated, setGated] = useState(false);
   // Gemma inspecte la page (décide d'intervenir) -> la bulle se tourne vers le PDF.
@@ -188,19 +223,83 @@ export function GemmaPanel({
   onGatedChangeRef.current = onGatedChange;
   const onMaskRef = useRef(onMask);
   onMaskRef.current = onMask;
+  const onZoneRef = useRef(onZone);
+  onZoneRef.current = onZone;
   const contextChipsRef = useRef(contextChips);
   contextChipsRef.current = contextChips;
   const gatedRef = useRef(false);
   gatedRef.current = gated;
+  // Page-contexte de la question bloquante : le lecteur y revient si la
+  // réponse est fausse, après avoir été libéré le temps de la correction.
+  const gatedPageRef = useRef<number | undefined>(undefined);
+  // Miroirs de l'état Q&R pour les gestionnaires du socket (fermetures figées).
+  const liveQaIdRef = useRef<number | null>(null);
+  liveQaIdRef.current = liveQaId;
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
   const bodyRef = useRef<HTMLDivElement>(null);
 
   function setGatedState(active: boolean, page?: number) {
     setGated(active);
+    if (active) gatedPageRef.current = page;
     onGatedChangeRef.current?.(active, page);
   }
 
   function applyMask(mask: QaMask | null) {
     onMaskRef.current?.(mask, pageRef.current);
+  }
+
+  /** L'encadré en jeu, s'il y en a un (lu depuis le miroir : les gestionnaires
+   *  du socket vivent dans une fermeture figée). */
+  function liveQa(): QaRecord | undefined {
+    const id = liveQaIdRef.current;
+    if (id === null) return undefined;
+    return messagesRef.current.find((m) => m.qa?.id === id)?.qa;
+  }
+
+  function patchQa(id: number, patch: Partial<QaRecord>) {
+    setMessages((m) => m.map((msg) => (msg.qa?.id === id ? { ...msg, qa: { ...msg.qa, ...patch } } : msg)));
+  }
+
+  /** Une nouvelle question entre dans le fil, à la suite, et devient celle en jeu.
+   *  La précédente — répondue ou non — y reste telle quelle, en lecture seule. */
+  function openQa(record: Omit<QaRecord, "id" | "answer" | "feedback">) {
+    const id = ++qaSeq.current;
+    setMessages((m) => [...m, { role: "qa", text: record.question, qa: { ...record, id, answer: "", feedback: null } }]);
+    setLiveQaId(id);
+    liveQaIdRef.current = id;
+    setQaDraft("");
+  }
+
+  /** Fin de partie pour l'encadré en jeu : il reste dans le fil, mais ne se
+   *  joue plus (plus de champ, plus de boutons). */
+  function endQa() {
+    setLiveQaId(null);
+    liveQaIdRef.current = null;
+  }
+
+  /**
+   * Gemma a fini de réfléchir. Le lecteur avait été rendu le temps de la
+   * réflexion : si une question bloquante est toujours en jeu, il revient se
+   * caler sur sa zone ; s'il n'y a plus rien à répondre (la nouvelle question
+   * n'est pas arrivée), le verrou n'a plus d'objet et tombe.
+   */
+  function restoreGate() {
+    if (!gatedRef.current) return;
+    if (liveQaIdRef.current !== null) onGatedChangeRef.current?.(true, gatedPageRef.current);
+    else setGatedState(false);
+  }
+
+  /** Le lecteur est rendu le temps que Gemma réfléchit — on peut relire la
+   *  page, défiler, zoomer. Le verrou, lui, reste armé (`gated`) : cf. restoreGate. */
+  function releaseWhileThinking() {
+    if (gatedRef.current) onGatedChangeRef.current?.(false);
+  }
+
+  function closeQa() {
+    endQa();
+    applyMask(null);
+    onZoneRef.current?.(null, pageRef.current);
   }
 
   useEffect(() => {
@@ -232,9 +331,11 @@ export function GemmaPanel({
         if (Array.isArray(evt.highlights) && evt.highlights.length) {
           onHighlightsRef.current?.(evt.highlights, pageRef.current);
         }
+        restoreGate();
       } else if (evt.type === "error") {
         setBusy(false);
         setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${evt.message || "Erreur"}` }]);
+        restoreGate();
       } else if (evt.type === "intervention") {
         if (evt.kind === "suggest_pause") {
           setPause({
@@ -258,23 +359,34 @@ export function GemmaPanel({
         setMessages((m) => [...m, { role: "system", text: evt.message }]);
       } else if (evt.type === "qa_question" || evt.type === "gated_question") {
         setBusy(false);
-        setQaFeedback(null);
-        setQaDraft("");
-        setQa({
+        const page = Number(evt.page) > 0 ? Number(evt.page) : pageRef.current;
+        // La question précédente, si elle était encore en jeu, reste dans le
+        // fil telle quelle ; la nouvelle s'écrit à la suite.
+        openQa({
           question: evt.question || "",
           choices: evt.choices ?? null,
           type: evt.question_type || "open",
           mask: evt.mask?.quote ? evt.mask : null,
           hint: evt.session_hint || "",
+          page,
         });
         // Rappel libre : le passage disparaît de la page le temps de répondre.
         applyMask(evt.mask?.quote ? evt.mask : null);
+        // Zone visée : le lecteur la cadre entière (et y reste, verrouillé ou non).
+        onZoneRef.current?.(evt.zone?.quote || null, page);
         setOpen(true);
-        // Question automatique : verrouille le scroll sur la page-contexte.
-        if (evt.type === "gated_question") setGatedState(true, evt.page);
+        // Question automatique : verrouille le scroll sur la page-contexte. Une
+        // question de reprise (« Réessayer » après une réponse fausse) arrive
+        // sans le drapeau mais prolonge le même blocage : le lecteur, rendu le
+        // temps de la génération, revient se caler dessus.
+        if (evt.type === "gated_question" || gatedRef.current) setGatedState(true, page);
       } else if (evt.type === "qa_feedback") {
         setBusy(false);
-        setQaFeedback({ verdict: evt.verdict || "", feedback: evt.feedback || "", hint: evt.hint || "" });
+        if (liveQaIdRef.current !== null) {
+          patchQa(liveQaIdRef.current, {
+            feedback: { verdict: evt.verdict || "", feedback: evt.feedback || "", hint: evt.hint || "" },
+          });
+        }
         // La réponse est donnée : on rend le passage masqué.
         applyMask(null);
         if (Array.isArray(evt.highlights) && evt.highlights.length) {
@@ -283,9 +395,11 @@ export function GemmaPanel({
         if (evt.flashcard_created) {
           setMessages((m) => [...m, { role: "system", text: t("gemma.fc_auto_created") }]);
         }
-        // Idée principale présente -> déverrouille la lecture.
-        if (gatedRef.current && (evt.verdict === "correct" || evt.verdict === "partial")) {
-          setGatedState(false);
+        if (gatedRef.current) {
+          // Idée principale présente -> fin du verrouillage. Sinon, le lecteur
+          // — libéré le temps de la correction — revient se caler sur la zone.
+          if (evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
+          else onGatedChangeRef.current?.(true, gatedPageRef.current);
         }
       }
     };
@@ -325,13 +439,12 @@ export function GemmaPanel({
   const playDemo = useCallback(
     (beat: DemoBeat) => {
       if (beat === "question") {
-        setQaFeedback(null);
-        setQaDraft("");
-        setQa({
+        openQa({
           question: t(DEMO_QUESTION.questionKey),
           choices: DEMO_QUESTION.choiceKeys.map((key) => t(key)),
           type: DEMO_QUESTION.type,
           mask: null,
+          page: pageRef.current,
         });
         setOpen(true);
         return;
@@ -432,14 +545,20 @@ export function GemmaPanel({
     // réfléchit… » tournait indéfiniment sur une connexion fermée.
     if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: snippets })) {
       setBusy(false);
+      return;
     }
+    releaseWhileThinking();
   }
 
   function action(type: "rephrase" | "recap" | "hook", label: string) {
     if (busy) return;
     setMessages((m) => [...m, { role: "user", text: label }]);
     setBusy(true);
-    if (!sendRaw({ type, page: pageRef.current })) setBusy(false);
+    if (!sendRaw({ type, page: pageRef.current })) {
+      setBusy(false);
+      return;
+    }
+    releaseWhileThinking();
   }
 
   function changeMode(m: (typeof MODES)[number]) {
@@ -456,12 +575,18 @@ export function GemmaPanel({
       playDemo("question");
       return;
     }
-    setQa(null);
-    setQaFeedback(null);
+    // « Nouvelle question » / « Réessayer » : la précédente et sa correction
+    // restent dans le fil, en lecture seule ; la suivante viendra à la suite.
+    endQa();
     setBusy(true);
     if (!sendRaw({ type: "start_qa", page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
+      restoreGate();
+      return;
     }
+    // Même après une réponse fausse : le temps que Gemma prépare la question
+    // suivante, on est libre de bouger dans le document.
+    releaseWhileThinking();
   }
 
   function startPause() {
@@ -483,20 +608,33 @@ export function GemmaPanel({
   }
 
   function submitQa(answer: string) {
+    const qa = liveQa();
     if (busy || !answer.trim() || !qa) return;
+    // C'est la réponse envoyée qui reste dans l'encadré, pas le brouillon
+    // (vide pour un QCM ou une remise en ordre).
+    patchQa(qa.id, { answer });
     if (demo) {
       // Verdict écrit d'avance : aucune réponse n'est évaluée, donc rien n'est
       // enregistré ni compté dans la rétention du profil.
-      setQaFeedback({ verdict: DEMO_QUESTION.verdict, feedback: t(DEMO_QUESTION.feedbackKey) });
+      patchQa(qa.id, { feedback: { verdict: DEMO_QUESTION.verdict, feedback: t(DEMO_QUESTION.feedbackKey) } });
       return;
     }
     setBusy(true);
     if (!sendRaw({ type: "qa_answer", question: qa.question, answer, page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
+      return;
     }
+    // Le temps que Gemma corrige, le lecteur est rendu. Le verrou, lui, reste
+    // armé — si la réponse est fausse, le lecteur revient se caler sur la zone.
+    releaseWhileThinking();
   }
 
   async function makeFlashcard(index: number) {
+    // Un seul départ par réponse : le second clic — pendant la création ou
+    // après — ne fait rien. Le serveur reconnaît de toute façon l'échange déjà
+    // transformé, mais l'appel LLM serait parti pour rien.
+    if (flashcardState[index]) return;
+    setFlashcardState((s) => ({ ...s, [index]: "pending" }));
     let front = t("gemma.note_front");
     for (let i = index - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
@@ -506,9 +644,15 @@ export function GemmaPanel({
     }
     try {
       // Flashcard intelligente : le LLM réécrit recto/verso en carte autoportante.
-      await api.createFlashcardFromExchange(front, messages[index].text, docId, pageRef.current);
-      setMessages((m) => [...m, { role: "system", text: t("gemma.fc_created") }]);
+      const { created } = await api.createFlashcardFromExchange(front, messages[index].text, docId, pageRef.current);
+      setFlashcardState((s) => ({ ...s, [index]: "done" }));
+      setMessages((m) => [...m, { role: "system", text: t(created ? "gemma.fc_created" : "gemma.fc_exists") }]);
     } catch {
+      setFlashcardState((s) => {
+        const next = { ...s };
+        delete next[index];
+        return next;
+      });
       setMessages((m) => [...m, { role: "system", text: t("gemma.fc_failed") }]);
     }
   }
@@ -646,16 +790,32 @@ export function GemmaPanel({
             découverte du panneau, la réponse à une question, l'intervention
             autonome). Une seule ancre pour les trois — c'est bien le même
             endroit qu'on désigne à chaque fois. */}
-        <div ref={bodyRef} data-tour="gemma-body" style={bodyStyle}>
+        <div ref={bodyRef} data-tour="gemma-body" data-testid="gemma-body" style={bodyStyle}>
           {messages.map((m, i) =>
             m.role === "system" ? (
               <div key={i} style={{ alignSelf: "center", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                 {m.text}
               </div>
+            ) : m.role === "qa" && m.qa ? (
+              // L'encadré en jeu porte l'ancre de la visite ; les autres sont
+              // des traces, à leur place dans le fil.
+              <div key={`qa-${m.qa.id}`} data-tour={m.qa.id === liveQaId ? "gemma-qa" : undefined} style={{ alignSelf: "stretch" }}>
+                <QaCard
+                  record={m.qa}
+                  live={m.qa.id === liveQaId}
+                  draft={qaDraft}
+                  setDraft={setQaDraft}
+                  busy={busy}
+                  locked={gated}
+                  onSubmit={submitQa}
+                  onNext={startQa}
+                  onClose={closeQa}
+                />
+              </div>
             ) : (
-              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+              <div key={i} data-role={m.role} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
                 <div
-                  style={bubble(m.role)}
+                  style={bubble(m.role === "user" ? "user" : "assistant")}
                   {...(m.role === "assistant"
                     ? { dangerouslySetInnerHTML: { __html: renderMathToHtml(m.text) } }
                     : { children: m.text })}
@@ -663,13 +823,20 @@ export function GemmaPanel({
                 {m.role === "assistant" && i > 0 && (
                   <button
                     onClick={() => makeFlashcard(i)}
+                    disabled={Boolean(flashcardState[i])}
+                    aria-disabled={Boolean(flashcardState[i])}
                     title={t("gemma.flashcard_hint")}
                     className="mt-1 rounded-[4px] border-none bg-transparent p-0 text-[11px] text-brand-ink
                                underline-offset-2 transition-colors duration-fast ease-brand
                                hover:text-accent-foreground hover:underline
+                               disabled:cursor-default disabled:text-muted-foreground disabled:no-underline
                                focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                   >
-                    {t("gemma.flashcard")}
+                    {flashcardState[i] === "pending"
+                      ? t("gemma.fc_pending")
+                      : flashcardState[i] === "done"
+                        ? t("gemma.fc_done")
+                        : t("gemma.flashcard")}
                   </button>
                 )}
               </div>
@@ -686,25 +853,6 @@ export function GemmaPanel({
               onDone={() => endPause(false)}
               onDismiss={() => setPause(null)}
             />
-          )}
-          {qa && (
-            <div data-tour="gemma-qa">
-            <QaCard
-              qa={qa}
-              feedback={qaFeedback}
-              draft={qaDraft}
-              setDraft={setQaDraft}
-              busy={busy}
-              locked={gated}
-              onSubmit={submitQa}
-              onNext={startQa}
-              onClose={() => {
-                setQa(null);
-                setQaFeedback(null);
-                applyMask(null);
-              }}
-            />
-            </div>
           )}
           {busy && (
             <div
@@ -807,6 +955,17 @@ const inputStyle: React.CSSProperties = {
 const chip: React.CSSProperties = {
   border: "1px solid var(--border)", background: "var(--surface-soft)", color: "var(--text-soft)",
   borderRadius: 999, padding: "4px 10px", fontSize: 12, cursor: "pointer",
+};
+// L'encadré de question. En jeu : bord à l'accent, fond de surface. Joué :
+// le même encadré, en plus discret (bord gauche seulement, fond adouci), pour
+// qu'on distingue d'un coup d'œil ce qui est à jouer de ce qui a été joué.
+const qaLiveStyle: React.CSSProperties = {
+  display: "flex", flexDirection: "column", gap: 8, padding: 12,
+  border: "1px solid var(--accent)", borderRadius: "var(--radius-md)", background: "var(--surface)",
+};
+const qaRecordStyle: React.CSSProperties = {
+  display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px",
+  borderLeft: "3px solid var(--accent)", borderRadius: "var(--radius-md)", background: "var(--surface-soft)",
 };
 const pauseCardStyle: React.CSSProperties = {
   alignSelf: "stretch", display: "flex", flexDirection: "column", gap: 8, padding: 12,
@@ -1033,9 +1192,14 @@ function PauseCard({
   );
 }
 
+/**
+ * L'encadré d'une question, en jeu ou joué — le même, pour qu'il ne bouge pas
+ * de place ni d'aspect entre les deux : on répond dedans, on y lit la
+ * correction, et il reste là, à sa place dans le fil, quand on continue.
+ */
 function QaCard({
-  qa,
-  feedback,
+  record,
+  live,
   draft,
   setDraft,
   busy,
@@ -1044,8 +1208,9 @@ function QaCard({
   onNext,
   onClose,
 }: {
-  qa: Qa;
-  feedback: { verdict: string; feedback: string; hint?: string } | null;
+  record: QaRecord;
+  /** En jeu : champ de réponse, puis boutons de suite. Sinon lecture seule. */
+  live: boolean;
   draft: string;
   setDraft: (v: string) => void;
   busy: boolean;
@@ -1055,48 +1220,43 @@ function QaCard({
   onClose: () => void;
 }) {
   const t = useT();
+  const { feedback } = record;
   // Verrouillé + réponse fausse : seule issue = une nouvelle question (pas de sortie).
-  const stayLocked = locked && feedback?.verdict === "incorrect";
+  const stayLocked = live && locked && feedback?.verdict === "incorrect";
   return (
-    <div
-      style={{
-        alignSelf: "stretch",
-        border: "1px solid var(--accent)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--surface)",
-        padding: 12,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
+    <div style={live ? qaLiveStyle : qaRecordStyle} data-testid="qa-card" data-live={live || undefined}>
       <div className="flex flex-wrap items-center gap-2">
         <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-ink)", letterSpacing: 0.4 }}>{t("flash.q")}</span>
-        <QuestionTypeBadge type={qa.type} />
+        <QuestionTypeBadge type={record.type} />
       </div>
-      <QuestionStem question={qa.question} type={qa.type} masked={Boolean(qa.mask)} />
+      <QuestionStem
+        question={record.question}
+        type={record.type}
+        masked={live && !feedback && Boolean(record.mask)}
+        showHint={live && !feedback}
+      />
 
       {/* Conseil de régulation de séance (`session_hint`) : renseigné par le
           modèle quand l'attention passe sous son seuil, et rempli aussi par le
           repli hors ligne. Vide la plupart du temps. */}
-      {qa.hint && (
+      {live && record.hint && (
         <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Coffee className="mt-px size-3.5 shrink-0 text-brand-ink" aria-hidden />
           <span>
             <span className="sr-only">{t("gemma.hint_label")} : </span>
-            {qa.hint}
+            {record.hint}
           </span>
         </div>
       )}
 
-      {!feedback && (
+      {live && !feedback && (
         <AnswerInput
           // Une nouvelle question doit repartir d'un widget vierge (étapes
           // remélangées, ordre remis à zéro) : la question sert de clé.
-          key={qa.question}
-          type={qa.type}
-          choices={qa.choices}
-          seed={qa.question}
+          key={record.id}
+          type={record.type}
+          choices={record.choices}
+          seed={record.question}
           draft={draft}
           setDraft={setDraft}
           busy={busy}
@@ -1104,26 +1264,35 @@ function QaCard({
         />
       )}
 
+      {record.answer && (feedback || !live) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("gemma.answer_given")}</span>
+          <div style={{ ...bubble("user"), alignSelf: "flex-start", maxWidth: "100%" }}>{record.answer}</div>
+        </div>
+      )}
+
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <VerdictBadge verdict={feedback.verdict} />
-          <div style={{ fontSize: 13, color: "var(--text-soft)" }}>{feedback.feedback}</div>
-          {feedback.hint && feedback.verdict === "incorrect" && (
+          {feedback.feedback && <div style={{ fontSize: 13, color: "var(--text-soft)" }}>{feedback.feedback}</div>}
+          {live && feedback.hint && feedback.verdict === "incorrect" && (
             <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <Lightbulb className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
               {feedback.hint}
             </div>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
-              {stayLocked ? t("gemma.retry_question") : t("gemma.new_question")}
-            </button>
-            {!stayLocked && (
-              <button onClick={onClose} style={chip}>
-                {t("gemma.finish")}
+          {live && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
+                {stayLocked ? t("gemma.retry_question") : t("gemma.new_question")}
               </button>
-            )}
-          </div>
+              {!stayLocked && (
+                <button onClick={onClose} style={chip}>
+                  {t("gemma.finish")}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

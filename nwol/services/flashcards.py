@@ -10,6 +10,8 @@ import logging
 
 from db.flashcards import (
     delete_flashcard as _delete_flashcard,
+    find_flashcard_id,
+    flashcard_key,
     get_due_flashcards,
     get_existing_tags,
     get_flashcards,
@@ -28,6 +30,7 @@ __all__ = [
     "list_flashcards",
     "existing_tags",
     "create_flashcard",
+    "find_flashcard",
     "create_lang_vocab_flashcards",
     "review_flashcard",
     "delete_flashcards",
@@ -57,6 +60,19 @@ def existing_tags(user_id: int = DEFAULT_USER_ID, limit: int = 100) -> list[str]
     return get_existing_tags(user_id, limit)
 
 
+def find_flashcard(
+    front: str,
+    back: str,
+    user_id: int = DEFAULT_USER_ID,
+) -> int | None:
+    """Id de la carte qui existe déjà pour ce recto/verso (au sens, pas à
+    l'octet : casse, accents et blancs ne comptent pas), None sinon.
+
+    Pour une carte issue d'un échange avec Gemma, passer l'échange BRUT —
+    c'est lui qui sert de clé, cf. `create_flashcard(origin=...)`."""
+    return find_flashcard_id(user_id, flashcard_key(front, back))
+
+
 def create_flashcard(
     user_id: int = DEFAULT_USER_ID,
     *,
@@ -71,7 +87,18 @@ def create_flashcard(
     session_id: int | None = None,
     asset_paths: list[str] | None = None,
     language: str | None = None,
+    origin: tuple[str, str] | None = None,
 ) -> int:
+    """Crée une carte — ou renvoie l'id de celle qui existe déjà.
+
+    LA politique de doublon : une carte est identifiée par ce dont elle est
+    issue. D'ordinaire son recto/verso ; pour une carte que le LLM a réécrite
+    depuis un échange avec Gemma, l'échange brut (`origin`) — la réécriture
+    change à chaque appel, deux clics sur « + Flashcard » donneraient sinon deux
+    cartes différentes du même échange. L'index UNIQUE (v29) fait le reste :
+    on ne crée jamais deux fois la même carte, quel que soit le chemin
+    (manuel, auto à la bonne réponse, échange, vocabulaire de langue).
+    """
     return save_flashcard(
         user_id,
         question_id=question_id,
@@ -85,6 +112,7 @@ def create_flashcard(
         session_id=session_id,
         asset_paths=asset_paths,
         language=language,
+        dedup_key=flashcard_key(*origin) if origin else None,
     )
 
 

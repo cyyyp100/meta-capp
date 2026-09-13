@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import itertools
 import json
 import logging
 import queue
 import re
+import socket
 import threading
 import time
-import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -116,15 +118,71 @@ _ORPHAN_SCRIPT_OUTSIDE_MATH_RE = re.compile(r"(?<![$\\\w])[_^]\s*(?:\{[^}\n]{1,1
 _EMPTY_SQRT_RE = re.compile(r"\\+sqrt\s*\{\s*\}")
 
 # Token incrémenté à chaque cancel_pending_generations() — les tâches capturant
-# un token obsolète s'annulent silencieusement sans appeler les callbacks.
+# un token obsolète ne sont pas lancées : leur `on_error` reçoit
+# CANCELLED_MESSAGE, pour qu'un appelant qui attend (pont synchrone) soit
+# libéré tout de suite et qu'un travail de fond puisse se remettre en file.
 _generation_token: int = 0
 
 
+class GenerationCancelled(RuntimeError):
+    """La génération EN VOL a été coupée par `cancel_pending_generations()`.
+
+    Distincte d'une panne : `_generate_json` ne la rejoue pas (rejouer
+    relancerait chez Ollama exactement le travail qu'on vient d'interrompre)."""
+
+
+# Message passé à `on_error` quand une tâche est annulée. Les callbacks ne
+# reçoivent qu'une chaîne : c'est elle qui permet à un appelant de fond (fiche
+# de document) de distinguer « on m'a coupé » de « Ollama a échoué » et de se
+# remettre en file plutôt que de se déclarer en échec.
+CANCELLED_MESSAGE = "génération annulée"
+
+
+def is_cancelled_error(message) -> bool:
+    return str(message) == CANCELLED_MESSAGE
+
+
+# Connexion HTTP de la génération en vol — il n'y a qu'un worker, donc au plus
+# une. Le token ci-dessus ne fait qu'IGNORER le résultat d'une tâche déjà
+# partie : Ollama, lui, continuait de générer jusqu'au bout, GPU occupé, et la
+# première réponse du document suivant attendait derrière. Couper la socket
+# est le seul signal qu'Ollama écoute : il abandonne la génération dès que le
+# client raccroche.
+_INFLIGHT_LOCK = threading.Lock()
+_inflight: dict = {"conn": None, "cancelled": False}
+
+
 def cancel_pending_generations() -> None:
-    """Invalide toutes les tâches LLM en attente ou en cours de streaming."""
+    """Invalide toutes les tâches LLM en attente ET coupe celle en vol."""
     global _generation_token
     _generation_token += 1
+    _abort_inflight_generation()
     logger.info("Génération LLM annulée (token=%s)", _generation_token)
+
+
+def _abort_inflight_generation() -> None:
+    with _INFLIGHT_LOCK:
+        conn = _inflight["conn"]
+        if conn is None:
+            return
+        _inflight["cancelled"] = True
+    # `shutdown` réveille le `recv` bloqué dans l'autre thread ; `close` seul
+    # ne le ferait pas tant que la lecture est en cours.
+    sock = getattr(conn, "sock", None)
+    if sock is not None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+    try:
+        conn.close()
+    except OSError:  # pragma: no cover - fermeture best-effort
+        pass
+
+
+def _inflight_was_cancelled(conn) -> bool:
+    with _INFLIGHT_LOCK:
+        return _inflight["conn"] is conn and bool(_inflight["cancelled"])
 
 
 class CallerSlot:
@@ -881,6 +939,7 @@ def _run_json_async(
     def _run() -> None:
         if _generation_token != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
+            on_error(CANCELLED_MESSAGE)
             return
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
@@ -891,8 +950,15 @@ def _run_json_async(
             logger.info("Génération LLM %s terminée", label)
             if _generation_token != captured_token:
                 logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
+                on_error(CANCELLED_MESSAGE)
                 return
             on_success(parsed)
+        except GenerationCancelled as exc:
+            # Attendu, pas une panne : le lecteur a été fermé pendant la
+            # génération. L'appelant est prévenu (un pont synchrone n'attend
+            # pas son timeout pour rien), sans ligne d'erreur dans le journal.
+            logger.debug("Génération LLM %s interrompue : %s", label, exc)
+            on_error(CANCELLED_MESSAGE)
         except Exception as exc:
             logger.error("Échec génération LLM %s : %s", label, exc)
             on_error(str(exc))
@@ -925,6 +991,7 @@ def _run_text_async(
     def _run() -> None:
         if _generation_token != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
+            on_error(CANCELLED_MESSAGE)
             return
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
@@ -934,6 +1001,8 @@ def _run_text_async(
             images = _load_ollama_images(image_paths or [])
             try:
                 raw = _call_ollama(prompt, model, images=images, options=task_options, format_json=False, task=label)
+            except GenerationCancelled:
+                raise
             except Exception as exc:
                 if images:
                     logger.warning("Ollama a refusé les images, repli texte seul: %s", exc)
@@ -943,8 +1012,12 @@ def _run_text_async(
             logger.info("Génération LLM %s terminée", label)
             if _generation_token != captured_token:
                 logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
+                on_error(CANCELLED_MESSAGE)
                 return
             on_success((raw or "").strip())
+        except GenerationCancelled as exc:
+            logger.debug("Génération LLM %s interrompue : %s", label, exc)
+            on_error(CANCELLED_MESSAGE)
         except Exception as exc:
             logger.error("Échec génération LLM %s : %s", label, exc)
             on_error(str(exc))
@@ -973,6 +1046,8 @@ def _generate_json(
     for attempt in range(1, attempts + 1):
         try:
             raw = _call_ollama(current_prompt, model, images=images, options=options, task=label)
+        except GenerationCancelled:
+            raise  # ni repli texte, ni nouvelle tentative : plus personne n'attend
         except Exception as exc:
             if images:
                 logger.warning("Ollama a refusé les images jointes, repli texte seul: %s", exc)
@@ -2097,32 +2172,88 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
 
     payload = json.dumps(payload_data).encode()
 
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    # `http.client` plutôt que `urlopen` : il faut GARDER la connexion sous la
+    # main pour que `cancel_pending_generations()` puisse la couper depuis un
+    # autre thread (cf. `_abort_inflight_generation`).
+    url = urllib.parse.urlsplit(OLLAMA_URL)
+    conn = http.client.HTTPConnection(
+        url.hostname or "localhost", url.port or 80, timeout=task_timeout_s(task),
     )
-
+    with _INFLIGHT_LOCK:
+        _inflight["conn"] = conn
+        _inflight["cancelled"] = False
     try:
-        with urllib.request.urlopen(req, timeout=task_timeout_s(task)) as resp:
-            data = json.loads(resp.read())
-            if "error" in data:
-                raise RuntimeError(f"Ollama error: {data['error']}")
-            response = data.get("response", "")
-
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
+        conn.connect()
+        # Annulation arrivée avant l'envoi : on ne lance pas chez Ollama un
+        # travail dont le résultat serait jeté.
+        if _inflight_was_cancelled(conn):
+            raise GenerationCancelled(f"Génération {task or '?'} annulée avant envoi")
+        conn.request(
+            "POST", url.path or "/api/generate", body=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        body = resp.read()
+        if resp.status >= 400:
+            detail = body.decode(errors="replace")[:500]
+            raise RuntimeError(f"Ollama HTTP {resp.status}: {detail}")
+        data = json.loads(body)
+        if "error" in data:
+            raise RuntimeError(f"Ollama error: {data['error']}")
+        response = data.get("response", "")
+        _warn_if_context_overflow(task, data, payload_data["options"], bool(images))
+    except GenerationCancelled:
+        raise
+    except (OSError, http.client.HTTPException) as exc:
+        # Socket coupée par l'annulation : ce n'est pas une panne d'Ollama.
+        if _inflight_was_cancelled(conn):
+            raise GenerationCancelled(f"Génération {task or '?'} interrompue") from exc
         raise RuntimeError(f"Ollama indisponible: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Réponse Ollama invalide: {exc}") from exc
+    finally:
+        with _INFLIGHT_LOCK:
+            if _inflight["conn"] is conn:
+                _inflight["conn"] = None
+                _inflight["cancelled"] = False
+        conn.close()
 
     if not isinstance(response, str) or not response.strip():
         raise ValueError("Réponse Ollama vide")
 
     return response
+
+
+def _warn_if_context_overflow(task: str, data: dict, options: dict, with_images: bool) -> None:
+    """Rend visible une dégradation qu'Ollama ne signale pas au client.
+
+    Un prompt texte seul plus long que `num_ctx` n'est PAS refusé : Ollama en
+    tronque silencieusement le DÉBUT (rôle, contexte, profil) et répond quand
+    même — seul le log serveur d'Ollama le mentionne. Avec image jointe, il
+    refuse (exceed_context_size_error) et le client se replie sur le texte,
+    d'où le repli. On ne peut pas désactiver la troncature via l'API ; on la
+    détecte après coup : `prompt_eval_count` est le nombre de tokens réellement
+    consommés par le prompt. S'il ne laisse pas la place de `num_predict`, soit
+    le prompt a été tronqué, soit la réponse le sera. Le remède est dans
+    config.settings.OLLAMA_TASK_OPTIONS (num_ctx de la tâche), pas ici."""
+    try:
+        prompt_tokens = int(data.get("prompt_eval_count") or 0)
+        num_ctx = int(options.get("num_ctx") or 0)
+        num_predict = int(options.get("num_predict") or 0)
+    except (TypeError, ValueError):
+        return
+    if not prompt_tokens or not num_ctx:
+        return
+    if prompt_tokens + num_predict > num_ctx:
+        logger.warning(
+            "Budget de contexte dépassé pour %s : prompt=%d tokens%s + num_predict=%d > num_ctx=%d "
+            "(prompt tronqué par Ollama ou réponse coupée) — relever num_ctx dans OLLAMA_TASK_OPTIONS",
+            task or "?",
+            prompt_tokens,
+            " (image comprise)" if with_images else "",
+            num_predict,
+            num_ctx,
+        )
 
 
 # ── Module langue — fonctions async ──────────────────────────────────────────

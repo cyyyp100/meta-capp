@@ -51,10 +51,16 @@ export function Flashcards() {
   }
 
   async function create() {
-    if (!front.trim() || !back.trim()) return;
+    if (!front.trim() || !back.trim() || saving) return;
     setSaving(true);
     try {
-      await api.createFlashcard(front.trim(), back.trim(), "manual");
+      const { created } = await api.createFlashcard(front.trim(), back.trim(), "manual");
+      // Le serveur ne crée jamais deux fois la même carte : on le dit, on
+      // garde le formulaire tel quel pour qu'on puisse la retoucher.
+      if (!created) {
+        toast.info(t("flash.exists"));
+        return;
+      }
       setFront("");
       setBack("");
       setCreating(false);

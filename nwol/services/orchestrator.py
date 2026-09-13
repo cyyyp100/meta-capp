@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 from config.settings import (
@@ -21,12 +22,26 @@ from db.documents import (
     upsert_document,
 )
 from db.user import DEFAULT_USER_ID
-from llm.ollama_client import generate_document_digest_async, is_ollama_available
+from llm.ollama_client import (
+    generate_document_digest_async,
+    is_cancelled_error,
+    is_ollama_available,
+)
 from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.pdf_document import PdfDocument
 from services import library
 
 logger = logging.getLogger("services.orchestrator")
+
+# Nombre de passages en file d'une fiche de document coupée par la fermeture
+# d'un lecteur (cf. generate_document_digest) avant de la déclarer en échec.
+_DIGEST_REQUEUE_MAX = 3
+# Délai avant de la remettre en file. Remise tout de suite, elle reprendrait le
+# worker unique à l'instant où l'utilisateur ouvre le document suivant, dont
+# l'accroche attendrait derrière — c'est précisément l'attente que la coupure
+# devait éviter. Vingt secondes laissent passer ce qui est interactif. Zéro =
+# remise synchrone (tests).
+_DIGEST_REQUEUE_DELAY_S = 20.0
 
 __all__ = ["import_pdf", "import_code", "llm_status", "generate_document_digest"]
 
@@ -88,17 +103,38 @@ def generate_document_digest(doc_id: int, title: str) -> None:
         except Exception:  # pragma: no cover - best-effort
             logger.debug("Persistance de la fiche document ignorée", exc_info=True)
 
-    def _on_error(_message: str) -> None:
-        set_document_digest_status(doc_id, "failed")
+    # La fiche part en fond pendant que le lecteur s'ouvre : fermer ce lecteur
+    # coupe TOUTE génération en vol (`cancel_pending_generations`), la sienne
+    # comprise. Ce n'est pas un échec : on la remet en file, au fond (priorité
+    # basse), un nombre borné de fois — elle passera quand la file sera calme.
+    attempts = {"n": 0}
 
-    try:
-        set_document_digest_status(doc_id, "pending")
+    def _enqueue() -> None:
+        attempts["n"] += 1
         generate_document_digest_async(
             doc_title=Path(title).stem,
             excerpt=excerpt,
             on_success=_on_success,
             on_error=_on_error,
         )
+
+    def _on_error(message: str) -> None:
+        if is_cancelled_error(message) and attempts["n"] < _DIGEST_REQUEUE_MAX:
+            try:
+                if _DIGEST_REQUEUE_DELAY_S > 0:
+                    timer = threading.Timer(_DIGEST_REQUEUE_DELAY_S, _enqueue)
+                    timer.daemon = True
+                    timer.start()
+                else:
+                    _enqueue()
+                return
+            except Exception:  # pragma: no cover - best-effort
+                logger.debug("Remise en file de la fiche document ignorée", exc_info=True)
+        set_document_digest_status(doc_id, "failed")
+
+    try:
+        set_document_digest_status(doc_id, "pending")
+        _enqueue()
     except Exception:  # pragma: no cover - le LLM reste un bonus
         set_document_digest_status(doc_id, "failed")
         logger.debug("Génération de la fiche document indisponible", exc_info=True)

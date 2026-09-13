@@ -27,6 +27,7 @@ from db.session_reflections import (
     get_recent_reflection_questions,
     save_session_reflection,
 )
+from db.sessions import delete_session as _delete_session
 from db.sessions import end_session as _end_session
 from db.sessions import get_session
 from db.sessions import start_session as _start_session
@@ -47,6 +48,7 @@ __all__ = [
     "REFLECTION_QUESTIONS",
     "start_session",
     "end_session",
+    "abandon_session",
     "session_metrics",
     "session_analysis",
     "finalize_session",
@@ -189,6 +191,23 @@ def start_session(doc_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
 def end_session(session_id: int, pages_read: int | None = None, duration_s: int | None = None) -> dict:
     _end_session(session_id, pages_read=pages_read, duration_s=duration_s)
     return session_metrics(session_id)
+
+
+def abandon_session(session_id: int) -> dict:
+    """Efface une session qui n'a pas eu lieu : mauvais document ouvert, retour
+    à la bibliothèque depuis le sas d'entrée.
+
+    Une session est ouverte dès que le lecteur se monte, AVANT le sas ; la clore
+    normalement la ferait compter (durée, frise de progression, série) alors
+    que rien n'a été lu. On ne touche qu'à une session encore OUVERTE et sans
+    réponse : une session close ou déjà jouée est une trace d'apprentissage,
+    elle se termine par `end_session`, jamais ici."""
+    session = get_session(session_id)
+    if session is None:
+        return {"abandoned": False}
+    if session.get("ended_at") or get_answers_for_session(session_id):
+        raise ValueError("Session déjà jouée : à terminer, pas à abandonner.")
+    return {"abandoned": _delete_session(session_id)}
 
 
 def session_metrics(session_id: int) -> dict:

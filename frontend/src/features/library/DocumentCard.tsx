@@ -1,9 +1,24 @@
 // features/library/DocumentCard.tsx — Une carte de la grille.
 //
-// Extraite de routes/Home.tsx, augmentée de deux choses : le ruban de
-// classification (résumé + mots-clés générés par le LLM) et la source de
-// glisser-déposer vers le rail de dossiers.
+// Extraite de routes/Home.tsx, augmentée de trois choses : le ruban de
+// classification (résumé + mots-clés générés par le LLM), la source de
+// glisser-déposer vers le rail de dossiers, et le menu du CLIC DROIT (ouvrir,
+// renommer, déplacer, supprimer). Renommer et supprimer ne vivent QUE là :
+// ni crayon ni corbeille sur la carte — une grille de documents n'a pas à
+// exposer en permanence les gestes qu'on fait le moins souvent.
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 import { pageImageUrl } from "../../api/client";
 import type { DocumentSummary } from "../../api/types";
@@ -26,6 +41,8 @@ export function DocumentCard({
   folders,
   onKeyword,
   onMove,
+  onRename,
+  onDelete,
 }: {
   doc: DocumentSummary;
   /** Renseigné en mode recherche : le résultat vient peut-être d'un autre dossier. */
@@ -33,6 +50,10 @@ export function DocumentCard({
   folders: FlatFolder[];
   onKeyword: (keyword: string) => void;
   onMove: (docId: number, folderId: number | null) => void;
+  /** Clic droit → « Renommer » : le titre validé (non vide, différent). */
+  onRename: (docId: number, title: string) => void;
+  /** Clic droit → « Supprimer ». La confirmation est du ressort de l'appelant. */
+  onDelete: (doc: DocumentSummary) => void;
 }) {
   const navigate = useNavigate();
   const t = useT();
@@ -40,15 +61,38 @@ export function DocumentCard({
   const dragging = useLibraryUi((s) => s.draggingDocId === doc.id);
   const setDraggingDocId = useLibraryUi((s) => s.setDraggingDocId);
 
+  // Renommage EN PLACE, comme une ligne du rail de dossiers (FolderRow) : le
+  // titre de la carte devient un champ, Entrée valide, Échap annule. Pas de
+  // boîte de dialogue — on renomme là où on lit le nom.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(doc.title);
+  // « Renommer » choisi dans le menu : le champ n'est monté qu'à la FERMETURE
+  // complète du menu (`onCloseAutoFocus`), pas au clic. Monté plus tôt, il
+  // prenait le focus pendant que le menu se fermait, le piège de focus du
+  // menu le lui reprenait, et son `onBlur` validait un titre inchangé avant
+  // qu'on ait tapé quoi que ce soit.
+  const renameRequested = useRef(false);
+
+  function commitRename() {
+    setRenaming(false);
+    const title = draft.trim();
+    if (title && title !== doc.title) onRename(doc.id, title);
+    else setDraft(doc.title);
+  }
+
   const progress = doc.page_count > 0 ? Math.round((doc.last_page / doc.page_count) * 100) : 0;
   const pending = doc.digest_status === "pending" && !doc.summary;
   const importedOn = doc.imported_at ? formatDay(doc.imported_at, lang) : "";
   const showRibbon = Boolean(doc.summary) || doc.keywords.length > 0 || pending;
 
   return (
+    <ContextMenu>
+    <ContextMenuTrigger asChild>
     <div
       className="doc-card"
-      draggable
+      // Pendant le renommage, la carte ne se glisse pas : un glissé depuis le
+      // champ sélectionnerait du texte ET armerait un déplacement.
+      draggable={!renaming}
       data-dragging={dragging ? "true" : undefined}
       onDragStart={(e) => {
         e.dataTransfer.setData(DOC_MIME, String(doc.id));
@@ -57,7 +101,9 @@ export function DocumentCard({
         setDraggingDocId(doc.id);
       }}
       onDragEnd={() => setDraggingDocId(null)}
-      onClick={() => navigate(`/reader/${doc.id}`)}
+      onClick={() => {
+        if (!renaming) navigate(`/reader/${doc.id}`);
+      }}
       style={{ ...card, opacity: dragging ? 0.45 : 1 }}
     >
       <div style={thumbnail}>
@@ -112,9 +158,30 @@ export function DocumentCard({
       </div>
 
       <div style={{ padding: "var(--space-md)" }}>
-        <div style={title} title={doc.title}>
-          {doc.title}
-        </div>
+        {renaming ? (
+          <input
+            autoFocus
+            aria-label={t("library.doc_rename_title")}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitRename();
+              if (e.key === "Escape") {
+                setDraft(doc.title);
+                setRenaming(false);
+              }
+            }}
+            style={renameInput}
+          />
+        ) : (
+          <div style={title} title={doc.title}>
+            {doc.title}
+          </div>
+        )}
         <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
           {t("home.pages", { n: doc.page_count })}
           {doc.subject ? ` · ${doc.subject}` : ""}
@@ -164,6 +231,58 @@ export function DocumentCard({
         </select>
       </div>
     </div>
+    </ContextMenuTrigger>
+
+    {/* Le menu du clic droit. « Déplacer vers… » y double le <select> ci-dessus
+        (qui reste le chemin clavier) ; « Renommer » et « Supprimer » n'existent
+        QU'ici. */}
+    <ContextMenuContent
+      onCloseAutoFocus={(e) => {
+        if (!renameRequested.current) return;
+        renameRequested.current = false;
+        // Le focus va au champ, pas à la carte.
+        e.preventDefault();
+        setDraft(doc.title);
+        setRenaming(true);
+      }}
+    >
+      <ContextMenuItem onSelect={() => navigate(`/reader/${doc.id}`)}>
+        {t("library.open")}
+      </ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() => {
+          renameRequested.current = true;
+        }}
+      >
+        {t("library.rename")}
+      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>{t("library.move_to")}</ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem
+            disabled={doc.folder_id === null}
+            onSelect={() => onMove(doc.id, null)}
+          >
+            {t("library.move_to_root")}
+          </ContextMenuItem>
+          {folders.map((folder) => (
+            <ContextMenuItem
+              key={folder.id}
+              disabled={doc.folder_id === folder.id}
+              onSelect={() => onMove(doc.id, folder.id)}
+              style={{ paddingLeft: 8 + folder.depth * 12 }}
+            >
+              {folder.name}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem variant="destructive" onSelect={() => onDelete(doc)}>
+        {t("common.delete")}
+      </ContextMenuItem>
+    </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -256,6 +375,21 @@ const title: React.CSSProperties = {
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
+};
+
+// Même champ que le renommage d'un dossier (FolderRow.renameInput), à la
+// taille du titre : le nom ne doit pas sauter quand il devient éditable.
+const renameInput: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  font: "inherit",
+  fontWeight: 600,
+  fontSize: 13,
+  padding: "2px 6px",
+  border: "1px solid var(--accent)",
+  borderRadius: "var(--radius-sm)",
+  background: "var(--surface)",
+  color: "var(--text)",
 };
 
 // L'effacement au repos (`opacity: 0`) et sa révélation vivent TOUS DEUX dans

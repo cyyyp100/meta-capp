@@ -11,6 +11,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from config.settings import (
+    LIBRARY_DOCUMENT_TITLE_MAX,
     LIBRARY_MAX_DOCUMENTS,
     LIBRARY_SEARCH_LIMIT,
     LIBRARY_SEARCH_POOL,
@@ -20,10 +21,14 @@ from config.settings import (
     LIBRARY_SEARCH_WEIGHT_SUMMARY,
 )
 from db.chapters import get_chapters
+from db.documents import delete_document as _delete_document
 from db.documents import get_document as _get_document
 from db.documents import list_all_documents as _list_all
 from db.documents import list_documents_for_search as _list_for_search
 from db.documents import list_recent_documents as _list_recent
+from db.documents import rename_document as _rename_document
+from i18n import t
+from pdf_viewer.page_renderer import clear_page_cache as _clear_page_cache
 from pdf_viewer.page_renderer import clear_reader_cache as _clear_reader_cache
 from pdf_viewer.page_renderer import render_page as _render_page
 from pdf_viewer.pdf_document import PdfDocument
@@ -40,6 +45,8 @@ __all__ = [
     "page_words",
     "search_page",
     "clear_reader_cache",
+    "delete_document",
+    "rename_document",
 ]
 
 
@@ -196,6 +203,51 @@ def clear_reader_cache(doc_id: int) -> None:
     doc = _get_document(doc_id)
     if doc and doc.get("path"):
         _clear_reader_cache(doc["path"])
+
+
+def delete_document(doc_id: int) -> dict:
+    """Retire un document de la bibliothèque.
+
+    Ce qui part : la ligne et tout ce qui n'a de sens que pour ce document
+    (sessions de lecture et leurs jauges, questions et réponses, surlignages,
+    chapitres — cascade SQL), plus les PNG rendus, vignette comprise, et le
+    cache texte. Ce qui reste : les flashcards, qui se détachent du document
+    (`document_id = NULL`) parce qu'elles appartiennent aux révisions, et le
+    profil métacognitif (`metacog_history` se détache de la session).
+
+    Le fichier source de l'utilisateur n'est jamais touché : on ne l'a jamais
+    copié, on n'a pas à l'effacer. ValueError si le document n'existe pas."""
+    doc = _get_document(doc_id)
+    if doc is None:
+        raise ValueError(t("folders.document_missing"))
+    for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
+        _PAGE_TEXT_CACHE.pop(key, None)
+    if doc.get("path") and doc.get("extraction_engine") != "code":
+        try:
+            _clear_page_cache(doc["path"])
+        except OSError:  # pragma: no cover - le cache disque est jetable
+            pass
+    _delete_document(doc_id)
+    return {"deleted": True, "id": int(doc_id)}
+
+
+def rename_document(doc_id: int, title: str) -> dict:
+    """Renomme un document de la bibliothèque (clic droit → Renommer).
+
+    C'est le TITRE qui change, pas le fichier : `documents.path` désigne le
+    PDF de l'utilisateur là où il l'a choisi, et on ne le touche jamais (même
+    règle qu'à la suppression). Le titre est nettoyé comme un nom de dossier
+    (blancs repliés, longueur bornée) ; vide, il est refusé — un document sans
+    nom serait introuvable dans la recherche, qui pèse le titre en premier.
+    Renvoie le détail à jour. ValueError si le document n'existe pas ou si le
+    titre est vide."""
+    if _get_document(doc_id) is None:
+        raise ValueError(t("folders.document_missing"))
+    clean = " ".join(str(title or "").split())[:LIBRARY_DOCUMENT_TITLE_MAX]
+    if not clean:
+        raise ValueError(t("library.title_empty"))
+    _rename_document(doc_id, clean)
+    return get_document(doc_id) or {"id": int(doc_id)}
 
 
 def search_page(doc_id: int, page: int, needle: str) -> list[list[float]]:

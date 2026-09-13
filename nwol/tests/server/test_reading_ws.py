@@ -660,3 +660,46 @@ def test_rehydration_is_scoped_to_the_document_and_bounded(client, monkeypatch):
     ]
     # Un document sans historique reste silencieux (pas d'erreur).
     assert get_recent_assistant_exchanges(9999) == []
+
+
+def test_reader_ws_question_carries_the_zone_to_frame(client, monkeypatch):
+    """La question vise un passage précis : le client reçoit sa CITATION pour
+    le cadrer entier à l'écran (même chemin que le masque : search_page)."""
+    from services import assistant, library
+
+    page = (
+        "Le théorème de Rolle affirme qu'entre deux zéros d'une fonction dérivable, "
+        "la dérivée s'annule. Ce résultat est central pour l'étude des variations."
+    )
+    monkeypatch.setattr(library, "page_text", lambda doc_id, p: page)
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({
+            "question": "Que dit le théorème de Rolle ?",
+            "choices": None,
+            "question_type": "comprehension",
+            "source_excerpt": "le théorème de Rolle affirme qu'entre deux zéros d'une fonction dérivable, la dérivée s'annule",
+        }),
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        assert q["type"] == "qa_question"
+        assert q["zone"] == {"quote": "Le théorème de Rolle affirme qu'entre deux zéros d'une fonction dérivable, la dérivée s'annule"}
+
+
+def test_reader_ws_question_without_locatable_passage_has_no_zone(client, monkeypatch):
+    from services import assistant, library
+
+    monkeypatch.setattr(library, "page_text", lambda doc_id, p: "Un texte de page quelconque.")
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Q ?", "choices": None, "question_type": "open"}),
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["zone"] is None

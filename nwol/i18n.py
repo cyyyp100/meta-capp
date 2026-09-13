@@ -554,6 +554,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "folders.document_missing": "Document introuvable.",
         "folders.cycle": "Un dossier ne peut pas être déplacé dans l'un de ses sous-dossiers.",
         "folders.too_deep": "Arborescence trop profonde (maximum {n} niveaux).",
+        "library.title_empty": "Le titre ne peut pas être vide.",
         # ── Visite guidée : le document emprunté ──────────────────────────
         # La fiche du document de démonstration est écrite ici plutôt que
         # générée par le LLM : la carte doit être complète immédiatement et
@@ -1114,6 +1115,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "folders.document_missing": "Document not found.",
         "folders.cycle": "A folder cannot be moved into one of its own subfolders.",
         "folders.too_deep": "Folder tree too deep (maximum {n} levels).",
+        "library.title_empty": "The title cannot be empty.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",
         "onboarding.doc_subject": "Computer science",

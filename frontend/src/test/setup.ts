@@ -56,6 +56,12 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// Le fil de Gemma défile jusqu'en bas à chaque message (`scrollTo`), que jsdom
+// ne définit pas non plus sur les éléments.
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}
+
 // jsdom ne connaît pas l'API Pointer Events, sur laquelle Radix s'appuie pour
 // distinguer souris et tactile. userEvent la sollicite dès qu'on ouvre un menu.
 if (!Element.prototype.hasPointerCapture) {

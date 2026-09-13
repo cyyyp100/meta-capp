@@ -105,14 +105,20 @@ def test_abandoned_task_is_dropped_by_the_worker(monkeypatch):
     #    Le budget vient de la tâche : on le rend minuscule pour ce test plutôt
     #    que d'attendre les 60 s réelles de `document_digest`.
     monkeypatch.setattr(ollama_client, "task_wall_timeout_s", lambda _task: 0.1)
-    monkeypatch.setattr(
-        ollama_client, "_generate_json",
-        lambda *a, **kw: ran_second.set() or {"x": 1},
-    )
+    # La file est PARTAGÉE avec les autres tests (fiches de document remises en
+    # file après une annulation, par exemple) : on ne compte que NOTRE tâche.
+    prompt = "prompt-abandonne"
+
+    def _generate(label, p, *a, **kw):
+        if p == prompt:
+            ran_second.set()
+        return {"x": 1}
+
+    monkeypatch.setattr(ollama_client, "_generate_json", _generate)
 
     def enqueue(on_success, on_error):
         ollama_client._run_json_async(
-            "document_digest", "prompt", lambda raw: raw, on_success, on_error, "modele",
+            "document_digest", prompt, lambda raw: raw, on_success, on_error, "modele",
         )
 
     with pytest.raises(TimeoutError):

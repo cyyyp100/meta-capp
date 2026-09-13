@@ -20,12 +20,15 @@ def upsert_document(
 ) -> int:
     conn = get_connection()
     with conn:
+        # `filename` est ABSENT du DO UPDATE : c'est le titre affiché dans la
+        # bibliothèque, que l'utilisateur peut renommer (`rename_document`).
+        # Le chemin est la clé du conflit, donc le nom sur disque n'a pas changé ;
+        # ré-importer ne doit pas défaire un renommage.
         conn.execute(
             """INSERT INTO documents
                (path, filename, page_count, doc_type, extraction_engine, has_toc, last_opened, subject)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
-                 filename=excluded.filename,
                  page_count=excluded.page_count,
                  doc_type=excluded.doc_type,
                  extraction_engine=excluded.extraction_engine,
@@ -69,6 +72,23 @@ def _decode_document(row) -> dict:
     if not isinstance(doc["keywords"], list):
         doc["keywords"] = []
     return doc
+
+
+def rename_document(doc_id: int, title: str) -> bool:
+    """Change le titre affiché (`filename`) d'un document ; False s'il n'existe pas.
+
+    Seule écriture de cette colonne après l'import. Tout ce qui affiche un
+    titre de document (flashcards, quiz, brainstorming, recherche) lit
+    `documents.filename` par jointure : le renommage se propage sans autre
+    écriture. Le FICHIER sur disque n'est pas touché — comme à la suppression.
+    """
+    conn = get_connection()
+    with conn:
+        cur = conn.execute("UPDATE documents SET filename=? WHERE id=?", (title, doc_id))
+    renamed = cur.rowcount > 0
+    if renamed:
+        logger.info("Document renommé id=%s : %s", doc_id, title)
+    return renamed
 
 
 def update_last_page(doc_id: int, page: int) -> None:
@@ -142,3 +162,20 @@ def list_all_documents(limit: int = LIBRARY_MAX_DOCUMENTS) -> list[dict]:
 def list_documents_for_search(limit: int = LIBRARY_SEARCH_POOL) -> list[dict]:
     """Lot borné parcouru par la recherche — même requête, autre intention."""
     return list_all_documents(limit)
+
+
+def delete_document(doc_id: int) -> bool:
+    """Supprime la ligne `documents` ; les tables liées suivent par cascade SQL
+    (sessions, questions, réponses, surlignages, chapitres, index) — les
+    flashcards, elles, passent à `document_id = NULL` et survivent (schéma).
+
+    Le FICHIER source n'est jamais touché : `documents.path` désigne le PDF
+    de l'utilisateur, là où il l'a choisi, pas une copie de l'application.
+    Renvoie False si le document n'existait pas."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+    deleted = cur.rowcount > 0
+    if deleted:
+        logger.info("Document supprimé id=%s", doc_id)
+    return deleted

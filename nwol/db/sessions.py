@@ -138,3 +138,15 @@ def _duration_from_started_at(started_at: str | None) -> int:
         return max(0, int((datetime.now() - started).total_seconds()))
     except ValueError:
         return 0
+
+
+def delete_session(session_id: int) -> bool:
+    """Efface une session (dwell, jauges et réflexions suivent par cascade).
+    Renvoie False si elle n'existait pas."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute("DELETE FROM reading_sessions WHERE id=?", (session_id,))
+    deleted = cur.rowcount > 0
+    if deleted:
+        logger.info("Session lecture effacée id=%s", session_id)
+    return deleted

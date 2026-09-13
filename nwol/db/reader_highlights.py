@@ -29,10 +29,34 @@ def add_highlight(
     """Mémorise un surlignage ; renvoie son id.
 
     `anchor` (v25, lecteur reconstruit) : {block_id, start, end} — ancrage TEXTE
-    dans les blocs OCR ; `rects` reste la référence des documents raster."""
+    dans les blocs OCR ; `rects` reste la référence des documents raster.
+
+    PAS DE DOUBLON : le même passage (même page, même texte) surligné une
+    seconde fois met à jour le surlignage existant — couleur et rectangles —
+    et renvoie SON id. Sinon chaque re-sélection empilait une couche de plus,
+    et le contexte LLM citait le passage autant de fois."""
     ensure_default_user()
     clean_color = color if color in _VALID_COLORS else "key"
+    clean_quote = (quote or "").strip()
     conn = get_connection()
+    existing = conn.execute(
+        """SELECT id FROM reader_highlights
+           WHERE user_id=? AND document_id=? AND page=? AND quote=? LIMIT 1""",
+        (user_id or DEFAULT_USER_ID, int(document_id), int(page), clean_quote),
+    ).fetchone()
+    if existing is not None:
+        with conn:
+            conn.execute(
+                "UPDATE reader_highlights SET rects_json=?, color=?, anchor_json=? WHERE id=?",
+                (
+                    json.dumps(rects or [], ensure_ascii=False),
+                    clean_color,
+                    json.dumps(anchor, ensure_ascii=False) if anchor else None,
+                    existing["id"],
+                ),
+            )
+        logger.info("Surlignage déjà présent id=%s (doc=%s page=%s), mis à jour", existing["id"], document_id, page)
+        return int(existing["id"])
     with conn:
         cur = conn.execute(
             """INSERT INTO reader_highlights
@@ -42,7 +66,7 @@ def add_highlight(
                 user_id or DEFAULT_USER_ID,
                 int(document_id),
                 int(page),
-                (quote or "").strip(),
+                clean_quote,
                 json.dumps(rects or [], ensure_ascii=False),
                 clean_color,
                 json.dumps(anchor, ensure_ascii=False) if anchor else None,

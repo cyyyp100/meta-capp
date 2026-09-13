@@ -10,10 +10,12 @@ from pydantic import BaseModel
 from config.settings import LIBRARY_MAX_DOCUMENTS, LIBRARY_SEARCH_LIMIT
 from server.security import import_path_allowed
 from services.library import (
+    delete_document as delete_document_service,
     get_document,
     list_all_documents,
     list_recent_documents,
     page_words,
+    rename_document as rename_document_service,
     render_page,
     search_documents,
     search_page,
@@ -41,6 +43,10 @@ class FolderParentBody(BaseModel):
 
 class DocumentFolderBody(BaseModel):
     folder_id: int | None = None
+
+
+class DocumentTitleBody(BaseModel):
+    title: str
 
 
 @router.get("/recent")
@@ -148,6 +154,26 @@ def document(doc_id: int) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="Document introuvable")
     return detail
+
+
+@router.delete("/doc/{doc_id}")
+def delete_document(doc_id: int) -> dict:
+    """Retire le document de la bibliothèque (jamais le fichier de l'utilisateur)."""
+    try:
+        return delete_document_service(doc_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/doc/{doc_id}/rename")
+def rename_document(doc_id: int, body: DocumentTitleBody) -> dict:
+    """Renomme le TITRE d'un document (clic droit → Renommer). Le fichier de
+    l'utilisateur n'est pas renommé — même règle qu'à la suppression."""
+    try:
+        return {"ok": True, "document": rename_document_service(doc_id, body.title)}
+    except ValueError as exc:
+        missing = get_document(doc_id) is None
+        raise HTTPException(status_code=404 if missing else 400, detail=str(exc))
 
 
 @router.post("/doc/{doc_id}/folder")

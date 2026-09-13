@@ -164,6 +164,35 @@ export function Home() {
     },
   };
 
+  /** Suppression d'un document (clic droit sur sa carte). Le fichier de
+   *  l'utilisateur n'est pas touché ; l'historique de lecture du document part
+   *  avec lui, ses flashcards restent — c'est ce que dit la confirmation. */
+  async function handleDelete(doc: DocumentSummary) {
+    const ok = await confirm({
+      title: t("library.doc_delete_title", { name: doc.title }),
+      description: t("library.doc_delete_confirm"),
+      confirmLabel: t("common.delete"),
+      destructive: true,
+    });
+    if (!ok) return;
+    await mutate(async () => {
+      await api.deleteDocument(doc.id);
+      toast.success(t("library.doc_deleted", { name: doc.title }));
+    }, "library.doc_delete_error");
+  }
+
+  /** Renommage d'un document (clic droit → Renommer, saisie en place sur la
+   *  carte). Le titre seul change : le fichier de l'utilisateur garde son nom. */
+  function handleRename(docId: number, title: string) {
+    void mutate(async () => {
+      const { document } = await api.renameDocument(docId, title);
+      // Le lecteur affiche ce titre dans son sas d'entrée et sa barre : sa
+      // requête est invalidée aussi, sinon il rouvrirait l'ancien nom.
+      await queryClient.invalidateQueries({ queryKey: ["document", docId] });
+      toast.success(t("library.doc_renamed", { name: document.title }));
+    }, "library.doc_rename_error");
+  }
+
   const emptyMessage =
     selection.kind === "folder" && !searching ? t("library.folder_empty_docs") : t("home.empty");
 
@@ -263,6 +292,8 @@ export function Home() {
               emptyMessage={emptyMessage}
               onKeyword={setRawQuery}
               onMove={handlers.onDropDocument}
+              onRename={handleRename}
+              onDelete={(doc) => void handleDelete(doc)}
               // L'état vide porte lui-même l'appel à l'import : c'est le premier
               // écran d'un nouvel utilisateur, le bouton du bandeau est loin.
               onImport={selection.kind === "all" ? handleImport : undefined}

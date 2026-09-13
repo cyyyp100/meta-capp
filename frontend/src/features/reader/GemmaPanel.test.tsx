@@ -7,12 +7,13 @@
 // Le panneau ouvre un WebSocket vers /api/reader/{id}/stream : on le bouchonne,
 // aucun serveur n'est nécessaire.
 
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+import { api } from "../../api/client";
 import { GemmaPanel } from "./GemmaPanel";
 
 /** WebSocket minimal : se déclare ouvert, avale ce qu'on lui envoie. */
@@ -51,14 +52,39 @@ class FakeWebSocket {
  * par un `<div onClick>` — donc uniquement à la souris. C'est maintenant un
  * vrai bouton, ce que ce parcours vérifie au passage.
  */
-async function renderOpenPanel() {
+async function renderOpenPanel(props: Partial<React.ComponentProps<typeof GemmaPanel>> = {}) {
   const view = render(
     <TooltipProvider>
-      <GemmaPanel docId={1} currentPage={1} sessionId={null} />
+      <GemmaPanel docId={1} currentPage={1} sessionId={null} {...props} />
     </TooltipProvider>,
   );
   await userEvent.click(await screen.findByRole("button", { name: /gemma|ouvrir|open/i }));
   return view;
+}
+
+/** Le champ de conversation avec Gemma (sous le fil). */
+function chatBox() {
+  return screen.getByPlaceholderText(/question sur la page|question about page/i);
+}
+
+/** Pose une question ouverte, y répond, reçoit un verdict. */
+async function playOneQuestion(verdict: string, extra: Record<string, unknown> = {}) {
+  await act(async () => {
+    FakeWebSocket.last?.emit({
+      type: "qa_question",
+      question: "Quelle est l'idée principale ?",
+      question_type: "open",
+      choices: null,
+      mask: null,
+      page: 1,
+      ...extra,
+    });
+  });
+  await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "La dérivée s'annule.");
+  await userEvent.click(screen.getByRole("button", { name: "OK" }));
+  await act(async () => {
+    FakeWebSocket.last?.emit({ type: "qa_feedback", verdict, feedback: "Oui, c'est bien ça.", hint: "" });
+  });
 }
 
 describe("GemmaPanel", () => {
@@ -184,5 +210,211 @@ describe("GemmaPanel", () => {
 
     expect(await screen.findByText(/rappel/i)).toBeInTheDocument();
     expect(screen.getByText(/masqué/i)).toBeInTheDocument();
+  });
+
+  // L'encadré d'une question vit DANS le fil, à sa place : il s'y répond, s'y
+  // corrige, et y reste. Ce qui vient ensuite s'écrit à la suite — la
+  // correction qu'on vient de lire ne disparaît pas, et ne descend pas non
+  // plus sous les messages suivants.
+  it("garde l'encadré de la question dans le fil, et continue à la suite", async () => {
+    await renderOpenPanel();
+    await playOneQuestion("correct");
+
+    const card = screen.getByTestId("qa-card");
+    expect(card).toHaveAttribute("data-live", "true");
+    expect(card).toHaveTextContent(/idée principale/i);
+    expect(card).toHaveTextContent(/La dérivée s'annule\./);
+    expect(card).toHaveTextContent(/c'est bien ça/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /terminer|finish/i }));
+
+    // Toujours là, en lecture seule : plus de champ ni de « Terminer ».
+    const played = screen.getByTestId("qa-card");
+    expect(played).not.toHaveAttribute("data-live");
+    expect(played).toHaveTextContent(/c'est bien ça/i);
+    expect(screen.queryByRole("button", { name: /terminer|finish/i })).not.toBeInTheDocument();
+
+    // La conversation continue APRÈS l'encadré, pas au-dessus.
+    await userEvent.type(chatBox(), "Et ensuite ?{Enter}");
+    const order = [...screen.getByTestId("gemma-body").querySelectorAll("[data-testid='qa-card'], [data-role='user']")];
+    expect(order.at(0)).toHaveAttribute("data-testid", "qa-card");
+    expect(order.at(-1)).toHaveTextContent("Et ensuite ?");
+  });
+
+  it("empile les encadrés d'une série de questions dans l'ordre", async () => {
+    await renderOpenPanel();
+    await playOneQuestion("partial");
+    await userEvent.click(screen.getByRole("button", { name: /nouvelle question|new question/i }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "qa_question",
+        question: "Deuxième question ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+      });
+    });
+
+    const cards = screen.getAllByTestId("qa-card");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveTextContent(/idée principale/i);
+    expect(cards[0]).not.toHaveAttribute("data-live");
+    expect(cards[1]).toHaveTextContent(/Deuxième question/);
+    expect(cards[1]).toHaveAttribute("data-live", "true");
+    // Le premier encadré a gardé sa correction.
+    expect(cards[0]).toHaveTextContent(/c'est bien ça/i);
+  });
+
+  // Pendant que Gemma corrige, on peut relire la page : le verrou du lecteur est
+  // levé à l'envoi de la réponse, et reposé seulement si elle est fausse.
+  it("libère le lecteur le temps de la correction d'une question bloquante", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Quelle est l'idée principale ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 3,
+      });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
+
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "Une réponse.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(onGatedChange).toHaveBeenLastCalledWith(false);
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "incorrect", feedback: "Non.", hint: "Relis." });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
+  });
+
+  // Après une réponse fausse, « Réessayer » relance une génération : pendant
+  // que Gemma prépare la question suivante, on est libre de bouger dans le
+  // document. Le verrou revient avec la question.
+  it("libère le lecteur pendant que Gemma prépare la question suivante après une réponse fausse", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Quelle est l'idée principale ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 3,
+      });
+    });
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "Faux.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "incorrect", feedback: "Non.", hint: "Relis." });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
+
+    await userEvent.click(screen.getByRole("button", { name: /nouvelle question|réessayer|new question|try again/i }));
+    expect(onGatedChange).toHaveBeenLastCalledWith(false);
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "qa_question",
+        question: "Reformulons : quelle est l'idée principale ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 3,
+      });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
+  });
+
+  // Une question posée à Gemma pendant une question bloquante : le lecteur est
+  // rendu le temps de la réponse, et revient se caler sur la zone ensuite.
+  it("libère le lecteur pendant que Gemma répond, même sous une question bloquante", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Q ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 5,
+      });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 5);
+
+    await userEvent.type(chatBox(), "Explique-moi ce terme.{Enter}");
+    expect(onGatedChange).toHaveBeenLastCalledWith(false);
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Voici.", highlights: [] });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 5);
+  });
+
+  // « + Flashcard » cliqué deux fois sous la même réponse créait deux cartes :
+  // un seul départ par réponse, et le bouton dit ce qu'il a fait.
+  it("ne crée la flashcard d'une réponse qu'une seule fois", async () => {
+    let resolve: (v: { id: number; front: string; back: string; created: boolean }) => void = () => {};
+    const spy = vi
+      .spyOn(api, "createFlashcardFromExchange")
+      .mockImplementation(() => new Promise((r) => (resolve = r)));
+    await renderOpenPanel();
+    await userEvent.type(chatBox(), "Question{Enter}");
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Réponse de Gemma.", highlights: [] });
+    });
+
+    const button = await screen.findByRole("button", { name: /flashcard/i });
+    await userEvent.click(button);
+    await userEvent.click(button);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    await act(async () => {
+      resolve({ id: 1, front: "Q", back: "R", created: true });
+    });
+    await waitFor(() => expect(button).toHaveTextContent(/✓/));
+    await userEvent.click(button);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(within(screen.getByTestId("gemma-body")).getByText(/flashcard créée|flashcard created/i)).toBeInTheDocument();
+  });
+
+  it("déverrouille définitivement le lecteur sur une bonne réponse", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Q ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 2,
+      });
+    });
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "R.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "correct", feedback: "Oui.", hint: "" });
+    });
+    expect(onGatedChange.mock.calls.at(-1)?.[0]).toBe(false);
+  });
+
+  // La zone visée par la question remonte au lecteur avec sa page, et se
+  // retire quand la carte se referme.
+  it("transmet la zone de la question au lecteur, puis la retire", async () => {
+    const onZone = vi.fn();
+    await renderOpenPanel({ onZone });
+    await playOneQuestion("correct", { zone: { quote: "le passage exact visé" }, page: 4 });
+    expect(onZone).toHaveBeenCalledWith("le passage exact visé", 4);
+
+    await userEvent.click(screen.getByRole("button", { name: /terminer|finish/i }));
+    expect(onZone).toHaveBeenLastCalledWith(null, expect.any(Number));
   });
 });

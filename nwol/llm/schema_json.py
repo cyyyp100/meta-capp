@@ -87,6 +87,12 @@ def parse_question(raw: str | dict) -> dict | None:
     source_block_id = _coerce_text(
         data.get("source_block_id", data.get("source_id", data.get("block_id", "")))
     )
+    # Passage précis visé par la question, recopié du paragraphe : sert au
+    # lecteur pour cadrer la zone à l'écran. Facultatif — sa localisation est
+    # revalidée contre le texte de la page par le service (resolve_question_zone).
+    source_excerpt = _coerce_text(
+        data.get("source_excerpt", data.get("source_quote", data.get("excerpt", "")))
+    )
     paragraph_mask = _parse_paragraph_mask(data.get("paragraph_mask"))
 
     evaluation_criteria = _coerce_str_list(
@@ -140,6 +146,9 @@ def parse_question(raw: str | dict) -> dict | None:
         ],
         "session_hint": session_hint.strip() if isinstance(session_hint, str) else "",
         "source_block_id": source_block_id.strip() if isinstance(source_block_id, str) else "",
+        "source_excerpt": (
+            " ".join(source_excerpt.split()) if isinstance(source_excerpt, str) else ""
+        ),
         "paragraph_mask": paragraph_mask,
     }
 

@@ -61,10 +61,16 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # L'UI Tkinter a été retirée du produit : ni Tk, ni matplotlib (qui ne
-        # servait qu'au rendu LaTeX de l'ancien lecteur), ni Pillow.
+        # servait qu'au rendu LaTeX de l'ancien lecteur).
+        # ⚠ Ne PAS exclure "PIL" : pypdfium2 l'importe dans un try/except
+        # (`PIL = None` si absent) et `PdfBitmap.to_pil()` — utilisé par
+        # pdf_viewer/page_renderer.py pour encoder chaque page en PNG — plante
+        # alors à la première page affichée. L'exclusion empêche aussi la
+        # collecte de l'extension C `PIL._imaging` ; les .py seuls ne suffisent
+        # pas. Le symptôme : le binaire démarre, la bibliothèque s'affiche, mais
+        # chaque page du lecteur est une image cassée.
         "tkinter",
         "matplotlib",
-        "PIL",
         "webview.platforms.android",
         "webview.platforms.gtk",
         "webview.platforms.qt",

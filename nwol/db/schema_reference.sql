@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 28).
+-- (config.settings.DB_SCHEMA_VERSION = 29).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -115,7 +115,8 @@ CREATE TABLE flashcards (
     due_at         DATETIME,
     interval_days  REAL DEFAULT 1.0,
     created_at     DATETIME DEFAULT (datetime('now'))
-, language TEXT);
+, language TEXT, dedup_key TEXT);
+CREATE UNIQUE INDEX idx_flashcards_dedup ON flashcards(user_id, dedup_key);
 CREATE INDEX idx_flashcards_due ON flashcards(user_id, due_at);
 CREATE INDEX idx_flashcards_lang ON flashcards(user_id, language);
 CREATE INDEX idx_flashcards_user ON flashcards(user_id);

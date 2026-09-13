@@ -77,3 +77,25 @@ def test_highlight_anchor_roundtrip(client):
     assert anchored["rects"] == []
     legacy = next(i for i in items if i["quote"] == "sans ancre")
     assert legacy["anchor"] is None
+
+
+def test_highlighting_the_same_passage_twice_updates_instead_of_duplicating(client):
+    # Re-sélectionner un passage déjà surligné ne doit pas empiler une couche :
+    # même id, couleur mise à jour, une seule ligne.
+    from db.documents import upsert_document
+
+    doc_id = upsert_document("/tmp/hl4.pdf", "hl4.pdf", 3, "pdfium", False)
+    first = client.post(
+        f"/api/library/doc/{doc_id}/highlights",
+        json={"page": 1, "quote": "même passage", "rects": [[1, 1, 2, 2]], "color": "key"},
+    ).json()["id"]
+    second = client.post(
+        f"/api/library/doc/{doc_id}/highlights",
+        json={"page": 1, "quote": "même passage ", "rects": [[1, 1, 3, 3]], "color": "explain"},
+    ).json()["id"]
+
+    assert second == first
+    items = client.get(f"/api/library/doc/{doc_id}/highlights").json()
+    assert len(items) == 1
+    assert items[0]["color"] == "explain"
+    assert items[0]["rects"] == [[1, 1, 3, 3]]

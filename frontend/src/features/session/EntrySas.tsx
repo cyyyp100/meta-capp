@@ -35,11 +35,18 @@ export function EntrySas({
   docId,
   title,
   onStart,
+  onLeave,
   demo = false,
 }: {
   docId: number;
   title: string;
   onStart: () => void;
+  /**
+   * « ← Bibliothèque » : on a ouvert le mauvais document. Le sas est le SEUL
+   * moment où ce retour a un sens — rien n'a encore été lu, rien ne doit être
+   * compté. Absent en démonstration : la visite tient le fil.
+   */
+  onLeave?: () => void;
   /**
    * Séance de démonstration de la visite guidée. Trois différences, toutes
    * pour la même raison — le sas est un rituel de RALENTISSEMENT, et on ne
@@ -127,6 +134,7 @@ export function EntrySas({
     if (!cards) {
       return (
         <SasOverlay contained>
+          {onLeave && !demo && <LeaveButton onLeave={onLeave} />}
           <div className="text-muted-foreground italic">{t("common.loading")}</div>
         </SasOverlay>
       );
@@ -139,6 +147,9 @@ export function EntrySas({
 
   return (
     <SasOverlay contained>
+      {/* Le retour n'attend pas les 30 s : se tromper de document est
+          précisément le cas où l'on ne veut pas ralentir. */}
+      {onLeave && !demo && <LeaveButton onLeave={onLeave} />}
       <motion.div
         // La visite éclaire ce panneau ENTIER. L'ancre était sur le titre :
         // la découpe ne montrait que deux lignes, et le rituel qu'on venait
@@ -219,5 +230,22 @@ export function EntrySas({
         </div>
       </motion.div>
     </SasOverlay>
+  );
+}
+
+/**
+ * « ← Bibliothèque », en HAUT À GAUCHE du sas — là où l'on attend un retour
+ * (barre du lecteur, navigateur), et hors du panneau central, qui ne parle
+ * que du rituel. Posé sous le bouton « Continuer », il se lisait comme une
+ * seconde issue du sas ; ici c'est une sortie, à sa place de sortie.
+ */
+function LeaveButton({ onLeave }: { onLeave: () => void }) {
+  const t = useT();
+  return (
+    <div className="absolute top-4 left-4 z-10">
+      <Button variant="ghost" size="sm" onClick={onLeave} title={t("entry.back_library_hint")}>
+        {t("entry.back_library")}
+      </Button>
+    </div>
   );
 }

@@ -180,3 +180,43 @@ def test_streak_is_a_pure_read_and_only_a_finished_session_advances_it(client, t
     after = client.get("/api/streak").json()
     assert after["streak"] == 1
     assert after["longest_streak"] == 1
+
+
+def test_abandon_erases_an_untouched_open_session(client, tmp_path, make_pdf):
+    """Retour à la bibliothèque depuis le sas d'entrée : la session n'a pas eu
+    lieu, elle disparaît de la frise au lieu d'y rester « non terminée »."""
+    from db.sessions import get_session
+
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+
+    response = client.post(f"/api/session/{sid}/abandon")
+
+    assert response.status_code == 200
+    assert response.json() == {"abandoned": True}
+    assert get_session(sid) is None
+    assert all(s["session_id"] != sid for s in client.get("/api/progress/sessions").json()["sessions"])
+
+
+def test_abandon_refuses_a_session_that_was_played(client, tmp_path, make_pdf):
+    from db.answers import save_answer
+    from db.sessions import get_session
+
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    save_answer(question_id=None, user_id=1, answer_text="a", verdict="correct", session_id=sid)
+
+    assert client.post(f"/api/session/{sid}/abandon").status_code == 409
+    assert get_session(sid) is not None
+
+
+def test_abandon_refuses_a_closed_session(client, tmp_path, make_pdf):
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 10})
+
+    assert client.post(f"/api/session/{sid}/abandon").status_code == 409
+
+
+def test_abandon_unknown_session_is_a_noop(client):
+    assert client.post("/api/session/424242/abandon").json() == {"abandoned": False}

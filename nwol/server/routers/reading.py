@@ -13,10 +13,13 @@
 #                     {"type":"scanning","active":bool}  # Gemma inspecte la page (décide
 #                       d'intervenir ou non) -> l'UI tourne la bulle vers le PDF
 #                     {"type":"qa_question"|"gated_question","question","choices",
-#                      "question_type","mask","session_hint"}  # mask = {"quote",
-#                       "placeholder"} du passage à cacher dans la page (rappel
-#                       libre), sinon null ; session_hint = conseil de régulation
-#                       de séance (pause courte…), vide la plupart du temps
+#                      "question_type","mask","zone","page","session_hint"}  # mask =
+#                       {"quote","placeholder"} du passage à cacher dans la page
+#                       (rappel libre), sinon null ; zone = {"quote"} du passage
+#                       précis sur lequel porte la question (le lecteur le
+#                       cadre à l'écran), sinon null ; session_hint = conseil de
+#                       régulation de séance (pause courte…), vide la plupart
+#                       du temps
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +39,7 @@ from config.settings import (
 )
 from db.answers import save_answer
 from db.documents import get_document, update_last_page
-from db.flashcards import get_due_flashcards, save_flashcard
+from db.flashcards import get_due_flashcards
 from db.page_dwell import save_page_dwell
 from db.questions import (
     get_recent_assistant_exchanges,
@@ -47,7 +50,7 @@ from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
-from services import assistant, library, session
+from services import assistant, flashcards as flashcards_service, library, session
 from services.intervention import AssistantInterventionPolicy
 from services.session_memory import SessionMemory
 
@@ -265,14 +268,29 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             "mask": assistant.resolve_paragraph_mask(
                 doc_id, page, result.get("paragraph_mask")
             ),
+            # Zone précise visée par la question : citation que le lecteur
+            # retrouve sur la page pour la cadrer entière à l'écran. Entre la
+            # décision d'intervenir et l'arrivée de la question, l'étudiant a pu
+            # zoomer ou défiler : c'est cette citation, pas la page, qui dit où
+            # revenir. Best-effort : None -> le lecteur cadre le haut de page.
+            "zone": _safe_zone(result, page),
+            # Page-contexte de la question : le client y cadre la zone. Elle a
+            # pu changer entre « Quiz-moi » et l'arrivée de la question.
+            "page": page,
         }
         if gated:
             # La politique se tait tant que l'étudiant doit répondre.
             state["gated"] = True
-            event["page"] = page
         # Un seul point de bascule : la génération est finie, le verrou est posé.
         refresh_busy()
         push_threadsafe(loop, out, event)
+
+    def _safe_zone(result: dict, page: int) -> dict | None:
+        try:
+            return assistant.resolve_question_zone(doc_id, page, result)
+        except Exception:  # pragma: no cover - la zone est un confort, jamais bloquant
+            logger.debug("Zone de question non résolue", exc_info=True)
+            return None
 
     async def _sender() -> None:
         while True:
@@ -602,23 +620,27 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     except Exception:  # persistance best-effort
                         logger.debug("Persistance de la réponse ignorée", exc_info=True)
                     # Flashcard auto-portante créée à la bonne réponse (le LLM exclut
-                    # déjà metacognition/anticipation -> flashcard=null).
+                    # déjà metacognition/anticipation -> flashcard=null). Par le
+                    # service, comme les autres chemins : même politique de
+                    # doublon — une carte déjà connue n'est ni recréée ni annoncée.
                     flashcard_created = False
                     card = ev.get("flashcard")
                     if card and ev.get("verdict") in ("correct", "partial"):
                         try:
-                            save_flashcard(
-                                DEFAULT_USER_ID,
-                                question_id=_qid,
-                                front=card.get("front", ""),
-                                back=card.get("back", ""),
-                                tags=card.get("tags"),
-                                difficulty=card.get("difficulty") or 2,
-                                source="auto",
-                                document_id=doc_id,
-                                session_id=_sid,
-                            )
-                            flashcard_created = True
+                            _front, _back = card.get("front", ""), card.get("back", "")
+                            if flashcards_service.find_flashcard(_front, _back) is None:
+                                flashcards_service.create_flashcard(
+                                    DEFAULT_USER_ID,
+                                    question_id=_qid,
+                                    front=_front,
+                                    back=_back,
+                                    tags=card.get("tags"),
+                                    difficulty=card.get("difficulty") or 2,
+                                    source="auto",
+                                    document_id=doc_id,
+                                    session_id=_sid,
+                                )
+                                flashcard_created = True
                         except Exception:  # persistance best-effort
                             logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
                     # Idée principale présente (correct/partial) -> fin du verrouillage.

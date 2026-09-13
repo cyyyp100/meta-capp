@@ -11,6 +11,7 @@ from pathlib import Path
 from db import get_connection
 from db.user import DEFAULT_USER_ID, ensure_default_user
 from utils.tags import fallback_flashcard_tags, normalize_flashcard_tags
+from utils.text import fingerprint
 
 logger = logging.getLogger("DB.flashcards")
 
@@ -23,6 +24,26 @@ _SR_INITIAL_INTERVAL_DAYS = 1.0
 def _sql_datetime(dt: datetime) -> str:
     """Format comparable aux datetime() de SQLite (heure locale, sans 'T')."""
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def flashcard_key(front: str, back: str) -> str:
+    """Clé de doublon d'une carte : empreinte pliée du recto et du verso.
+
+    UNE seule définition, partagée par l'écriture (`save_flashcard`), la
+    recherche d'un doublon (`find_flashcard_id`) et la migration v29 qui a posé
+    l'index UNIQUE — trois copies divergeraient.
+    """
+    return fingerprint(front or "", back or "")
+
+
+def find_flashcard_id(user_id: int, dedup_key: str) -> int | None:
+    """Id de la carte qui porte déjà cette clé, None si elle n'existe pas."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM flashcards WHERE user_id=? AND dedup_key=? LIMIT 1",
+        (user_id or DEFAULT_USER_ID, dedup_key),
+    ).fetchone()
+    return int(row["id"]) if row else None
 
 
 def save_flashcard(
@@ -38,19 +59,33 @@ def save_flashcard(
     session_id: int | None = None,
     asset_paths: list[str] | None = None,
     language: str | None = None,
+    dedup_key: str | None = None,
 ) -> int:
+    """Enregistre une carte ; renvoie son id.
+
+    JAMAIS DE DOUBLON : l'index UNIQUE (user_id, dedup_key) posé par la
+    migration v29 fait de l'insertion un no-op quand la clé existe déjà, et
+    c'est alors l'id de la carte EXISTANTE qui est renvoyé — l'appelant qui
+    veut savoir si la carte est neuve compare avec `find_flashcard_id` avant.
+    `dedup_key` par défaut = `flashcard_key(front, back)` ; une carte réécrite
+    par le LLM depuis un échange passe l'empreinte de l'échange brut à la place
+    (cf. services.flashcards.create_flashcard).
+    """
     ensure_default_user()
     normalized_tags = normalize_flashcard_tags(tags)
     if not normalized_tags:
         normalized_tags = fallback_flashcard_tags(front, back, minimum=1)
     assets = _encode_flashcard_assets(asset_paths or [])
+    key = dedup_key or flashcard_key(front, back)
     conn = get_connection()
     with conn:
         cur = conn.execute(
             """INSERT INTO flashcards
                (user_id, question_id, session_id, document_id, chapter_id, front, back,
-                tags, assets_json, difficulty, source, due_at, interval_days, language)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tags, assets_json, difficulty, source, due_at, interval_days, language,
+                dedup_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, dedup_key) DO NOTHING""",
             (
                 user_id or DEFAULT_USER_ID,
                 question_id,
@@ -66,8 +101,14 @@ def save_flashcard(
                 _sql_datetime(datetime.now() + timedelta(days=_SR_INITIAL_INTERVAL_DAYS)),
                 _SR_INITIAL_INTERVAL_DAYS,
                 language,
+                key,
             ),
         )
+    if cur.rowcount == 0:
+        existing = find_flashcard_id(user_id, key)
+        if existing is not None:
+            logger.info("Flashcard déjà présente id=%s (doublon ignoré, source=%s)", existing, source)
+            return existing
     logger.info("Flashcard créée id=%s source=%s", cur.lastrowid, source)
     return int(cur.lastrowid)
 

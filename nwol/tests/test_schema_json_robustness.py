@@ -149,3 +149,28 @@ def test_recall_requires_a_usable_mask():
     )
     assert parsed is not None
     assert parsed["paragraph_mask"]["enabled"] is True
+
+
+def test_question_keeps_the_source_excerpt_flattened():
+    from llm.schema_json import parse_question
+
+    parsed = parse_question({
+        "question_type": "open",
+        "question": "Que dit le théorème ?",
+        "expected_answer": "La dérivée s'annule.",
+        "source_excerpt": "  Le théorème de Rolle\n affirme   que la dérivée s'annule.  ",
+    })
+    assert parsed is not None
+    assert parsed["source_excerpt"] == "Le théorème de Rolle affirme que la dérivée s'annule."
+
+
+def test_question_without_source_excerpt_gets_an_empty_string():
+    from llm.schema_json import parse_question
+
+    parsed = parse_question({
+        "question_type": "open",
+        "question": "Q ?",
+        "expected_answer": "R.",
+    })
+    assert parsed is not None
+    assert parsed["source_excerpt"] == ""

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Highlighter, Plus } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +29,15 @@ const HL_COLORS: Record<string, string> = {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
 const BASE_WIDTH = 820;
+
+// Cadrage de la zone d'une question : ce qu'il faut laisser libre autour pour
+// qu'elle soit VISIBLE et non simplement dans le viewport — la barre d'outils
+// et la bannière de blocage recouvrent le haut du cadre.
+const ZONE_TOP_INSET = 112;
+const ZONE_BOTTOM_INSET = 24;
+const ZONE_SIDE_INSET = 24;
+/** Marge (en points PDF) autour du passage cité, pour le liseré. */
+const ZONE_PAD_PTS = 4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -63,6 +72,16 @@ function mergeLineRects(rects: number[][]): number[][] {
     merged.push(cur);
   }
   return merged;
+}
+
+/** Boîte englobante [x0, y0, x1, y1] d'une liste de rects (points PDF). */
+function boundsOf(rects: number[][]): number[] {
+  return [
+    Math.min(...rects.map((r) => r[0])),
+    Math.min(...rects.map((r) => r[1])),
+    Math.max(...rects.map((r) => r[2])),
+    Math.max(...rects.map((r) => r[3])),
+  ];
 }
 
 /**
@@ -104,6 +123,7 @@ const selBtn: React.CSSProperties = {
 export function Reader() {
   const { docId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const t = useT();
   const confirm = useConfirm();
   // `prefers-reduced-motion` est neutralisé en CSS, mais Motion anime en JS :
@@ -157,6 +177,14 @@ export function Reader() {
   // Question automatique bloquante : scroll figé sur la page-contexte.
   const [locked, setLocked] = useState(false);
   const [lockedPage, setLockedPage] = useState(1);
+  // Zone précise visée par la question en cours (boîte en points PDF) : on la
+  // cadre ENTIÈRE à l'écran et on l'encadre d'un liseré, jusqu'à ce que la
+  // carte se referme. Elle vient d'une citation retrouvée sur la page
+  // (même chemin que le masque et les surlignages : api.searchPage).
+  const [zone, setZone] = useState<{ page: number; rect: number[] } | null>(null);
+  // « ← Bibliothèque » cliqué avant que la session ne soit ouverte : on
+  // l'abandonne dès qu'elle arrive, sinon elle resterait orpheline.
+  const leftRef = useRef(false);
   // Rappel libre : passage caché sous un cache opaque le temps de répondre.
   const [maskByPage, setMaskByPage] = useState<Record<number, number[][]>>({});
 
@@ -188,6 +216,35 @@ export function Reader() {
       if (rects.length) setMaskByPage({ [page]: rects });
     } catch {
       /* rien à masquer : dégradation silencieuse, comme pour les citations */
+    }
+  }
+
+  /**
+   * Localise la citation d'une zone sur sa page. PDFium retrouve un passage
+   * qui court sur plusieurs lignes, mais une citation longue peut buter sur
+   * un détail d'extraction (ligature, césure) : on retombe alors sur son début
+   * et sa fin, dont l'union donne la même boîte.
+   */
+  async function locateQuote(page: number, quote: string): Promise<number[][]> {
+    const full = mergeLineRects((await api.searchPage(id, page, quote)).rects_pts);
+    if (full.length || quote.length < 80) return full;
+    const head = quote.slice(0, 60).trim();
+    const tail = quote.slice(-60).trim();
+    const [a, b] = await Promise.all([api.searchPage(id, page, head), api.searchPage(id, page, tail)]);
+    return mergeLineRects([...a.rects_pts, ...b.rects_pts]);
+  }
+
+  async function handleZone(quote: string | null, page: number) {
+    // Lecture reconstruite (fichier de code) : pas de géométrie, la page fait zone.
+    if (!quote || isCode) {
+      setZone(null);
+      return;
+    }
+    try {
+      const rects = await locateQuote(page, quote);
+      setZone(rects.length ? { page, rect: boundsOf(rects) } : null);
+    } catch {
+      setZone(null); // introuvable : on cadre le haut de page, comme avant
     }
   }
 
@@ -271,7 +328,12 @@ export function Reader() {
         color: "key",
         anchor: anchor ?? undefined,
       });
-      setSavedHighlights((prev) => [...prev, { id: hid, page, quote: text, rects, color: "key", anchor }]);
+      // Le serveur ne crée pas deux fois le même passage : il rend l'id du
+      // surlignage existant, qu'on remplace au lieu d'empiler une couche.
+      setSavedHighlights((prev) => {
+        const next = { id: hid, page, quote: text, rects, color: "key" as const, anchor };
+        return prev.some((h) => h.id === hid) ? prev.map((h) => (h.id === hid ? next : h)) : [...prev, next];
+      });
     } catch {
       /* persistance best-effort */
     }
@@ -405,8 +467,13 @@ export function Reader() {
     const el = scrollRef.current;
     if (!el) return;
     if (locked) {
-      // Page bloquée : on garde la page-contexte en haut, sans saut.
-      el.querySelector(`[data-page="${lockedPage}"]`)?.scrollIntoView({ block: "start" });
+      // Page bloquée : la zone reste cadrée à travers le zoom ; sans zone, on
+      // garde la page-contexte en haut, sans saut.
+      // `fit: false` : c'est l'utilisateur qui zoome, on ne lui reprend pas
+      // la main — on garde seulement la zone dans la vue.
+      if (!frameZone("auto", false)) {
+        el.querySelector(`[data-page="${lockedPage}"]`)?.scrollIntoView({ block: "start" });
+      }
       zoomAnchorRef.current = null;
       return;
     }
@@ -417,6 +484,53 @@ export function Reader() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom]);
+
+  /**
+   * Amène la zone de la question ENTIÈRE à l'écran : centrée verticalement
+   * dans la partie libre du cadre, ramenée dans la vue horizontalement (par
+   * `panX`, qui reste manipulable), et — au cadrage initial seulement (`fit`) —
+   * si elle ne tient pas au zoom courant, le zoom baisse juste assez pour
+   * qu'elle tienne. Jamais l'inverse, et jamais contre un zoom que
+   * l'utilisateur vient de choisir : zoomer et dézoomer restent à lui pendant
+   * le blocage. Rend false s'il n'y a rien à cadrer (pas de zone, ou pas sur
+   * la page bloquée).
+   *
+   * C'est ce qui remplace « page-contexte en haut » : entre la décision de
+   * poser la question et son arrivée, on a pu défiler ou zoomer, et le passage
+   * visé se retrouvait coupé au bord du cadre.
+   */
+  function frameZone(behavior: ScrollBehavior, fit = true): boolean {
+    const el = scrollRef.current;
+    if (!el || !zone || zone.page !== lockedPage) return false;
+    const pageEl = el.querySelector<HTMLElement>(`[data-page="${zone.page}"]`);
+    if (!pageEl) return false;
+    const [w] = (data?.page_sizes_pts ?? [])[zone.page - 1] ?? [595, 842];
+    const scale = (BASE_WIDTH * zoom) / w;
+    const [x0, y0, x1, y1] = zone.rect;
+    const zoneW = (x1 - x0 + 2 * ZONE_PAD_PTS) * scale;
+    const zoneH = (y1 - y0 + 2 * ZONE_PAD_PTS) * scale;
+    const availW = el.clientWidth - 2 * ZONE_SIDE_INSET;
+    const availH = el.clientHeight - ZONE_TOP_INSET - ZONE_BOTTOM_INSET;
+    if (fit && (zoneH > availH || zoneW > availW) && zoom > MIN_ZOOM) {
+      const fitZoom = clamp(Math.min(availH / zoneH, availW / zoneW) * zoom * 0.96, MIN_ZOOM, MAX_ZOOM);
+      if (fitZoom < zoom - 0.01) {
+        setZoom(fitZoom); // l'effet de zoom rappellera frameZone une fois la mise en page refaite
+        return true;
+      }
+    }
+    const elRect = el.getBoundingClientRect();
+    const pageRect = pageEl.getBoundingClientRect();
+    const zoneTop = pageRect.top - elRect.top + el.scrollTop + (y0 - ZONE_PAD_PTS) * scale;
+    const top = zoneTop - ZONE_TOP_INSET - Math.max(0, (availH - zoneH) / 2);
+    el.scrollTo({ top: clamp(top, 0, Math.max(0, el.scrollHeight - el.clientHeight)), behavior });
+    const zoneLeft = pageRect.left - elRect.left + (x0 - ZONE_PAD_PTS) * scale;
+    const zoneRight = zoneLeft + zoneW;
+    let dx = 0;
+    if (zoneLeft < ZONE_SIDE_INSET) dx = ZONE_SIDE_INSET - zoneLeft;
+    else if (zoneRight > el.clientWidth - ZONE_SIDE_INSET) dx = el.clientWidth - ZONE_SIDE_INSET - zoneRight;
+    if (dx) setPanX((p) => clampPanX(p + dx));
+    return true;
+  }
 
   // Borne le décalage horizontal : on peut parcourir un PDF zoomé plus large que le
   // viewport (overflow/2 de chaque côté) PLUS une marge pour le pousser sur le côté.
@@ -556,7 +670,17 @@ export function Reader() {
     startTimeRef.current = Date.now();
     maxPageRef.current = 1;
     let cancelled = false;
-    api.startSession(id).then((r) => !cancelled && setSessionId(r.session_id)).catch(() => {});
+    api
+      .startSession(id)
+      .then((r) => {
+        // Parti avant la réponse : la session n'a pas eu lieu, on l'efface.
+        if (leftRef.current) {
+          api.abandonSession(r.session_id).catch(() => {});
+          return;
+        }
+        if (!cancelled) setSessionId(r.session_id);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -679,13 +803,17 @@ export function Reader() {
   }, [isCode, quoteMarksByPage, savedHighlights]);
 
   // Verrouillage de la lecture pendant une question automatique : on amène la
-  // page-contexte dans la vue et on fige le scroll jusqu'à la bonne réponse.
+  // ZONE visée entière dans la vue (à défaut, la page-contexte) et on fige le
+  // scroll jusqu'à la bonne réponse. Relancé quand la zone arrive — sa
+  // localisation (api.searchPage) suit la question d'un aller-retour.
   useEffect(() => {
     if (!locked) return;
     clearSelection();
+    if (frameZone("smooth")) return;
     const pageEl = scrollRef.current?.querySelector(`[data-page="${lockedPage}"]`);
     pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [locked, lockedPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, lockedPage, zone]);
 
   function handleGatedChange(active: boolean, page?: number) {
     if (active && page) setLockedPage(page);
@@ -701,6 +829,23 @@ export function Reader() {
     // avant que la visite ne renonce à trouver son ancre.
     const tour = useTour.getState();
     if (currentStep(tour)?.id === "warmup") tour.next();
+  }
+
+  /**
+   * « ← Bibliothèque » depuis le sas d'entrée : mauvais document. Rien n'a été
+   * lu, donc la session est EFFACÉE, pas close — close, elle compterait (durée,
+   * frise de progression). Le WebSocket se ferme avec le lecteur : le serveur
+   * coupe alors la génération en cours (accroche de curiosité, fiche du
+   * document) pour que le document suivant ne l'attende pas.
+   */
+  function handleLeave() {
+    leftRef.current = true;
+    if (sessionId != null) api.abandonSession(sessionId).catch(() => {});
+    // L'accroche du sas est peut-être en vol : coupée côté serveur, elle
+    // reviendrait vide et resterait en cache (staleTime infini) — le prochain
+    // passage sur ce document n'aurait plus d'accroche.
+    queryClient.removeQueries({ queryKey: ["hook", id] });
+    navigate("/");
   }
 
   async function handleEnd() {
@@ -868,6 +1013,31 @@ export function Reader() {
                           rx={1}
                         />
                       ))}
+                    </svg>
+                  ) : null}
+                  {/* Zone visée par la question en cours : un liseré à l'accent,
+                      pour qu'on voie de quoi Gemma parle — surtout quand la
+                      lecture est bloquée dessus. */}
+                  {zone && zone.page === n ? (
+                    <svg
+                      viewBox={`0 0 ${w} ${h}`}
+                      preserveAspectRatio="none"
+                      aria-hidden
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 4 }}
+                    >
+                      <rect
+                        data-testid="question-zone"
+                        x={zone.rect[0] - ZONE_PAD_PTS}
+                        y={zone.rect[1] - ZONE_PAD_PTS}
+                        width={zone.rect[2] - zone.rect[0] + 2 * ZONE_PAD_PTS}
+                        height={zone.rect[3] - zone.rect[1] + 2 * ZONE_PAD_PTS}
+                        fill="var(--accent)"
+                        fillOpacity={0.07}
+                        stroke="var(--accent)"
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        rx={3}
+                      />
                     </svg>
                   ) : null}
                   {/* Ancre de la visite guidée sur le passage cité (cf.
@@ -1082,12 +1252,13 @@ export function Reader() {
         onRemoveContextChip={removeContextChip}
         onGatedChange={handleGatedChange}
         onMask={handleMask}
+        onZone={handleZone}
         demo={demo}
         onDemoReady={handleDemoReady}
       />
 
       {data && !entered && (
-        <EntrySas docId={id} title={data.title} onStart={startReading} demo={demo} />
+        <EntrySas docId={id} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
       )}
 
       {exitMetrics && <ExitSas metrics={exitMetrics} onClose={handleExitSasClose} demo={demo} />}

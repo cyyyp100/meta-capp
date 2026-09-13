@@ -19,6 +19,8 @@ export function DocumentGrid({
   emptyMessage,
   onKeyword,
   onMove,
+  onRename,
+  onDelete,
   onImport,
   importing,
 }: {
@@ -32,6 +34,8 @@ export function DocumentGrid({
   emptyMessage: string;
   onKeyword: (keyword: string) => void;
   onMove: (docId: number, folderId: number | null) => void;
+  onRename: (docId: number, title: string) => void;
+  onDelete: (doc: DocumentSummary) => void;
   /** Import depuis l'état vide — le tout premier écran d'un nouvel utilisateur. */
   onImport?: () => void;
   importing?: boolean;
@@ -121,6 +125,8 @@ export function DocumentGrid({
               folders={folders}
               onKeyword={onKeyword}
               onMove={onMove}
+              onRename={onRename}
+              onDelete={onDelete}
             />
           </motion.div>
         ))}
