@@ -26,11 +26,19 @@ export function SasOverlay({
   /** Ancre le voile au conteneur positionné le plus proche plutôt qu'à la fenêtre. */
   contained = false,
   className,
+  corner,
 }: {
   children?: React.ReactNode;
   variant?: SasVariant;
   contained?: boolean;
   className?: string;
+  /**
+   * Coin HAUT-GAUCHE du voile (« ← Bibliothèque » du sas d'entrée). Rendu à
+   * même le voile, pas dans le bloc de contenu : celui-ci est centré et n'a
+   * que la hauteur de son contenu, donc un `absolute top-0` posé dedans
+   * atterrissait à mi-hauteur de l'écran.
+   */
+  corner?: React.ReactNode;
 }) {
   const reduce = useReducedMotion();
 
@@ -56,6 +64,7 @@ export function SasOverlay({
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_50%_at_50%_45%,var(--accent-soft),transparent_70%)] opacity-60"
         />
       )}
+      {corner && <div className="absolute top-4 left-4 z-10">{corner}</div>}
       <div className="relative max-h-full w-full overflow-y-auto">
         <div className="grid min-h-full place-items-center">{children}</div>
       </div>

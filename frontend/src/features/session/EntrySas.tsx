@@ -133,8 +133,7 @@ export function EntrySas({
     if (demo) return <WarmUp cards={demoCards} onDone={onStart} demo />;
     if (!cards) {
       return (
-        <SasOverlay contained>
-          {onLeave && !demo && <LeaveButton onLeave={onLeave} />}
+        <SasOverlay contained corner={onLeave && !demo ? <LeaveButton onLeave={onLeave} /> : null}>
           <div className="text-muted-foreground italic">{t("common.loading")}</div>
         </SasOverlay>
       );
@@ -146,10 +145,9 @@ export function EntrySas({
   const elapsed = totalSeconds - left;
 
   return (
-    <SasOverlay contained>
-      {/* Le retour n'attend pas les 30 s : se tromper de document est
-          précisément le cas où l'on ne veut pas ralentir. */}
-      {onLeave && !demo && <LeaveButton onLeave={onLeave} />}
+    // Le retour n'attend pas les 30 s : se tromper de document est précisément
+    // le cas où l'on ne veut pas ralentir.
+    <SasOverlay contained corner={onLeave && !demo ? <LeaveButton onLeave={onLeave} /> : null}>
       <motion.div
         // La visite éclaire ce panneau ENTIER. L'ancre était sur le titre :
         // la découpe ne montrait que deux lignes, et le rituel qu'on venait
@@ -234,18 +232,16 @@ export function EntrySas({
 }
 
 /**
- * « ← Bibliothèque », en HAUT À GAUCHE du sas — là où l'on attend un retour
- * (barre du lecteur, navigateur), et hors du panneau central, qui ne parle
- * que du rituel. Posé sous le bouton « Continuer », il se lisait comme une
- * seconde issue du sas ; ici c'est une sortie, à sa place de sortie.
+ * « ← Bibliothèque », dans le coin HAUT-GAUCHE du voile (`SasOverlay.corner`)
+ * — là où l'on attend un retour (barre du lecteur, navigateur), et hors du
+ * panneau central, qui ne parle que du rituel. Posé sous « Continuer », il se
+ * lisait comme une seconde issue du sas ; ici c'est une sortie, à sa place.
  */
 function LeaveButton({ onLeave }: { onLeave: () => void }) {
   const t = useT();
   return (
-    <div className="absolute top-4 left-4 z-10">
-      <Button variant="ghost" size="sm" onClick={onLeave} title={t("entry.back_library_hint")}>
-        {t("entry.back_library")}
-      </Button>
-    </div>
+    <Button variant="ghost" size="sm" onClick={onLeave} title={t("entry.back_library_hint")}>
+      {t("entry.back_library")}
+    </Button>
   );
 }

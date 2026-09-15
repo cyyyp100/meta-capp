@@ -1267,18 +1267,28 @@ function QaCard({
       {record.answer && (feedback || !live) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("gemma.answer_given")}</span>
-          <div style={{ ...bubble("user"), alignSelf: "flex-start", maxWidth: "100%" }}>{record.answer}</div>
+          <div
+            style={{ ...bubble("user"), alignSelf: "flex-start", maxWidth: "100%" }}
+            dangerouslySetInnerHTML={{ __html: renderMathToHtml(record.answer) }}
+          />
         </div>
       )}
 
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <VerdictBadge verdict={feedback.verdict} />
-          {feedback.feedback && <div style={{ fontSize: 13, color: "var(--text-soft)" }}>{feedback.feedback}</div>}
+          {/* La correction cite les formules du passage ($\alpha$…) comme
+              l'énoncé : même rendu KaTeX, sinon le LaTeX s'affiche brut. */}
+          {feedback.feedback && (
+            <div
+              style={{ fontSize: 13, color: "var(--text-soft)" }}
+              dangerouslySetInnerHTML={{ __html: renderMathToHtml(feedback.feedback) }}
+            />
+          )}
           {live && feedback.hint && feedback.verdict === "incorrect" && (
             <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <Lightbulb className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
-              {feedback.hint}
+              <span dangerouslySetInnerHTML={{ __html: renderMathToHtml(feedback.hint) }} />
             </div>
           )}
           {live && (
