@@ -38,7 +38,14 @@ export function WhyButton({ whyKey }: { whyKey: WhyKey }) {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[620px]">
+      {/* Le bouton vit DANS un SAS (`SasOverlay`, `z-100`) : au `z-50` par
+          défaut de la Dialog, le panneau s'ouvrait DERRIÈRE le sas de sortie
+          — invisible, mais avec le focus et le verrou de défilement. Il passe
+          au-dessus des SAS, sous les bulles de la visite (`z-120`/`z-130`). */}
+      <DialogContent
+        className="z-[110] max-h-[88vh] overflow-y-auto sm:max-w-[620px]"
+        overlayClassName="z-[110]"
+      >
         <DialogHeader>
           <DialogTitle className="pr-8 font-serif text-h2">
             {content.title}

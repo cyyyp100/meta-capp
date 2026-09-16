@@ -135,7 +135,10 @@ export function Reader() {
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   const [sessionId, setSessionId] = useState<number | null>(null);
-  const [exitMetrics, setExitMetrics] = useState<SessionMetrics | null>(null);
+  // Sas de sortie : `null` tant qu'on lit. Au clic sur « Terminer », il
+  // s'ouvre avec `metrics: null` — la clôture (`endSession`) répond ensuite et
+  // remplit les chiffres. Le lecteur n'a donc jamais à attendre le serveur.
+  const [exit, setExit] = useState<{ sessionId: number; metrics: SessionMetrics | null } | null>(null);
   const [showPostExitRest, setShowPostExitRest] = useState(false);
   const [entered, setEntered] = useState(false);
   // 0 = pas encore monté ; la vraie valeur est posée par l'effet de démarrage de session.
@@ -426,9 +429,9 @@ export function Reader() {
       },
       openPanel: () => gemmaControls.current?.openPanel(),
       play: (beat) => gemmaControls.current?.play(beat),
-      endSession: () => setExitMetrics(demoMetricsRef.current),
+      endSession: () => setExit({ sessionId: DEMO_METRICS.session_id, metrics: demoMetricsRef.current }),
       closeExitSas: () => {
-        setExitMetrics(null);
+        setExit(null);
         setShowPostExitRest(true);
       },
     });
@@ -834,12 +837,15 @@ export function Reader() {
   /**
    * « ← Bibliothèque » depuis le sas d'entrée : mauvais document. Rien n'a été
    * lu, donc la session est EFFACÉE, pas close — close, elle compterait (durée,
-   * frise de progression). Le WebSocket se ferme avec le lecteur : le serveur
-   * coupe alors la génération en cours (accroche de curiosité, fiche du
-   * document) pour que le document suivant ne l'attende pas.
+   * frise de progression). Gemma est coupée TOUT DE SUITE : l'accroche de
+   * curiosité et la fiche du document sont peut-être en vol, et tant qu'Ollama
+   * génère, toute la machine rame. La fermeture du WebSocket coupe aussi, mais
+   * seulement quand le serveur constate la déconnexion, après la navigation —
+   * l'appel explicite part avant, sans attendre sa réponse.
    */
   function handleLeave() {
     leftRef.current = true;
+    api.cancelGenerations().catch(() => {});
     if (sessionId != null) api.abandonSession(sessionId).catch(() => {});
     // L'accroche du sas est peut-être en vol : coupée côté serveur, elle
     // reviendrait vide et resterait en cache (staleTime infini) — le prochain
@@ -848,28 +854,38 @@ export function Reader() {
     navigate("/");
   }
 
-  async function handleEnd() {
+  /**
+   * « Terminer » : le sas de sortie s'ouvre TOUT DE SUITE et Gemma passe en
+   * fond. Deux choses partent en parallèle sans qu'on les attende : le
+   * WebSocket du lecteur se ferme (`ended` -> plus d'intervention, plus de
+   * dérive d'attention pendant les réflexions) et la clôture côté serveur, qui
+   * coupe la génération en vol et purge la file LLM avant d'écrire la session
+   * (cf. services.session.end_session). Le bilan ne se demande qu'à sa
+   * réponse : il trouve alors un worker libre.
+   */
+  function handleEnd() {
     // Démonstration : le bilan est écrit d'avance, il n'y a pas de session à
     // clore. C'est aussi le chemin qu'emprunte la visite pour faire apparaître
     // le sas de sortie au moment où elle l'explique.
     if (demo) {
-      setExitMetrics(demoMetricsRef.current);
+      setExit({ sessionId: DEMO_METRICS.session_id, metrics: demoMetricsRef.current });
       return;
     }
     if (sessionId == null) {
       navigate("/");
       return;
     }
+    if (exit) return;
     const duration = Math.round((Date.now() - startTimeRef.current) / 1000);
-    try {
-      setExitMetrics(await api.endSession(sessionId, maxPageRef.current, duration));
-    } catch {
-      navigate("/");
-    }
+    setExit({ sessionId, metrics: null });
+    api
+      .endSession(sessionId, maxPageRef.current, duration)
+      .then((metrics) => setExit((e) => (e && e.sessionId === sessionId ? { sessionId, metrics } : e)))
+      .catch(() => navigate("/"));
   }
 
   function handleExitSasClose() {
-    setExitMetrics(null);
+    setExit(null);
     setShowPostExitRest(true);
   }
 
@@ -1254,6 +1270,7 @@ export function Reader() {
         onMask={handleMask}
         onZone={handleZone}
         demo={demo}
+        ended={exit !== null}
         onDemoReady={handleDemoReady}
       />
 
@@ -1261,7 +1278,9 @@ export function Reader() {
         <EntrySas docId={id} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
       )}
 
-      {exitMetrics && <ExitSas metrics={exitMetrics} onClose={handleExitSasClose} demo={demo} />}
+      {exit && (
+        <ExitSas sessionId={exit.sessionId} metrics={exit.metrics} onClose={handleExitSasClose} demo={demo} />
+      )}
 
       {/* En démonstration, le repos est raccourci et la visite reprend la main
           à sa fin — on ne renvoie pas vers l'accueil au milieu d'un tutoriel. */}

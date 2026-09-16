@@ -22,7 +22,7 @@ from db.metacog import CRITERIA, ensure_profile, get_history
 from db.page_dwell import get_page_dwell
 from db.session_gauges import get_first_gauges, get_session_gauges
 from db.session_reflections import get_session_reflections
-from db.sessions import get_session, list_sessions
+from db.sessions import get_session, list_sessions, reading_ranks
 from db.user import DEFAULT_USER_ID
 from services.session import session_metrics
 
@@ -61,6 +61,7 @@ def list_progress_sessions(
     sessions = list_sessions(user_id, limit=limit)
     moves = _history_by_session(user_id)
     titles = _titles_for(sessions)
+    ranks = _safe(lambda: reading_ranks(user_id), {})
 
     items: list[dict] = []
     for session in sessions:
@@ -70,6 +71,9 @@ def list_progress_sessions(
             "session_id": sid,
             "document_id": session.get("document_id"),
             "document_title": titles.get(session.get("document_id"), ""),
+            # « Lecture n » de ce document — le nom de la session dans la frise,
+            # avec le titre. 0 quand la session n'a pas de document.
+            "reading_index": ranks.get(sid, 0),
             "started_at": session.get("started_at") or "",
             "ended_at": session.get("ended_at") or "",
             "duration_s": int(session.get("duration_s") or 0),
@@ -106,9 +110,10 @@ def get_session_progress(session_id: int, user_id: int = DEFAULT_USER_ID) -> dic
         "session_id": int(session_id),
         "document": {
             "id": document.get("id"),
-            "title": document.get("title") or "",
+            "title": _document_title(document),
             "subject": document.get("subject") or "",
         },
+        "reading_index": _safe(lambda: reading_ranks(user_id), {}).get(int(session_id), 0),
         "started_at": session.get("started_at") or "",
         "ended_at": session.get("ended_at") or "",
         "completed": bool(session.get("ended_at")),
@@ -176,6 +181,15 @@ def _history_by_session(user_id: int) -> dict[int, list[dict]]:
     return grouped
 
 
+def _document_title(document: dict) -> str:
+    """Le titre d'un document EST son `filename` (renommable, cf. `rename_document`) :
+    la ligne `documents` n'a pas de colonne `title`, c'est `services/library._summary`
+    qui l'expose sous ce nom. Lire `title` ici rendait toujours une chaîne
+    vide — et la frise affichait le même libellé générique pour chaque
+    session."""
+    return document.get("filename") or ""
+
+
 def _titles_for(sessions: list[dict]) -> dict[int, str]:
     """Titres des documents lus, une lecture par document et non par session."""
     titles: dict[int, str] = {}
@@ -184,7 +198,7 @@ def _titles_for(sessions: list[dict]) -> dict[int, str]:
         if doc_id is None or doc_id in titles:
             continue
         document = _safe(lambda: get_document(doc_id), None) or {}
-        titles[doc_id] = document.get("title") or ""
+        titles[doc_id] = _document_title(document)
     return titles
 
 

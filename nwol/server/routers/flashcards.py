@@ -110,6 +110,9 @@ def from_exchange(body: FromExchangeBody) -> dict:
 
     final_front = (card or {}).get("front") or front
     final_back = (card or {}).get("back") or back
+    # La réécriture peut retomber sur une carte déjà connue : le service rend
+    # alors son id, et `created` doit le dire (rien n'a été écrit).
+    already = find_flashcard(final_front, final_back)
     card_id = create_flashcard(
         front=final_front,
         back=final_back,
@@ -119,7 +122,7 @@ def from_exchange(body: FromExchangeBody) -> dict:
         document_id=body.doc_id,
         origin=(front, back),
     )
-    return {"id": card_id, "front": final_front, "back": final_back, "created": True}
+    return {"id": card_id, "front": final_front, "back": final_back, "created": already is None}
 
 
 @router.post("/{card_id}/review")

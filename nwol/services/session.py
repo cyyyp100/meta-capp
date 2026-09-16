@@ -32,6 +32,7 @@ from db.sessions import end_session as _end_session
 from db.sessions import get_session
 from db.sessions import start_session as _start_session
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
+from llm.ollama_client import cancel_pending_generations
 from metacog.gauges import (
     clamp_gauge,
     make_gauges,
@@ -189,6 +190,15 @@ def start_session(doc_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
 
 
 def end_session(session_id: int, pages_read: int | None = None, duration_s: int | None = None) -> dict:
+    """Clôt la session et coupe Gemma — en file ET en vol.
+
+    « Terminer » arrive souvent pendant qu'une correction ou une intervention
+    est en cours : leur résultat n'a plus de destinataire, et il n'y a qu'UN
+    worker LLM. Sans cette coupure, le bilan du sas de sortie (`session_analysis`)
+    attendait derrière une génération dont plus personne ne voulait. La coupure
+    précède l'écriture : le bilan, enfilé après la réponse de cet appel, capture
+    un token neuf et n'est pas concerné."""
+    cancel_pending_generations()
     _end_session(session_id, pages_read=pages_read, duration_s=duration_s)
     return session_metrics(session_id)
 

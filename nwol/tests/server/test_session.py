@@ -29,6 +29,28 @@ def test_session_lifecycle_and_metrics(client, tmp_path, make_pdf):
     assert len(m["reflection_questions"]) == 2
 
 
+def test_ending_a_session_cuts_gemma_before_anything_else(client, tmp_path, make_pdf, monkeypatch):
+    """« Terminer » arrive pendant qu'une correction ou une intervention est en
+    vol : il n'y a qu'un worker LLM, et le bilan du sas de sortie attendait
+    derrière. La clôture coupe Gemma (file + en vol) AVANT d'écrire, pour que le
+    bilan, enfilé après la réponse, parte sur un worker libre."""
+    import services.session as session_service
+
+    events: list[str] = []
+    monkeypatch.setattr(session_service, "cancel_pending_generations", lambda: events.append("cancel"))
+    real_end = session_service._end_session
+    monkeypatch.setattr(
+        session_service, "_end_session",
+        lambda *a, **kw: (events.append("end"), real_end(*a, **kw))[1],
+    )
+
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    resp = client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 10})
+    assert resp.status_code == 200
+    assert events == ["cancel", "end"]
+
+
 def test_session_finalize_updates_profile(client, tmp_path, make_pdf):
     from db.metacog import get_profile
     from db.session_reflections import get_session_reflections

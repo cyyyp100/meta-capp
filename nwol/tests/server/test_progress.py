@@ -79,3 +79,33 @@ def test_weekly_recap_counts_only_finished_sessions(client, tmp_path, make_pdf):
     assert recap["sessions"] == 1
     assert recap["pages_read"] == 2
     assert recap["duration_s"] == 300
+
+
+def test_sessions_are_named_after_their_document_and_reading_number(client, tmp_path, make_pdf):
+    """La frise nomme chaque session « <titre du document> · Lecture n » — n
+    compté PARMI les lectures de ce document. Le titre vient de
+    `documents.filename` (la ligne n'a pas de colonne `title`) : le lire sous
+    un autre nom rendait une chaîne vide et le même libellé pour toutes."""
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    other = client.post("/api/library/import", json={
+        "path": make_pdf(tmp_path / "autre.pdf", ["Autre document."]),
+    }).json()["id"]
+
+    first = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    client.post(f"/api/session/{first}/end", json={"pages_read": 1, "duration_s": 60})
+    elsewhere = client.post("/api/session/start", json={"doc_id": other}).json()["session_id"]
+    client.post(f"/api/session/{elsewhere}/end", json={"pages_read": 1, "duration_s": 60})
+    second = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    client.post(f"/api/session/{second}/end", json={"pages_read": 1, "duration_s": 60})
+
+    rows = {r["session_id"]: r for r in client.get("/api/progress/sessions").json()["sessions"]}
+    assert rows[first]["document_title"] == "progress.pdf"
+    assert rows[first]["reading_index"] == 1
+    assert rows[second]["reading_index"] == 2
+    # L'autre document a sa propre numérotation.
+    assert rows[elsewhere]["document_title"] == "autre.pdf"
+    assert rows[elsewhere]["reading_index"] == 1
+
+    detail = client.get(f"/api/progress/session/{second}").json()
+    assert detail["document"]["title"] == "progress.pdf"
+    assert detail["reading_index"] == 2

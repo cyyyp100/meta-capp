@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { useT } from "../i18n";
-import { SessionDetail } from "../features/progress/SessionDetail";
+import { SessionDetail, sessionName } from "../features/progress/SessionDetail";
 import { WeeklyRecap } from "../features/progress/WeeklyRecap";
 
 export function Progress() {
@@ -42,7 +42,12 @@ export function Progress() {
   }, [sessions, selected]);
 
   return (
-    <div className="flex h-full flex-col gap-5 p-8.5">
+    // La page défile EN ENTIER (c'est `<main>` qui porte le défilement). Elle
+    // était en `h-full` avec la frise et le détail en `flex-1 min-h-0` : le
+    // bilan hebdomadaire prenait la hauteur qu'il voulait, et la zone du bas —
+    // les courbes, les réflexions — se retrouvait comprimée dans le reliquat,
+    // à lire par un ascenseur intérieur de quelques lignes.
+    <div className="flex flex-col gap-5 p-8.5">
       <header>
         {/* Retour explicite : cet écran n'a plus d'entrée dans la barre
             latérale, on y arrive depuis le profil et on doit pouvoir y revenir
@@ -66,10 +71,10 @@ export function Progress() {
       <WeeklyRecap />
 
       {isLoading && (
-        <div className="flex flex-1 gap-6" role="status" aria-busy="true">
+        <div className="flex gap-6" role="status" aria-busy="true">
           <span className="sr-only">{t("progress.loading")}</span>
-          <Skeleton className="h-full w-72 shrink-0 rounded-lg" />
-          <Skeleton className="h-full flex-1 rounded-lg" />
+          <Skeleton className="h-80 w-72 shrink-0 rounded-lg" />
+          <Skeleton className="h-80 flex-1 rounded-lg" />
         </div>
       )}
 
@@ -80,10 +85,13 @@ export function Progress() {
       )}
 
       {data && sessions.length > 0 && (
-        <div className="flex min-h-0 flex-1 gap-6">
+        <div className="flex items-start gap-6">
+          {/* La frise reste sous la main pendant qu'on défile le détail :
+              collée en haut de la fenêtre, et bornée à sa hauteur pour qu'une
+              longue frise défile en son sein sans repousser le reste. */}
           <nav
             aria-label={t("progress.title")}
-            className="w-72 shrink-0 overflow-y-auto pr-1"
+            className="sticky top-0 max-h-[calc(100vh-2rem)] w-72 shrink-0 overflow-y-auto pr-1"
           >
             <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
               {sessions.map((session) => (
@@ -98,7 +106,7 @@ export function Progress() {
             </ol>
           </nav>
 
-          <div className="min-w-0 flex-1 overflow-y-auto pr-1 pb-8">
+          <div className="min-w-0 flex-1 pr-1 pb-8">
             {selected === null ? (
               <p className="text-muted-foreground">{t("progress.select")}</p>
             ) : (
@@ -136,8 +144,11 @@ function TimelineRow({
           : "border-border bg-surface hover:border-border-strong hover:bg-surface-soft",
       )}
     >
+      {/* « <document> · Lecture n » : le nom d'une session, c'est ce qu'on a
+          lu et pour la combientième fois — pas un libellé identique sur
+          toutes les lignes. */}
       <span className="block truncate text-sm font-semibold">
-        {session.document_title || t("progress.detail_title")}
+        {sessionName(t, session.document_title, session.reading_index)}
       </span>
       <span className="mt-0.5 block text-[12px] text-muted-foreground">
         {session.completed

@@ -49,13 +49,21 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlayClassName,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /**
+   * Classes du voile, séparées de celles du contenu : un dialogue ouvert
+   * PAR-DESSUS une couche plus haute que `z-50` (les SAS sont en `z-100`)
+   * doit remonter ses deux moitiés, sinon le voile reste sous cette couche
+   * et le contenu avec lui.
+   */
+  overlayClassName?: string
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

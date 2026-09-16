@@ -133,6 +133,20 @@ class ReaderMessage(BaseModel):
         return cleaned[:5]
 
 
+@router.post("/reader/cancel")
+def cancel_generations() -> dict:
+    """Coupe TOUTE génération LLM (en file et en vol). Aucune entrée.
+
+    « ← Bibliothèque » depuis le sas d'entrée : l'accroche de curiosité et la
+    fiche du document sont peut-être en vol, et Ollama occupe la machine. La
+    fermeture du WebSocket déclenche déjà cette coupure (cf. le `finally` de
+    `reader_stream`), mais elle n'arrive qu'APRÈS la navigation, quand le
+    serveur constate la déconnexion — le clic, lui, doit couper tout de suite.
+    Un seul mécanisme derrière les deux chemins : `cancel_pending_generations`."""
+    cancel_pending_generations()
+    return {"cancelled": True}
+
+
 @router.websocket("/reader/{doc_id}/stream")
 async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     await ws.accept()

@@ -98,7 +98,17 @@ def create_flashcard(
     cartes différentes du même échange. L'index UNIQUE (v29) fait le reste :
     on ne crée jamais deux fois la même carte, quel que soit le chemin
     (manuel, auto à la bonne réponse, échange, vocabulaire de langue).
+
+    Avec `origin`, le recto/verso réécrit est AUSSI vérifié : si le LLM retombe
+    sur une carte que l'utilisateur a déjà (tapée à la main, ou créée à une
+    bonne réponse), c'est elle qu'on rend. Sans cela, deux cartes au texte
+    identique cohabitaient sous deux clés différentes — un doublon visible que
+    l'index, qui ne connaît que la clé, ne pouvait pas empêcher.
     """
+    if origin is not None:
+        same_text = find_flashcard_id(user_id, flashcard_key(front, back))
+        if same_text is not None:
+            return same_text
     return save_flashcard(
         user_id,
         question_id=question_id,

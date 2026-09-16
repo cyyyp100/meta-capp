@@ -20,12 +20,20 @@ import { SasCard, SasOverlay } from "./SasOverlay";
 // l'analyse — c'est le même appel qui porte les deux. Attendre le LLM pour poser
 // les trois faisait patienter devant un écran vide ; les figer toutes les trois
 // jetait une question personnalisée déjà payée.
+//
+// Le sas s'affiche AU CLIC sur « Terminer », avant la réponse du serveur :
+// `metrics` vaut `null` le temps de la clôture (`endSession`), et les chiffres
+// comme les deux questions fixes arrivent avec elle. En attendant, on montre la
+// structure du bilan plutôt qu'un lecteur figé — Gemma travaille en fond.
 export function ExitSas({
+  sessionId,
   metrics,
   onClose,
   demo = false,
 }: {
-  metrics: SessionMetrics;
+  sessionId: number;
+  /** `null` tant que la clôture n'a pas répondu : squelettes, boutons inactifs. */
+  metrics: SessionMetrics | null;
   onClose: () => void;
   /**
    * Séance de démonstration de la visite guidée.
@@ -42,29 +50,37 @@ export function ExitSas({
   const queryClient = useQueryClient();
   const t = useT();
   const reduce = useReducedMotion();
-  const fixedQuestions = metrics.reflection_questions;
-  const [responses, setResponses] = useState<string[]>(() =>
-    Array(fixedQuestions.length + 1).fill(""),
-  );
+  const ending = metrics === null;
+  const fixedQuestions = metrics?.reflection_questions ?? [];
+  // Indexées comme les questions affichées (fixes puis générée). Les questions
+  // arrivent après le montage : le tableau se remplit à l'index écrit, et les
+  // trous sont lus comme des réponses vides à l'envoi.
+  const [responses, setResponses] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   // Analyse LLM de la session (stats + jauges session + jauges profil) ET la
-  // question de réflexion personnalisée. Best-effort.
+  // question de réflexion personnalisée. Best-effort. Elle ne part qu'une fois
+  // la session CLOSE : la clôture purge la file LLM (cf. services.session), le
+  // bilan est donc enfilé sur un worker libre — et il lit la durée qu'elle écrit.
   const { data: analysis, isLoading: rawAnalysisLoading } = useQuery({
-    queryKey: ["session-analysis", metrics.session_id],
-    queryFn: () => api.sessionAnalysis(metrics.session_id),
+    queryKey: ["session-analysis", sessionId],
+    queryFn: () => api.sessionAnalysis(sessionId),
     staleTime: Infinity,
     // Aucune session n'existe côté serveur : la demander renverrait une erreur,
     // et la faire générer par Ollama ferait attendre devant un squelette.
-    enabled: !demo,
+    enabled: !demo && !ending,
   });
-  const analysisLoading = demo ? false : rawAnalysisLoading;
+  const analysisLoading = demo ? false : ending || rawAnalysisLoading;
   const demoAnalysis = demo ? { analysis: t("demo.exit_analysis"), question: t("demo.reflect_3") } : null;
   const shownAnalysis = demoAnalysis ?? analysis;
   const generatedQuestion = shownAnalysis?.question ?? "";
 
   function setResponse(index: number, value: string) {
-    setResponses((r) => r.map((v, j) => (j === index ? value : v)));
+    setResponses((r) => {
+      const next = [...r];
+      next[index] = value;
+      return next;
+    });
   }
 
   // Les intitulés partent avec les réponses : la 3e n'existe nulle part côté
@@ -74,8 +90,9 @@ export function ExitSas({
     // serveur (`session_id` vaut -1), et c'est très bien ainsi. Ni écriture de
     // profil, ni série d'étude, ni ligne dans la frise de progression.
     if (demo) return Promise.resolve(null);
+    const questions = [...fixedQuestions, generatedQuestion];
     return api
-      .finalizeSession(metrics.session_id, responses, [...fixedQuestions, generatedQuestion])
+      .finalizeSession(sessionId, questions.map((_, i) => responses[i] ?? ""), questions)
       .then((result) => {
         // La finalisation change trois choses que d'autres écrans affichent
         // déjà : la série d'étude, l'historique de progression et le profil.
@@ -123,10 +140,10 @@ export function ExitSas({
 
         <div className="my-4.5 grid grid-cols-4 gap-3">
           {[
-            { label: t("exit.duration"), value: formatDuration(metrics.duration_s) },
-            { label: t("exit.pages"), value: String(metrics.pages_read) },
-            { label: t("exit.questions"), value: String(metrics.questions_answered) },
-            { label: t("exit.success"), value: `${metrics.success_rate}%` },
+            { label: t("exit.duration"), value: metrics && formatDuration(metrics.duration_s) },
+            { label: t("exit.pages"), value: metrics && String(metrics.pages_read) },
+            { label: t("exit.questions"), value: metrics && String(metrics.questions_answered) },
+            { label: t("exit.success"), value: metrics && `${metrics.success_rate}%` },
           ].map((m, i) => (
             <Metric key={m.label} label={m.label} value={m.value} index={i} reduce={reduce} />
           ))}
@@ -155,6 +172,16 @@ export function ExitSas({
         )}
 
         <div className="flex flex-col gap-3.5">
+          {/* Les deux questions fixes voyagent avec les métriques : le temps de
+              la clôture, leur place est tenue. */}
+          {ending &&
+            [0, 1].map((i) => (
+              <div key={i} className="flex flex-col gap-2" role="status" aria-busy="true">
+                <span className="sr-only">{t("exit.question_loading")}</span>
+                <Skeleton className="h-3.5 w-[70%]" />
+                <Skeleton className="h-[52px] w-full" />
+              </div>
+            ))}
           {fixedQuestions.map((q, i) => (
             <Reflection
               key={i}
@@ -193,12 +220,14 @@ export function ExitSas({
         </div>
 
         <div className="mt-4.5 flex justify-end gap-2.5">
-          <Button variant="secondary" onClick={skip}>
+          {/* Inactifs le temps de la clôture : finaliser AVANT qu'elle ait
+              écrit la durée noterait une session de zéro seconde. */}
+          <Button variant="secondary" onClick={skip} disabled={ending}>
             {t("exit.skip")}
           </Button>
           {/* Le bouton affichait « … » pendant l'enregistrement : un indicateur
               muet, indistinguable d'un libellé cassé. */}
-          <Button onClick={finish} pending={saving}>
+          <Button onClick={finish} pending={saving} disabled={ending}>
             {t("exit.finish")}
           </Button>
         </div>
@@ -251,7 +280,8 @@ function Metric({
   reduce,
 }: {
   label: string;
-  value: string;
+  /** `null` : la clôture n'a pas encore répondu, la tuile tient sa place. */
+  value: string | null;
   index: number;
   reduce: boolean | null;
 }) {
@@ -262,7 +292,9 @@ function Metric({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.08 + index * 0.06, ease: [0.33, 1, 0.68, 1] }}
     >
-      <div className="text-[22px] font-bold tabular-nums">{value}</div>
+      <div className="text-[22px] font-bold tabular-nums">
+        {value ?? <Skeleton className="mx-auto h-[26px] w-12" />}
+      </div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
     </motion.div>
   );

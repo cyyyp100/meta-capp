@@ -196,6 +196,8 @@ export const api = {
   // Retour à la bibliothèque depuis le sas d'entrée : la session n'a pas eu
   // lieu, elle est effacée plutôt que close (409 si elle a déjà été jouée).
   abandonSession: (sid: number) => postJSON<{ abandoned: boolean }>(`/api/session/${sid}/abandon`, {}),
+  // Coupe toute génération LLM en cours (file + en vol). Sans entrée.
+  cancelGenerations: () => postJSON<{ cancelled: boolean }>("/api/reader/cancel", {}),
   endSession: (sid: number, pagesRead: number, durationS: number) =>
     postJSON<SessionMetrics>(`/api/session/${sid}/end`, { pages_read: pagesRead, duration_s: durationS }),
   // `questions` = les intitulés réellement affichés (2 fixes + celle générée) :
@@ -381,6 +383,8 @@ export interface ProgressSessionRow {
   session_id: number;
   document_id: number | null;
   document_title: string;
+  /** « Lecture n » de ce document (0 : session sans document). */
+  reading_index: number;
   started_at: string;
   ended_at: string;
   duration_s: number;
@@ -426,6 +430,8 @@ export interface GaugePoint {
 export interface ProgressSession {
   session_id: number;
   document: { id: number | null; title: string; subject: string };
+  /** « Lecture n » de ce document (0 : session sans document). */
+  reading_index: number;
   started_at: string;
   ended_at: string;
   completed: boolean;

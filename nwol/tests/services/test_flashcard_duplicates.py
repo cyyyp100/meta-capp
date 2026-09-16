@@ -106,3 +106,44 @@ def test_migration_removes_existing_duplicates_and_keeps_the_reviewed_one(tmp_pa
     ).fetchall()
     assert [(r["front"], r["review_count"]) for r in rows] == [("Q", 5), ("Autre", 0)]
     close_connection()
+
+
+def test_llm_rewrite_that_lands_on_an_existing_card_is_that_card(fresh_db):
+    """La clé d'une carte d'échange est l'échange brut — mais si la réécriture
+    du LLM retombe sur une carte que l'utilisateur a déjà (tapée à la main),
+    c'est elle qu'on rend : deux textes identiques ne font pas deux cartes."""
+    from services.flashcards import create_flashcard, list_flashcards
+
+    manual = create_flashcard(front="Qu'est-ce que l'ADN ?", back="Le support de l'hérédité.")
+    from_exchange = create_flashcard(
+        front="qu'est-ce que l'ADN ?",
+        back="Le support de l'hérédité.",
+        origin=("Selon ce texte, l'ADN c'est quoi ?", "C'est le support de l'hérédité, dit le texte."),
+    )
+
+    assert from_exchange == manual
+    assert len(list_flashcards()) == 1
+
+
+def test_editing_a_card_moves_its_key_with_its_text(fresh_db):
+    """La clé suit le texte : l'ancien recto/verso redevient libre, le nouveau
+    est protégé, et une édition ne peut pas fabriquer un doublon."""
+    import pytest
+
+    from db.flashcards import update_flashcard
+    from services.flashcards import create_flashcard, find_flashcard, list_flashcards
+
+    card = create_flashcard(front="Q1", back="R1")
+    other = create_flashcard(front="Q2", back="R2")
+
+    update_flashcard(card, front="Q3")
+    assert find_flashcard("Q3", "R1") == card
+    assert find_flashcard("Q1", "R1") is None
+    # Le nouveau texte est protégé comme s'il avait été créé ainsi.
+    assert create_flashcard(front="q3", back="r1") == card
+    assert len(list_flashcards()) == 2
+
+    # Réécrire la carte à l'identique d'une autre est refusé.
+    with pytest.raises(ValueError):
+        update_flashcard(other, front="Q3", back="R1")
+    assert find_flashcard("Q2", "R2") == other

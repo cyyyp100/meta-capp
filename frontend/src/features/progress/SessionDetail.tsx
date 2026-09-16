@@ -19,6 +19,22 @@ import { useT } from "../../i18n";
 import { criterionLabel } from "../stats/labels";
 import { GaugeCurves } from "./GaugeCurves";
 
+/**
+ * Le nom d'une session : « <titre du document> · Lecture n ». Une seule
+ * définition, pour la frise et pour l'en-tête du détail, sinon les deux
+ * divergent. Sans document (session orpheline), on retombe sur le libellé
+ * générique ; sans rang connu, sur le titre seul.
+ */
+export function sessionName(
+  t: ReturnType<typeof useT>,
+  title: string,
+  readingIndex: number,
+): string {
+  if (!title) return t("progress.detail_title");
+  if (!(readingIndex > 0)) return title;
+  return `${title} · ${t("progress.reading_n", { n: readingIndex })}`;
+}
+
 export function SessionDetail({ sessionId }: { sessionId: number }) {
   const t = useT();
   const { data, isLoading, isError } = useQuery({
@@ -32,7 +48,9 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
   return (
     <div className="flex flex-col gap-5">
       <header>
-        <h2 className="m-0 font-serif text-h2 font-bold">{data.document.title || t("progress.detail_title")}</h2>
+        <h2 className="m-0 font-serif text-h2 font-bold">
+          {sessionName(t, data.document.title, data.reading_index)}
+        </h2>
         <p className="mt-1 mb-0 text-sm text-muted-foreground">
           {data.completed
             ? t("progress.session_of", { date: formatDate(data.started_at) })

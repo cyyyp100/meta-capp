@@ -271,7 +271,13 @@ export function Coachmark({ step, index }: { step: TourStepDef; index: number })
               // l'ombre de 9999 px la repeignait à 55 % de noir, texte compris —
               // et sous les sas (`z-100`), qui la masquaient entièrement pendant
               // les étapes du lecteur. Elle doit être au-dessus des deux.
-              className="pointer-events-auto z-[130] w-80"
+              //
+              // Le cadre (fond, bordure, ombre, marge intérieure) n'est PAS ici :
+              // il est porté par `BubbleBody`, qui est l'élément animé. Tant que
+              // le primitif le peignait lui-même, la sortie n'effaçait que le
+              // texte — le rectangle blanc, hors du fondu, restait plein jusqu'au
+              // démontage et survivait au voile.
+              className="pointer-events-auto z-[130] w-80 border-0 bg-transparent p-0 shadow-none"
             >
               <BubbleBody reduce={reduce}>
                 <p className="m-0 text-[11px] font-bold tracking-wide text-muted-foreground uppercase">
@@ -299,7 +305,7 @@ export function Coachmark({ step, index }: { step: TourStepDef; index: number })
 }
 
 /**
- * Le contenu de la bulle, qui fond au même rythme que le voile.
+ * La bulle elle-même — cadre ET contenu — qui fond au même rythme que le voile.
  *
  * Radix PORTE la bulle dans `body` : elle n'est pas un descendant DOM du calque
  * animé, et l'opacité de celui-ci ne l'atteint pas. La bulle de l'étape quittée
@@ -318,6 +324,9 @@ function BubbleBody({ reduce, children }: { reduce: boolean | null; children: Re
       initial={reduce ? false : { opacity: 0 }}
       animate={{ opacity: 1, transition: { duration: ENTER_S, ease: EASE } }}
       exit={reduce ? undefined : { opacity: 0, transition: { duration: LEAVE_S, ease: EASE } }}
+      // Le cadre est ici, et non sur `PopoverContent`, pour que le fondu
+      // l'emporte avec le texte (cf. le commentaire du primitif plus haut).
+      className="rounded-md border bg-popover p-4 text-popover-foreground shadow-md"
       style={{ pointerEvents: present ? "auto" : "none" }}
     >
       {children}

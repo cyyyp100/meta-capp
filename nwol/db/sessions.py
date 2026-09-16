@@ -121,6 +121,25 @@ def list_sessions(user_id: int = DEFAULT_USER_ID, limit: int = 20) -> list[dict]
     return [_decode_session(row) for row in rows]
 
 
+def reading_ranks(user_id: int = DEFAULT_USER_ID) -> dict[int, int]:
+    """Rang de chaque session PARMI les lectures de son document : {id: n}.
+
+    « Lecture 3 » d'un PDF, pas « session n° 47 » : c'est le document qui
+    donne son sens au numéro. Compté sur TOUTES les sessions de l'utilisateur,
+    pas sur la fenêtre qu'une timeline affiche — la 41e ligne d'une frise
+    limitée à 40 n'est pas la première lecture. L'ordre est celui des ids,
+    monotones à la création, donc chronologique sans dépendre du format des
+    dates. Une session sans document n'a pas de rang."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, ROW_NUMBER() OVER (PARTITION BY document_id ORDER BY id) AS n
+           FROM reading_sessions
+           WHERE user_id=? AND document_id IS NOT NULL""",
+        (user_id,),
+    ).fetchall()
+    return {int(row["id"]): int(row["n"]) for row in rows}
+
+
 def _decode_session(row) -> dict:
     item = dict(row)
     try:

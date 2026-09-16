@@ -76,6 +76,10 @@ _IMAGE_MAX_BYTES = 500_000
 # Valeur basse = priorité haute. Ordre : math_render > descriptions > Q&A > background.
 _TASK_PRIORITY: dict[str, int] = {
     "math_render":              0,
+    # Bilan du sas de sortie : la session est close (`services.session.end_session`
+    # a déjà purgé la file), l'étudiant n'attend plus que lui. Au-dessus de tout
+    # ce que le lecteur pourrait encore enfiler avant que son WebSocket se ferme.
+    "session_summary":          1,
     "question":                 2,
     "follow_up":                3,
     "assistant_answer":         3,

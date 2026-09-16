@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import mimetypes
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -401,10 +402,31 @@ def update_flashcard(
     if not updates:
         return
 
-    params.append(card_id)
     conn = get_connection()
-    with conn:
-        conn.execute(f"UPDATE flashcards SET {', '.join(updates)} WHERE id=?", params)
+    # La clé de doublon suit le texte : une carte réécrite doit être retrouvée
+    # par son NOUVEAU recto/verso (et libérer l'ancien). Sinon la même carte
+    # retapée passait l'index, et l'ancien texte restait bloqué pour rien.
+    if front is not None or back is not None:
+        current = conn.execute(
+            "SELECT front, back FROM flashcards WHERE id=?", (card_id,)
+        ).fetchone()
+        if current is None:
+            return
+        new_key = flashcard_key(
+            front if front is not None else current["front"],
+            back if back is not None else current["back"],
+        )
+        updates.append("dedup_key=?")
+        params.append(new_key)
+
+    params.append(card_id)
+    try:
+        with conn:
+            conn.execute(f"UPDATE flashcards SET {', '.join(updates)} WHERE id=?", params)
+    except sqlite3.IntegrityError as exc:
+        # Une AUTRE carte porte déjà ce recto/verso : l'index UNIQUE refuse, et
+        # c'est le bon comportement — on ne fabrique pas un doublon par édition.
+        raise ValueError("Une flashcard identique existe déjà") from exc
 
 
 def delete_flashcard(card_id: int) -> None:

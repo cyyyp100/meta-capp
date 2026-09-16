@@ -703,3 +703,19 @@ def test_reader_ws_question_without_locatable_passage_has_no_zone(client, monkey
         ws.send_json({"type": "start_qa", "page": 1})
         assert ws.receive_json()["type"] == "loading"
         assert ws.receive_json()["zone"] is None
+
+
+def test_leaving_the_entry_sas_cuts_gemma_right_away(client, monkeypatch):
+    """« ← Bibliothèque » depuis le sas d'entrée : une génération est peut-être
+    en vol et Ollama occupe la machine. La fermeture du WebSocket coupe déjà,
+    mais après la navigation ; le clic doit couper tout de suite, par le même
+    mécanisme. L'endpoint ne prend AUCUNE entrée."""
+    import server.routers.reading as reading
+
+    calls = {"n": 0}
+    monkeypatch.setattr(reading, "cancel_pending_generations", lambda: calls.__setitem__("n", calls["n"] + 1))
+
+    resp = client.post("/api/reader/cancel", json={})
+    assert resp.status_code == 200
+    assert resp.json() == {"cancelled": True}
+    assert calls["n"] == 1

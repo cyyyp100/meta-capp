@@ -146,6 +146,7 @@ export function GemmaPanel({
   onMask,
   onZone,
   demo = false,
+  ended = false,
   onDemoReady,
 }: {
   docId: number;
@@ -168,6 +169,14 @@ export function GemmaPanel({
    * garantit que la visite n'écrit rien et ne dépend pas d'Ollama.
    */
   demo?: boolean;
+  /**
+   * La session est terminée (« Terminer ») : le WebSocket se ferme tout de
+   * suite, pendant que le sas de sortie recouvre le lecteur. Côté serveur, la
+   * déconnexion coupe la génération en vol, arrête le ticker (plus
+   * d'intervention enfilée, plus de dérive d'attention pendant que l'étudiant
+   * écrit ses réflexions) et persiste le temps passé par page.
+   */
+  ended?: boolean;
   /** Rend à la visite de quoi jouer les répliques, tant que le panneau vit. */
   onDemoReady?: (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => void;
 }) {
@@ -315,6 +324,9 @@ export function GemmaPanel({
       setConnected(true);
       return;
     }
+    // Session close : le nettoyage de l'effet précédent a fermé le socket, on
+    // n'en rouvre pas — Gemma n'a plus rien à faire pour ce lecteur.
+    if (ended) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/api/reader/${docId}/stream${wsTokenSuffix()}`);
     ws.onopen = () => setConnected(true);
@@ -424,7 +436,7 @@ export function GemmaPanel({
       window.removeEventListener("focus", reportPresence);
       ws.close();
     };
-  }, [docId, demo]);
+  }, [docId, demo, ended]);
 
   useEffect(() => {
     const ws = wsRef.current;
