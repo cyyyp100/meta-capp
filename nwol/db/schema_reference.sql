@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 29).
+-- (config.settings.DB_SCHEMA_VERSION = 30).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -71,6 +71,16 @@ CREATE TABLE chapters (
     toc_level    INTEGER DEFAULT 1
 );
 CREATE INDEX idx_chapters_doc ON chapters(document_id);
+CREATE TABLE document_embeddings (
+                   doc_id      INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                   mtime       REAL NOT NULL,
+                   model       TEXT NOT NULL,
+                   chunk_hash  TEXT NOT NULL,
+                   dim         INTEGER NOT NULL,
+                   count       INTEGER NOT NULL,
+                   vectors     BLOB NOT NULL,
+                   created_at  DATETIME DEFAULT (datetime('now'))
+               );
 CREATE TABLE document_index (
     doc_id                   INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
     pdf_hash                 TEXT NOT NULL,

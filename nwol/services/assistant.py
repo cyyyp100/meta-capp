@@ -144,6 +144,11 @@ def build_answer_context(
     selected_snippets: list[str] | None = None,
 ) -> dict:
     doc = _get_document(doc_id) or {}
+    # Un suivi (« cherche dans tout l'article ») ne porte aucun mot-clé : la
+    # recherche emprunte ceux des dernières questions.
+    recent_questions = [
+        str(item.get("question") or "") for item in (recent_exchanges or [])[-2:]
+    ]
     return {
         "user_question": question,
         "page_text": _safe(lambda: library.page_text(doc_id, page), ""),
@@ -159,8 +164,14 @@ def build_answer_context(
         # RAG plein-document : passages pertinents trouvés AILLEURS que sur la page
         # visible (uniquement sur une question de l'étudiant, cf. answer_question).
         "retrieved_passages": _safe(
-            lambda: pdf_rag.retrieve(doc_id, question, current_page=page), []
+            lambda: pdf_rag.retrieve(
+                doc_id, question, current_page=page, recent_questions=recent_questions,
+            ),
+            [],
         ),
+        # L'étudiant demande explicitement une recherche hors de la page visible :
+        # le prompt fait alors primer les passages trouvés ailleurs.
+        "whole_document_search": pdf_rag.is_search_request(question),
         "image_paths": _page_image_paths(doc_id, page),
     }
 

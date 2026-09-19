@@ -148,8 +148,11 @@ class PdfDocument:
             logger.debug("raw_text page %s: %s", page_number, exc)
             return ""
         # PDFium sépare les lignes par CRLF : on normalise en LF, comme le
-        # reste de l'app (découpe en passages du RAG, prompts LLM).
-        return text.replace("\r\n", "\n").replace("\r", "\n")
+        # reste de l'app (découpe en passages du RAG, prompts LLM). Un mot coupé
+        # par un tiret en fin de ligne (« inter-\nmediate ») ressort avec un
+        # U+0002 à la place du tiret : on le recolle, sinon ni la recherche
+        # lexicale ni le LLM ne retrouvent « intermediate ».
+        return text.replace("\r\n", "\n").replace("\r", "\n").replace("\x02", "")
 
     def search_text(self, page_number: int, needle: str) -> list[tuple[float, float, float, float]]:
         """Localise un texte sur une page → rects (x0, y0, x1, y1) en points PDF.

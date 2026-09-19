@@ -31,6 +31,14 @@ OLLAMA_OPTIONS = {
 
 OLLAMA_KEEP_ALIVE = "30m"
 
+# Modèle d'embeddings (recherche sémantique du lecteur, services/pdf_rag) :
+# EmbeddingGemma, 300 M de paramètres, multilingue — il relie « taux
+# d'apprentissage » à « learning rate » là où la recherche lexicale ne peut pas.
+# Optionnel : sans lui (`ollama pull embeddinggemma`), la recherche reste lexicale.
+OLLAMA_EMBED_URL = "http://localhost:11434/api/embed"
+OLLAMA_EMBED_MODEL = "embeddinggemma"
+OLLAMA_EMBED_TIMEOUT = 60          # par lot de chunks (le premier appel charge le modèle)
+
 # ── Fournisseur LLM ──────────────────────────────────────────────────────────
 # Cette édition est 100 % locale : Ollama sur 127.0.0.1, point d'insertion
 # unique dans services/llm_provider.py. Aucune génération ne quitte la machine.
@@ -65,8 +73,13 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # le double pour ne jamais tronquer. temperature 0.15 : la matière est une
     # classification, mais le résumé doit rester une phrase lisible.
     "document_digest":          {"num_ctx": 3072, "num_predict": 260, "temperature": 0.15},
-    # num_ctx élargi : page visible (3500 car.) + passages RAG plein-document.
-    "assistant_answer":         {"num_ctx": 6144, "num_predict": 560, "temperature": 0.1},
+    # num_ctx élargi : page visible (3500 car. ≈ 1000 tokens) + jusqu'à
+    # ASSISTANT_RAG_SEARCH_TOP_K passages de ASSISTANT_RAG_MAX_CHARS (≈ 1200)
+    # + consignes (≈ 900) + échanges récents + image de page + num_predict.
+    # num_predict 700 : une réponse qui cite les valeurs d'une table et leurs
+    # pages dépasse les « 4 à 8 phrases » (mesuré ~420 tokens avec le JSON
+    # autour) ; coupée, elle finit en pleine phrase.
+    "assistant_answer":         {"num_ctx": 8192, "num_predict": 700, "temperature": 0.1},
     "assistant_intervention":   {"num_ctx": 3072, "num_predict": 220, "temperature": 0.1},
     "flashcard_standalone":     {"num_ctx": 3072, "num_predict": 260, "temperature": 0.1},
     # Génération batch des distracteurs de QCM (~10 questions en un seul appel).
@@ -362,7 +375,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 29
+DB_SCHEMA_VERSION = 30
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -491,3 +504,38 @@ BRAINSTORM_RECENCY_FLOOR = 0.4
 # Assistant lecteur : cartes liées proposées au prompt, tirées dans un vivier
 # plus large que les 3 finalement citées (sinon toujours les 3 mêmes).
 ASSISTANT_FLASHCARD_POOL = 40
+
+# ── RAG plein-document de l'assistant (services/pdf_rag.py) ─────────────────
+# Recherche LEXICALE (BM25-lite en Python, < 1 ms) : aucun appel LLM ni modèle
+# d'embeddings. Seul coût : le prompt s'allonge des passages cités.
+ASSISTANT_RAG_TOP_K = 4            # passages cités pour une question ordinaire
+ASSISTANT_RAG_SEARCH_TOP_K = 6     # … quand l'étudiant demande de chercher partout
+ASSISTANT_RAG_MAX_CHARS = 700      # longueur max d'un passage dans le prompt
+ASSISTANT_RAG_CHUNK_CHARS = 900    # taille cible d'un chunk (phrases entières)
+# Un bloc tabulaire (lignes courtes denses en chiffres) est gardé entier jusqu'à
+# cette taille : une table coupée en deux ne sert plus à rien au LLM.
+ASSISTANT_RAG_TABLE_CHUNK_CHARS = 1800
+# Poids des termes des questions précédentes, ajoutés quand la question courante
+# est un suivi (« cherche dans tout l'article ») ou trop pauvre en mots-clés.
+ASSISTANT_RAG_HISTORY_WEIGHT = 0.5
+# La page visible a toujours la priorité : tant qu'elle contient au moins cette
+# part des mots-clés de la question, la recherche reste un complément
+# (ASSISTANT_RAG_TOP_K). En dessous, la réponse est probablement ailleurs et la
+# recherche s'élargit comme sur une demande explicite (ASSISTANT_RAG_SEARCH_TOP_K).
+ASSISTANT_RAG_PAGE_COVERAGE = 0.67
+# Poids des quasi-synonymes ajoutés à la requête (services/rag_lexicon :
+# « hyperparamètres » → « configuration ») : le mot de l'étudiant reste premier.
+ASSISTANT_RAG_SYNONYM_WEIGHT = 0.5
+# Couche sémantique (embeddings via OLLAMA_EMBED_MODEL), fusionnée au lexical
+# par rangs réciproques : score = Σ 1 / (RRF_K + rang). K = 60 est la valeur
+# canonique (Cormack et al., 2009) — assez grand pour qu'un passage bien classé
+# par une seule des deux listes ne soit pas écrasé par la première place de l'autre.
+ASSISTANT_RAG_RRF_K = 60
+ASSISTANT_RAG_EMBED_BATCH = 32     # chunks par appel /api/embed à l'indexation
+# Similarité cosinus minimale d'un passage pour entrer dans le classement
+# sémantique : une question hors sujet (« la capitale de la France ») plafonne
+# vers 0.1 sur un article scientifique, une vraie réponse dépasse 0.23.
+ASSISTANT_RAG_MIN_SIMILARITY = 0.2
+# Après un échec d'embedding (modèle absent, Ollama arrêté), on n'insiste pas
+# avant ce délai : chaque question ne doit pas payer un timeout.
+ASSISTANT_RAG_EMBED_RETRY_S = 600

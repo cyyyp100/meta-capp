@@ -242,9 +242,11 @@ During reading they are invisible. They still drive everything: question difficu
 
 ```bash
 ollama pull gemma4:e4b
+ollama pull embeddinggemma   # optional (~600 MB): semantic search inside the document you read
 ```
 
 > Without Ollama the app still runs: reader, flashcards and stats work, and the assistant visibly falls asleep.
+> Without `embeddinggemma`, Gemma's search inside the current document stays lexical (BM25).
 
 ### Setup
 

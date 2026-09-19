@@ -50,7 +50,7 @@ from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
-from services import assistant, flashcards as flashcards_service, library, session
+from services import assistant, flashcards as flashcards_service, library, pdf_rag, session
 from services.intervention import AssistantInterventionPolicy
 from services.session_memory import SessionMemory
 
@@ -197,6 +197,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     # Nombre de pages du document (si connu) pour borner les entrées client (S4).
     doc_row = await loop.run_in_executor(None, get_document, doc_id)
     page_count = int(doc_row["page_count"] or 0) if doc_row else 0
+    # Index de recherche plein-document (services/pdf_rag) construit en tâche de
+    # fond dès l'ouverture : la première question ne paie pas l'extraction du
+    # texte. Fire-and-forget, best-effort (warm_index avale ses erreurs).
+    asyncio.ensure_future(loop.run_in_executor(None, pdf_rag.warm_index, doc_id))
 
     def clamp_page(raw) -> int:
         try:

@@ -11,12 +11,16 @@ import re
 import socket
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable
 from config import question_types
 from config.settings import (
+    OLLAMA_EMBED_MODEL,
+    OLLAMA_EMBED_TIMEOUT,
+    OLLAMA_EMBED_URL,
     OLLAMA_KEEP_ALIVE,
     OLLAMA_MODEL,
     OLLAMA_OPTIONS,
@@ -255,6 +259,40 @@ def is_ollama_available() -> bool:
         return False
 
 
+def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[float]]:
+    """Vecteurs d'embedding d'une liste de textes (Ollama `/api/embed`), dans
+    l'ordre. Synchrone et HORS de la file `_LLM_QUEUE` : celle-ci sérialise les
+    générations (longues, lourdes) ; un embedding est une passe avant de
+    quelques dizaines de ms sur un petit modèle, et l'indexation de fond d'un
+    document ne doit pas attendre la fin d'une réponse de Gemma — ni l'inverse.
+    Lève RuntimeError si Ollama ou le modèle sont indisponibles : l'appelant
+    (services/pdf_rag) dégrade vers la recherche lexicale."""
+    if not texts:
+        return []
+    payload = json.dumps({
+        "model": model,
+        "input": list(texts),
+        "truncate": True,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+    }).encode()
+    req = urllib.request.Request(
+        OLLAMA_EMBED_URL, data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_EMBED_TIMEOUT) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"Ollama embed HTTP {exc.code}: {detail}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Ollama embed indisponible: {exc}") from exc
+    vectors = data.get("embeddings")
+    if not isinstance(vectors, list) or len(vectors) != len(texts):
+        raise RuntimeError("Ollama embed: réponse sans embeddings")
+    return vectors
+
+
 def generate_question_async(
     context: dict,
     on_success,
@@ -355,6 +393,7 @@ def answer_user_question_async(
         selected_snippets=context.get("selected_snippets") or [],
         user_highlights=context.get("user_highlights") or [],
         retrieved_passages=context.get("retrieved_passages") or [],
+        whole_document_search=bool(context.get("whole_document_search")),
     )
     return _run_json_async(
         "assistant_answer",
@@ -2246,6 +2285,14 @@ def _warn_if_context_overflow(task: str, data: dict, options: dict, with_images:
         num_predict = int(options.get("num_predict") or 0)
     except (TypeError, ValueError):
         return
+    # Réponse arrêtée par num_predict : le JSON est coupé, et le parseur sait
+    # le refermer silencieusement (`_complete_truncated_json`) — sans cette
+    # ligne, une réponse tronquée à l'écran n'a aucune trace.
+    if data.get("done_reason") == "length":
+        logger.warning(
+            "Réponse %s coupée par num_predict=%d (eval_count=%s) — relever num_predict dans OLLAMA_TASK_OPTIONS",
+            task or "?", num_predict, data.get("eval_count"),
+        )
     if not prompt_tokens or not num_ctx:
         return
     if prompt_tokens + num_predict > num_ctx:

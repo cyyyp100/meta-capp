@@ -5,10 +5,13 @@
 # (PDFs importés, surlignages, flashcards, anciennes Q&R) et on renvoie des
 # extraits normalisés que le prompt et l'UI peuvent citer.
 #
-# Pas de FTS5 ni d'embeddings dans le projet : la recherche est LEXICALE. Sur une
-# base locale mono-utilisateur, on charge un lot borné par table et on filtre EN
+# Pas de FTS5 ni d'embeddings ICI : la recherche est LEXICALE. Sur une base
+# locale mono-utilisateur, on charge un lot borné par table et on filtre EN
 # PYTHON avec repli d'accents + insensibilité à la casse — bien plus robuste que
 # `LIKE` SQL (qui ne sait pas matcher « photosynthèse » ↔ « photosynthese »).
+# (Seul services/pdf_rag.py, la recherche dans le document LU, ajoute une couche
+# d'embeddings au lexical : là, la question est en français et le document en
+# anglais, et la réponse fonde le contenu de Gemma, pas seulement sa couleur.)
 #
 # Le classement est un score de coordination : nombre de termes DISTINCTS trouvés
 # d'abord, occurrences ensuite (`services.selection.relevance`). Pas d'IDF, pas de
@@ -44,6 +47,27 @@ _STOPWORDS = {
     "il", "elle", "on", "nous", "vous", "ils", "comme", "plus", "moins", "the",
     "and", "or", "for", "with", "this", "that", "these", "those", "what", "how",
     "about", "idea", "idee", "idees", "brainstorm", "brainstorming",
+    # Mots de question et de recherche : « quelle est la meilleure … », « cherche
+    # dans tout l'article » ne disent rien du SUJET, ils ne doivent pas peser.
+    "quel", "quelle", "quels", "quelles", "comment", "pourquoi", "combien",
+    "est-ce", "peux", "peut", "cherche", "chercher", "trouve", "trouver",
+    "regarde", "tout", "toute", "tous", "toutes", "article", "document",
+    "papier", "texte", "page", "pages", "dit", "dis", "explique", "meilleur",
+    "meilleure", "meilleurs", "meilleures", "which", "where", "when", "does",
+    "can", "could", "would", "search", "find", "look", "whole", "entire",
+    "paper", "says", "say", "tell", "explain", "best", "according",
+    # Verbes et mots-outils fréquents dans une question (« combien de runs ont
+    # divergé », « how many seeds were used ») : aucun poids non plus.
+    "ont", "etre", "avoir", "fait", "faire", "aussi", "donc", "ainsi", "entre",
+    "vers", "chez", "leur", "leurs", "notre", "votre", "cela", "ceci", "celui",
+    "celle", "ceux", "celles", "utilise", "utilisee", "utilises", "utilisees",
+    "utilisent", "utiliser", "utilisation", "quand", "sinon", "encore", "puis",
+    "many", "much", "were", "was", "been", "being", "are", "have", "has",
+    "had", "used", "use", "uses", "using", "why", "who", "whom", "there",
+    "here", "then", "than", "also", "into", "from", "some", "such", "only",
+    "very", "just", "its", "their", "they", "them", "our", "your", "you",
+    "will", "should", "did", "done", "make", "made", "get", "got", "mean",
+    "means", "meant",
 }
 
 _MAX_SNIPPET = 280

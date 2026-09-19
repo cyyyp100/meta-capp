@@ -8,6 +8,9 @@ import re
 import i18n as _i18n
 from config import question_types
 from config.settings import (
+    ASSISTANT_RAG_MAX_CHARS,
+    ASSISTANT_RAG_SEARCH_TOP_K,
+    ASSISTANT_RAG_TABLE_CHUNK_CHARS,
     DOCUMENT_DIGEST_PROMPT_CHARS,
     LANGUAGE_SCRIPTS,
     LATIN_SCRIPT,
@@ -107,22 +110,39 @@ def _retrieved_passages_block(passages: list[dict] | None) -> str:
     """Bloc optionnel : passages pertinents trouvés AILLEURS dans le document (RAG).
 
     Inséré uniquement dans le prompt de réponse à une question. Chaque passage
-    indique sa page source pour que le LLM puisse la citer en clair dans sa réponse.
+    indique sa page source pour que le LLM puisse la citer en clair dans sa
+    réponse ; une table (déjà bornée par services.pdf_rag) est signalée comme
+    telle et n'est pas retronquée : coupée, elle perdrait ses valeurs.
     """
     lines: list[str] = []
-    for item in (passages or [])[:3]:
-        text = " ".join(str((item or {}).get("text") or "").split())[:400]
+    for item in (passages or [])[:ASSISTANT_RAG_SEARCH_TOP_K]:
+        item = item or {}
+        is_table = bool(item.get("table"))
+        raw = str(item.get("text") or "")
+        if is_table:
+            # Une rangée par ligne : c'est ce qui rend les valeurs lisibles.
+            text = "\n".join(" ".join(ln.split()) for ln in raw.splitlines() if ln.strip())
+            text = text[:ASSISTANT_RAG_TABLE_CHUNK_CHARS]
+        else:
+            text = " ".join(raw.split())[:ASSISTANT_RAG_MAX_CHARS]
         if not text:
             continue
-        page = (item or {}).get("page")
+        page = item.get("page")
         prefix = f"(p.{page}) " if page else ""
-        lines.append(f"- {prefix}« {text} »")
+        if is_table:
+            lines.append(f"- {prefix}[table]\n" + "\n".join(f"    {ln}" for ln in text.splitlines()))
+        else:
+            lines.append(f"- {prefix}« {text} »")
     if not lines:
         return ""
     body = "\n".join(lines)
     return "\n" + _t(
-        "Passages pertinents trouvés ailleurs dans le document (recherche automatique) :\n" + body,
-        "Relevant passages found elsewhere in the document (automatic search):\n" + body,
+        # Libellé choisi pour être recopiable tel quel : un modèle 4B reprend
+        # volontiers le titre du bloc dans sa réponse (« se trouve dans les
+        # extraits des autres pages… ») — « ailleurs dans le document » peut
+        # être dit à l'étudiant, « extraits » et « recherche » non.
+        "Ailleurs dans le document (autres pages que celle affichée) :\n" + body,
+        "Elsewhere in the document (pages other than the one displayed):\n" + body,
     ) + "\n"
 
 
@@ -2865,6 +2885,23 @@ LANG_SESSION_PROMPT_BUILDERS: dict = {
 # Assistant bulle (lecteur scroll libre)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Question qui porte sur une figure : le modèle reçoit l'image de la page, mais
+# sans consigne il paraphrase la légende (« Figure 1. ... ») présente dans le
+# texte extrait, ce qui est le chemin le plus court — et n'exploite rien du
+# visuel. Les bornes de mot évitent « graphe » (théorie des graphes) et
+# « imagerie ».
+_FIGURE_QUESTION_RE = re.compile(
+    r"\b(?:fig\.?|figures?|sch[ée]mas?|diagrams?|diagrammes?|graphiques?|graphs?|plots?|"
+    r"courbes?|curves?|illustrations?|dessins?|drawings?|images?|pictures?|visuels?)\b",
+    re.IGNORECASE,
+)
+
+
+def is_figure_question(question: str) -> bool:
+    """La question de l'étudiant porte-t-elle sur une figure de la page ?"""
+    return bool(_FIGURE_QUESTION_RE.search(question or ""))
+
+
 def build_assistant_answer_prompt(
     page_text: str,
     user_question: str,
@@ -2878,6 +2915,7 @@ def build_assistant_answer_prompt(
     selected_snippets: list[str] | None = None,
     user_highlights: list[str] | None = None,
     retrieved_passages: list[dict] | None = None,
+    whole_document_search: bool = False,
 ) -> str:
     """Réponse de l'assistant à une question libre posée pendant la lecture.
 
@@ -2887,11 +2925,38 @@ def build_assistant_answer_prompt(
     identiques au prompt follow_up pour partager le repli local.
 
     `retrieved_passages` (RAG) apporte des extraits venant d'AILLEURS dans le
-    document ; ils enrichissent la réponse mais ne servent jamais de source aux
-    `highlights`, qui restent copiés de la seule page visible.
+    document : la réponse peut s'y appuyer entièrement (une table p.5 quand on
+    lit la p.1), mais ils ne servent jamais de source aux `highlights`, qui
+    restent copiés de la seule page visible. `whole_document_search` : l'étudiant
+    a explicitement demandé de chercher dans tout le document.
     """
     student_context = _student_context_block(selected_snippets, user_highlights)
     retrieved_context = _retrieved_passages_block(retrieved_passages)
+    search_rule = ""
+    if whole_document_search:
+        # Un suivi (« cherche dans tout l'article ») ne dit pas SUR QUOI chercher :
+        # on rappelle la question précédente, celle dont les passages viennent.
+        previous = ""
+        for item in reversed(recent_exchanges or []):
+            previous = str(item.get("question") or "").strip()
+            if previous:
+                break
+        about = ""
+        if previous:
+            about = _t(
+                f" La recherche porte sur la question précédente : « {previous[:200]} » — réponds à CETTE question, pas en résumant la page.",
+                f" The search is about the previous question: \"{previous[:200]}\" — answer THAT question, do not summarise the page.",
+            )
+        search_rule = _t(
+            f"- L'étudiant demande explicitement de chercher dans TOUT le document : privilégie ce qui se trouve ailleurs dans le document sur la page visible, et dis clairement si rien n'a été trouvé.{about}\n",
+            f"- The student explicitly asks to search the WHOLE document: favour what lies elsewhere in the document over the visible page, and say clearly if nothing was found.{about}\n",
+        )
+    figure_rule = ""
+    if is_figure_question(user_question):
+        figure_rule = _t(
+            "- La question porte sur une figure : décris d'abord ce qui est RÉELLEMENT VISIBLE sur l'image de la page (blocs, flèches, couleurs, ce qui distingue la gauche de la droite, axes et légendes internes), puis seulement ce que dit la légende. Paraphraser la légende ne suffit pas. Si aucune image n'est jointe ou si la figure n'y est pas lisible, dis-le en une demi-phrase plutôt que d'inventer des détails visuels.\n",
+            "- The question is about a figure: first describe what is ACTUALLY VISIBLE in the page image (blocks, arrows, colours, what sets the left apart from the right, axes and inner labels), and only then what the caption says. Paraphrasing the caption is not enough. If no image is attached or the figure is not legible in it, say so in half a sentence rather than inventing visual details.\n",
+        )
     exchanges_lines = []
     for item in (recent_exchanges or [])[-4:]:
         question = str(item.get("question") or "").strip()
@@ -2925,7 +2990,7 @@ Question de l'étudiant:
 {(user_question or "")[:500]}
 ---
 
-If an image is attached, it is the rendered PDF page itself: trust it for notations, figures and layout.
+If an image is attached, it is the rendered PDF page itself — the primary source, of which the text above is only the extraction: trust it for notations, figures and layout.
 
 Respond in valid JSON, without Markdown:
 {{
@@ -2948,11 +3013,13 @@ Respond in valid JSON, without Markdown:
 }}
 
 Constraints:
+- Write "answer" in English, whatever the language of the document (keep the document's technical terms as they are).
 - curiosity must be at least 1.0: the student is asking on their own initiative.
 - highlights: 0 to 3 quotes copied WORD FOR WORD from the visible page text (never rephrased), pointing at the passages your answer relies on — they will be highlighted on the page for the student. purpose is "key", "explain" or "reference". Use an empty list if nothing relevant.
-- The "relevant passages found elsewhere" come from OTHER pages of the document: use them to enrich your answer and cite their page in prose (e.g. "see p.12"), but NEVER copy them into highlights — every highlight quote must come from the visible page text only.
-- Answer first from the visible page, then add general knowledge introduced by "More generally, ..." when the question goes beyond the page.
-- Never invent facts about the document that the page does not show.
+- Sources, in priority order: (1) the visible page, when it actually contains the answer; (2) otherwise what lies elsewhere in the document (the "Elsewhere in the document" block) — it is reliable: answer precisely from it and give the page (e.g. "Table I, p.5"). When the answer is in a table, COPY the values of the relevant row or column into the answer (e.g. "Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps"); never just say that they are listed there; (3) only then general knowledge, introduced by "More generally, ...". If the visible page does not hold the answer, say so in half a sentence and move on to the other pages — no apology, no filler.
+- NEVER copy text from other pages into highlights — every highlight quote must come from the visible page text only.
+- Never mention "excerpts", "passages", "search" or "context" to the student: as far as they are concerned, you have simply read the document. Say "on page 5" or "in Table I (p.5)", never "in the excerpts".
+{search_rule}{figure_rule}- Never invent facts about the document that neither the page nor the other pages show.
 - If one of the listed flashcards already covers the question, naturally point it out ("You already have a flashcard on this") and connect your answer to it.
 - Keep the answer compact (4-8 sentences): it is displayed in a small floating panel.
 - meta_cognition stays at 0.0."""
@@ -2977,7 +3044,7 @@ Question de l'étudiant :
 {(user_question or "")[:500]}
 ---
 
-Si une image est jointe, c'est la page PDF rendue elle-même : fie-toi à elle pour les notations, figures et mises en page.
+Si une image est jointe, c'est la page PDF rendue elle-même — la source primaire, dont le texte ci-dessus n'est que l'extraction : fie-toi à elle pour les notations, les figures et la mise en page.
 
 Réponds en JSON valide, sans Markdown :
 {{
@@ -3000,11 +3067,13 @@ Réponds en JSON valide, sans Markdown :
 }}
 
 Contraintes :
+- Rédige "answer" en français, quelle que soit la langue du document (garde tels quels les termes techniques du document).
 - curiosity doit être au moins 1.0 : l'étudiant questionne de sa propre initiative.
 - highlights : 0 à 3 citations copiées MOT POUR MOT du texte de la page visible (jamais reformulées), désignant les passages sur lesquels ta réponse s'appuie — ils seront surlignés sur la page pour l'étudiant. purpose vaut "key", "explain" ou "reference". Liste vide si rien de pertinent.
-- Les « passages pertinents trouvés ailleurs » viennent d'AUTRES pages du document : sers-t'en pour enrichir ta réponse et cite leur page en clair (ex. « voir p.12 »), mais ne les recopie JAMAIS dans highlights — toute citation surlignée doit provenir uniquement du texte de la page visible.
-- Réponds d'abord depuis la page visible, puis ajoute un complément de connaissances générales introduit par "Plus généralement, ..." dès que la question dépasse la page.
-- N'invente jamais de fait sur le document que la page ne montre pas.
+- Sources, par ordre de priorité : (1) la page visible, quand elle contient vraiment la réponse ; (2) sinon ce qui se trouve ailleurs dans le document (bloc « Ailleurs dans le document ») — c'est fiable : réponds précisément à partir de là et indique la page (ex. « Table I, p.5 »). Quand la réponse est dans une table, RECOPIE les valeurs de la ligne ou de la colonne concernée dans la réponse (ex. « Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps ») ; ne dis jamais seulement qu'elles y sont listées ; (3) seulement ensuite les connaissances générales, introduites par "Plus généralement, ...". Si la page visible ne contient pas la réponse, dis-le en une demi-phrase et passe aux autres pages — sans excuse ni remplissage.
+- Ne recopie JAMAIS du texte d'autres pages dans highlights — toute citation surlignée doit provenir uniquement du texte de la page visible.
+- Ne parle jamais d'« extraits », de « passages », de « recherche » ni de « contexte » à l'étudiant : pour lui, tu as simplement lu le document. Dis « à la page 5 » ou « dans la Table I (p.5) », jamais « dans les extraits ».
+{search_rule}{figure_rule}- N'invente jamais de fait sur le document que ni la page ni les autres pages ne montrent.
 - Si une des flashcards listées couvre déjà la question, signale-le naturellement ("Tu as déjà une flashcard sur ce point") et relie ta réponse à elle.
 - Réponse compacte (4 à 8 phrases) : elle s'affiche dans un petit panneau flottant.
 - meta_cognition reste à 0.0."""

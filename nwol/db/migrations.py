@@ -155,6 +155,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 29)
         current = 29
 
+    if current < 30 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v30(conn)
+        _set_version(conn, 30)
+        current = 30
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -978,3 +983,32 @@ def _migrate_to_v29(conn) -> None:
     if removed:
         logger.info("Migration v29 : %s flashcard(s) en doublon supprimée(s)", removed)
     logger.info("Migration SQLite v29 terminée")
+
+
+def _migrate_to_v30(conn) -> None:
+    """Vecteurs d'embedding des passages d'un document (`document_embeddings`).
+
+    La recherche de l'assistant dans le document lu (services/pdf_rag) gagne
+    une couche sémantique : chaque passage de l'index est plongé une fois par
+    OLLAMA_EMBED_MODEL, et les vecteurs sont conservés ici pour que la
+    réouverture d'un document ne repaie pas l'indexation (une à deux minutes
+    pour un livre). Une ligne par document, tous les vecteurs en un blob
+    float32 ; `mtime`, `chunk_hash` et `model` disent pour quel fichier, quel
+    découpage et quel modèle elle vaut — cf. db/embeddings.py.
+
+    Table neuve, rien à reprendre : l'absence de ligne vaut « à calculer »."""
+    logger.info("Migration SQLite v30 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS document_embeddings (
+                   doc_id      INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                   mtime       REAL NOT NULL,
+                   model       TEXT NOT NULL,
+                   chunk_hash  TEXT NOT NULL,
+                   dim         INTEGER NOT NULL,
+                   count       INTEGER NOT NULL,
+                   vectors     BLOB NOT NULL,
+                   created_at  DATETIME DEFAULT (datetime('now'))
+               )"""
+        )
+    logger.info("Migration SQLite v30 terminée")

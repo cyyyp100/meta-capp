@@ -29,7 +29,7 @@ from llm.ollama_client import (
 )
 from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.pdf_document import PdfDocument
-from services import library
+from services import library, pdf_rag
 
 logger = logging.getLogger("services.orchestrator")
 
@@ -60,6 +60,7 @@ def import_pdf(path: str) -> dict:
 
     doc_id = upsert_document(doc_path, filename, page_count, "pdfium_scroll", has_toc)
     save_chapters(doc_id, build_chapter_index(doc_path))
+    pdf_rag.clear_index(doc_id)  # réimport sous le même chemin : l'index mémoire est périmé
     generate_document_digest(doc_id, filename)
 
     return library.get_document(doc_id) or {"id": doc_id}
@@ -152,6 +153,7 @@ def import_code(path: str) -> dict:
     filename = os.path.basename(path)
     pages = code_reader.page_count(path)  # lève ValueError si binaire/trop gros
     doc_id = upsert_document(path, filename, pages, "code", False, doc_type="code")
+    pdf_rag.clear_index(doc_id)
     # Un fichier de code est précisément le cas où le nom seul ne dit rien :
     # la fiche (résumé + mots-clés) est ce qui permettra de le retrouver.
     generate_document_digest(doc_id, filename)

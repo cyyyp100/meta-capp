@@ -10,6 +10,17 @@ if str(NWOL_DIR) not in sys.path:
     sys.path.insert(0, str(NWOL_DIR))
 
 
+@pytest.fixture(autouse=True)
+def no_semantic_search(monkeypatch):
+    """La couche sémantique du RAG (services/pdf_rag) appelle Ollama : hors
+    des tests, toujours. Un test qui la veut remplace `pdf_rag._embed` par un
+    faux embedder (cf. tests/services/test_pdf_rag.py)."""
+    from services import pdf_rag
+
+    monkeypatch.setattr(pdf_rag, "_embed", lambda texts: None)
+    monkeypatch.setattr(pdf_rag, "_EMBED_STATE", {"retry_at": 0.0, "failure": ""})
+
+
 @pytest.fixture
 def make_pdf():
     """Fabrique un PDF de test : une page par entrée de ``pages``.

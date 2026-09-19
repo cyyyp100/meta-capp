@@ -12,6 +12,9 @@
 #   - Ollama running locally with the model from config/settings.py
 #     (OLLAMA_MODEL, default `gemma4:e4b`):  ollama pull gemma4:e4b
 #     The app degrades gracefully when Ollama is offline (no API key needed).
+#   - Optional: the embedding model (OLLAMA_EMBED_MODEL, `embeddinggemma`, ~600 MB)
+#     for semantic search inside the document being read:  ollama pull embeddinggemma
+#     Without it the reader's search stays lexical (BM25) — nothing breaks.
 
 # PDF rendering, page text and chapter detection.
 # pypdfium2 wraps PDFium (the PDF engine of Chrome), licensed Apache-2.0 OR
