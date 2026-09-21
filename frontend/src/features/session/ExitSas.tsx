@@ -56,7 +56,6 @@ export function ExitSas({
   // arrivent après le montage : le tableau se remplit à l'index écrit, et les
   // trous sont lus comme des réponses vides à l'envoi.
   const [responses, setResponses] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
 
   // Analyse LLM de la session (stats + jauges session + jauges profil) ET la
   // question de réflexion personnalisée. Best-effort. Elle ne part qu'une fois
@@ -105,22 +104,19 @@ export function ExitSas({
       });
   }
 
-  async function finish() {
-    setSaving(true);
-    try {
-      await submitFinalize();
-    } catch {
-      /* on ferme quand même */
-    }
-    onClose();
-  }
-
-  // « Passer » finalise AUSSI, sans attendre : la session a été mesurée (jauges,
-  // réponses évaluées), et jeter cette mesure parce que l'étudiant ne veut pas
-  // écrire de réflexion n'avait pas de sens. Les réponses partent telles quelles
-  // — vides, la métacognition n'est simplement pas notée (on ne note pas un
-  // silence), et une session sans aucune mesure ne déplace rien.
-  function skip() {
+  // « Terminer » comme « Passer » ferment SANS attendre la finalisation : elle
+  // évalue les réponses par le LLM (`nudge_metacog_profile`), enfilé derrière
+  // l'analyse de session déjà en cours — l'étudiant restait devant un bouton
+  // qui tourne le temps de deux appels Ollama. Le repos post-session n'a besoin
+  // de rien de tout cela : Gemma finit en fond, les caches sont invalidés à
+  // l'arrivée du résultat.
+  //
+  // « Passer » finalise AUSSI : la session a été mesurée (jauges, réponses
+  // évaluées), et jeter cette mesure parce que l'étudiant ne veut pas écrire de
+  // réflexion n'avait pas de sens. Les réponses partent telles quelles — vides,
+  // la métacognition n'est simplement pas notée (on ne note pas un silence), et
+  // une session sans aucune mesure ne déplace rien.
+  function finish() {
     submitFinalize().catch(() => {
       /* best-effort : la fermeture ne dépend pas du réseau */
     });
@@ -222,12 +218,12 @@ export function ExitSas({
         <div className="mt-4.5 flex justify-end gap-2.5">
           {/* Inactifs le temps de la clôture : finaliser AVANT qu'elle ait
               écrit la durée noterait une session de zéro seconde. */}
-          <Button variant="secondary" onClick={skip} disabled={ending}>
+          <Button variant="secondary" onClick={finish} disabled={ending}>
             {t("exit.skip")}
           </Button>
           {/* Le bouton affichait « … » pendant l'enregistrement : un indicateur
               muet, indistinguable d'un libellé cassé. */}
-          <Button onClick={finish} pending={saving} disabled={ending}>
+          <Button onClick={finish} disabled={ending}>
             {t("exit.finish")}
           </Button>
         </div>

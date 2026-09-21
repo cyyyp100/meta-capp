@@ -9,7 +9,7 @@ import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
 import { DEMO_CARDS } from "../reader/demoScript";
 import { currentStep, useTour } from "../tour/useTour";
-import { useT } from "../../i18n";
+import { useLangStore, useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
 import { WarmUp } from "./WarmUp";
@@ -71,8 +71,12 @@ export function EntrySas({
   const [left, setLeft] = useState(totalSeconds);
   const canSkip = demo || left <= SKIP_AT;
 
+  // La langue fait partie de la clé : l'accroche est générée dans la langue de
+  // l'interface, et une accroche mise en cache en anglais ne doit pas resservir
+  // après un passage au français.
+  const lang = useLangStore((s) => s.lang);
   const { data: hook } = useQuery({
-    queryKey: ["hook", docId],
+    queryKey: ["hook", docId, lang],
     queryFn: () => api.docHook(docId, 1),
     staleTime: Infinity,
     enabled: !demo,

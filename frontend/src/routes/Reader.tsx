@@ -37,6 +37,9 @@ const ZONE_TOP_INSET = 112;
 const ZONE_BOTTOM_INSET = 24;
 const ZONE_SIDE_INSET = 24;
 /** Marge (en points PDF) autour du passage cité, pour le liseré. */
+// Marge du cache de rappel libre : couvre jambages et interlignes, sinon les
+// hampes des lignes voisines laissent deviner le passage.
+const MASK_PAD_PTS = 2.5;
 const ZONE_PAD_PTS = 4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -212,14 +215,41 @@ export function Reader() {
       return;
     }
     try {
-      const { rects_pts } = await api.searchPage(id, page, mask.quote);
-      const rects = mergeLineRects(rects_pts);
+      const rects = await locateMask(page, mask.quote);
       // Passage introuvable (extraction ≠ rendu) : plutôt que de cacher la page
       // entière, on laisse la question posée — elle reste jouable, en plus facile.
       if (rects.length) setMaskByPage({ [page]: rects });
     } catch {
       /* rien à masquer : dégradation silencieuse, comme pour les citations */
     }
+  }
+
+  /**
+   * Géométrie du cache d'un rappel libre. Même recherche que `locateQuote`,
+   * mais quand la citation entière bute (ligature, césure, tiret) on ne peut
+   * pas se contenter de ses deux extrémités : les lignes du milieu resteraient
+   * lisibles, et le cache serait « transparent ». On renvoie alors l'enveloppe
+   * du début et de la fin — un seul rectangle qui couvre tout le paragraphe,
+   * quitte à déborder un peu sur les voisins.
+   */
+  async function locateMask(page: number, quote: string): Promise<number[][]> {
+    const full = mergeLineRects((await api.searchPage(id, page, quote)).rects_pts);
+    if (full.length) return full;
+    const head = quote.slice(0, 60).trim();
+    const tail = quote.slice(-60).trim();
+    if (!head) return [];
+    const [a, b] = await Promise.all([
+      api.searchPage(id, page, head),
+      tail && tail !== head ? api.searchPage(id, page, tail) : Promise.resolve({ rects_pts: [] as number[][] }),
+    ]);
+    const parts = [...a.rects_pts, ...b.rects_pts].filter((r) => r.length >= 4);
+    if (!parts.length) return [];
+    return [[
+      Math.min(...parts.map((r) => r[0])),
+      Math.min(...parts.map((r) => r[1])),
+      Math.max(...parts.map((r) => r[2])),
+      Math.max(...parts.map((r) => r[3])),
+    ]];
   }
 
   /**
@@ -818,6 +848,14 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, lockedPage, zone]);
 
+  /** Référence de page cliquée dans une réponse de Gemma : on y amène le lecteur.
+      Pas pendant une question verrouillée — la page-contexte doit rester en vue. */
+  function goToPage(page: number) {
+    if (locked) return;
+    const pageEl = scrollRef.current?.querySelector(`[data-page="${page}"]`);
+    pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function handleGatedChange(active: boolean, page?: number) {
     if (active && page) setLockedPage(page);
     setLocked(active);
@@ -1079,13 +1117,18 @@ export function Reader() {
                       {maskByPage[n].map((rect, ri) => (
                         <rect
                           key={ri}
-                          x={rect[0] - 1}
-                          y={rect[1] - 1}
-                          width={rect[2] - rect[0] + 2}
-                          height={rect[3] - rect[1] + 2}
+                          x={rect[0] - MASK_PAD_PTS}
+                          y={rect[1] - MASK_PAD_PTS}
+                          width={rect[2] - rect[0] + 2 * MASK_PAD_PTS}
+                          height={rect[3] - rect[1] + 2 * MASK_PAD_PTS}
+                          // Opaque, explicitement : la variable de thème est
+                          // pleine, mais rien ne doit pouvoir la rendre
+                          // translucide (transition d'opacité, thème tiers).
                           fill="var(--surface-soft)"
+                          fillOpacity={1}
                           stroke="var(--border-strong)"
                           strokeDasharray="4 3"
+                          vectorEffect="non-scaling-stroke"
                           rx={3}
                         />
                       ))}
@@ -1269,6 +1312,8 @@ export function Reader() {
         onGatedChange={handleGatedChange}
         onMask={handleMask}
         onZone={handleZone}
+        onGoToPage={goToPage}
+        pageCount={data?.page_count}
         demo={demo}
         ended={exit !== null}
         onDemoReady={handleDemoReady}

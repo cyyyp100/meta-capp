@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Coffee,
   CornerDownLeft,
@@ -95,6 +95,8 @@ const MODES = ["discret", "normal", "coach"] as const;
 type Layout = "float" | "dockRight";
 type Rect = { x: number; y: number; width: number; height: number };
 const DOCK_TOP = 56; // hauteur de la barre flottante du lecteur
+// Cadence max. du signal « engaged » (miroir de settings.ATTENTION_ENGAGED_REPORT_S).
+const ENGAGED_REPORT_MS = 10_000;
 const LS_RECT = "gemma:panelRect";
 const LS_LAYOUT = "gemma:layout";
 const LS_DOCKW = "gemma:dockWidth";
@@ -145,6 +147,8 @@ export function GemmaPanel({
   onGatedChange,
   onMask,
   onZone,
+  onGoToPage,
+  pageCount,
   demo = false,
   ended = false,
   onDemoReady,
@@ -163,6 +167,10 @@ export function GemmaPanel({
    * carte se referme. Le lecteur la retrouve sur la page et la cadre entière.
    */
   onZone?: (quote: string | null, page: number) => void;
+  /** Clic sur une référence de page (« p.29 ») dans une réponse : le lecteur y va. */
+  onGoToPage?: (page: number) => void;
+  /** Nombre de pages du document : borne les références cliquables. */
+  pageCount?: number;
   /**
    * Séance de démonstration de la visite guidée : AUCUN WebSocket n'est ouvert
    * et le contenu affiché est écrit d'avance (`demoScript.ts`). C'est ce qui
@@ -272,6 +280,15 @@ export function GemmaPanel({
 
   /** Une nouvelle question entre dans le fil, à la suite, et devient celle en jeu.
    *  La précédente — répondue ou non — y reste telle quelle, en lecture seule. */
+  /** Délégation : les liens `data-page-ref` sont injectés par renderMathToHtml. */
+  function handlePageRefClick(e: ReactMouseEvent<HTMLDivElement>) {
+    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-page-ref]");
+    if (!target) return;
+    e.preventDefault();
+    const page = Number(target.dataset.pageRef);
+    if (Number.isFinite(page) && page >= 1) onGoToPage?.(page);
+  }
+
   function openQa(record: Omit<QaRecord, "id" | "answer" | "feedback">) {
     const id = ++qaSeq.current;
     setMessages((m) => [...m, { role: "qa", text: record.question, qa: { ...record, id, answer: "", feedback: null } }]);
@@ -428,12 +445,26 @@ export function GemmaPanel({
     document.addEventListener("visibilitychange", reportPresence);
     window.addEventListener("blur", reportPresence);
     window.addEventListener("focus", reportPresence);
+    // Engagement : défilement, souris, clavier. Rester longtemps sur une page
+    // en la parcourant (deuxième colonne, retour sur un schéma) n'est pas du
+    // décrochage ; sans ce signal, la dérive passive le comptait comme tel.
+    // Compressé : au plus un message toutes les ENGAGED_REPORT_MS.
+    let lastEngaged = 0;
+    const reportEngaged = () => {
+      const now = Date.now();
+      if (now - lastEngaged < ENGAGED_REPORT_MS || ws.readyState !== WebSocket.OPEN) return;
+      lastEngaged = now;
+      ws.send(JSON.stringify({ type: "activity", hidden: false, engaged: true }));
+    };
+    const engagedEvents: (keyof WindowEventMap)[] = ["wheel", "scroll", "mousemove", "keydown", "pointerdown", "touchmove"];
+    for (const ev of engagedEvents) window.addEventListener(ev, reportEngaged, { capture: true, passive: true });
 
     wsRef.current = ws;
     return () => {
       document.removeEventListener("visibilitychange", reportPresence);
       window.removeEventListener("blur", reportPresence);
       window.removeEventListener("focus", reportPresence);
+      for (const ev of engagedEvents) window.removeEventListener(ev, reportEngaged, { capture: true });
       ws.close();
     };
   }, [docId, demo, ended]);
@@ -828,8 +859,9 @@ export function GemmaPanel({
               <div key={i} data-role={m.role} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
                 <div
                   style={bubble(m.role === "user" ? "user" : "assistant")}
+                  onClick={m.role === "assistant" ? handlePageRefClick : undefined}
                   {...(m.role === "assistant"
-                    ? { dangerouslySetInnerHTML: { __html: renderMathToHtml(m.text) } }
+                    ? { dangerouslySetInnerHTML: { __html: renderMathToHtml(m.text, { pageLinks: true, maxPage: pageCount }) } }
                     : { children: m.text })}
                 />
                 {m.role === "assistant" && i > 0 && (

@@ -631,3 +631,17 @@ input[type="search"]::-webkit-search-cancel-button {
 .doc-card:focus-within:not([data-dragging="true"]) .doc-chip {
   max-width: none;
 }
+
+/* Référence de page cliquable dans une réponse de Gemma (« p.29 »), injectée
+   par renderMathToHtml : un clic amène le lecteur à cette page. */
+.page-ref {
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.page-ref:hover {
+  text-decoration-style: solid;
+}

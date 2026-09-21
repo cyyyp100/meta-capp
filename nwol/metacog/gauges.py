@@ -152,12 +152,13 @@ def reading_attention_delta(
     """Dérive d'attention imputable au COMPORTEMENT de lecture, sur `elapsed_s`.
 
     C'est le seul endroit du produit où `attention` bouge sans passer par le LLM.
-    Trois observations, et rien d'autre — le reste (vitesse de scroll, souris)
-    n'est pas mesuré, donc pas inventé ici :
+    Trois observations, et rien d'autre :
 
       * fenêtre masquée ou application au second plan -> l'étudiant n'est pas là ;
-      * plus de `ATTENTION_IDLE_GRACE_S` sur la même page sans avancer -> décrochage
-        probable (la lecture lente légitime est amortie par la grâce) ;
+      * plus de `ATTENTION_IDLE_GRACE_S` d'immobilité réelle — même page ET aucun
+        geste (défilement, souris, clavier ; cf. `SessionMemory.stagnant_since`)
+        -> décrochage probable. Rester longtemps sur une page en la parcourant
+        (deuxième colonne, retour sur un schéma) n'est PAS de la stagnation ;
       * pages nouvellement lues -> la lecture avance, petit crédit.
 
     Renvoie un delta signé, à borner par l'appelant (cf. `LiveGauges`)."""

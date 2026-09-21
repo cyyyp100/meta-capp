@@ -1722,7 +1722,7 @@ Write a single opening hook sentence in English, calm and concrete, that makes t
 The sentence must speak about the document content, not about the reading tool.
 Respond only in valid JSON, without Markdown, in the exact format:
 {{
-  "curiosity_hook": "opening hook sentence",
+  "curiosity_hook": "opening hook sentence, in English",
   "tone": "calm | intriguing | concrete | playful",
   "link_with_chapter": "explicit link with the chapter",
   "estimated_accessibility": 0.0
@@ -1732,7 +1732,8 @@ Constraints:
 - curiosity_hook is a single short sentence.
 - tone is exactly "calm", "intriguing", "concrete", or "playful".
 - estimated_accessibility is between 0.0 and 1.0.
-- Never mention the name of the application or the tool."""
+- Never mention the name of the application or the tool.
+- curiosity_hook is in English even if the document title or excerpt is in another language."""
 
     excerpt_section = (
         "Aucun extrait disponible : base-toi uniquement sur le titre du document et du chapitre."
@@ -1756,7 +1757,7 @@ Extrait du chapitre :
 La phrase doit parler du contenu du document, pas de l'outil de lecture.
 Réponds uniquement en JSON valide, sans Markdown, au format exact :
 {{
-  "curiosity_hook": "phrase d'accroche",
+  "curiosity_hook": "phrase d'accroche, en français",
   "tone": "calm | intriguing | concrete | playful",
   "link_with_chapter": "lien explicite avec le chapitre",
   "estimated_accessibility": 0.0
@@ -1766,7 +1767,8 @@ Contraintes :
 - curiosity_hook tient en une phrase courte.
 - tone vaut exactement "calm", "intriguing", "concrete" ou "playful".
 - estimated_accessibility est entre 0.0 et 1.0.
-- Ne mentionne jamais le nom de l'application ou de l'outil."""
+- Ne mentionne jamais le nom de l'application ou de l'outil.
+- curiosity_hook est en français même si le titre ou l'extrait du document sont en anglais."""
 
 
 def build_latex_paragraph_render_prompt(paragraph_text: str) -> str:
@@ -2902,6 +2904,36 @@ def is_figure_question(question: str) -> bool:
     return bool(_FIGURE_QUESTION_RE.search(question or ""))
 
 
+def build_system_prompt() -> str:
+    """Consigne système envoyée avec CHAQUE génération (`/api/generate`, champ
+    `system`) : la langue de l'interface pilote la langue des réponses.
+
+    Les prompts disent déjà « en français », mais un petit modèle suit volontiers
+    la langue du document (titre ou pages en anglais) plutôt qu'une contrainte
+    perdue au milieu d'une liste. Répétée en position système, la règle tient.
+    Elle n'écrase pas les tâches qui produisent explicitement une autre langue
+    (module langues) : le prompt de la tâche garde le dernier mot."""
+    if _i18n.current_lang() == "en":
+        return (
+            "The learner's interface language is ENGLISH. Every sentence addressed "
+            "to the learner (answers, hooks, questions, summaries, hints) is written "
+            "in English, even when the document, its title or its pages are in "
+            "another language — only technical terms are kept as in the document. "
+            "JSON keys, enum values and any text the task prompt explicitly asks "
+            "for in another language (language-learning exercises) follow the task "
+            "prompt."
+        )
+    return (
+        "La langue de l'interface de l'apprenant est le FRANÇAIS. Toute phrase "
+        "adressée à l'apprenant (réponses, accroches, questions, synthèses, "
+        "indices) est rédigée en français, même quand le document, son titre ou "
+        "ses pages sont en anglais — seuls les termes techniques sont gardés tels "
+        "quels. Les clés JSON, les valeurs d'énumération et tout texte que le "
+        "prompt de la tâche demande explicitement dans une autre langue "
+        "(exercices du module langues) suivent le prompt de la tâche."
+    )
+
+
 def build_assistant_answer_prompt(
     page_text: str,
     user_question: str,
@@ -2994,7 +3026,7 @@ If an image is attached, it is the rendered PDF page itself — the primary sour
 
 Respond in valid JSON, without Markdown:
 {{
-  "answer": "clear, pedagogical answer grounded in the visible page, then a general supplement if useful",
+  "answer": "clear, pedagogical answer IN ENGLISH grounded in the visible page, then a general supplement if useful",
   "metacog_signals": {{
     "context_comprehension": 0.0,
     "creativity": 0.0,
@@ -3013,7 +3045,7 @@ Respond in valid JSON, without Markdown:
 }}
 
 Constraints:
-- Write "answer" in English, whatever the language of the document (keep the document's technical terms as they are).
+- LANGUAGE: write "answer" in English, whatever the language of the document, its title or the student's question (keep the document's technical terms as they are). Never answer in the document's language.
 - curiosity must be at least 1.0: the student is asking on their own initiative.
 - highlights: 0 to 3 quotes copied WORD FOR WORD from the visible page text (never rephrased), pointing at the passages your answer relies on — they will be highlighted on the page for the student. purpose is "key", "explain" or "reference". Use an empty list if nothing relevant.
 - Sources, in priority order: (1) the visible page, when it actually contains the answer; (2) otherwise what lies elsewhere in the document (the "Elsewhere in the document" block) — it is reliable: answer precisely from it and give the page (e.g. "Table I, p.5"). When the answer is in a table, COPY the values of the relevant row or column into the answer (e.g. "Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps"); never just say that they are listed there; (3) only then general knowledge, introduced by "More generally, ...". If the visible page does not hold the answer, say so in half a sentence and move on to the other pages — no apology, no filler.
@@ -3022,7 +3054,8 @@ Constraints:
 {search_rule}{figure_rule}- Never invent facts about the document that neither the page nor the other pages show.
 - If one of the listed flashcards already covers the question, naturally point it out ("You already have a flashcard on this") and connect your answer to it.
 - Keep the answer compact (4-8 sentences): it is displayed in a small floating panel.
-- meta_cognition stays at 0.0."""
+- meta_cognition stays at 0.0.
+- Reminder: "answer" is in English."""
 
     return f"""Tu es Gemma, la bulle assistante de lecture de MetaC-App. L'étudiant lit un PDF librement et vient de te poser une question en cliquant sur ta bulle.
 
@@ -3048,7 +3081,7 @@ Si une image est jointe, c'est la page PDF rendue elle-même — la source prima
 
 Réponds en JSON valide, sans Markdown :
 {{
-  "answer": "réponse claire et pédagogique ancrée dans la page visible, puis un complément général si utile",
+  "answer": "réponse claire et pédagogique EN FRANÇAIS ancrée dans la page visible, puis un complément général si utile",
   "metacog_signals": {{
     "context_comprehension": 0.0,
     "creativity": 0.0,
@@ -3067,7 +3100,7 @@ Réponds en JSON valide, sans Markdown :
 }}
 
 Contraintes :
-- Rédige "answer" en français, quelle que soit la langue du document (garde tels quels les termes techniques du document).
+- LANGUE : rédige "answer" en français, quelle que soit la langue du document, de son titre ou de la question de l'étudiant (garde tels quels les termes techniques du document). Ne réponds jamais dans la langue du document.
 - curiosity doit être au moins 1.0 : l'étudiant questionne de sa propre initiative.
 - highlights : 0 à 3 citations copiées MOT POUR MOT du texte de la page visible (jamais reformulées), désignant les passages sur lesquels ta réponse s'appuie — ils seront surlignés sur la page pour l'étudiant. purpose vaut "key", "explain" ou "reference". Liste vide si rien de pertinent.
 - Sources, par ordre de priorité : (1) la page visible, quand elle contient vraiment la réponse ; (2) sinon ce qui se trouve ailleurs dans le document (bloc « Ailleurs dans le document ») — c'est fiable : réponds précisément à partir de là et indique la page (ex. « Table I, p.5 »). Quand la réponse est dans une table, RECOPIE les valeurs de la ligne ou de la colonne concernée dans la réponse (ex. « Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps ») ; ne dis jamais seulement qu'elles y sont listées ; (3) seulement ensuite les connaissances générales, introduites par "Plus généralement, ...". Si la page visible ne contient pas la réponse, dis-le en une demi-phrase et passe aux autres pages — sans excuse ni remplissage.
@@ -3076,7 +3109,8 @@ Contraintes :
 {search_rule}{figure_rule}- N'invente jamais de fait sur le document que ni la page ni les autres pages ne montrent.
 - Si une des flashcards listées couvre déjà la question, signale-le naturellement ("Tu as déjà une flashcard sur ce point") et relie ta réponse à elle.
 - Réponse compacte (4 à 8 phrases) : elle s'affiche dans un petit panneau flottant.
-- meta_cognition reste à 0.0."""
+- meta_cognition reste à 0.0.
+- Rappel : "answer" est en français."""
 
 
 def build_intervention_prompt(context: dict) -> str:

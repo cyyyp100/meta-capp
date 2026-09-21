@@ -242,3 +242,19 @@ def test_math_ahead_stays_silent_once_the_formulas_are_on_screen(monkeypatch):
     policy.tick()
 
     assert contexts[-1]["trigger"] == "hard_page"
+
+
+def test_stagnant_since_resets_on_interaction() -> None:
+    """Un geste (scroll, souris, clavier) remet l'immobilité à zéro sans changer
+    la page : lire une deuxième colonne n'est pas du décrochage."""
+    memory = SessionMemory()
+    memory.on_page_view(3, now=1000.0)
+    assert memory.stagnant_since(1200.0) == 200.0
+    assert memory.current_dwell(1200.0) == 200.0
+    memory.on_interaction(now=1190.0)
+    assert memory.stagnant_since(1200.0) == 10.0
+    # Le dwell, lui, ne bouge pas : `long_dwell` continue de lire le temps sur la page.
+    assert memory.current_dwell(1200.0) == 200.0
+    # Jamais plus que le dwell (interaction antérieure à l'entrée sur la page).
+    memory.on_page_view(4, now=1300.0)
+    assert memory.stagnant_since(1305.0) == 5.0

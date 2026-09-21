@@ -96,7 +96,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Bulle assistante ──────────────────────────────────────────────
         "assistant.title": "Gemma — assistante de lecture",
         "assistant.mode_label": "Mode ",
-        "assistant.hint": "Pose-moi une question sur ce que tu lis : je regarde la page visible au moment où tu envoies.",
+        "assistant.hint": "Pose-moi une question sur ce que tu lis : je regarde d'abord la page visible au moment où tu envoies, puis le reste du document si besoin.",
         "assistant.send": "Envoyer",
         "assistant.thinking": "Gemma réfléchit…",
         "assistant.unavailable": "LLM indisponible — lecture libre, l'assistante dort.",
@@ -657,7 +657,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Assistant bubble ──────────────────────────────────────────────
         "assistant.title": "Gemma — reading assistant",
         "assistant.mode_label": "Mode ",
-        "assistant.hint": "Ask me anything about what you're reading: I look at the page visible the moment you press Send.",
+        "assistant.hint": "Ask me anything about what you're reading: I look at the page visible the moment you press Send first, then the rest of the document if needed.",
         "assistant.send": "Send",
         "assistant.thinking": "Gemma is thinking…",
         "assistant.unavailable": "LLM unavailable — free reading, the assistant is asleep.",

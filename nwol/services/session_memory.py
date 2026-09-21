@@ -19,6 +19,10 @@ class SessionMemory:
 
     _current_page: int | None = None
     _entered_at: float = 0.0
+    # Dernière interaction physique avec la page (défilement, souris, clavier).
+    # 0.0 tant que rien n'a été observé : la stagnation retombe alors sur le
+    # seul temps passé sur la page.
+    _last_interaction: float = 0.0
 
     # ------------------------------------------------------------------
     # Événements
@@ -31,8 +35,18 @@ class SessionMemory:
         self._flush_dwell(now)
         self._current_page = page
         self._entered_at = now
+        self._last_interaction = now
         self.visits_by_page[page] = self.visits_by_page.get(page, 0) + 1
         self.dwell_by_page.setdefault(page, 0.0)
+
+    def on_interaction(self, now: float | None = None) -> None:
+        """Le lecteur a bougé (scroll, souris, clavier) : l'étudiant est là.
+
+        Une page longue, une deuxième colonne, un retour sur un schéma : autant
+        de lectures légitimes qui laissent la page dominante inchangée pendant
+        plusieurs minutes. Sans ce signal, la dérive passive les prenait pour du
+        décrochage."""
+        self._last_interaction = time.monotonic() if now is None else now
 
     def on_user_question(self, page: int, question: str = "") -> None:
         self.questions_by_page[page] = self.questions_by_page.get(page, 0) + 1
@@ -69,6 +83,17 @@ class SessionMemory:
             return 0.0
         now = time.monotonic() if now is None else now
         return max(0.0, now - self._entered_at)
+
+    def stagnant_since(self, now: float | None = None) -> float:
+        """Secondes d'immobilité réelle : sur la même page ET sans interaction.
+
+        C'est la mesure que la dérive passive d'attention doit lire — pas le
+        seul `current_dwell`, qui ignore tout ce que fait l'étudiant sur la page."""
+        now = time.monotonic() if now is None else now
+        dwell = self.current_dwell(now)
+        if not self._last_interaction:
+            return dwell
+        return max(0.0, min(dwell, now - self._last_interaction))
 
     def visits(self, page: int) -> int:
         return self.visits_by_page.get(page, 0)

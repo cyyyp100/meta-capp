@@ -389,12 +389,17 @@ LOG_BACKUP_COUNT = 5
 # (tests/services/test_intervention.py).
 ASSISTANT_MODES = ("discret", "normal", "coach")
 ASSISTANT_DEFAULT_MODE = "normal"
-ASSISTANT_GLOBAL_COOLDOWN = {"normal": 240.0, "coach": 120.0}
-ASSISTANT_PAGE_COOLDOWN = {"normal": 600.0, "coach": 360.0}
+# Cadence relevée de deux minutes (retour terrain : les questions arrivaient
+# trop serrées, même en coach) — le cooldown global est le temps minimal entre
+# deux interventions, quelle que soit la page.
+ASSISTANT_GLOBAL_COOLDOWN = {"normal": 360.0, "coach": 240.0}
+ASSISTANT_PAGE_COOLDOWN = {"normal": 720.0, "coach": 480.0}
 ASSISTANT_DWELL_TRIGGER_S = {"normal": 150.0, "coach": 75.0}
 # Warm-up : délai d'entrée dans le document pendant lequel aucune intervention
 # autonome ne part (les déclencheurs « doux » sont sinon armés dès 30 s de dwell).
-ASSISTANT_WARMUP_S = {"normal": 180.0, "coach": 90.0}
+# Une minute de plus que la cadence de croisière ne le suggère : on laisse
+# l'étudiant s'installer dans sa lecture avant la première question.
+ASSISTANT_WARMUP_S = {"normal": 240.0, "coach": 150.0}
 ASSISTANT_REVISIT_TRIGGER = 3       # retours sur une même page
 ASSISTANT_LOW_ATTENTION = 40.0      # seuil de jauge attention
 ASSISTANT_QUESTIONS_TRIGGER = 2     # questions utilisateur sur la même page
@@ -431,7 +436,8 @@ FOCUS_DEFAULT_MIN = 25
 # dérive appliquée à chaque tick du lecteur à partir de ce qu'on observe vraiment
 # (fenêtre au premier plan, progression dans le document, stagnation sur une page).
 # Lues uniquement par `services/session.LiveGauges.apply_reading_behaviour`.
-ATTENTION_IDLE_GRACE_S = 90.0        # stagnation tolérée sur une page avant dérive
+ATTENTION_IDLE_GRACE_S = 90.0        # immobilité (même page, aucun geste) tolérée avant dérive
+ATTENTION_ENGAGED_REPORT_S = 10.0    # cadence max. du signal « engaged » envoyé par le lecteur
 ATTENTION_DRIFT_PER_MIN = 2.0        # points/min perdus au-delà de la grâce
 ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hors focus
 ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue

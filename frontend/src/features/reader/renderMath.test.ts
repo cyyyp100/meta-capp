@@ -36,3 +36,18 @@ describe("renderMathToHtml — anti-XSS", () => {
     expect(out).toContain("<br/>");
   });
 });
+
+describe("linkPageRefs", () => {
+  it("rend p.29 / page 12 / pages 4-6 cliquables", () => {
+    const html = renderMathToHtml("Voir Table I, p.29 et page 12, puis pages 4-6.", { pageLinks: true });
+    expect(html).toContain('data-page-ref="29"');
+    expect(html).toContain('data-page-ref="12"');
+    expect(html).toContain('data-page-ref="4"');
+    expect(html).toContain('data-page-ref="6"');
+  });
+  it("respecte la borne et ne touche pas au texte sans option", () => {
+    expect(renderMathToHtml("cf. p.99", { pageLinks: true, maxPage: 10 })).not.toContain("data-page-ref");
+    expect(renderMathToHtml("cf. p.9", { pageLinks: true, maxPage: 10 })).toContain('data-page-ref="9"');
+    expect(renderMathToHtml("cf. p.9")).not.toContain("data-page-ref");
+  });
+});

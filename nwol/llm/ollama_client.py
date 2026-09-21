@@ -31,6 +31,7 @@ from config.settings import (
 )
 from i18n import current_lang, t
 from llm.prompts import (
+    build_system_prompt,
     build_assistant_answer_prompt,
     build_chapter_summary_prompt,
     build_curiosity_hook_prompt,
@@ -2199,8 +2200,11 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     Le timeout socket est dérivé du budget de `task` (`settings.task_timeout_s`) :
     une tâche qui demande 3000 tokens ne peut pas tenir dans le budget d'une qui
     en demande 160."""
+    # La langue de l'interface voyage en position système (cf. build_system_prompt) :
+    # c'est ce qui empêche un document anglais d'entraîner la réponse en anglais.
     payload_data = {
         "model": model,
+        "system": build_system_prompt(),
         "prompt": prompt,
         "stream": False,
         "think": False,

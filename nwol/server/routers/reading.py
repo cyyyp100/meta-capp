@@ -3,8 +3,9 @@
 # client -> serveur : {"type":"ask","question","page"} | {"type":"rephrase","page"}
 #                     {"type":"recap","page"} | {"type":"hook","page"}
 #                     {"type":"viewport","page"} | {"type":"mode","mode"} | {"type":"focus"}
-#                     {"type":"activity","hidden":bool}  # fenêtre masquée / app au
-#                       second plan -> alimente la dérive passive d'attention
+#                     {"type":"activity","hidden":bool,"engaged":bool}  # fenêtre
+#                       masquée / app au second plan, ou (engaged) défilement /
+#                       souris / clavier -> alimentent la dérive passive d'attention
 #                     {"type":"pause","minutes":int}  # pause recommandée acceptée
 #                       (0 = reprise anticipée) -> silence + dérive suspendue
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
@@ -81,6 +82,7 @@ class ReaderMessage(BaseModel):
     ]
     page: int | None = None
     hidden: bool = False
+    engaged: bool = False
     minutes: int | None = None
     session_id: int | None = None
     mode: str | None = None
@@ -408,7 +410,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         state["pages_seen"] = seen
         gauges.apply_reading_behaviour(
             elapsed_s=elapsed_s,
-            stagnant_s=memory.current_dwell(now),
+            stagnant_s=memory.stagnant_since(now),
             pages_progressed=progressed,
             away=bool(state["away"]),
         )
@@ -484,9 +486,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 continue
 
             if kind == "activity":
-                # Fenêtre masquée ou application au second plan : l'étudiant n'est
-                # pas devant sa page. Seul signal d'absence dont on dispose.
+                # Deux signaux de présence : la fenêtre (masquée / second plan =
+                # absent) et le geste (scroll, souris, clavier = présent, même si
+                # la page dominante ne change pas — deuxième colonne, retour sur
+                # un schéma). Le second remet la stagnation à zéro.
                 state["away"] = bool(msg.hidden)
+                if msg.engaged and not msg.hidden:
+                    memory.on_interaction(time.monotonic())
                 continue
 
             if kind == "pause":
