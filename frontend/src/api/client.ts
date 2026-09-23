@@ -279,7 +279,6 @@ export const api = {
     postJSON<LangPlacementResult>("/api/lang/placement/skip", { language }),
   docHook: (docId: number, page = 1) =>
     getJSON<{ hook: string }>(`/api/library/doc/${docId}/hook?page=${page}`),
-  dueFlashcards: (docId: number) => getJSON<Flashcard[]>(`/api/flashcards/due?doc_id=${docId}`),
   // Warm-up du SAS d'entrée : 5 cartes sélectionnées par pertinence (dues + récence/matière).
   sessionStartCards: (docId: number, limit = 5) =>
     getJSON<Flashcard[]>(`/api/flashcards/session-start?doc_id=${docId}&limit=${limit}`),

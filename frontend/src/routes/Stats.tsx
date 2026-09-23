@@ -16,6 +16,7 @@ export function Stats() {
     queryFn: api.statsOverview,
   });
   const { data: langStats } = useQuery({ queryKey: ["lang", "stats"], queryFn: api.langStats });
+  const languages = langStats ?? [];
 
   const del = (d: number) => (d > 2 ? `+${Math.round(d)}` : d < -2 ? `${Math.round(d)}` : t("trend.stable"));
 
@@ -145,10 +146,11 @@ export function Stats() {
         <ArrowRight className="size-4.5 shrink-0" style={{ color: "var(--muted)" }} aria-hidden />
       </Link>
 
-      {/* Matières */}
+      {/* Matières — les langues étudiées (score global 0–100 + niveau CEFR)
+          y ont leur carte, à la suite des matières lues : c'en sont aussi. */}
       <Card>
         <SectionTitle>{t("stats.by_subject")}</SectionTitle>
-        {data.subjects.length === 0 ? (
+        {data.subjects.length === 0 && languages.length === 0 ? (
           <div style={{ color: "var(--muted)", fontStyle: "italic" }}>{t("stats.no_subjects")}</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
@@ -171,19 +173,8 @@ export function Stats() {
                 </div>
               </Card>
             ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Langue — score global 0–100 + niveau CEFR par langue étudiée. */}
-      <Card style={{ marginTop: "var(--space-lg)" }}>
-        <SectionTitle>{t("stats.by_language")}</SectionTitle>
-        {!langStats || langStats.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontStyle: "italic" }}>{t("stats.no_languages")}</div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
-            {langStats.map((l) => (
-              <Card key={l.language} soft>
+            {languages.map((l) => (
+              <Card key={`lang-${l.language}`} soft>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontWeight: 700 }}>
                     <span style={{ marginRight: 8 }}>{l.flag}</span>

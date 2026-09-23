@@ -9,7 +9,7 @@
 // sessions déjà terminées par cette personne. Promettre « 20 min » à quelqu'un
 // qui lit par tranches de 8 est la meilleure façon de ne pas être cru.
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Flame, Layers } from "lucide-react";
+import { BookOpen, Flame } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api/client";
@@ -30,11 +30,6 @@ export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
   // ouvert au moins une fois EST celui qu'on était en train de lire.
   const doc = documents.find((d) => (d.last_page ?? 0) > 0) ?? documents[0];
 
-  const { data: due } = useQuery({
-    queryKey: ["flashcards", "due", doc?.id],
-    queryFn: () => api.dueFlashcards(doc!.id),
-    enabled: Boolean(doc),
-  });
   const { data: streak } = useQuery({ queryKey: ["streak"], queryFn: api.streak });
   const { data: history } = useQuery({
     queryKey: ["progress", "sessions"],
@@ -44,7 +39,6 @@ export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
   if (!doc) return null;
 
   const minutes = medianMinutes(history?.sessions ?? []);
-  const dueCount = due?.length ?? 0;
 
   return (
     <section
@@ -59,11 +53,6 @@ export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
         <h2 className="mt-1.5 mb-0 truncate font-serif text-h3 font-bold">{doc.title}</h2>
         <p className="mt-1 mb-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
           <span>{t("resume.page", { page: Math.max(1, doc.last_page || 1) })}</span>
-          <span aria-hidden>·</span>
-          <span className="flex items-center gap-1.5">
-            <Layers className="size-3.5" aria-hidden />
-            {dueCount > 0 ? t("resume.cards_due", { n: dueCount }) : t("resume.no_cards")}
-          </span>
           <span aria-hidden>·</span>
           <span>{t("resume.estimate", { n: minutes })}</span>
         </p>
