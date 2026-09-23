@@ -3256,6 +3256,7 @@ def _brainstorm_sources_block(sources: list[dict] | None) -> str:
         "qa": _t("Échange passé", "Past exchange"),
         "flashcard": "Flashcard",
         "document": "Document",
+        "mistake": _t("Erreur passée", "Past mistake"),
     }
     lines: list[str] = []
     for i, s in enumerate(sources, 1):
@@ -3272,11 +3273,35 @@ def _brainstorm_sources_block(sources: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
-def build_brainstorm_search_decide_prompt(history: list[dict] | None, user_message: str) -> str:
+def _brainstorm_scope_block(scope: dict | None) -> str:
+    """Dossier auquel la discussion est liée, ou chaîne vide (toute la base)."""
+    if not scope:
+        return ""
+    name = str(scope.get("name") or "").strip() or "?"
+    titles = [str(title) for title in (scope.get("titles") or []) if title]
+    extra = max(0, int(scope.get("total") or 0) - len(titles))
+    if titles:
+        listing = ", ".join(titles) + (f" (+{extra})" if extra else "")
+    else:
+        listing = _t("(aucun document)", "(no documents)")
+    return (
+        _t(
+            f"Cette discussion est LIÉE au dossier « {name} » : la base consultée se limite aux documents de ce dossier et de ses sous-dossiers — {listing}.",
+            f"This discussion is LINKED to the folder \"{name}\": the database searched is limited to the documents of that folder and its subfolders — {listing}.",
+        )
+        + "\n"
+    )
+
+
+def build_brainstorm_search_decide_prompt(
+    history: list[dict] | None,
+    user_message: str,
+    scope: dict | None = None,
+) -> str:
     """Décision JSON courte : faut-il fouiller la base de l'utilisateur, et avec quels mots-clés."""
     hist = _brainstorm_history_block(history, max_turns=4)
-    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses).", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers).")}
-{_t("Décide s'il serait utile de chercher dans cette base AVANT de répondre au dernier message.", "Decide whether searching that database BEFORE answering the last message would help.")}
+    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses, erreurs passées).", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers, past mistakes).")}
+{_brainstorm_scope_block(scope)}{_t("Décide s'il serait utile de chercher dans cette base AVANT de répondre au dernier message.", "Decide whether searching that database BEFORE answering the last message would help.")}
 
 {_t("Contexte récent", "Recent context")} :
 {hist}
@@ -3297,20 +3322,21 @@ def build_brainstorm_answer_prompt(
     history: list[dict] | None,
     user_message: str,
     sources: list[dict] | None,
+    scope: dict | None = None,
 ) -> str:
     """Réponse conversationnelle (texte libre) : mémoire de la discussion + sources DB citées."""
     summary_block = (summary or "").strip() or _t("(aucun, discussion récente)", "(none, recent discussion)")
     hist = _brainstorm_history_block(history)
     src = _brainstorm_sources_block(sources)
     return f"""{_t("Tu es Gemma, partenaire de brainstorming de l'utilisateur dans MetaC-App. Tu discutes librement, comme un assistant conversationnel, mais tu as un atout : l'accès à la base personnelle de l'utilisateur.", "You are Gemma, the user's brainstorming partner in MetaC-App. You chat freely, like a conversational assistant, but with an edge: access to the user's personal database.")}
-
+{_brainstorm_scope_block(scope)}
 {_t("Mémoire de la discussion (résumé des échanges précédents)", "Discussion memory (summary of earlier exchanges)")} :
 {summary_block}
 
 {_t("Messages récents", "Recent messages")} :
 {hist}
 
-{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A)")} :
+{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R, erreurs passées)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A, past mistakes)")} :
 {src}
 
 {_t("Nouveau message de l'utilisateur", "User's new message")} :

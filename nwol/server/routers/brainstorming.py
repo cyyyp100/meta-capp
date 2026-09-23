@@ -1,10 +1,15 @@
 # server/routers/brainstorming.py — Page « Brainstorming » (chat libre + RAG).
 #
-# REST  : gestion des discussions (liste / création / messages / suppression).
+# REST  : gestion des discussions (liste / création / messages / suppression,
+#         épinglage, lien à un dossier de la bibliothèque).
 # WS    : canal temps réel d'une discussion.
 #   client -> serveur : {"type":"ask","question":"…"}
-#   serveur -> client : {"type":"loading"} | {"type":"scanning","active":bool}
+#   serveur -> client : {"type":"loading"} | {"type":"title","title"}
+#                       {"type":"scanning","active":bool}
 #                       {"type":"answer","answer","sources"} | {"type":"error","message"}
+#
+# Plafond d'épinglage et validité du dossier : `services/brainstorm.py` ; ici on
+# ne fait que traduire ses ValueError en 400.
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +34,15 @@ _MAX_QUESTION_CHARS = 4000
 
 class CreateBody(BaseModel):
     title: str | None = None
+    folder_id: int | None = None
+
+
+class PinBody(BaseModel):
+    pinned: bool
+
+
+class FolderBody(BaseModel):
+    folder_id: int | None = None
 
 
 @router.get("/discussions")
@@ -38,9 +52,26 @@ def discussions() -> list[dict]:
 
 @router.post("")
 def create(body: CreateBody) -> dict:
-    discussion_id = store.create_discussion(body.title or "")
-    created = store.get_discussion(discussion_id)
-    return created or {"id": discussion_id, "title": (body.title or "").strip()}
+    try:
+        return brainstorm.create_discussion(body.title or "", body.folder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/{discussion_id}/pin")
+def pin(discussion_id: int, body: PinBody) -> dict:
+    try:
+        return brainstorm.set_pinned(discussion_id, body.pinned)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/{discussion_id}/folder")
+def link_folder(discussion_id: int, body: FolderBody) -> dict:
+    try:
+        return brainstorm.set_folder(discussion_id, body.folder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/{discussion_id}/messages")
@@ -52,6 +83,9 @@ def messages(discussion_id: int) -> dict:
         "id": discussion["id"],
         "title": discussion["title"],
         "summary": discussion.get("summary") or "",
+        "pinned_at": discussion.get("pinned_at"),
+        "folder_id": discussion.get("folder_id"),
+        "folder_name": discussion.get("folder_name"),
         "messages": store.get_messages(discussion_id),
     }
 
@@ -90,6 +124,9 @@ async def brainstorm_stream(ws: WebSocket, discussion_id: int) -> None:
     def on_scanning(active: bool) -> None:
         push_threadsafe(loop, out, {"type": "scanning", "active": bool(active)})
 
+    def on_title(title: str) -> None:
+        push_threadsafe(loop, out, {"type": "title", "title": str(title)})
+
     try:
         while True:
             msg = await ws.receive_json()
@@ -103,7 +140,9 @@ async def brainstorm_stream(ws: WebSocket, discussion_id: int) -> None:
             await out.put({"type": "loading"})
             # handle_message rend la main vite (il met le travail LLM en file) ;
             # les callbacks reviennent depuis le thread worker via push_threadsafe.
-            brainstorm.handle_message(discussion_id, question, on_answer, on_error, on_scanning)
+            brainstorm.handle_message(
+                discussion_id, question, on_answer, on_error, on_scanning, on_title=on_title,
+            )
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover

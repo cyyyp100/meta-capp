@@ -2565,11 +2565,14 @@ def decide_brainstorm_search_async(
     on_success,
     on_error,
     model: str = OLLAMA_MODEL,
+    scope: dict | None = None,
 ) -> None:
-    """Décide s'il faut fouiller la base de l'utilisateur (JSON court {search, queries})."""
+    """Décide s'il faut fouiller la base de l'utilisateur (JSON court {search, queries}).
+
+    ``scope`` : dossier auquel la discussion est liée (cf. services/brainstorm._scope)."""
     from llm.prompts import build_brainstorm_search_decide_prompt
     from llm.schema_json import parse_brainstorm_search_decision
-    prompt = build_brainstorm_search_decide_prompt(history, user_message)
+    prompt = build_brainstorm_search_decide_prompt(history, user_message, scope)
     return _run_json_async(
         "brainstorm_search_decide", prompt, parse_brainstorm_search_decision,
         on_success, on_error, model,
@@ -2589,6 +2592,7 @@ def answer_brainstorm_async(
         history=context.get("history") or [],
         user_message=context.get("user_message") or "",
         sources=context.get("sources") or [],
+        scope=context.get("scope"),
     )
     return _run_text_async("brainstorm_answer", prompt, on_success, on_error, model)
 

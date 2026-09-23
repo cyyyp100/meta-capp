@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { BrainstormSource } from "../../api/client";
+import type { BrainstormDiscussion, BrainstormSource } from "../../api/client";
 import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
 import { renderMathToHtml } from "../reader/renderMath";
+import { FolderScopePicker } from "./FolderScopePicker";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -18,9 +19,21 @@ const SOURCE_ICON: Record<BrainstormSource["source_type"], string> = {
   qa: "💬",
   flashcard: "🗂",
   document: "📄",
+  mistake: "❌",
 };
 
-export function ChatPanel({ discussionId, onActivity }: { discussionId: number; onActivity?: () => void }) {
+export function ChatPanel({
+  discussionId,
+  discussion,
+  onFolderChange,
+  onActivity,
+}: {
+  discussionId: number;
+  /** Ligne de la liste (titre, dossier lié) — absente le temps qu'elle arrive. */
+  discussion?: BrainstormDiscussion;
+  onFolderChange: (folderId: number | null) => void;
+  onActivity?: () => void;
+}) {
   const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -54,6 +67,10 @@ export function ChatPanel({ discussionId, onActivity }: { discussionId: number; 
       const evt = JSON.parse(e.data);
       if (evt.type === "scanning") {
         setScanning(Boolean(evt.active));
+      } else if (evt.type === "title") {
+        // 1er message : le serveur vient de nommer la discussion, la liste le
+        // montre tout de suite au lieu d'attendre la réponse de Gemma.
+        onActivity?.();
       } else if (evt.type === "answer") {
         setBusy(false);
         setScanning(false);
@@ -88,10 +105,29 @@ export function ChatPanel({ discussionId, onActivity }: { discussionId: number; 
     ws.send(JSON.stringify({ type: "ask", question: text }));
   }
 
+  const folderId = discussion?.folder_id ?? null;
+  const folderName = discussion?.folder_name ?? null;
+
   return (
     <div style={panel}>
+      <div style={header}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={headerTitle}>{discussion?.title ?? ""}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", ...ellipsis }}>
+            {folderId !== null
+              ? t("brainstorm.scope_hint", { name: folderName ?? "" })
+              : t("brainstorm.scope_all_hint")}
+          </div>
+        </div>
+        <FolderScopePicker folderId={folderId} folderName={folderName} onChange={onFolderChange} />
+      </div>
       <div ref={bodyRef} style={body}>
-        {messages.length === 0 && !busy && <div style={welcome}>{t("brainstorm.welcome")}</div>}
+        {messages.length === 0 && !busy && (
+          <div style={welcome}>
+            {t("brainstorm.welcome")}
+            {folderId === null && <div style={{ marginTop: 10, fontSize: 13 }}>{t("brainstorm.welcome_folder")}</div>}
+          </div>
+        )}
         {messages.map((m, i) => (
           <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "82%" }}>
             <div
@@ -153,6 +189,18 @@ const panel: React.CSSProperties = {
   background: "var(--surface)",
   overflow: "hidden",
 };
+
+const ellipsis: React.CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+
+const header: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  padding: "10px 14px",
+  borderBottom: "1px solid var(--border)",
+};
+
+const headerTitle: React.CSSProperties = { fontSize: 14, fontWeight: 600, color: "var(--text)", ...ellipsis };
 
 const body: React.CSSProperties = {
   flex: 1,

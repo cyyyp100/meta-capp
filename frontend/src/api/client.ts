@@ -290,8 +290,14 @@ export const api = {
     getJSON<SessionAnalysis>(`/api/session/${sid}/analysis`),
   // ── Brainstorming (chat libre + RAG sur la base utilisateur) ─────────────────
   brainstormDiscussions: () => getJSON<BrainstormDiscussion[]>("/api/brainstorming/discussions"),
-  createDiscussion: (title?: string) =>
-    postJSON<BrainstormDiscussion>("/api/brainstorming", { title: title ?? null }),
+  createDiscussion: (title?: string, folderId: number | null = null) =>
+    postJSON<BrainstormDiscussion>("/api/brainstorming", { title: title ?? null, folder_id: folderId }),
+  // Au-delà de 5 épinglées, le serveur répond 400 (message traduit dans l'Error).
+  pinDiscussion: (id: number, pinned: boolean) =>
+    postJSON<BrainstormDiscussion>(`/api/brainstorming/${id}/pin`, { pinned }),
+  // Lie la discussion à un dossier de la bibliothèque (null = toute la base).
+  setDiscussionFolder: (id: number, folderId: number | null) =>
+    postJSON<BrainstormDiscussion>(`/api/brainstorming/${id}/folder`, { folder_id: folderId }),
   discussionMessages: (id: number) => getJSON<BrainstormDetail>(`/api/brainstorming/${id}/messages`),
   deleteDiscussion: (id: number) =>
     fetch(`/api/brainstorming/${id}`, { method: "DELETE" }).then((r) => {
@@ -473,7 +479,7 @@ export interface StudyStreak {
 }
 
 export interface BrainstormSource {
-  source_type: "highlight" | "qa" | "flashcard" | "document";
+  source_type: "highlight" | "qa" | "flashcard" | "document" | "mistake";
   doc_id?: number | null;
   doc_title?: string | null;
   page?: number | null;
@@ -487,6 +493,11 @@ export interface BrainstormDiscussion {
   message_count: number;
   created_at: string;
   updated_at: string;
+  /** Non null = épinglée (en tête de liste, dans l'ordre d'épinglage). */
+  pinned_at: string | null;
+  /** Dossier lié : Gemma ne puise que dans ses documents (sous-dossiers compris). */
+  folder_id: number | null;
+  folder_name: string | null;
 }
 
 export interface BrainstormMessage {
@@ -501,6 +512,9 @@ export interface BrainstormDetail {
   id: number;
   title: string;
   summary: string;
+  pinned_at: string | null;
+  folder_id: number | null;
+  folder_name: string | null;
   messages: BrainstormMessage[];
 }
 

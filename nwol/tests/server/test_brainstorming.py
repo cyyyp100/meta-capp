@@ -3,11 +3,11 @@
 
 # ── Fakes LLM (mêmes signatures callback que le code réel) ────────────────────
 
-def _decide_no_search(history, user_message, on_success, on_error, model=None):
+def _decide_no_search(history, user_message, on_success, on_error, model=None, **_):
     on_success({"search": False, "queries": []})
 
 
-def _decide_with_search(history, user_message, on_success, on_error, model=None):
+def _decide_with_search(history, user_message, on_success, on_error, model=None, **_):
     on_success({"search": True, "queries": ["vélo"]})
 
 
@@ -56,6 +56,8 @@ def test_brainstorm_ws_answer_and_persist(client, monkeypatch):
     with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
         ws.send_json({"type": "ask", "question": "Idée sur le vélo"})
         assert ws.receive_json()["type"] == "loading"
+        # 1er message d'une discussion vierge : son titre part avant la réponse.
+        assert ws.receive_json() == {"type": "title", "title": "Idée sur le vélo"}
         answer = ws.receive_json()
         assert answer["type"] == "answer"
         assert "vélo" in answer["answer"]
@@ -115,7 +117,7 @@ def test_brainstorm_question_is_bounded(client, monkeypatch):
 
     seen: dict = {}
 
-    def _capture(discussion_id, question, on_answer, on_error, on_scanning):
+    def _capture(discussion_id, question, on_answer, on_error, on_scanning, **_):
         seen["question"] = question
         on_answer({"answer": "ok", "sources": []})
 
@@ -137,7 +139,7 @@ def test_brainstorm_ignores_non_dict_message(client, monkeypatch):
     gestionnaire d'exception du WebSocket et fermait le canal."""
     from services import brainstorm as svc
 
-    def _answer(discussion_id, question, on_answer, on_error, on_scanning):
+    def _answer(discussion_id, question, on_answer, on_error, on_scanning, **_):
         on_answer({"answer": "ok", "sources": []})
 
     monkeypatch.setattr(svc, "handle_message", _answer)
@@ -261,3 +263,253 @@ def test_search_returns_nothing_without_usable_terms(client):
     assert search_user_db("le la les") == []
     assert search_user_db("") == []
     assert search_user_db("photosynthèse", limit=0) == []
+
+
+# ── Titre immédiat ────────────────────────────────────────────────────────────
+
+def test_title_is_pushed_before_the_answer(client, monkeypatch):
+    """Le titre tiré du 1er message part AVANT la réponse : la liste le montre dès
+    l'envoi, au lieu de rester sur « Nouvelle discussion » toute la génération."""
+    import services.brainstorm as svc
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide_no_search)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer_fake)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    did = client.post("/api/brainstorming", json={}).json()["id"]
+    question = "Comment   relier la photosynthèse et la respiration cellulaire dans un même schéma global ?"
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": question})
+        types = []
+        title = None
+        while True:
+            evt = ws.receive_json()
+            types.append(evt["type"])
+            if evt["type"] == "title":
+                title = evt["title"]
+            if evt["type"] == "answer":
+                break
+        # 2e message : la discussion a déjà un nom, pas de nouvel événement.
+        ws.send_json({"type": "ask", "question": "Et ensuite ?"})
+        second = []
+        while True:
+            evt = ws.receive_json()
+            second.append(evt["type"])
+            if evt["type"] == "answer":
+                break
+
+    assert types.index("title") < types.index("answer")
+    assert "title" not in second
+    # Espaces compactés, coupe sur une frontière de mot, jamais au-delà de 60.
+    assert title.endswith("…") and len(title) <= 60
+    assert "  " not in title
+    assert question.replace("   ", " ").startswith(title[:-1])
+    listing = client.get("/api/brainstorming/discussions").json()
+    assert listing[0]["title"] == title
+
+
+def test_title_from_message_cuts_on_a_word():
+    from services.brainstorm import _title_from_message
+
+    assert _title_from_message("  Idée   courte ") == "Idée courte"
+    long = "mot " * 30
+    title = _title_from_message(long)
+    assert title.endswith("…") and not title[:-1].endswith(" ")
+    assert len(title) <= 60
+    # Un seul mot démesuré est coupé plutôt que de rendre un titre vide.
+    assert len(_title_from_message("x" * 200)) == 60
+
+
+# ── Épinglage ─────────────────────────────────────────────────────────────────
+
+def test_pin_limit_and_order(client):
+    from config.settings import BRAINSTORM_MAX_PINNED
+
+    ids = [
+        client.post("/api/brainstorming", json={"title": f"D{i}"}).json()["id"]
+        for i in range(BRAINSTORM_MAX_PINNED + 2)
+    ]
+    for did in ids[:BRAINSTORM_MAX_PINNED]:
+        res = client.post(f"/api/brainstorming/{did}/pin", json={"pinned": True})
+        assert res.status_code == 200 and res.json()["pinned_at"]
+
+    over = client.post(f"/api/brainstorming/{ids[-1]}/pin", json={"pinned": True})
+    assert over.status_code == 400
+    assert str(BRAINSTORM_MAX_PINNED) in over.json()["detail"]
+    # Ré-épingler une épinglée n'est pas un dépassement.
+    assert client.post(f"/api/brainstorming/{ids[0]}/pin", json={"pinned": True}).status_code == 200
+
+    # Les épinglées sont en tête, même si une autre discussion est plus récente.
+    listing = client.get("/api/brainstorming/discussions").json()
+    head = {d["id"] for d in listing[:BRAINSTORM_MAX_PINNED]}
+    assert head == set(ids[:BRAINSTORM_MAX_PINNED])
+    assert all(d["pinned_at"] is None for d in listing[BRAINSTORM_MAX_PINNED:])
+
+    # Désépingler libère une place.
+    client.post(f"/api/brainstorming/{ids[0]}/pin", json={"pinned": False})
+    assert client.post(f"/api/brainstorming/{ids[-1]}/pin", json={"pinned": True}).status_code == 200
+
+
+def test_pin_unknown_discussion_is_400(client):
+    assert client.post("/api/brainstorming/999/pin", json={"pinned": True}).status_code == 400
+
+
+# ── Lien à un dossier ─────────────────────────────────────────────────────────
+
+def _folder(client, name: str, parent_id: int | None = None) -> int:
+    return client.post("/api/library/folders", json={"name": name, "parent_id": parent_id}).json()["id"]
+
+
+def test_link_folder_and_folder_deletion(client):
+    folder_id = _folder(client, "Biologie")
+    created = client.post("/api/brainstorming", json={"title": "Bio", "folder_id": folder_id}).json()
+    assert created["folder_id"] == folder_id and created["folder_name"] == "Biologie"
+
+    assert client.post("/api/brainstorming", json={"folder_id": 999}).status_code == 400
+    assert client.post(f"/api/brainstorming/{created['id']}/folder", json={"folder_id": 999}).status_code == 400
+
+    unlinked = client.post(f"/api/brainstorming/{created['id']}/folder", json={"folder_id": None}).json()
+    assert unlinked["folder_id"] is None
+    client.post(f"/api/brainstorming/{created['id']}/folder", json={"folder_id": folder_id})
+
+    # Supprimer le dossier délie la discussion (ON DELETE SET NULL), sans la supprimer.
+    client.delete(f"/api/library/folders/{folder_id}")
+    detail = client.get(f"/api/brainstorming/{created['id']}/messages").json()
+    assert detail["folder_id"] is None
+
+
+def _seed_doc_with_material(path: str, word: str) -> int:
+    """Un document avec surlignage, flashcard, Q&R et erreur qui parlent de ``word``."""
+    from db.answers import save_answer
+    from db.documents import upsert_document
+    from db.flashcards import save_flashcard
+    from db.questions import save_assistant_exchange, save_question
+    from db.reader_highlights import add_highlight
+    from db.user import DEFAULT_USER_ID
+
+    doc_id = upsert_document(
+        path=path, filename=path.rsplit("/", 1)[-1], page_count=10,
+        engine="test", has_toc=False, subject="biologie",
+    )
+    add_highlight(doc_id, page=1, quote=f"Surlignage sur la {word}.", rects=[])
+    save_flashcard(DEFAULT_USER_ID, None, f"{word} ?", "réponse", document_id=doc_id)
+    save_assistant_exchange(doc_id, 2, f"{word}, comment ?", "explication")
+    qid = save_question(
+        doc_id, "page", "Page 3", 3, 3,
+        {"question": f"Définis la {word}.", "answer": "la bonne définition"},
+    )
+    save_answer(qid, DEFAULT_USER_ID, "une confusion", verdict="incorrect")
+    return doc_id
+
+
+def test_search_is_scoped_to_the_folder_subtree(client):
+    from db.folders import descendant_ids, set_document_folder
+    from services.brainstorm_search import search_user_db
+
+    parent = _folder(client, "Cours")
+    child = _folder(client, "Chapitre 1", parent)
+    inside = _seed_doc_with_material("/tmp/in.pdf", "photosynthese")
+    nested = _seed_doc_with_material("/tmp/nested.pdf", "photosynthese")
+    outside = _seed_doc_with_material("/tmp/out.pdf", "photosynthese")
+    set_document_folder(inside, parent)
+    set_document_folder(nested, child)
+
+    scope = descendant_ids(parent)
+    seen_docs: set = set()
+    seen_types: set = set()
+    for _ in range(40):
+        for item in search_user_db("photosynthèse", limit=10, folder_ids=scope):
+            seen_docs.add(item["doc_id"])
+            seen_types.add(item["source_type"])
+    assert seen_docs == {inside, nested}, "une source hors dossier a fui"
+    assert outside not in seen_docs
+    assert {"highlight", "flashcard", "qa", "mistake"} <= seen_types
+
+    # Sans dossier : toute la base.
+    unscoped = set()
+    for _ in range(40):
+        unscoped.update(item["doc_id"] for item in search_user_db("photosynthèse", limit=10))
+    assert outside in unscoped
+
+    # Dossier vide : aucun document, donc rien — jamais « toute la base ».
+    empty = _folder(client, "Vide")
+    assert search_user_db("photosynthèse", folder_ids=descendant_ids(empty)) == []
+    assert search_user_db("photosynthèse", folder_ids=set()) == []
+
+
+def test_mistakes_only_cover_wrong_answers(client):
+    from db.answers import save_answer
+    from db.documents import upsert_document
+    from db.questions import save_question
+    from db.user import DEFAULT_USER_ID
+    from services.brainstorm_search import search_user_db
+
+    doc_id = upsert_document(
+        path="/tmp/chimie.pdf", filename="chimie.pdf", page_count=5,
+        engine="test", has_toc=False, subject="chimie",
+    )
+    ok = save_question(doc_id, "page", "Page 1", 1, 1, {"question": "Qu'est-ce qu'un isotope ?", "answer": "x"})
+    ko = save_question(doc_id, "page", "Page 2", 2, 2, {"question": "Qu'est-ce qu'un isotope radioactif ?", "answer": "y"})
+    save_answer(ok, DEFAULT_USER_ID, "bonne réponse", verdict="correct")
+    save_answer(ko, DEFAULT_USER_ID, "mauvaise réponse", verdict="incorrect")
+
+    snippets = [
+        item["snippet"]
+        for _ in range(20)
+        for item in search_user_db("isotope")
+        if item["source_type"] == "mistake"
+    ]
+    assert snippets and all("radioactif" in s and "mauvaise réponse" in s for s in snippets)
+
+
+def test_linked_discussion_searches_only_its_folder(client, monkeypatch):
+    """Bout en bout : la discussion liée transmet le sous-arbre à la recherche et
+    nomme le dossier dans les deux prompts."""
+    import services.brainstorm as svc
+    from db.folders import set_document_folder
+
+    parent = _folder(client, "Cours")
+    child = _folder(client, "Chapitre 1", parent)
+    doc_id = _seed_doc_with_material("/tmp/vélo.pdf", "vélo")
+    set_document_folder(doc_id, child)
+
+    captured: dict = {}
+
+    def _decide(history, user_message, on_success, on_error, model=None, scope=None):
+        captured["decide_scope"] = scope
+        on_success({"search": True, "queries": ["vélo"]})
+
+    def _answer(context, on_success, on_error, model=None):
+        captured["answer_scope"] = context.get("scope")
+        on_success("ok")
+
+    def _spy_search(query, *a, folder_ids=None, **k):
+        captured["folder_ids"] = folder_ids
+        return []
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+    monkeypatch.setattr(svc.brainstorm_search, "search_user_db", _spy_search)
+
+    did = client.post("/api/brainstorming", json={"title": "Vélo", "folder_id": parent}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Parle-moi de vélo"})
+        while ws.receive_json()["type"] != "answer":
+            pass
+
+    assert captured["folder_ids"] == {parent, child}
+    assert captured["decide_scope"]["name"] == "Cours"
+    assert captured["answer_scope"]["titles"] == ["vélo.pdf"]
+
+
+def test_scope_block_names_the_folder_in_prompts():
+    from llm.prompts import build_brainstorm_answer_prompt, build_brainstorm_search_decide_prompt
+
+    scope = {"folder_ids": {1}, "name": "Cours", "titles": ["a.pdf", "b.pdf"], "total": 5}
+    decide = build_brainstorm_search_decide_prompt([], "question", scope)
+    answer = build_brainstorm_answer_prompt("", [], "question", [], scope)
+    for prompt in (decide, answer):
+        assert "Cours" in prompt and "a.pdf, b.pdf (+3)" in prompt
+    assert "Cours" not in build_brainstorm_answer_prompt("", [], "question", [])
+

@@ -2,8 +2,15 @@
 #
 # C'est le « tool » de Gemma pour le brainstorming : à partir d'une requête en
 # langage naturel décidée par le LLM, on fouille les contenus de l'utilisateur
-# (PDFs importés, surlignages, flashcards, anciennes Q&R) et on renvoie des
-# extraits normalisés que le prompt et l'UI peuvent citer.
+# (PDFs importés, surlignages, flashcards, anciennes Q&R, réponses fausses ou
+# partielles) et on renvoie des extraits normalisés que le prompt et l'UI peuvent
+# citer.
+#
+# Une discussion liée à un dossier de la bibliothèque restreint TOUTES les
+# sources aux documents de ce dossier et de ses sous-dossiers (`folder_ids`, cf.
+# `_scope_sql`). Le filtre est posé en SQL, AVANT l'échantillonnage : filtré
+# après coup, un vivier tiré sur toute la base ne contiendrait presque rien du
+# dossier.
 #
 # Pas de FTS5 ni d'embeddings ICI : la recherche est LEXICALE. Sur une base
 # locale mono-utilisateur, on charge un lot borné par table et on filtre EN
@@ -127,6 +134,7 @@ def search_user_db(
     limit: int = 6,
     user_id: int = DEFAULT_USER_ID,
     damp_keys: set | None = None,
+    folder_ids: set[int] | None = None,
 ) -> list[dict]:
     """Cherche dans la base de l'utilisateur. Renvoie des extraits normalisés.
 
@@ -148,15 +156,22 @@ def search_user_db(
     ``damp_keys`` (cf. :func:`source_key`) porte ce dernier point : une source
     déjà citée dans la discussion voit son poids fondre sans être exclue — elle
     reste citable si elle est vraiment la seule pertinente.
+
+    ``folder_ids`` restreint la recherche aux documents de ces dossiers. ``None``
+    = toute la base ; un ensemble VIDE = aucun document, donc aucun extrait —
+    jamais « pas de filtre ».
     """
     terms = extract_terms(query)
     if not terms or limit <= 0:
         return []
+    if folder_ids is not None and not folder_ids:
+        return []
     candidates: list[dict] = []
-    candidates.extend(_search_highlights(terms, user_id))
-    candidates.extend(_search_flashcards(terms, user_id))
-    candidates.extend(_search_questions(terms))
-    candidates.extend(_search_documents(terms))
+    candidates.extend(_search_highlights(terms, user_id, folder_ids))
+    candidates.extend(_search_flashcards(terms, user_id, folder_ids))
+    candidates.extend(_search_questions(terms, folder_ids))
+    candidates.extend(_search_mistakes(terms, user_id, folder_ids))
+    candidates.extend(_search_documents(terms, folder_ids))
     if not candidates:
         return []
 
@@ -192,6 +207,23 @@ def _truncate(text: str) -> str:
     return text if len(text) <= _MAX_SNIPPET else text[: _MAX_SNIPPET - 1] + "…"
 
 
+def _scope_sql(column: str, folder_ids: set[int] | None) -> tuple[str, tuple]:
+    """Clause ``AND <column> IN (documents de ces dossiers)``, vide sans dossier.
+
+    Seul point où la portée d'une discussion devient du SQL : chaque source y
+    passe, pour qu'aucune ne fuie hors du dossier. Une ligne sans document
+    (flashcard libre) n'appartient à aucun dossier, elle est donc exclue.
+    """
+    if folder_ids is None:
+        return "", ()
+    ids = tuple(sorted(int(fid) for fid in folder_ids))
+    placeholders = ", ".join("?" for _ in ids)
+    return (
+        f" AND {column} IN (SELECT id FROM documents WHERE folder_id IN ({placeholders}))",
+        ids,
+    )
+
+
 def _scored(text: str, terms: list[str]) -> tuple[int, int] | None:
     """``(distincts, total)`` si le texte touche la requête, ``None`` sinon.
 
@@ -203,16 +235,17 @@ def _scored(text: str, terms: list[str]) -> tuple[int, int] | None:
     return (distinct, total) if distinct else None
 
 
-def _search_highlights(terms: list[str], user_id: int) -> list[dict]:
+def _search_highlights(terms: list[str], user_id: int, folder_ids: set[int] | None) -> list[dict]:
+    scope, scope_params = _scope_sql("h.document_id", folder_ids)
     try:
         conn = get_connection()
         rows = conn.execute(
-            """SELECT h.quote, h.page, h.document_id, h.created_at, d.filename AS doc_title
+            f"""SELECT h.quote, h.page, h.document_id, h.created_at, d.filename AS doc_title
                FROM reader_highlights h
                LEFT JOIN documents d ON d.id = h.document_id
-               WHERE h.user_id=?
+               WHERE h.user_id=?{scope}
                ORDER BY RANDOM() LIMIT ?""",
-            (user_id, _CANDIDATE_POOL),
+            (user_id, *scope_params, _CANDIDATE_POOL),
         ).fetchall()
     except Exception as exc:  # pragma: no cover - best-effort
         logger.debug("Recherche surlignages échouée : %s", exc)
@@ -234,17 +267,18 @@ def _search_highlights(terms: list[str], user_id: int) -> list[dict]:
     return out
 
 
-def _search_questions(terms: list[str]) -> list[dict]:
+def _search_questions(terms: list[str], folder_ids: set[int] | None) -> list[dict]:
+    scope, scope_params = _scope_sql("q.document_id", folder_ids)
     try:
         conn = get_connection()
         rows = conn.execute(
-            """SELECT q.question, q.answer, q.page_start, q.document_id, q.created_at,
+            f"""SELECT q.question, q.answer, q.page_start, q.document_id, q.created_at,
                       d.filename AS doc_title
                FROM questions q
                LEFT JOIN documents d ON d.id = q.document_id
-               WHERE q.scope_type IN ('assistant_follow_up', 'qa_follow_up')
+               WHERE q.scope_type IN ('assistant_follow_up', 'qa_follow_up'){scope}
                ORDER BY RANDOM() LIMIT ?""",
-            (_CANDIDATE_POOL,),
+            (*scope_params, _CANDIDATE_POOL),
         ).fetchall()
     except Exception as exc:  # pragma: no cover - best-effort
         logger.debug("Recherche Q&R échouée : %s", exc)
@@ -268,17 +302,18 @@ def _search_questions(terms: list[str]) -> list[dict]:
     return out
 
 
-def _search_flashcards(terms: list[str], user_id: int) -> list[dict]:
+def _search_flashcards(terms: list[str], user_id: int, folder_ids: set[int] | None) -> list[dict]:
+    scope, scope_params = _scope_sql("f.document_id", folder_ids)
     try:
         conn = get_connection()
         rows = conn.execute(
-            """SELECT f.front, f.back, f.tags, f.document_id, f.created_at,
+            f"""SELECT f.front, f.back, f.tags, f.document_id, f.created_at,
                       d.filename AS doc_title
                FROM flashcards f
                LEFT JOIN documents d ON d.id = f.document_id
-               WHERE f.user_id=?
+               WHERE f.user_id=?{scope}
                ORDER BY RANDOM() LIMIT ?""",
-            (user_id, _CANDIDATE_POOL),
+            (user_id, *scope_params, _CANDIDATE_POOL),
         ).fetchall()
     except Exception as exc:  # pragma: no cover - best-effort
         logger.debug("Recherche flashcards échouée : %s", exc)
@@ -302,12 +337,56 @@ def _search_flashcards(terms: list[str], user_id: int) -> list[dict]:
     return out
 
 
-def _search_documents(terms: list[str]) -> list[dict]:
+def _search_mistakes(terms: list[str], user_id: int, folder_ids: set[int] | None) -> list[dict]:
+    """Réponses fausses ou partielles aux questions posées pendant la lecture.
+
+    Jointure INTERNE sur `questions` : une réponse sans sa question ne dit rien
+    de citable, et c'est la question qui porte le document (donc le dossier).
+    """
+    scope, scope_params = _scope_sql("q.document_id", folder_ids)
     try:
         conn = get_connection()
         rows = conn.execute(
-            "SELECT id, filename, last_opened FROM documents ORDER BY RANDOM() LIMIT ?",
-            (_CANDIDATE_POOL,),
+            f"""SELECT q.question, q.answer AS expected, q.page_start, q.document_id,
+                      a.answer_text, a.feedback, a.answered_at, d.filename AS doc_title
+               FROM answers a
+               JOIN questions q ON q.id = a.question_id
+               LEFT JOIN documents d ON d.id = q.document_id
+               WHERE a.user_id=? AND a.verdict IN ('incorrect', 'partial'){scope}
+               ORDER BY RANDOM() LIMIT ?""",
+            (user_id, *scope_params, _CANDIDATE_POOL),
+        ).fetchall()
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("Recherche erreurs échouée : %s", exc)
+        return []
+    out = []
+    for r in rows:
+        q = (r["question"] or "").strip()
+        given = (r["answer_text"] or "").strip()
+        expected = (r["expected"] or "").strip()
+        hits = _scored(f"{q} {given} {r['feedback'] or ''}", terms)
+        if hits is None:
+            continue
+        out.append({
+            "source_type": "mistake",
+            "doc_id": r["document_id"],
+            "doc_title": r["doc_title"],
+            "page": r["page_start"],
+            "snippet": _truncate(f"Q : {q} — ta réponse : {given} — attendu : {expected}"),
+            "_hits": hits,
+            "_age_days": selection.age_days(r["answered_at"]),
+        })
+    return out
+
+
+def _search_documents(terms: list[str], folder_ids: set[int] | None) -> list[dict]:
+    scope, scope_params = _scope_sql("id", folder_ids)
+    try:
+        conn = get_connection()
+        rows = conn.execute(
+            f"SELECT id, filename, last_opened FROM documents WHERE 1=1{scope} "
+            "ORDER BY RANDOM() LIMIT ?",
+            (*scope_params, _CANDIDATE_POOL),
         ).fetchall()
     except Exception as exc:  # pragma: no cover - best-effort
         logger.debug("Recherche documents échouée : %s", exc)

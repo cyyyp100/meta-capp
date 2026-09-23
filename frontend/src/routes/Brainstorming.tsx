@@ -1,6 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 
 import { api } from "../api/client";
 import { ChatPanel } from "../features/brainstorming/ChatPanel";
@@ -16,6 +19,7 @@ export function Brainstorming() {
   const [creating, setCreating] = useState(false);
 
   const { data: discussions } = useQuery({ queryKey: QK, queryFn: api.brainstormDiscussions });
+  const selected = discussions?.find((d) => d.id === selectedId);
 
   // Sélectionne la 1re discussion par défaut quand la liste arrive.
   useEffect(() => {
@@ -42,6 +46,26 @@ export function Brainstorming() {
     qc.invalidateQueries({ queryKey: QK });
   }
 
+  // Le plafond d'épinglage est tenu par le serveur : son refus (400, message
+  // traduit) remonte tel quel en toast.
+  async function togglePin(id: number, pinned: boolean) {
+    try {
+      await api.pinDiscussion(id, pinned);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+    qc.invalidateQueries({ queryKey: QK });
+  }
+
+  async function setFolder(id: number, folderId: number | null) {
+    try {
+      await api.setDiscussionFolder(id, folderId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+    qc.invalidateQueries({ queryKey: QK });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "var(--space-lg)", gap: "var(--space-md)" }}>
       <header>
@@ -57,15 +81,16 @@ export function Brainstorming() {
 
       <div style={{ display: "flex", gap: "var(--space-lg)", flex: 1, minHeight: 0 }}>
         <aside style={{ width: 260, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
-          <button onClick={createDiscussion} disabled={creating} style={newBtn}>
-            {!creating && <Plus className="size-4" aria-hidden />}
-            {creating ? t("common.loading") : t("brainstorm.new")}
-          </button>
+          <Button variant="secondary" className="w-full" onClick={createDiscussion} pending={creating}>
+            {!creating && <Plus aria-hidden />}
+            {t("brainstorm.new")}
+          </Button>
           <DiscussionList
             discussions={discussions ?? []}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onDelete={deleteDiscussion}
+            onTogglePin={togglePin}
           />
         </aside>
 
@@ -74,6 +99,8 @@ export function Brainstorming() {
             <ChatPanel
               key={selectedId}
               discussionId={selectedId}
+              discussion={selected}
+              onFolderChange={(folderId) => setFolder(selectedId, folderId)}
               onActivity={() => qc.invalidateQueries({ queryKey: QK })}
             />
           ) : (
@@ -84,17 +111,6 @@ export function Brainstorming() {
     </div>
   );
 }
-
-const newBtn: React.CSSProperties = {
-  border: "1px solid var(--accent)",
-  background: "var(--accent-soft)",
-  color: "var(--accent-ink)",
-  borderRadius: "var(--radius-sm)",
-  padding: "9px 12px",
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
 
 const placeholder: React.CSSProperties = {
   height: "100%",

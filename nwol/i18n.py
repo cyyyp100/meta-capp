@@ -554,6 +554,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "folders.document_missing": "Document introuvable.",
         "folders.cycle": "Un dossier ne peut pas être déplacé dans l'un de ses sous-dossiers.",
         "folders.too_deep": "Arborescence trop profonde (maximum {n} niveaux).",
+        "brainstorm.missing": "Discussion introuvable.",
+        "brainstorm.folder_missing": "Dossier introuvable.",
+        "brainstorm.pin_limit": "{n} discussions épinglées au maximum : désépingles-en une d'abord.",
         "library.title_empty": "Le titre ne peut pas être vide.",
         # ── Visite guidée : le document emprunté ──────────────────────────
         # La fiche du document de démonstration est écrite ici plutôt que
@@ -1115,6 +1118,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "folders.document_missing": "Document not found.",
         "folders.cycle": "A folder cannot be moved into one of its own subfolders.",
         "folders.too_deep": "Folder tree too deep (maximum {n} levels).",
+        "brainstorm.missing": "Discussion not found.",
+        "brainstorm.folder_missing": "Folder not found.",
+        "brainstorm.pin_limit": "At most {n} pinned discussions: unpin one first.",
         "library.title_empty": "The title cannot be empty.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",

@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 32).
+-- (config.settings.DB_SCHEMA_VERSION = 33).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -52,7 +52,7 @@ CREATE TABLE brainstorm_discussions (
     message_count       INTEGER DEFAULT 0,
     created_at          DATETIME DEFAULT (datetime('now')),
     updated_at          DATETIME DEFAULT (datetime('now'))
-);
+, pinned_at DATETIME, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL);
 CREATE TABLE brainstorm_messages (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     discussion_id INTEGER NOT NULL REFERENCES brainstorm_discussions(id) ON DELETE CASCADE,

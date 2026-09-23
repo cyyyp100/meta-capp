@@ -1,8 +1,12 @@
 # db/brainstorm.py — CRUD des discussions de brainstorming (chat libre avec Gemma).
 #
 # Deux tables (schéma v23) :
-#   brainstorm_discussions : 1 ligne par discussion (+ résumé glissant)
+#   brainstorm_discussions : 1 ligne par discussion (+ résumé glissant ;
+#                            v33 : `pinned_at`, `folder_id`)
 #   brainstorm_messages    : historique complet, 1 ligne par tour (user|assistant)
+#
+# SQL pur : la limite d'épinglage et la validation du dossier sont décidées dans
+# `services/brainstorm.py`.
 import json
 import logging
 
@@ -12,25 +16,34 @@ from db.user import DEFAULT_USER_ID
 logger = logging.getLogger("DB.brainstorm")
 
 
-def create_discussion(title: str, user_id: int = DEFAULT_USER_ID) -> int:
+def create_discussion(
+    title: str,
+    folder_id: int | None = None,
+    user_id: int = DEFAULT_USER_ID,
+) -> int:
     title = (title or "").strip() or "Nouvelle discussion"
     conn = get_connection()
     with conn:
         cur = conn.execute(
-            "INSERT INTO brainstorm_discussions (user_id, title) VALUES (?, ?)",
-            (user_id, title[:200]),
+            "INSERT INTO brainstorm_discussions (user_id, title, folder_id) VALUES (?, ?, ?)",
+            (user_id, title[:200], folder_id),
         )
-    logger.info("Discussion brainstorming créée id=%s", cur.lastrowid)
+    logger.info("Discussion brainstorming créée id=%s dossier=%s", cur.lastrowid, folder_id)
     return int(cur.lastrowid)
 
 
 def list_discussions(user_id: int = DEFAULT_USER_ID) -> list[dict]:
+    """Épinglées d'abord (ordre d'épinglage, le plus récent en tête), puis le reste
+    par activité. Épingler ne touche pas `updated_at` : une épinglée ne saute
+    donc pas d'une place à chaque message."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, title, summary, message_count, created_at, updated_at
-           FROM brainstorm_discussions
-           WHERE user_id=?
-           ORDER BY updated_at DESC, id DESC""",
+        """SELECT b.id, b.title, b.summary, b.message_count, b.created_at, b.updated_at,
+                  b.pinned_at, b.folder_id, f.name AS folder_name
+           FROM brainstorm_discussions b
+           LEFT JOIN library_folders f ON f.id = b.folder_id
+           WHERE b.user_id=?
+           ORDER BY b.pinned_at IS NULL, b.pinned_at DESC, b.updated_at DESC, b.id DESC""",
         (user_id,),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -39,10 +52,56 @@ def list_discussions(user_id: int = DEFAULT_USER_ID) -> list[dict]:
 def get_discussion(discussion_id: int) -> dict | None:
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM brainstorm_discussions WHERE id=?",
+        """SELECT b.*, f.name AS folder_name
+           FROM brainstorm_discussions b
+           LEFT JOIN library_folders f ON f.id = b.folder_id
+           WHERE b.id=?""",
         (discussion_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def pin_discussion(discussion_id: int, max_pinned: int, user_id: int = DEFAULT_USER_ID) -> bool:
+    """Épingle la discussion si le plafond n'est pas atteint. ``False`` sinon.
+
+    Un seul UPDATE conditionnel : compter puis écrire en deux requêtes laisserait
+    deux épinglages simultanés passer tous les deux sous le plafond. Déjà
+    épinglée -> ``True`` sans rien réécrire (sa place en tête ne bouge pas).
+    """
+    conn = get_connection()
+    with conn:
+        row = conn.execute(
+            "SELECT pinned_at FROM brainstorm_discussions WHERE id=?", (discussion_id,)
+        ).fetchone()
+        if row is not None and row["pinned_at"] is not None:
+            return True
+        cur = conn.execute(
+            """UPDATE brainstorm_discussions SET pinned_at=datetime('now')
+               WHERE id=? AND pinned_at IS NULL
+                 AND (SELECT COUNT(*) FROM brainstorm_discussions
+                      WHERE user_id=? AND pinned_at IS NOT NULL) < ?""",
+            (discussion_id, user_id, int(max_pinned)),
+        )
+    return cur.rowcount > 0
+
+
+def unpin_discussion(discussion_id: int) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE brainstorm_discussions SET pinned_at=NULL WHERE id=?", (discussion_id,)
+        )
+
+
+def set_discussion_folder(discussion_id: int, folder_id: int | None) -> None:
+    """Lie la discussion à un dossier (``None`` = toute la base)."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE brainstorm_discussions SET folder_id=? WHERE id=?",
+            (folder_id, discussion_id),
+        )
+    logger.info("Discussion brainstorming id=%s liée au dossier %s", discussion_id, folder_id)
 
 
 def rename_discussion(discussion_id: int, title: str) -> None:

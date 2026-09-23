@@ -375,7 +375,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 32
+DB_SCHEMA_VERSION = 33
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -505,7 +505,7 @@ FLASHCARD_SUBJECT_BONUS = 2.0
 FLASHCARD_REVIEW_COOLDOWN_DAYS = 5.0
 FLASHCARD_REVIEW_FLOOR = 0.2
 
-# Brainstorming : plafond d'extraits par type de source (surlignage, flashcard,
+# Brainstorming : plafond d'extraits par type de source (surlignage, flashcard, erreur,
 # Q&R, document) et amortissement d'une source DÉJÀ CITÉE dans la discussion.
 BRAINSTORM_PER_TYPE_CAP = 2
 BRAINSTORM_CITED_FLOOR = 0.2
@@ -516,6 +516,12 @@ BRAINSTORM_CITED_FLOOR = 0.2
 BRAINSTORM_RELEVANCE_BASE = 3.0
 BRAINSTORM_RECENCY_HALF_LIFE_DAYS = 45.0
 BRAINSTORM_RECENCY_FLOOR = 0.4
+# Discussions épinglées en tête de liste, au plus. La limite est tenue par un
+# UPDATE conditionnel (`db/brainstorm.pin_discussion`), pas par l'interface.
+BRAINSTORM_MAX_PINNED = 5
+# Discussion liée à un dossier : titres de documents du sous-arbre nommés à
+# Gemma dans le prompt (le reste est résumé en « +N »).
+BRAINSTORM_SCOPE_TITLES_MAX = 12
 
 # Assistant lecteur : cartes liées proposées au prompt, tirées dans un vivier
 # plus large que les 3 finalement citées (sinon toujours les 3 mêmes).

@@ -170,6 +170,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 32)
         current = 32
 
+    if current < 33 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v33(conn)
+        _set_version(conn, 33)
+        current = 33
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1072,3 +1077,29 @@ def _migrate_to_v32(conn) -> None:
             "CREATE INDEX IF NOT EXISTS idx_session_pauses_session ON session_pauses(session_id)"
         )
     logger.info("Migration SQLite v32 terminée")
+
+
+def _migrate_to_v33(conn) -> None:
+    """Discussions de brainstorming : épinglage et lien à un dossier.
+
+    - `pinned_at` : NULL = non épinglée. Une date plutôt qu'un booléen, pour que
+      les épinglées gardent un ordre stable en tête de liste (l'ordre
+      d'épinglage) au lieu de sauter à chaque message. Le plafond
+      (`BRAINSTORM_MAX_PINNED`) n'est pas une contrainte SQL : il est tenu par
+      l'UPDATE conditionnel de `db/brainstorm.pin_discussion`.
+    - `folder_id` : la discussion ne puise plus que dans les documents de ce
+      dossier et de ses sous-dossiers (`services/brainstorm._scope`). Même
+      politique que `documents.folder_id`, `ON DELETE SET NULL` : supprimer le
+      dossier délie la discussion, qui retombe sur toute la base — elle n'est
+      jamais supprimée avec lui.
+
+    Colonnes nullables : les discussions existantes restent non épinglées et
+    sans dossier, rien à reprendre."""
+    logger.info("Migration SQLite v33 démarrée")
+    with conn:
+        _ensure_column(conn, "brainstorm_discussions", "pinned_at", "DATETIME")
+        _ensure_column(
+            conn, "brainstorm_discussions", "folder_id",
+            "INTEGER REFERENCES library_folders(id) ON DELETE SET NULL",
+        )
+    logger.info("Migration SQLite v33 terminée")

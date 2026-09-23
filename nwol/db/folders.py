@@ -123,3 +123,23 @@ def count_documents_by_folder() -> dict[int | None, int]:
         "SELECT folder_id, COUNT(*) AS n FROM documents GROUP BY folder_id"
     ).fetchall()
     return {row["folder_id"]: int(row["n"]) for row in rows}
+
+
+def document_titles_in_folders(folder_ids: set[int], limit: int) -> tuple[list[str], int]:
+    """(``limit`` premiers titres, nombre total) des documents de ces dossiers.
+
+    Sert à dire au LLM ce que couvre une discussion liée à un dossier ; les plus
+    récemment ouverts d'abord, les autres ne sont que comptés.
+    """
+    if not folder_ids:
+        return [], 0
+    ids = tuple(sorted(int(fid) for fid in folder_ids))
+    placeholders = ", ".join("?" for _ in ids)
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT filename FROM documents WHERE folder_id IN ({placeholders})
+            ORDER BY last_opened IS NULL, last_opened DESC, id DESC""",
+        ids,
+    ).fetchall()
+    titles = [row["filename"] for row in rows]
+    return titles[: max(0, int(limit))], len(titles)
