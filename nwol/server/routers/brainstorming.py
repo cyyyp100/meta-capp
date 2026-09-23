@@ -7,16 +7,19 @@
 #   serveur -> client : {"type":"loading"} | {"type":"title","title"}
 #                       {"type":"scanning","active":bool}
 #                       {"type":"answer","answer","sources"} | {"type":"error","message"}
+#   Discussion inconnue : fermeture 4404 dès la connexion.
 #
-# Plafond d'épinglage et validité du dossier : `services/brainstorm.py` ; ici on
-# ne fait que traduire ses ValueError en 400.
+# Plafond d'épinglage, validité du dossier, page blanche unique et question
+# unique par discussion : `services/brainstorm.py` ; ici on ne fait que traduire
+# ses ValueError en 400.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import brainstorm as store
 from server.events import push_threadsafe
@@ -33,7 +36,7 @@ _MAX_QUESTION_CHARS = 4000
 
 
 class CreateBody(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=store.TITLE_MAX_CHARS)
     folder_id: int | None = None
 
 
@@ -87,6 +90,9 @@ def messages(discussion_id: int) -> dict:
         "folder_id": discussion.get("folder_id"),
         "folder_name": discussion.get("folder_name"),
         "messages": store.get_messages(discussion_id),
+        # Question partie d'un autre canal (discussion quittée puis rouverte) :
+        # le client attend sa réponse au lieu d'en poser une seconde.
+        "answering": brainstorm.is_answering(discussion_id),
     }
 
 
@@ -100,6 +106,11 @@ def delete(discussion_id: int) -> dict:
 async def brainstorm_stream(ws: WebSocket, discussion_id: int) -> None:
     await ws.accept()
     loop = asyncio.get_running_loop()
+    # Discussion inconnue (supprimée entre-temps, id forgé) : on ferme tout de
+    # suite plutôt que de garder un canal dont chaque question finirait en erreur.
+    if await loop.run_in_executor(None, store.get_discussion, discussion_id) is None:
+        await ws.close(code=4404)
+        return
     out: asyncio.Queue = asyncio.Queue()
 
     async def _sender() -> None:
@@ -129,20 +140,28 @@ async def brainstorm_stream(ws: WebSocket, discussion_id: int) -> None:
 
     try:
         while True:
-            msg = await ws.receive_json()
+            try:
+                msg = await ws.receive_json()
+            except ValueError:
+                continue  # trame qui n'est pas du JSON : ignorée, le canal reste ouvert
             if not isinstance(msg, dict) or msg.get("type") != "ask":
+                continue
+            question = msg.get("question")
+            if not isinstance(question, str):
                 continue
             # S4 : on tronque plutôt que de refuser — une question trop longue
             # reste une question, et fermer le socket ferait perdre la discussion.
-            question = str(msg.get("question") or "").strip()[:_MAX_QUESTION_CHARS]
+            question = question.strip()[:_MAX_QUESTION_CHARS]
             if not question:
                 continue
             await out.put({"type": "loading"})
             # handle_message rend la main vite (il met le travail LLM en file) ;
             # les callbacks reviennent depuis le thread worker via push_threadsafe.
-            brainstorm.handle_message(
+            # Il lit et écrit la DB : jamais dans la boucle asyncio.
+            await loop.run_in_executor(None, functools.partial(
+                brainstorm.handle_message,
                 discussion_id, question, on_answer, on_error, on_scanning, on_title=on_title,
-            )
+            ))
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover

@@ -1,4 +1,17 @@
 # Tests de la page Brainstorming (REST + WebSocket avec LLM mocké).
+import queue
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_question_left_in_flight():
+    """La réservation « une question à la fois » vit en mémoire de processus :
+    un test qui échoue en cours de réponse ne doit pas bloquer les suivants."""
+    yield
+    import services.brainstorm as svc
+
+    svc._answering.clear()
 
 
 # ── Fakes LLM (mêmes signatures callback que le code réel) ────────────────────
@@ -136,10 +149,14 @@ def test_brainstorm_ignores_non_dict_message(client, monkeypatch):
     """Un message JSON qui n'est pas un objet ne doit pas faire tomber le socket.
 
     `msg.get(...)` sur une liste lève un AttributeError qui remontait jusqu'au
-    gestionnaire d'exception du WebSocket et fermait le canal."""
+    gestionnaire d'exception du WebSocket et fermait le canal. Même chose pour
+    une trame qui n'est pas du JSON du tout."""
     from services import brainstorm as svc
 
+    asked: list = []
+
     def _answer(discussion_id, question, on_answer, on_error, on_scanning, **_):
+        asked.append(question)
         on_answer({"answer": "ok", "sources": []})
 
     monkeypatch.setattr(svc, "handle_message", _answer)
@@ -148,10 +165,15 @@ def test_brainstorm_ignores_non_dict_message(client, monkeypatch):
     with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
         ws.send_json(["pas", "un", "objet"])   # ignoré
         ws.send_json({"type": "inconnu"})      # ignoré
+        ws.send_text("{pas du json")           # ignoré
+        # Une question qui n'est pas une chaîne n'est pas convertie en texte.
+        ws.send_json({"type": "ask", "question": {"piège": 1}})
         # Le socket est toujours vivant : un `ask` valide obtient sa réponse.
         ws.send_json({"type": "ask", "question": "toujours là ?"})
         while ws.receive_json()["type"] != "answer":
             pass
+
+    assert asked == ["toujours là ?"]
 
 
 # ── Recherche en base : pertinence, diversité, rotation ──────────────────────
@@ -513,3 +535,142 @@ def test_scope_block_names_the_folder_in_prompts():
         assert "Cours" in prompt and "a.pdf, b.pdf (+3)" in prompt
     assert "Cours" not in build_brainstorm_answer_prompt("", [], "question", [])
 
+
+# ── Garde-fous ────────────────────────────────────────────────────────────────
+
+def _ask_until_answer(client, did: int, question: str) -> None:
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": question})
+        while ws.receive_json()["type"] != "answer":
+            pass
+
+
+def test_new_discussion_reopens_the_blank_one(client, monkeypatch):
+    """Dix clics sur « Nouvelle discussion » faisaient dix discussions vides.
+    Tant que la page blanche n'a pas servi, c'est elle qui revient."""
+    import services.brainstorm as svc
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide_no_search)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer_fake)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    first = client.post("/api/brainstorming", json={}).json()["id"]
+    for _ in range(5):
+        assert client.post("/api/brainstorming", json={}).json()["id"] == first
+    # Le titre par défaut, envoyé tel quel, ne contourne pas la règle.
+    assert client.post("/api/brainstorming", json={"title": "Nouvelle discussion"}).json()["id"] == first
+    assert len(client.get("/api/brainstorming/discussions").json()) == 1
+
+    # Rouverte avec un dossier : elle y est liée. Sans dossier : son lien reste.
+    folder_id = _folder(client, "Biologie")
+    reopened = client.post("/api/brainstorming", json={"folder_id": folder_id}).json()
+    assert reopened["id"] == first and reopened["folder_id"] == folder_id
+    assert client.post("/api/brainstorming", json={}).json()["folder_id"] == folder_id
+
+    # Une fois qu'elle a servi, la suivante est bien une nouvelle discussion.
+    _ask_until_answer(client, first, "Une idée")
+    second = client.post("/api/brainstorming", json={}).json()["id"]
+    assert second != first
+    # Un vrai titre crée toujours, même à côté d'une page blanche.
+    named = client.post("/api/brainstorming", json={"title": "Mon sujet"}).json()["id"]
+    assert named not in (first, second)
+
+
+def test_create_title_is_bounded(client):
+    from db.brainstorm import TITLE_MAX_CHARS
+
+    too_long = {"title": "x" * (TITLE_MAX_CHARS + 1)}
+    assert client.post("/api/brainstorming", json=too_long).status_code == 422
+
+
+def test_migration_v34_keeps_a_single_blank_discussion(client):
+    """Les pages blanches déjà empilées sont résorbées : la plus récente reste,
+    ainsi que celles que l'utilisateur a épinglées ou liées à un dossier."""
+    from db import brainstorm as store
+    from db import get_connection
+    from db.migrations import _migrate_to_v34
+
+    folder_id = _folder(client, "Maths")
+    pinned = store.create_discussion("")
+    store.pin_discussion(pinned, 5)
+    linked = store.create_discussion("", folder_id=folder_id)
+    used = store.create_discussion("")
+    store.add_message(used, "user", "bonjour")
+    named = store.create_discussion("Mon sujet")
+    blanks = [store.create_discussion("") for _ in range(4)]
+
+    _migrate_to_v34(get_connection())
+
+    remaining = {d["id"] for d in store.list_discussions()}
+    assert remaining == {pinned, linked, used, named, blanks[-1]}
+
+
+def test_one_question_at_a_time_per_discussion(client, monkeypatch):
+    """Tant que Gemma répond, une seconde question dans la MÊME discussion est
+    refusée sans rien persister : deux questions croisées entrelaçaient leurs
+    messages et chaque réponse ignorait l'autre."""
+    import services.brainstorm as svc
+    from i18n import t
+
+    # La décision part d'un thread de l'executor : on l'attend, on ne la suppose pas là.
+    pending: queue.Queue = queue.Queue()
+
+    def _decide_later(history, user_message, on_success, on_error, model=None, **_):
+        pending.put(on_success)
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide_later)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer_fake)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    did = client.post("/api/brainstorming", json={"title": "Occupée"}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "première"})
+        assert ws.receive_json()["type"] == "loading"
+        ws.send_json({"type": "ask", "question": "seconde"})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json() == {"type": "error", "message": t("brainstorm.busy")}
+        # Le détail le dit : un client qui rouvre la discussion attend la réponse.
+        assert client.get(f"/api/brainstorming/{did}/messages").json()["answering"] is True
+
+        pending.get(timeout=5)({"search": False, "queries": []})
+        answer = ws.receive_json()
+        assert answer["type"] == "answer" and "première" in answer["answer"]
+
+        # Libérée : la question suivante passe.
+        ws.send_json({"type": "ask", "question": "troisième"})
+        assert ws.receive_json()["type"] == "loading"
+        pending.get(timeout=5)({"search": False, "queries": []})
+        assert ws.receive_json()["type"] == "answer"
+
+    detail = client.get(f"/api/brainstorming/{did}/messages").json()
+    assert detail["answering"] is False
+    assert [m["content"] for m in detail["messages"] if m["role"] == "user"] == ["première", "troisième"]
+
+
+def test_failure_before_queueing_releases_the_discussion(client, monkeypatch):
+    """Une panne avant la mise en file répond une erreur et libère la discussion,
+    au lieu de la laisser réservée — donc muette — jusqu'au redémarrage."""
+    import services.brainstorm as svc
+    from i18n import t
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("file LLM cassée")
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _boom)
+
+    did = client.post("/api/brainstorming", json={"title": "Panne"}).json()["id"]
+    answers: list = []
+    errors: list = []
+    svc.handle_message(did, "question", answers.append, errors.append)
+
+    assert answers == [] and errors == [t("brainstorm.failed")]
+    assert not svc.is_answering(did)
+
+
+def test_ws_on_unknown_discussion_is_closed(client):
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect("/api/brainstorming/999/stream") as ws:
+            ws.receive_json()
+    assert closed.value.code == 4404

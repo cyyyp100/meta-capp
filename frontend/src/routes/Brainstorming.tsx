@@ -17,17 +17,23 @@ export function Brainstorming() {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  // Incrémenté à chaque « Nouvelle discussion » : le champ de saisie reprend le
+  // focus, même quand le serveur a rouvert la page blanche déjà affichée.
+  const [focusNonce, setFocusNonce] = useState(0);
 
   const { data: discussions } = useQuery({ queryKey: QK, queryFn: api.brainstormDiscussions });
   const selected = discussions?.find((d) => d.id === selectedId);
 
-  // Sélectionne la 1re discussion par défaut quand la liste arrive.
+  // Sélection toujours valide : la 1re discussion quand rien n'est choisi, ou
+  // quand la discussion choisie a disparu de la liste (supprimée).
   useEffect(() => {
-    if (selectedId === null && discussions && discussions.length > 0) {
-      setSelectedId(discussions[0].id);
-    }
+    if (!discussions) return;
+    if (selectedId !== null && discussions.some((d) => d.id === selectedId)) return;
+    setSelectedId(discussions[0]?.id ?? null);
   }, [discussions, selectedId]);
 
+  // Le serveur tient la règle « une seule page blanche » : il renvoie la
+  // discussion vierge existante au lieu d'en empiler une autre.
   async function createDiscussion() {
     if (creating) return;
     setCreating(true);
@@ -35,15 +41,23 @@ export function Brainstorming() {
       const created = await api.createDiscussion();
       await qc.invalidateQueries({ queryKey: QK });
       setSelectedId(created.id);
+      setFocusNonce((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
     }
   }
 
+  // On attend la liste à jour avant de réévaluer la sélection : sinon l'effet
+  // ci-dessus reprenait la discussion supprimée dans la liste encore périmée.
   async function deleteDiscussion(id: number) {
-    await api.deleteDiscussion(id);
-    if (selectedId === id) setSelectedId(null);
-    qc.invalidateQueries({ queryKey: QK });
+    try {
+      await api.deleteDiscussion(id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+    await qc.invalidateQueries({ queryKey: QK });
   }
 
   // Le plafond d'épinglage est tenu par le serveur : son refus (400, message
@@ -100,6 +114,7 @@ export function Brainstorming() {
               key={selectedId}
               discussionId={selectedId}
               discussion={selected}
+              focusNonce={focusNonce}
               onFolderChange={(folderId) => setFolder(selectedId, folderId)}
               onActivity={() => qc.invalidateQueries({ queryKey: QK })}
             />

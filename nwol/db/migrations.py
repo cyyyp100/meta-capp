@@ -175,6 +175,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 33)
         current = 33
 
+    if current < 34 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v34(conn)
+        _set_version(conn, 34)
+        current = 34
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1103,3 +1108,44 @@ def _migrate_to_v33(conn) -> None:
             "INTEGER REFERENCES library_folders(id) ON DELETE SET NULL",
         )
     logger.info("Migration SQLite v33 terminée")
+
+
+def _migrate_to_v34(conn) -> None:
+    """Discussions de brainstorming : une seule page blanche.
+
+    Rien n'empêchait de cliquer dix fois « Nouvelle discussion » : chaque clic
+    insérait une discussion vide et la liste s'en remplissait. Depuis,
+    `db/brainstorm.create_blank_discussion` rouvre la discussion vierge au lieu
+    d'en créer une autre ; cette étape résorbe celles déjà empilées.
+
+    Vierge = titre par défaut ET aucun message (compteur et table relus tous
+    les deux : on supprime). Par utilisateur, la plus récente reste ; les autres
+    partent, sauf celles que l'utilisateur a épinglées ou liées à un dossier —
+    un geste de sa part. Pas de colonne ni d'index : la règle est tenue par
+    l'INSERT conditionnel, comme le plafond d'épinglage."""
+    from db.brainstorm import BLANK_TITLES
+
+    logger.info("Migration SQLite v34 démarrée")
+    marks = ", ".join("?" * len(BLANK_TITLES))
+    rows = conn.execute(
+        f"""SELECT id, user_id, pinned_at, folder_id FROM brainstorm_discussions b
+            WHERE message_count = 0 AND title IN ({marks})
+              AND NOT EXISTS (SELECT 1 FROM brainstorm_messages m WHERE m.discussion_id = b.id)
+            ORDER BY updated_at DESC, id DESC""",
+        BLANK_TITLES,
+    ).fetchall()
+    kept: set[int] = set()
+    removed = 0
+    with conn:
+        for row in rows:
+            user_id = int(row["user_id"])
+            if user_id not in kept:
+                kept.add(user_id)
+                continue
+            if row["pinned_at"] is not None or row["folder_id"] is not None:
+                continue
+            conn.execute("DELETE FROM brainstorm_discussions WHERE id=?", (row["id"],))
+            removed += 1
+    if removed:
+        logger.info("Migration v34 : %s discussion(s) vierge(s) en double supprimée(s)", removed)
+    logger.info("Migration SQLite v34 terminée")

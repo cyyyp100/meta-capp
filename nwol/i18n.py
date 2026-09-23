@@ -557,6 +557,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.missing": "Discussion introuvable.",
         "brainstorm.folder_missing": "Dossier introuvable.",
         "brainstorm.pin_limit": "{n} discussions épinglées au maximum : désépingles-en une d'abord.",
+        "brainstorm.busy": "Gemma répond déjà dans cette discussion : attends sa réponse.",
+        "brainstorm.failed": "Gemma n'a pas pu traiter ce message. Réessaie dans un instant.",
         "library.title_empty": "Le titre ne peut pas être vide.",
         # ── Visite guidée : le document emprunté ──────────────────────────
         # La fiche du document de démonstration est écrite ici plutôt que
@@ -1121,6 +1123,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.missing": "Discussion not found.",
         "brainstorm.folder_missing": "Folder not found.",
         "brainstorm.pin_limit": "At most {n} pinned discussions: unpin one first.",
+        "brainstorm.busy": "Gemma is already answering in this discussion: wait for the reply.",
+        "brainstorm.failed": "Gemma could not process this message. Try again in a moment.",
         "library.title_empty": "The title cannot be empty.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",

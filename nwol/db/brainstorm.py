@@ -15,21 +15,69 @@ from db.user import DEFAULT_USER_ID
 
 logger = logging.getLogger("DB.brainstorm")
 
+# Titre d'une discussion créée sans nom. Une discussion est VIERGE tant qu'elle
+# porte l'un de ces titres et n'a aucun message : c'est la page blanche que
+# « Nouvelle discussion » rouvre au lieu d'en empiler une autre.
+DEFAULT_TITLE = "Nouvelle discussion"
+BLANK_TITLES = (DEFAULT_TITLE, "New discussion")
+TITLE_MAX_CHARS = 200
+
+_BLANK_WHERE = f"message_count = 0 AND title IN ({', '.join('?' * len(BLANK_TITLES))})"
+
 
 def create_discussion(
     title: str,
     folder_id: int | None = None,
     user_id: int = DEFAULT_USER_ID,
 ) -> int:
-    title = (title or "").strip() or "Nouvelle discussion"
+    title = (title or "").strip() or DEFAULT_TITLE
     conn = get_connection()
     with conn:
         cur = conn.execute(
             "INSERT INTO brainstorm_discussions (user_id, title, folder_id) VALUES (?, ?, ?)",
-            (user_id, title[:200], folder_id),
+            (user_id, title[:TITLE_MAX_CHARS], folder_id),
         )
     logger.info("Discussion brainstorming créée id=%s dossier=%s", cur.lastrowid, folder_id)
     return int(cur.lastrowid)
+
+
+def create_blank_discussion(folder_id: int | None = None, user_id: int = DEFAULT_USER_ID) -> int:
+    """Rouvre la discussion vierge de l'utilisateur, ou en crée une s'il n'en a pas.
+
+    Au plus une page blanche à la fois : dix clics sur « Nouvelle discussion »
+    empilaient dix discussions vides. L'INSERT est conditionnel, en une seule
+    requête — vérifier puis insérer en deux laisserait deux clics simultanés
+    passer tous les deux. Il ouvre la transaction d'écriture même quand il
+    n'insère rien, donc la vierge relue ensuite ne peut plus disparaître.
+
+    La discussion rouverte remonte en tête des récentes (`updated_at`) ;
+    ``folder_id`` donné la lie à ce dossier, ``None`` laisse son lien tel quel.
+    """
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            f"""INSERT INTO brainstorm_discussions (user_id, title, folder_id)
+                SELECT ?, ?, ?
+                WHERE NOT EXISTS (SELECT 1 FROM brainstorm_discussions
+                                  WHERE user_id=? AND {_BLANK_WHERE})""",
+            (user_id, DEFAULT_TITLE, folder_id, user_id, *BLANK_TITLES),
+        )
+        if cur.rowcount > 0:
+            logger.info("Discussion brainstorming créée id=%s dossier=%s", cur.lastrowid, folder_id)
+            return int(cur.lastrowid)
+        row = conn.execute(
+            f"""SELECT id FROM brainstorm_discussions WHERE user_id=? AND {_BLANK_WHERE}
+                ORDER BY updated_at DESC, id DESC LIMIT 1""",
+            (user_id, *BLANK_TITLES),
+        ).fetchone()
+        conn.execute(
+            """UPDATE brainstorm_discussions
+               SET updated_at=datetime('now'), folder_id=COALESCE(?, folder_id)
+               WHERE id=?""",
+            (folder_id, row["id"]),
+        )
+    logger.info("Discussion brainstorming vierge rouverte id=%s", row["id"])
+    return int(row["id"])
 
 
 def list_discussions(user_id: int = DEFAULT_USER_ID) -> list[dict]:
@@ -109,7 +157,7 @@ def rename_discussion(discussion_id: int, title: str) -> None:
     with conn:
         conn.execute(
             "UPDATE brainstorm_discussions SET title=?, updated_at=datetime('now') WHERE id=?",
-            ((title or "").strip()[:200] or "Nouvelle discussion", discussion_id),
+            ((title or "").strip()[:TITLE_MAX_CHARS] or DEFAULT_TITLE, discussion_id),
         )
 
 

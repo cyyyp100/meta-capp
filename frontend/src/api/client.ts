@@ -290,6 +290,7 @@ export const api = {
     getJSON<SessionAnalysis>(`/api/session/${sid}/analysis`),
   // ── Brainstorming (chat libre + RAG sur la base utilisateur) ─────────────────
   brainstormDiscussions: () => getJSON<BrainstormDiscussion[]>("/api/brainstorming/discussions"),
+  // Sans titre, le serveur rouvre la discussion vierge existante au lieu d'en créer une autre.
   createDiscussion: (title?: string, folderId: number | null = null) =>
     postJSON<BrainstormDiscussion>("/api/brainstorming", { title: title ?? null, folder_id: folderId }),
   // Au-delà de 5 épinglées, le serveur répond 400 (message traduit dans l'Error).
@@ -516,6 +517,8 @@ export interface BrainstormDetail {
   folder_id: number | null;
   folder_name: string | null;
   messages: BrainstormMessage[];
+  /** Une question de la discussion est en cours côté serveur (partie d'un autre canal). */
+  answering: boolean;
 }
 
 export interface LangLesson {

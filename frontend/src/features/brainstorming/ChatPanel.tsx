@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { BrainstormDiscussion, BrainstormSource } from "../../api/client";
+import type { BrainstormDiscussion, BrainstormMessage, BrainstormSource } from "../../api/client";
 import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
@@ -14,6 +14,14 @@ interface ChatMessage {
   sources?: BrainstormSource[];
 }
 
+// Réponse partie d'un autre canal (discussion quittée puis rouverte) : on relit
+// la discussion à ce rythme jusqu'à ce que le serveur l'ait livrée.
+const PENDING_POLL_MS = 2000;
+
+function toChat(messages: BrainstormMessage[]): ChatMessage[] {
+  return messages.map((m) => ({ role: m.role, content: m.content, sources: m.sources }));
+}
+
 const SOURCE_ICON: Record<BrainstormSource["source_type"], string> = {
   highlight: "🖍",
   qa: "💬",
@@ -25,12 +33,15 @@ const SOURCE_ICON: Record<BrainstormSource["source_type"], string> = {
 export function ChatPanel({
   discussionId,
   discussion,
+  focusNonce,
   onFolderChange,
   onActivity,
 }: {
   discussionId: number;
   /** Ligne de la liste (titre, dossier lié) — absente le temps qu'elle arrive. */
   discussion?: BrainstormDiscussion;
+  /** Change à chaque « Nouvelle discussion » : redonne le focus au champ de saisie. */
+  focusNonce?: number;
   onFolderChange: (folderId: number | null) => void;
   onActivity?: () => void;
 }) {
@@ -38,20 +49,28 @@ export function ChatPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // Le serveur répond déjà à une question posée depuis un canal précédent.
+  const [pending, setPending] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [disconnected, setDisconnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const waiting = busy || pending;
 
   // Historique persistant : recharge les messages à l'ouverture d'une discussion.
   useEffect(() => {
     let alive = true;
     setMessages([]);
     setBusy(false);
+    setPending(false);
     setScanning(false);
     api
       .discussionMessages(discussionId)
       .then((d) => {
-        if (alive) setMessages(d.messages.map((m) => ({ role: m.role, content: m.content, sources: m.sources })));
+        if (!alive) return;
+        setMessages(toChat(d.messages));
+        setPending(d.answering);
       })
       .catch(() => {});
     return () => {
@@ -59,12 +78,42 @@ export function ChatPanel({
     };
   }, [discussionId]);
 
+  // Une réponse est due mais ce canal ne la recevra pas : on relit la discussion
+  // jusqu'à ce qu'elle y soit, au lieu de laisser poser une seconde question.
+  useEffect(() => {
+    if (!pending) return;
+    let alive = true;
+    const timer = window.setInterval(() => {
+      api
+        .discussionMessages(discussionId)
+        .then((d) => {
+          if (!alive || d.answering) return;
+          setMessages(toChat(d.messages));
+          setPending(false);
+        })
+        .catch(() => {});
+    }, PENDING_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [pending, discussionId]);
+
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, [focusNonce]);
+
   // Canal temps réel dédié à la discussion courante.
   useEffect(() => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/api/brainstorming/${discussionId}/stream${wsTokenSuffix()}`);
     ws.onmessage = (e) => {
-      const evt = JSON.parse(e.data);
+      let evt;
+      try {
+        evt = JSON.parse(e.data);
+      } catch {
+        return; // trame illisible : ignorée
+      }
       if (evt.type === "scanning") {
         setScanning(Boolean(evt.active));
       } else if (evt.type === "title") {
@@ -82,18 +131,28 @@ export function ChatPanel({
         setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${evt.message || ""}` }]);
       }
     };
+    // Coupure inattendue : la réponse attendue n'arrivera plus par ce canal. On
+    // débloque la saisie et on le dit, au lieu d'afficher « réfléchit » à vie.
+    ws.onclose = () => {
+      setBusy(false);
+      setScanning(false);
+      setDisconnected(true);
+    };
     wsRef.current = ws;
-    return () => ws.close();
+    return () => {
+      ws.onclose = null; // fermeture voulue (changement de discussion) : pas d'alerte
+      ws.close();
+    };
   }, [discussionId]);
 
   // Auto-scroll vers le dernier message.
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy, scanning]);
+  }, [messages, waiting, scanning, disconnected]);
 
   function ask() {
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text || waiting) return;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${t("brainstorm.unavailable")}` }]);
@@ -122,7 +181,7 @@ export function ChatPanel({
         <FolderScopePicker folderId={folderId} folderName={folderName} onChange={onFolderChange} />
       </div>
       <div ref={bodyRef} style={body}>
-        {messages.length === 0 && !busy && (
+        {messages.length === 0 && !waiting && (
           <div style={welcome}>
             {t("brainstorm.welcome")}
             {folderId === null && <div style={{ marginTop: 10, fontSize: 13 }}>{t("brainstorm.welcome_folder")}</div>}
@@ -140,17 +199,19 @@ export function ChatPanel({
           </div>
         ))}
         {scanning && <div style={hint}>🔎 {t("brainstorm.searching")}</div>}
-        {busy && !scanning && <div style={hint}>{t("brainstorm.thinking")}</div>}
+        {waiting && !scanning && <div style={hint}>{t("brainstorm.thinking")}</div>}
+        {disconnected && <div style={hint}>⚠️ {t("brainstorm.disconnected")}</div>}
       </div>
       <div style={inputBar}>
         <AutoGrowTextarea
+          ref={composerRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onSubmit={ask}
           placeholder={t("brainstorm.placeholder")}
           style={input}
         />
-        <button onClick={ask} disabled={busy} style={{ ...sendBtn, background: busy ? "var(--muted-light)" : "var(--accent)" }}>
+        <button onClick={ask} disabled={waiting} style={{ ...sendBtn, background: waiting ? "var(--muted-light)" : "var(--accent)" }}>
           ↵
         </button>
       </div>
