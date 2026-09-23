@@ -76,6 +76,7 @@ class AssistantInterventionPolicy:
         self._get_due_flashcard = get_due_flashcard
 
         self._busy = False
+        self._paused = False
         self._pending = False
         self._last_global = _NEVER
         self._last_by_page: dict[int, float] = {}
@@ -102,6 +103,13 @@ class AssistantInterventionPolicy:
         """L'assistant est occupé (réponse en cours, question Q&R active…)."""
         self._busy = busy
 
+    def set_paused(self, paused: bool) -> None:
+        """La lecture est en pause : aucune décision, et celle déjà en vol est
+        abandonnée à son retour SANS compter — ni dans le plafond de la séance,
+        ni dans les cooldowns, ni dans l'anti-répétition. L'élève ne l'a pas vue :
+        pour la séance, elle n'a pas eu lieu."""
+        self._paused = paused
+
     def start_reading(self) -> None:
         """Le lecteur entre dans le document : le warm-up part d'ici.
 
@@ -110,8 +118,20 @@ class AssistantInterventionPolicy:
         if self._opened_at is None:
             self._opened_at = time.monotonic()
 
+    def skip(self, seconds: float) -> None:
+        """Retire une pause des horloges : warm-up et cooldowns reprennent où ils
+        en étaient. Sans ça, une pause de dix minutes consommait le cooldown, et
+        Gemma intervenait à la seconde où l'élève revenait."""
+        seconds = max(0.0, float(seconds))
+        if self._opened_at is not None:
+            self._opened_at += seconds
+        self._last_global += seconds  # -inf (aucune intervention) le reste
+        for page in self._last_by_page:
+            self._last_by_page[page] += seconds
+
     def reset(self) -> None:
         self._busy = False
+        self._paused = False
         self._pending = False
         self._last_global = _NEVER
         self._last_by_page.clear()
@@ -129,7 +149,7 @@ class AssistantInterventionPolicy:
     # ------------------------------------------------------------------
     def tick(self) -> None:
         mode = self._get_mode()
-        if mode == "discret" or self._busy or self._pending:
+        if mode == "discret" or self._busy or self._paused or self._pending:
             return
         if self._interventions_count >= ASSISTANT_MAX_INTERVENTIONS:
             return
@@ -154,6 +174,9 @@ class AssistantInterventionPolicy:
         if now - self._last_by_page.get(page, _NEVER) < ASSISTANT_PAGE_COOLDOWN.get(mode, 600.0):
             return
 
+        # Signaux à usage unique que la détection consomme : rendus si la
+        # décision est jetée (pause), comme si elle n'avait jamais été demandée.
+        rearm = (self._flashcard_prompted, self._due_card, self._fatigue_at_answers)
         reason = self._detect_trigger(page, mode, now)
         if reason is None:
             return
@@ -185,7 +208,7 @@ class AssistantInterventionPolicy:
             context["answer_lengths"] = self._memory.recent_answer_lengths(ASSISTANT_FATIGUE_WINDOW)
 
         def _on_done(decision: dict | None) -> None:
-            self._handle_decision(decision, page)
+            self._handle_decision(decision, page, reason, rearm)
 
         try:
             self._request_decision(context, _on_done)
@@ -193,8 +216,20 @@ class AssistantInterventionPolicy:
             logger.debug("Décision d'intervention impossible : %s", exc)
             self._pending = False
 
-    def _handle_decision(self, decision: dict | None, trigger_page: int) -> None:
+    def _handle_decision(
+        self,
+        decision: dict | None,
+        trigger_page: int,
+        reason: str,
+        rearm: tuple[bool, dict | None, int],
+    ) -> None:
         self._pending = False
+        if self._paused:
+            # Décision partie avant la pause, revenue pendant : jetée, et le
+            # signal pourra être redonné à la reprise s'il tient toujours.
+            self._fired_reasons.discard((trigger_page, reason))
+            self._flashcard_prompted, self._due_card, self._fatigue_at_answers = rearm
+            return
         now = time.monotonic()
         if not decision or not decision.get("should_intervene"):
             # Le LLM a jugé l'intervention inutile : petit cooldown quand même.

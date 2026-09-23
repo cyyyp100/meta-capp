@@ -295,3 +295,94 @@ def test_stagnant_since_resets_on_interaction() -> None:
     # Jamais plus que le dwell (interaction antérieure à l'entrée sur la page).
     memory.on_page_view(4, now=1300.0)
     assert memory.stagnant_since(1305.0) == 5.0
+
+
+def test_a_pause_is_skipped_by_dwell_and_stagnation() -> None:
+    """Une pause n'est ni du temps sur la page, ni de l'immobilité : à la
+    reprise, le dwell repart exactement d'où il s'était arrêté."""
+    memory = SessionMemory()
+    memory.on_page_view(2, now=1000.0)
+    memory.on_interaction(now=1050.0)
+    # Pause de 1000 s entre t=1100 et t=2100.
+    memory.skip(1000.0)
+    assert memory.current_dwell(2100.0) == 100.0
+    assert memory.stagnant_since(2100.0) == 50.0
+    memory.flush(2130.0)
+    assert memory.dwell_by_page[2] == 130.0
+
+
+def test_a_pause_freezes_warmup_and_cooldowns(monkeypatch):
+    """Une pause de dix minutes ne doit pas « consommer » le cooldown : sans ça,
+    Gemma intervenait à la seconde où l'élève revenait."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, cooldown=240.0, warmup=120.0)
+    policy._opened_at = None
+    policy.start_reading()  # warm-up de 120 s à partir de t=1000
+
+    clock["t"] = 1060.0  # 60 s de lecture, puis 600 s de pause
+    clock["t"] += 600.0
+    policy.skip(600.0)
+    policy.tick()
+    assert fired == []  # il reste 60 s de warm-up : la pause n'en a rien mangé
+
+    clock["t"] += 60.0
+    policy.tick()
+    assert len(fired) == 1
+
+    # Même chose pour le cooldown global : 100 s de lecture, 900 s de pause.
+    policy._fired_reasons.clear()
+    clock["t"] += 100.0 + 900.0
+    policy.skip(900.0)
+    policy.tick()
+    assert len(fired) == 1
+    clock["t"] += 140.0
+    policy.tick()
+    assert len(fired) == 2
+
+
+def test_a_decision_returning_during_a_pause_never_happened(monkeypatch):
+    """Décision partie avant la pause, revenue pendant : l'élève ne l'a pas vue.
+    Elle ne doit compter ni dans le plafond, ni dans le cooldown, ni dans
+    l'anti-répétition — à la reprise, le même signal peut être redonné."""
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, cooldown=3600.0)
+    in_flight: list = []
+    policy._request_decision = lambda ctx, done: in_flight.append(done)
+
+    policy.tick()
+    assert len(in_flight) == 1  # décision demandée, LLM en train de répondre
+    policy.set_paused(True)
+    in_flight.pop()({"should_intervene": True, "kind": "offer_help"})
+    assert fired == []
+    assert policy._interventions_count == 0
+
+    policy.tick()  # toujours en pause : aucune nouvelle demande
+    assert in_flight == []
+
+    policy.set_paused(False)
+    policy.tick()  # ni cooldown d'une heure, ni raison déjà « tirée »
+    assert len(in_flight) == 1
+    in_flight.pop()({"should_intervene": True, "kind": "offer_help"})
+    assert len(fired) == 1
+
+
+def test_a_dropped_fatigue_signal_is_rearmed(monkeypatch):
+    """Le signal de fatigue se consomme à la détection : jeté pendant une pause,
+    il doit revenir à la reprise, pas attendre une fenêtre entière de réponses."""
+    from services import intervention
+
+    policy, memory, fired, contexts, _page = make_policy(monkeypatch)
+    monkeypatch.setattr(intervention, "detect_answer_fatigue", lambda lengths: True)
+    for chars in (400, 300, 200, 100, 50, 20):
+        memory.on_answer(1, "partial", chars=chars)
+    in_flight: list = []
+    policy._request_decision = lambda ctx, done: (contexts.append(ctx), in_flight.append(done))
+
+    policy.tick()
+    assert contexts[-1]["trigger"] == "answer_fatigue"
+    policy.set_paused(True)
+    in_flight.pop()({"should_intervene": True, "kind": "suggest_pause"})
+    policy.set_paused(False)
+
+    policy.tick()
+    assert contexts[-1]["trigger"] == "answer_fatigue"

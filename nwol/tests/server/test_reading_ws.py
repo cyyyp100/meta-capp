@@ -260,7 +260,7 @@ def test_qa_question_without_hint_carries_an_empty_string(client, monkeypatch):
 
 
 def test_pause_message_keeps_the_channel_open(client, monkeypatch):
-    # La pause ne répond rien (la carte côté client tient le compte à rebours) :
+    # La pause ne répond rien (l'écran de pause tient le chrono côté client) :
     # ce qui doit rester vrai, c'est que le canal continue de servir.
     from services import assistant
 
@@ -269,11 +269,159 @@ def test_pause_message_keeps_the_channel_open(client, monkeypatch):
         lambda d, p, q, ok, err, **kw: ok({"answer": "ok", "highlights": []}),
     )
     with client.websocket_connect("/api/reader/1/stream") as ws:
-        ws.send_json({"type": "pause", "minutes": 5})
-        ws.send_json({"type": "pause", "minutes": 0})  # reprise anticipée
+        ws.send_json({"type": "pause", "source": "manual"})
+        # En pause, une demande n'est pas servie : le lecteur est masqué.
+        ws.send_json({"type": "ask", "question": "pendant la pause", "page": 1})
+        ws.send_json({"type": "resume"})
         ws.send_json({"type": "ask", "question": "toujours là ?", "page": 1})
         assert ws.receive_json()["type"] == "loading"
-        assert ws.receive_json()["type"] == "answer"
+        answer = ws.receive_json()
+        assert answer["type"] == "answer"
+
+
+def _reading_session(client, tmp_path, make_pdf) -> tuple[int, int]:
+    """Un vrai document et une session ouverte : les pauses s'y rattachent."""
+    path = make_pdf(tmp_path / "pause.pdf", ["Contenu de test"])
+    doc_id = client.post("/api/library/import", json={"path": path}).json()["id"]
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    return doc_id, sid
+
+
+def _sync(ws) -> None:
+    """Aller-retour sur le canal : tout message envoyé avant est traité."""
+    ws.send_json({"type": "mode", "mode": "normal"})
+    while ws.receive_json()["type"] != "system":
+        pass
+
+
+def test_manual_pause_is_recorded_and_leaves_the_gauges_alone(client, tmp_path, make_pdf, monkeypatch):
+    from db.session_pauses import get_session_pauses
+    from services import session
+
+    credits: list[float] = []
+    monkeypatch.setattr(session.LiveGauges, "recover_attention", lambda self, pts: credits.append(pts))
+    doc_id, sid = _reading_session(client, tmp_path, make_pdf)
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "pause", "source": "manual"})
+        ws.send_json({"type": "resume"})
+        ws.send_json({"type": "resume"})  # une reprise répétée n'enregistre rien de plus
+        _sync(ws)
+
+    pauses = get_session_pauses(sid)
+    assert len(pauses) == 1
+    assert pauses[0]["source"] == "manual"
+    assert pauses[0]["after_recommendation"] is False
+    assert pauses[0]["recommendation_kind"] is None
+    assert pauses[0]["planned_s"] is None
+    assert pauses[0]["ended_by"] == "resume"
+    assert credits == []  # une pause manuelle est neutre pour les jauges
+
+
+def test_suggested_pause_credits_attention_once(client, tmp_path, make_pdf, monkeypatch):
+    from server.routers import reading
+    from services import session
+
+    credits: list[float] = []
+    monkeypatch.setattr(session.LiveGauges, "recover_attention", lambda self, pts: credits.append(pts))
+    # Le prorata est testé dans tests/services/test_pause.py ; ici, le routage.
+    monkeypatch.setattr(reading, "attention_credit", lambda record: 7.0 if record.source == "suggested" else 0.0)
+    doc_id, sid = _reading_session(client, tmp_path, make_pdf)
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "pause", "source": "suggested", "minutes": 5})
+        ws.send_json({"type": "resume"})
+        ws.send_json({"type": "resume"})
+        _sync(ws)
+    assert credits == [7.0]
+
+
+def test_pause_after_an_intervention_records_the_recommendation(client, tmp_path, make_pdf, monkeypatch):
+    from db.session_pauses import get_session_pauses
+    from server.routers import reading
+    from services import assistant
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.02)
+    _relax_policy(monkeypatch)
+    monkeypatch.setattr(assistant, "build_intervention_context", lambda *a, **k: {"trigger": "long_dwell", "page": 1})
+    monkeypatch.setattr(
+        reading, "decide_intervention_async",
+        lambda ctx, ok, err, **kw: ok({"should_intervene": True, "kind": "suggest_pause", "message": "Souffle un peu."}),
+    )
+    doc_id, sid = _reading_session(client, tmp_path, make_pdf)
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "start_reading"})
+        evt = None
+        for _ in range(40):
+            evt = ws.receive_json()
+            if evt["type"] == "intervention":
+                break
+        assert evt["kind"] == "suggest_pause"
+        # L'élève ne prend pas la carte mais le bouton : la pause suit quand même.
+        ws.send_json({"type": "pause", "source": "manual"})
+        ws.send_json({"type": "resume"})
+        _sync(ws)
+
+    pause = get_session_pauses(sid)[0]
+    assert pause["after_recommendation"] is True
+    assert pause["recommendation_kind"] == "suggest_pause"
+    assert pause["recommendation_delay_s"] is not None
+
+
+def test_nothing_is_observed_nor_decided_during_a_pause(client, monkeypatch):
+    import time
+
+    from server.routers import reading
+    from services import assistant, session
+
+    observed: list[int] = []
+    decided: list[int] = []
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.01)
+    _relax_policy(monkeypatch)
+    monkeypatch.setattr(
+        session.LiveGauges, "apply_reading_behaviour",
+        lambda self, **kw: observed.append(1) or self.snapshot(),
+    )
+    monkeypatch.setattr(
+        assistant, "build_intervention_context",
+        lambda *a, **k: decided.append(1) or {"trigger": "long_dwell", "page": 1},
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "pause", "source": "manual"})
+        _sync(ws)
+        observed.clear()  # des ticks ont pu passer avant la pause
+        ws.send_json({"type": "start_reading"})
+        ws.send_json({"type": "activity", "hidden": True})
+        time.sleep(0.2)  # une vingtaine de ticks
+        assert observed == []
+        assert decided == []
+        ws.send_json({"type": "resume"})
+        time.sleep(0.2)
+    # À la reprise, la lecture est de nouveau observée.
+    assert observed
+
+
+def test_a_session_closed_during_a_pause_still_records_it(client, tmp_path, make_pdf):
+    from db.page_dwell import get_page_dwell
+    from db.session_pauses import get_session_pauses
+
+    doc_id, sid = _reading_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "pause", "source": "manual"})
+        _sync(ws)
+
+    pauses = get_session_pauses(sid)
+    assert len(pauses) == 1
+    assert pauses[0]["ended_by"] == "disconnect"
+    # Le dwell persisté à la fermeture n'inclut pas la pause.
+    dwell = {row["page"]: row["dwell_s"] for row in get_page_dwell(sid)}
+    assert dwell[1] <= 5.0
 
 
 def test_intervention_context_relays_policy_trigger(client):

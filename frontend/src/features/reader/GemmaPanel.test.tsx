@@ -156,7 +156,8 @@ describe("GemmaPanel", () => {
   // `suggest_pause` traversait tout le serveur pour finir en phrase ordinaire
   // dans le fil : rien ne la distinguait, et rien ne permettait de la prendre.
   it("propose une pause qu'on peut réellement prendre", async () => {
-    await renderOpenPanel();
+    const onPauseRequest = vi.fn();
+    await renderOpenPanel({ onPauseRequest });
     await act(async () => {
       FakeWebSocket.last?.emit({
         type: "intervention",
@@ -171,11 +172,38 @@ describe("GemmaPanel", () => {
     expect(await screen.findByText(/pause recommandée/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /faire une pause de 5 min/i }));
 
-    // Le serveur doit l'apprendre : c'est lui qui suspend sa dérive d'attention.
-    const sent = FakeWebSocket.last?.sent.map((raw) => JSON.parse(raw)) ?? [];
-    expect(sent).toContainEqual({ type: "pause", minutes: 5 });
-    // Et le décompte tourne, à la durée annoncée par le serveur.
-    expect(screen.getByRole("timer")).toHaveTextContent("05:00");
+    // La prendre ouvre l'écran de pause du lecteur, à la durée annoncée par le
+    // serveur — le même chemin que le bouton « Pause ». La carte s'efface.
+    expect(onPauseRequest).toHaveBeenCalledWith(5);
+    expect(screen.queryByText(/pause recommandée/i)).not.toBeInTheDocument();
+  });
+
+  // Pendant une pause, le serveur fige tout ; le panneau, lui, ne doit plus
+  // rien lui envoyer de la présence de l'élève, et signaler l'arrêt et la reprise.
+  it("signale la pause et la reprise, et se tait entre les deux", async () => {
+    const sent = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m));
+    const panel = (paused: React.ComponentProps<typeof GemmaPanel>["paused"]) => (
+      <TooltipProvider>
+        <GemmaPanel docId={1} currentPage={1} sessionId={null} reading paused={paused} />
+      </TooltipProvider>
+    );
+    const view = await renderOpenPanel({ reading: true });
+
+    view.rerender(panel({ source: "suggested", plannedMin: 5, startedAt: Date.now() }));
+    await waitFor(() => expect(sent()).toContainEqual({ type: "pause", source: "suggested", minutes: 5 }));
+
+    const before = sent().length;
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("mousemove"));
+    });
+    expect(sent().slice(before).filter((m) => m.type === "activity")).toEqual([]);
+
+    view.rerender(panel(null));
+    await waitFor(() => expect(sent()).toContainEqual({ type: "resume" }));
+    // Une seule paire, même si le lecteur se re-rend.
+    view.rerender(panel(null));
+    expect(sent().filter((m) => m.type === "resume")).toHaveLength(1);
   });
 
   // Le conseil de régulation de séance était produit par le modèle, validé par

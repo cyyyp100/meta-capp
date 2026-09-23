@@ -165,6 +165,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 31)
         current = 31
 
+    if current < 32 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v32(conn)
+        _set_version(conn, 32)
+        current = 32
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1031,3 +1036,39 @@ def _migrate_to_v31(conn) -> None:
     with conn:
         _ensure_column(conn, "flashcards", "pronunciation", "TEXT")
     logger.info("Migration SQLite v31 terminée")
+
+
+def _migrate_to_v32(conn) -> None:
+    """Pauses de lecture (`session_pauses`), une ligne par pause prise.
+
+    Pendant une pause, le lecteur fige tout (dérive d'attention, dwell,
+    interventions) : il ne reste à mesurer que la pause elle-même — sa durée,
+    ce qui l'a déclenchée (bouton de l'élève ou conseil de Gemma accepté) et la
+    dernière recommandation du LLM qui la précédait, avec son délai. Le type et
+    le délai sont gardés bruts pour pouvoir réinterpréter plus tard ce qui
+    compte comme « après une recommandation » (cf. services/pause.py).
+
+    Table neuve, en cascade sur la session : abandonner ou supprimer une séance
+    emporte ses pauses comme son dwell."""
+    logger.info("Migration SQLite v32 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS session_pauses (
+                   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id              INTEGER NOT NULL REFERENCES reading_sessions(id) ON DELETE CASCADE,
+                   started_at              TEXT NOT NULL,
+                   page                    INTEGER,
+                   duration_s              REAL NOT NULL,
+                   planned_s               REAL,
+                   source                  TEXT NOT NULL,
+                   after_recommendation    INTEGER NOT NULL DEFAULT 0,
+                   recommendation_kind     TEXT,
+                   recommendation_delay_s  REAL,
+                   attention_at_start      REAL,
+                   ended_by                TEXT NOT NULL
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_pauses_session ON session_pauses(session_id)"
+        )
+    logger.info("Migration SQLite v32 terminée")

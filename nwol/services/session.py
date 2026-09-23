@@ -23,6 +23,7 @@ from db.metacog import (
 )
 from db.questions import count_assistant_questions
 from db.session_gauges import get_first_gauges, get_latest_gauges, record_gauges
+from db.session_pauses import get_session_pauses
 from db.session_reflections import (
     get_recent_reflection_questions,
     save_session_reflection,
@@ -42,6 +43,7 @@ from metacog.gauges import (
 )
 from metacog.profile import compute_alpha, compute_confidence, update_profile
 from metacog.reflection import fallback_meta_cognition_analysis, pick_reflection_question
+from services.pause import summarize as summarize_pauses
 
 logger = logging.getLogger("services.session")
 
@@ -173,6 +175,12 @@ class LiveGauges:
         self._record()
         return self.snapshot()
 
+    def skip(self, seconds: float) -> None:
+        """Retire une pause de l'horloge des mesures : le `t` de `session_gauges`
+        reste du temps de LECTURE, et la courbe de la séance n'est pas étirée
+        d'un plat de la longueur de la pause."""
+        self._t0 += max(0.0, float(seconds))
+
     def snapshot(self) -> dict[str, float]:
         return snapshot(self._gauges)
 
@@ -227,13 +235,20 @@ def session_metrics(session_id: int) -> dict:
     correct = sum(1 for a in answers if a.get("verdict") == "correct")
     partial = sum(1 for a in answers if a.get("verdict") == "partial")
     success = round(100 * (correct + 0.5 * partial) / total) if total else 0
+    try:
+        pauses = summarize_pauses(get_session_pauses(session_id))
+    except Exception:  # best-effort : une séance sans pause lisible reste une séance
+        pauses = summarize_pauses([])
     return {
         "session_id": session_id,
+        # Temps de LECTURE : les pauses en sont exclues (cf. `pause_s`).
         "duration_s": int(session.get("duration_s") or 0),
         "pages_read": int(session.get("pages_read") or 0),
         "questions_answered": total,
         "correct": correct,
         "success_rate": success,
+        # pauses, pause_s, pauses_after_recommendation (services/pause.summarize)
+        **pauses,
         "reflection_questions": list(REFLECTION_QUESTIONS),
     }
 
@@ -259,6 +274,11 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
         "questions_answered": metrics["questions_answered"],
         "correct": metrics["correct"],
         "success_rate": metrics["success_rate"],
+        # Les pauses et ce qui les a précédées : le bilan distingue le repos
+        # conseillé suivi (autorégulation) d'un simple arrêt.
+        "pauses": metrics["pauses"],
+        "pause_s": metrics["pause_s"],
+        "pauses_after_recommendation": metrics["pauses_after_recommendation"],
     }
     session_data = {**stats, "gauges": session_gauges, "profile": profile_gauges}
     context = {"session_data": session_data, "metacog_profile": profile_gauges}

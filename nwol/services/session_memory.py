@@ -48,6 +48,17 @@ class SessionMemory:
         décrochage."""
         self._last_interaction = time.monotonic() if now is None else now
 
+    def skip(self, seconds: float) -> None:
+        """Retire une pause de l'horloge : ni dwell, ni stagnation ne la comptent.
+
+        Les repères de la page courante avancent de la durée de la pause — à la
+        reprise, le temps passé sur la page repart exactement d'où il s'était
+        arrêté, au lieu de compter la pause comme une lecture interminable."""
+        seconds = max(0.0, float(seconds))
+        self._entered_at += seconds
+        if self._last_interaction:
+            self._last_interaction += seconds
+
     def on_user_question(self, page: int, question: str = "") -> None:
         self.questions_by_page[page] = self.questions_by_page.get(page, 0) + 1
 

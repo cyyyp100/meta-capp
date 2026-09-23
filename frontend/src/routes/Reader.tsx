@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Highlighter, Plus } from "lucide-react";
+import { Highlighter, Pause as PauseIcon, Plus } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -16,6 +16,7 @@ import { PageTextLayer } from "../features/reader/PageTextLayer";
 import { placedBoxes } from "../features/reader/textLayer";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
+import { PauseSas, type ReadingPause } from "../features/session/PauseSas";
 import { currentStep, useTour } from "../features/tour/useTour";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
 import { useT } from "../i18n";
@@ -147,6 +148,11 @@ export function Reader() {
   // 0 = pas encore monté ; la vraie valeur est posée par l'effet de démarrage de session.
   const startTimeRef = useRef(0);
   const maxPageRef = useRef(1);
+  // Pause en cours (bouton « Pause » ou carte de Gemma acceptée) : le PDF est
+  // masqué, la vue figée, et le serveur ne mesure plus rien jusqu'à la reprise.
+  // Le temps cumulé des pauses est retiré de la durée de la séance.
+  const [pause, setPause] = useState<ReadingPause | null>(null);
+  const pausedMsRef = useRef(0);
 
   const [zoom, setZoom] = useState(1);
   // Décalage horizontal du PDF (px). Découplé du scroll natif (transform) -> reste
@@ -413,7 +419,8 @@ export function Reader() {
   // pendant qu'on lit la bulle la décale d'autant. On cale la vue une fois
   // (`pinPassage`), puis plus rien ne la déplace.
   const tourRunning = useTour((s) => s.running);
-  const frozen = demo && tourRunning;
+  // La pause fige la vue de la même façon : rien ne doit bouger derrière le voile.
+  const frozen = (demo && tourRunning) || pause !== null;
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
   const gemmaControls = useRef<{ openPanel: () => void; play: (beat: DemoBeat) => void } | null>(null);
@@ -645,7 +652,7 @@ export function Reader() {
   // Raccourcis clavier Ctrl/Cmd + +/-/0.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
+      if (!(e.ctrlKey || e.metaKey) || frozenRef.current) return;
       if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         captureZoomAnchor();
@@ -906,6 +913,7 @@ export function Reader() {
     // clore. C'est aussi le chemin qu'emprunte la visite pour faire apparaître
     // le sas de sortie au moment où elle l'explique.
     if (demo) {
+      setPause(null);
       setExit({ sessionId: DEMO_METRICS.session_id, metrics: demoMetricsRef.current });
       return;
     }
@@ -914,12 +922,31 @@ export function Reader() {
       return;
     }
     if (exit) return;
-    const duration = Math.round((Date.now() - startTimeRef.current) / 1000);
+    // Durée de LECTURE : les pauses en sont retirées, y compris celle en cours
+    // quand la séance se termine depuis l'écran de pause.
+    const now = Date.now();
+    const pausedMs = pausedMsRef.current + (pause ? now - pause.startedAt : 0);
+    const duration = Math.max(0, Math.round((now - startTimeRef.current - pausedMs) / 1000));
+    setPause(null);
     setExit({ sessionId, metrics: null });
     api
       .endSession(sessionId, maxPageRef.current, duration)
       .then((metrics) => setExit((e) => (e && e.sessionId === sessionId ? { sessionId, metrics } : e)))
       .catch(() => navigate("/"));
+  }
+
+  /** Pause : la lecture s'arrête, l'élève reviendra. `plannedMin` = durée
+   *  conseillée par Gemma quand c'est sa carte qui l'a déclenchée. */
+  function startPause(source: ReadingPause["source"], plannedMin: number | null = null) {
+    if (!entered || exit || pause) return;
+    clearSelection();
+    setPause({ source, plannedMin, startedAt: Date.now() });
+  }
+
+  function resumeReading() {
+    if (!pause) return;
+    pausedMsRef.current += Date.now() - pause.startedAt;
+    setPause(null);
   }
 
   function handleExitSasClose() {
@@ -950,6 +977,9 @@ export function Reader() {
           // même verrouillé.
           overflowY: locked || frozen ? "hidden" : "auto",
           overflowX: "hidden",
+          // En pause, le PDF n'est plus visible — masqué, pas démonté : la
+          // position de lecture, le zoom et les pages chargées sont intacts.
+          visibility: pause ? "hidden" : undefined,
           background: "var(--bg-alt)",
           cursor: panning ? "grabbing" : undefined,
         }}
@@ -1205,6 +1235,29 @@ export function Reader() {
         <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
           {data?.title ?? ""}
         </span>
+        <button
+          onClick={() => startPause("manual")}
+          disabled={!entered || exit !== null}
+          title={t("reader.pause_hint")}
+          aria-label={t("reader.pause_hint")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: !entered || exit !== null ? "default" : "pointer",
+            color: "var(--text-soft)",
+            fontWeight: 600,
+            fontSize: 13,
+            padding: "6px 12px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            opacity: !entered || exit !== null ? 0.5 : 1,
+          }}
+        >
+          <PauseIcon className="size-3.5" aria-hidden />
+          {t("reader.pause")}
+        </button>
         {data && (
           <span style={{ color: "var(--muted)", fontSize: 13, whiteSpace: "nowrap" }}>
             {t("reader.page", { cur: currentPage, total: data.page_count })}
@@ -1317,12 +1370,16 @@ export function Reader() {
         demo={demo}
         reading={entered}
         ended={exit !== null}
+        paused={pause}
+        onPauseRequest={(minutes) => startPause("suggested", minutes)}
         onDemoReady={handleDemoReady}
       />
 
       {data && !entered && (
         <EntrySas docId={id} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
       )}
+
+      {pause && !exit && <PauseSas pause={pause} onResume={resumeReading} onEnd={handleEnd} />}
 
       {exit && (
         <ExitSas sessionId={exit.sessionId} metrics={exit.metrics} onClose={handleExitSasClose} demo={demo} />

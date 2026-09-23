@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 31).
+-- (config.settings.DB_SCHEMA_VERSION = 32).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -393,6 +393,21 @@ CREATE TABLE session_gauges (
     value       REAL NOT NULL
 );
 CREATE INDEX idx_session_gauges_session ON session_gauges(session_id);
+CREATE TABLE session_pauses (
+                   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id              INTEGER NOT NULL REFERENCES reading_sessions(id) ON DELETE CASCADE,
+                   started_at              TEXT NOT NULL,
+                   page                    INTEGER,
+                   duration_s              REAL NOT NULL,
+                   planned_s               REAL,
+                   source                  TEXT NOT NULL,
+                   after_recommendation    INTEGER NOT NULL DEFAULT 0,
+                   recommendation_kind     TEXT,
+                   recommendation_delay_s  REAL,
+                   attention_at_start      REAL,
+                   ended_by                TEXT NOT NULL
+               );
+CREATE INDEX idx_session_pauses_session ON session_pauses(session_id);
 CREATE TABLE session_reflections (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      INTEGER REFERENCES reading_sessions(id) ON DELETE CASCADE,

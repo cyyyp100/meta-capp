@@ -26,6 +26,7 @@ import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
+import type { ReadingPause } from "../session/PauseSas";
 import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
@@ -81,12 +82,10 @@ export interface QaMask {
   placeholder?: string;
 }
 
-/** Pause proposée par Gemma (intervention `suggest_pause`). */
+/** Pause proposée par Gemma (intervention `suggest_pause`), pas encore prise. */
 interface Pause {
   message: string;
   minutes: number;
-  /** Fin du décompte une fois la pause acceptée ; null tant qu'elle est proposée. */
-  endsAt: number | null;
 }
 
 const MODES = ["discret", "normal", "coach"] as const;
@@ -152,6 +151,8 @@ export function GemmaPanel({
   demo = false,
   reading = false,
   ended = false,
+  paused = null,
+  onPauseRequest,
   onDemoReady,
 }: {
   docId: number;
@@ -192,6 +193,14 @@ export function GemmaPanel({
    * écrit ses réflexions) et persiste le temps passé par page.
    */
   ended?: boolean;
+  /**
+   * La lecture est en pause (écran de pause du lecteur) : le serveur fige tout
+   * — ni observation, ni intervention, ni horloge — et le panneau cesse
+   * d'envoyer présence, gestes et page visible jusqu'à la reprise.
+   */
+  paused?: ReadingPause | null;
+  /** « Faire une pause » sur la carte de Gemma : le lecteur ouvre l'écran de pause. */
+  onPauseRequest?: (minutes: number) => void;
   /** Rend à la visite de quoi jouer les répliques, tant que le panneau vit. */
   onDemoReady?: (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => void;
 }) {
@@ -217,9 +226,8 @@ export function GemmaPanel({
   const [gated, setGated] = useState(false);
   // Gemma inspecte la page (décide d'intervenir) -> la bulle se tourne vers le PDF.
   const [scanning, setScanning] = useState(false);
-  // Pause recommandée : une carte avec un décompte, pas une phrase de plus dans
-  // le fil. `suggest_pause` arrivait jusqu'ici et se rendait comme n'importe
-  // quel message — rien ne permettait de la PRENDRE.
+  // Pause recommandée : une carte qu'on peut prendre, pas une phrase de plus
+  // dans le fil. La prendre ouvre l'écran de pause du lecteur (`onPauseRequest`).
   const [pause, setPause] = useState<Pause | null>(null);
 
   // Disposition / taille de la zone de discussion (libre + presets), persistées.
@@ -253,6 +261,8 @@ export function GemmaPanel({
   contextChipsRef.current = contextChips;
   const gatedRef = useRef(false);
   gatedRef.current = gated;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   // Page-contexte de la question bloquante : le lecteur y revient si la
   // réponse est fausse, après avoir été libéré le temps de la correction.
   const gatedPageRef = useRef<number | undefined>(undefined);
@@ -378,7 +388,6 @@ export function GemmaPanel({
             message: evt.message || "",
             // La durée vient du serveur (config/settings.py), jamais de l'UI.
             minutes: Number(evt.pause_minutes) > 0 ? Number(evt.pause_minutes) : 5,
-            endsAt: null,
           });
           setOpen(true);
           return;
@@ -449,6 +458,8 @@ export function GemmaPanel({
     // serveur — sans lui, `attention` ne mesurait que la performance aux questions.
     let away = false;
     const reportPresence = () => {
+      // En pause, l'élève est parti : on ne l'observe plus (le serveur l'ignore aussi).
+      if (pausedRef.current) return;
       const hidden = document.hidden || !document.hasFocus();
       if (hidden === away || ws.readyState !== WebSocket.OPEN) return;
       away = hidden;
@@ -463,6 +474,7 @@ export function GemmaPanel({
     // Compressé : au plus un message toutes les ENGAGED_REPORT_MS.
     let lastEngaged = 0;
     const reportEngaged = () => {
+      if (pausedRef.current) return;
       const now = Date.now();
       if (now - lastEngaged < ENGAGED_REPORT_MS || ws.readyState !== WebSocket.OPEN) return;
       lastEngaged = now;
@@ -483,8 +495,27 @@ export function GemmaPanel({
 
   useEffect(() => {
     const ws = wsRef.current;
+    if (pausedRef.current) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "viewport", page: currentPage, session_id: sessionId ?? null }));
   }, [currentPage, sessionId]);
+
+  // Pause de la lecture : un message à l'arrêt, un à la reprise. Le serveur
+  // mesure la durée et ce qui l'a précédée (services/pause.py) ; ici on ne fait
+  // que signaler. Socket fermé (séance terminée pendant la pause) : rien ne
+  // part, le serveur enregistre la pause à la déconnexion.
+  const pauseSentRef = useRef(false);
+  useEffect(() => {
+    const ws = wsRef.current;
+    const live = !demo && ws !== null && ws.readyState === WebSocket.OPEN;
+    if (paused && !pauseSentRef.current) {
+      pauseSentRef.current = true;
+      if (live) ws.send(JSON.stringify({ type: "pause", source: paused.source, minutes: paused.plannedMin }));
+    } else if (!paused && pauseSentRef.current) {
+      pauseSentRef.current = false;
+      if (live) ws.send(JSON.stringify({ type: "resume" }));
+      setMessages((m) => [...m, { role: "system", text: t("gemma.pause_over") }]);
+    }
+  }, [paused, demo, t]);
 
   // Entrée dans la lecture : le serveur démarre le warm-up de la première
   // question. `connected` couvre le socket pas encore ouvert à la sortie du sas ;
@@ -652,21 +683,11 @@ export function GemmaPanel({
     releaseWhileThinking();
   }
 
-  function startPause() {
+  /** La carte de Gemma est acceptée : le lecteur ouvre SON écran de pause, le
+   *  même que celui du bouton — une seule pause, un seul chemin vers le serveur. */
+  function acceptPause() {
     if (!pause) return;
-    // Le serveur suspend sa dérive passive d'attention et se tait pendant ce
-    // temps : sans ce message, la pause qu'il vient de conseiller lui
-    // ressemblerait à un décrochage et ferait chuter la jauge.
-    // Message non parti (socket fermé) : pas de décompte. Un compte à rebours
-    // qui tourne pendant que le serveur continue d'observer serait un mensonge.
-    if (!sendRaw({ type: "pause", minutes: pause.minutes })) return;
-    setPause({ ...pause, endsAt: Date.now() + pause.minutes * 60_000 });
-  }
-
-  /** Fin de pause. `early` = reprise avant la fin -> le serveur doit le savoir. */
-  function endPause(early: boolean) {
-    if (early) sendRaw({ type: "pause", minutes: 0 });
-    setMessages((m) => [...m, { role: "system", text: t("gemma.pause_over") }]);
+    onPauseRequest?.(pause.minutes);
     setPause(null);
   }
 
@@ -906,18 +927,7 @@ export function GemmaPanel({
               </div>
             ),
           )}
-          {pause && (
-            <PauseCard
-              // Le démarrage de la pause remonte un décompte tout neuf : la
-              // carte se remonte plutôt que de resynchroniser son état.
-              key={pause.endsAt ?? "idle"}
-              pause={pause}
-              onStart={startPause}
-              onResume={() => endPause(true)}
-              onDone={() => endPause(false)}
-              onDismiss={() => setPause(null)}
-            />
-          )}
+          {pause && <PauseCard pause={pause} onStart={acceptPause} onDismiss={() => setPause(null)} />}
           {busy && (
             <div
               role="status"
@@ -1160,57 +1170,22 @@ const pupilStyle: React.CSSProperties = {
   width: 7.5, height: 7.5, borderRadius: "50%", background: "#1b1b2b", transition: "transform 0.12s ease-out",
 };
 
-/** Secondes restantes avant `endsAt` (0 quand la pause n'a pas démarré). */
-function remainingSeconds(endsAt: number | null): number {
-  return endsAt === null ? 0 : Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
-}
-
-function formatClock(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-/** Pause recommandée : une carte qu'on peut PRENDRE, avec son décompte.
+/** Pause recommandée : une carte qu'on peut PRENDRE.
  *
  *  `suggest_pause` existait de bout en bout côté serveur et se rendait comme
  *  une phrase de plus dans le fil : rien ne la distinguait, rien ne la
- *  déclenchait, et le serveur continuait pendant ce temps de compter la page
- *  immobile comme du décrochage. */
+ *  déclenchait. La prendre ouvre l'écran de pause du lecteur, qui tient le
+ *  décompte de la durée conseillée (features/session/PauseSas.tsx). */
 function PauseCard({
   pause,
   onStart,
-  onResume,
-  onDone,
   onDismiss,
 }: {
   pause: Pause;
   onStart: () => void;
-  onResume: () => void;
-  /** Le décompte est arrivé à zéro (le serveur a repris de son côté). */
-  onDone: () => void;
   onDismiss: () => void;
 }) {
   const t = useT();
-  const [left, setLeft] = useState(() => remainingSeconds(pause.endsAt));
-  // La fin de pause remonte au panneau ; la relire à chaque rendu relancerait
-  // l'intervalle en boucle.
-  const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
-
-  useEffect(() => {
-    if (pause.endsAt === null) return;
-    // Décompte recalculé depuis l'horloge, jamais décrémenté : un onglet mis en
-    // arrière-plan ralentit les intervalles, et une pause de cinq minutes en
-    // aurait duré huit.
-    const id = window.setInterval(() => {
-      const rest = remainingSeconds(pause.endsAt);
-      setLeft(rest);
-      if (rest <= 0) onDoneRef.current();
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [pause.endsAt]);
-
   return (
     <div style={pauseCardStyle} role="group" aria-label={t("gemma.pause_title")}>
       <div
@@ -1223,35 +1198,15 @@ function PauseCard({
 
       {pause.message && <div style={{ fontSize: 13, color: "var(--text)" }}>{pause.message}</div>}
 
-      {pause.endsAt === null ? (
-        <>
-          <div className="text-xs text-muted-foreground">{t("gemma.pause_note")}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={onStart} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
-              {t("gemma.pause_start", { n: pause.minutes })}
-            </button>
-            <button onClick={onDismiss} style={chip}>
-              {t("gemma.pause_decline")}
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div
-            role="timer"
-            aria-label={t("gemma.pause_running", { time: formatClock(left) })}
-            style={{ fontSize: 26, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--accent-ink)" }}
-          >
-            {formatClock(left)}
-          </div>
-          <div className="text-xs text-muted-foreground">{t("gemma.pause_note")}</div>
-          <div>
-            <button onClick={onResume} style={chip}>
-              {t("gemma.pause_resume")}
-            </button>
-          </div>
-        </>
-      )}
+      <div className="text-xs text-muted-foreground">{t("gemma.pause_note")}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={onStart} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
+          {t("gemma.pause_start", { n: pause.minutes })}
+        </button>
+        <button onClick={onDismiss} style={chip}>
+          {t("gemma.pause_decline")}
+        </button>
+      </div>
     </div>
   );
 }

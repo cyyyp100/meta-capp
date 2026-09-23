@@ -6,6 +6,7 @@
 # zoom d'affichage) — voir pdf_viewer/pdf_document.py pour la convention.
 from __future__ import annotations
 
+import logging
 import os
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -20,19 +21,23 @@ from config.settings import (
     LIBRARY_SEARCH_WEIGHT_SUBJECT,
     LIBRARY_SEARCH_WEIGHT_SUMMARY,
 )
-from db.chapters import get_chapters
+from db.chapters import get_chapters, save_chapters
 from db.documents import delete_document as _delete_document
 from db.documents import get_document as _get_document
 from db.documents import list_all_documents as _list_all
 from db.documents import list_documents_for_search as _list_for_search
 from db.documents import list_recent_documents as _list_recent
 from db.documents import rename_document as _rename_document
+from db.documents import update_page_count as _update_page_count
 from i18n import t
+from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.page_renderer import clear_page_cache as _clear_page_cache
 from pdf_viewer.page_renderer import clear_reader_cache as _clear_reader_cache
 from pdf_viewer.page_renderer import render_page as _render_page
 from pdf_viewer.pdf_document import PdfDocument
 from utils.text import fold
+
+logger = logging.getLogger("services.library")
 
 __all__ = [
     "list_recent_documents",
@@ -107,18 +112,47 @@ def get_document(doc_id: int) -> dict | None:
     doc = _get_document(doc_id)
     if doc is None:
         return None
-    detail = _summary(doc)
-    detail["chapters"] = get_chapters(doc_id)
     if doc.get("extraction_engine") == "code":
+        detail = _summary(doc)
+        detail["chapters"] = get_chapters(doc_id)
         # Pas de PDF : tailles de page uniformes (repli avant chargement des blocs).
         detail["page_sizes_pts"] = [[595, 842]] * (doc.get("page_count") or 1)
         return detail
     try:
         with PdfDocument(doc["path"]) as pdf:
-            detail["page_sizes_pts"] = [[w, h] for (w, h) in pdf.page_sizes()]
+            sizes = [[w, h] for (w, h) in pdf.page_sizes()]
     except Exception:
-        detail["page_sizes_pts"] = []
+        sizes = []
+    if sizes and len(sizes) != doc.get("page_count"):
+        doc = _resync_rewritten_pdf(doc, len(sizes))
+    detail = _summary(doc)
+    detail["chapters"] = get_chapters(doc_id)
+    detail["page_sizes_pts"] = sizes
     return detail
+
+
+def _resync_rewritten_pdf(doc: dict, page_count: int) -> dict:
+    """Le PDF a été réécrit sur place depuis l'import (rapport LaTeX recompilé…).
+
+    `page_count` fixe la liste des pages du lecteur : resté à l'ancienne valeur,
+    il fait demander des pages qui n'existent plus. Le texte de page et l'index
+    RAG se revalident seuls sur le mtime ; les chapitres et les PNG (cache
+    indexé par le seul chemin) non — on refait donc ce que ferait un réimport.
+    """
+    logger.info(
+        "PDF réécrit depuis l'import id=%s : %s -> %s pages",
+        doc["id"], doc.get("page_count"), page_count,
+    )
+    _update_page_count(doc["id"], page_count)
+    try:
+        save_chapters(doc["id"], build_chapter_index(doc["path"]))
+    except Exception:  # pragma: no cover - des chapitres périmés valent mieux qu'un lecteur fermé
+        logger.warning("Chapitres non reconstruits pour doc=%s", doc["id"], exc_info=True)
+    try:
+        _clear_page_cache(doc["path"])
+    except OSError:  # pragma: no cover - le cache disque est jetable
+        pass
+    return {**doc, "page_count": page_count}
 
 
 def render_page(doc_id: int, page: int, zoom: float = 2.5) -> str | None:

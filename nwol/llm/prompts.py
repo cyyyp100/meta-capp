@@ -1259,7 +1259,8 @@ Respond only in valid JSON, without Markdown, in the exact format:
 Constraints:
 - success_rate is between 0.0 and 1.0.
 - qualitative_summary: 2 to 3 sentences in English. Mention at least one positive point, one area for improvement, and one concrete suggestion. If a gauge exceeds its profile by ≥8 pts, explicitly note this (e.g., "your attention was noticeably above your usual level"). If a gauge is below by ≥8 pts, note that too. Be precise and personalized.
-- Provide exactly 3 short, clear, and distinct metacognitive questions, adapted to the session data and gauges."""
+- Provide exactly 3 short, clear, and distinct metacognitive questions, adapted to the session data and gauges.
+- pauses / pause_s: breaks taken during reading, already excluded from duration_s; pauses_after_recommendation: how many followed a recommendation from the assistant. A break is never disengagement: one taken after a recommendation is self-regulation, say so if relevant."""
 
     return f"""Tu produis le sas de sortie d'une session MetaC-App.
 
@@ -1292,7 +1293,8 @@ Réponds uniquement en JSON valide, sans Markdown, au format exact :
 Contraintes :
 - success_rate est entre 0.0 et 1.0.
 - qualitative_summary : 2 à 3 phrases en français. Mentionne au moins un point positif, un point d'amélioration, et une suggestion concrète. Si une jauge dépasse de ≥8 pts son profil, signale explicitement ce surpassement (ex : "ton attention était nettement au-dessus de ton niveau habituel"). Si une jauge est en retrait de ≥8 pts, signale-le aussi. Sois précis et personnalisé.
-- Fournis exactement 3 questions métacognitives courtes, claires et différentes, adaptées aux données et aux jauges de la session."""
+- Fournis exactement 3 questions métacognitives courtes, claires et différentes, adaptées aux données et aux jauges de la session.
+- pauses / pause_s : pauses prises pendant la lecture, déjà exclues de duration_s ; pauses_after_recommendation : combien suivaient une recommandation de l'assistant. Une pause n'est jamais un décrochage : prise après une recommandation, c'est de l'autorégulation, signale-le si c'est pertinent."""
 
 
 def build_meta_cognition_questions_prompt(

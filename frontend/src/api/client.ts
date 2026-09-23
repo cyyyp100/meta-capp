@@ -446,6 +446,23 @@ export interface ProgressSession {
   profile_changes: ProgressChange[];
   reflections: { question: string; answer: string; created_at: string }[];
   page_dwell: { page: number; dwell_s: number; visits: number }[];
+  pauses?: SessionPause[];
+}
+
+/** Une pause prise pendant la lecture, et ce qui l'a précédée. */
+export interface SessionPause {
+  started_at: string;
+  page: number | null;
+  duration_s: number;
+  /** Durée conseillée par Gemma (secondes), null pour une pause manuelle. */
+  planned_s: number | null;
+  source: "manual" | "suggested";
+  /** Une recommandation du LLM était arrivée juste avant (ou la carte a été acceptée). */
+  after_recommendation: boolean;
+  recommendation_kind: string | null;
+  recommendation_delay_s: number | null;
+  attention_at_start: number | null;
+  ended_by: "resume" | "disconnect";
 }
 
 export interface StudyStreak {

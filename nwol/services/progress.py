@@ -21,6 +21,7 @@ from db.flashcards import get_due_flashcards
 from db.metacog import CRITERIA, ensure_profile, get_history
 from db.page_dwell import get_page_dwell
 from db.session_gauges import get_first_gauges, get_session_gauges
+from db.session_pauses import get_session_pauses
 from db.session_reflections import get_session_reflections
 from db.sessions import get_session, list_sessions, reading_ranks
 from db.user import DEFAULT_USER_ID
@@ -130,6 +131,9 @@ def get_session_progress(session_id: int, user_id: int = DEFAULT_USER_ID) -> dic
             for r in _safe(lambda: get_session_reflections(int(session_id)), [])
         ],
         "page_dwell": _safe(lambda: get_page_dwell(int(session_id)), []),
+        # Les pauses prises, chacune avec ce qui l'a précédée (conseil de Gemma
+        # accepté, recommandation récente, ou rien) — cf. services/pause.
+        "pauses": _safe(lambda: get_session_pauses(int(session_id)), []),
     }
 
 

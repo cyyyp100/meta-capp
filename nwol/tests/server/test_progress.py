@@ -60,6 +60,32 @@ def test_gauges_left_at_their_seed_are_not_reported_as_measured(client, tmp_path
     assert len(gauges["series"]["attention"]) == 2
 
 
+def test_pauses_are_listed_and_summed_but_kept_out_of_reading_time(client, tmp_path, make_pdf):
+    """Les pauses de la séance : chacune avec ce qui l'a précédée, et leur
+    total à part — `duration_s` reste du temps de lecture."""
+    from db.session_pauses import save_pause
+
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    save_pause(sid, {"started_at": "2026-09-23T10:00:00", "page": 2, "duration_s": 300.0,
+                     "planned_s": 300.0, "source": "suggested", "after_recommendation": True,
+                     "recommendation_kind": "suggest_pause", "recommendation_delay_s": 12.0,
+                     "attention_at_start": 35.0, "ended_by": "resume"})
+    save_pause(sid, {"started_at": "2026-09-23T10:20:00", "page": 4, "duration_s": 120.0,
+                     "source": "manual", "ended_by": "resume"})
+    metrics = client.post(f"/api/session/{sid}/end", json={"pages_read": 4, "duration_s": 900}).json()
+    assert metrics["duration_s"] == 900
+    assert metrics["pauses"] == 2
+    assert metrics["pause_s"] == 420
+    assert metrics["pauses_after_recommendation"] == 1
+
+    pauses = client.get(f"/api/progress/session/{sid}").json()["pauses"]
+    assert [p["source"] for p in pauses] == ["suggested", "manual"]
+    assert pauses[0]["after_recommendation"] is True
+    assert pauses[1]["after_recommendation"] is False
+    assert pauses[1]["recommendation_kind"] is None
+
+
 def test_unknown_session_is_a_404(client):
     assert client.get("/api/progress/session/424242").status_code == 404
 

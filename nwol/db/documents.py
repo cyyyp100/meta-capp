@@ -100,6 +100,13 @@ def update_last_page(doc_id: int, page: int) -> None:
         )
 
 
+def update_page_count(doc_id: int, page_count: int) -> None:
+    """Réaligne `page_count` sur le fichier quand il a été réécrit depuis l'import."""
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE documents SET page_count=? WHERE id=?", (page_count, doc_id))
+
+
 def get_document_subject(doc_id: int) -> str | None:
     conn = get_connection()
     row = conn.execute("SELECT subject FROM documents WHERE id=?", (doc_id,)).fetchone()

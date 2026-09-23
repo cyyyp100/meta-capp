@@ -71,3 +71,13 @@ def test_pause_minutes_are_bounded_server_side():
     assert ReaderMessage.model_validate({"type": "pause", "minutes": "cinq"}).minutes is None
     # Champ absent : la durée par défaut est décidée par le routeur, pas ici.
     assert ReaderMessage.model_validate({"type": "pause"}).minutes is None
+
+
+def test_pause_source_and_resume_are_validated():
+    # Une source inconnue ne jette pas la pause : elle compte comme manuelle.
+    from server.routers.reading import ReaderMessage
+
+    assert ReaderMessage.model_validate({"type": "pause"}).source == "manual"
+    assert ReaderMessage.model_validate({"type": "pause", "source": "suggested"}).source == "suggested"
+    assert ReaderMessage.model_validate({"type": "pause", "source": "admin"}).source == "manual"
+    assert ReaderMessage.model_validate({"type": "resume"}).type == "resume"

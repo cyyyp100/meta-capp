@@ -216,7 +216,11 @@ def hook(doc_id: int, page: int = 1) -> dict:
 
 @router.get("/doc/{doc_id}/page/{page}.png")
 def page_image(doc_id: int, page: int, zoom: float = Query(2.5, ge=0.5, le=6.0)) -> FileResponse:
-    path = render_page(doc_id, page, zoom)
+    try:
+        path = render_page(doc_id, page, zoom)
+    except ValueError as exc:
+        # Page hors limites : le PDF a pu être réécrit plus court pendant la lecture.
+        raise HTTPException(status_code=404, detail=str(exc))
     if path is None:
         raise HTTPException(status_code=404, detail="Document introuvable")
     # Le PNG est immuable pour un (doc, page, zoom) -> cache navigateur agressif.

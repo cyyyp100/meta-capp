@@ -375,7 +375,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 31
+DB_SCHEMA_VERSION = 32
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -418,14 +418,24 @@ ASSISTANT_FATIGUE_MIN_CHARS = 60      # départ trop court -> on ne conclut rien
 # évite de parler pendant un défilement rapide.
 ASSISTANT_MATH_AHEAD_DWELL_S = 15.0
 
-# ── Pauses recommandées ──────────────────────────────────────────────────────
-# Une pause acceptée n'est pas du décrochage : pendant sa durée, la dérive
-# passive d'attention est suspendue (sans quoi le repos que Gemma vient de
-# conseiller ferait chuter la jauge) et l'assistant se tait. Au retour, la jauge
-# est recréditée une fois — c'est le bénéfice mesurable de la pause.
+# ── Pauses ───────────────────────────────────────────────────────────────────
+# Une pause n'est pas du décrochage : l'élève la prend (bouton « Pause ») ou
+# accepte celle que Gemma conseille, et tant qu'il n'a pas repris, TOUT est
+# figé — ni dérive passive d'attention, ni dwell, ni intervention, ni horloge de
+# cooldown (cf. services/pause.py). La pause est ouverte : elle dure jusqu'au
+# retour de l'élève. Seules sa durée et ce qui l'a précédée sont mesurés.
+#
+# PAUSE_DEFAULT_MIN / PAUSE_MAX_MIN : durée CONSEILLÉE par la carte de Gemma
+# (bornée côté serveur), qui sert de référence au crédit ci-dessous.
 PAUSE_DEFAULT_MIN = 5
 PAUSE_MAX_MIN = 20
+# Crédit d'attention versé au retour d'une pause CONSEILLÉE, au prorata du temps
+# pris sur la durée conseillée. Une pause manuelle est neutre pour les jauges.
 PAUSE_ATTENTION_RECOVERY = 12.0
+# Une pause « suit une recommandation » si une intervention du LLM (ou un
+# conseil de séance) est arrivée moins de N secondes avant son début. Le type et
+# le délai sont enregistrés tels quels : la fenêtre peut être revue après coup.
+PAUSE_RECOMMENDATION_WINDOW_S = 600.0
 
 # Mode focus : interventions coupées pendant N minutes (déclenché depuis le panneau)
 FOCUS_DEFAULT_MIN = 25

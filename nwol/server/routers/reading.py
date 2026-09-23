@@ -6,8 +6,11 @@
 #                     {"type":"activity","hidden":bool,"engaged":bool}  # fenêtre
 #                       masquée / app au second plan, ou (engaged) défilement /
 #                       souris / clavier -> alimentent la dérive passive d'attention
-#                     {"type":"pause","minutes":int}  # pause recommandée acceptée
-#                       (0 = reprise anticipée) -> silence + dérive suspendue
+#                     {"type":"pause","source":"manual"|"suggested","minutes":int|null}
+#                       # pause OUVERTE (bouton de l'élève, ou carte de Gemma
+#                       acceptée : minutes = durée conseillée) -> tout est figé :
+#                       ni observation, ni intervention, ni horloge (services/pause)
+#                     {"type":"resume"}  # fin de la pause -> enregistrée en base
 #                     {"type":"start_reading"}  # sas d'entrée franchi -> départ du
 #                       warm-up de la première question (aucune intervention avant)
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
@@ -36,7 +39,6 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from config.settings import (
     ASSISTANT_MODES,
     FOCUS_DEFAULT_MIN,
-    PAUSE_ATTENTION_RECOVERY,
     PAUSE_DEFAULT_MIN,
     PAUSE_MAX_MIN,
 )
@@ -49,12 +51,14 @@ from db.questions import (
     save_assistant_exchange,
     save_question,
 )
+from db.session_pauses import save_pause
 from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
 from services import assistant, flashcards as flashcards_service, library, pdf_rag, session
 from services.intervention import AssistantInterventionPolicy
+from services.pause import PAUSE_SOURCES, PauseTracker, attention_credit
 from services.session_memory import SessionMemory
 
 logger = logging.getLogger("server.reading")
@@ -70,6 +74,8 @@ _MAX_HISTORY_TEXT_CHARS = 240
 # Bornage des entrées client (S4) : longueurs maximales acceptées.
 _MAX_QUESTION_CHARS = 4000
 _MAX_SNIPPET_CHARS = 1000
+# Demandes de l'élève sans objet pendant une pause (le lecteur est masqué).
+_PAUSED_ACTIONS = frozenset({"ask", "rephrase", "recap", "hook", "start_qa", "qa_answer"})
 
 
 class ReaderMessage(BaseModel):
@@ -80,12 +86,13 @@ class ReaderMessage(BaseModel):
 
     type: Literal[
         "viewport", "mode", "focus", "ask", "rephrase", "recap", "hook",
-        "start_qa", "qa_answer", "activity", "pause", "start_reading",
+        "start_qa", "qa_answer", "activity", "pause", "resume", "start_reading",
     ]
     page: int | None = None
     hidden: bool = False
     engaged: bool = False
     minutes: int | None = None
+    source: str = "manual"
     session_id: int | None = None
     mode: str | None = None
     question: str | None = None
@@ -111,6 +118,12 @@ class ReaderMessage(BaseModel):
         except (TypeError, ValueError):
             return None
         return max(0, min(minutes, PAUSE_MAX_MIN))
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _known_source(cls, value):
+        # Une source inconnue ne jette pas la pause : elle compte comme manuelle.
+        return value if value in PAUSE_SOURCES else "manual"
 
     @field_validator("session_id", mode="before")
     @classmethod
@@ -178,12 +191,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
         "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
         "pages_seen": 0,  # pages distinctes vues au dernier tick (progression)
-        # Pause recommandée en cours : fin prévue, début réel et durée annoncée.
-        # Tant qu'elle dure, Gemma se tait ET l'observation passive est suspendue.
-        "pause_until": 0.0,
-        "pause_started": 0.0,
-        "pause_planned_s": 0.0,
     }
+    # Pause en cours (bouton de l'élève ou carte de Gemma acceptée) et dernière
+    # recommandation du LLM. Tant qu'elle dure, tout est figé (cf. end_pause).
+    pause = PauseTracker()
     state["live_gauges"] = await loop.run_in_executor(None, session.LiveGauges)
     # Mémoire de conversation d'une session à l'autre. Best-effort : un document
     # sans historique, ou une lecture qui échoue, laisse simplement la liste vide.
@@ -275,6 +286,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         state["recent_qtypes"].append(qtype)
         del state["recent_qtypes"][:-5]
         state["generating"] = False
+        session_hint = str(result.get("session_hint") or "").strip()
+        if session_hint:
+            # Conseil de régulation du LLM : une pause prise juste après le suit.
+            pause.note_recommendation("session_hint")
         event = {
             "type": "gated_question" if gated else "qa_question",
             "question": result.get("question", ""),
@@ -284,7 +299,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             # pause courte ») : le prompt le demande sous le seuil d'attention,
             # le repli hors ligne le remplit aussi, le schéma le valide — et il
             # s'arrêtait ici, à un dict près du client. Vide la plupart du temps.
-            "session_hint": str(result.get("session_hint") or "").strip(),
+            "session_hint": session_hint,
             # Passage à masquer dans la page (rappel libre) : citation + texte de
             # remplacement, résolus par le service. None quand il n'y a rien à cacher.
             "mask": assistant.resolve_paragraph_mask(
@@ -353,7 +368,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             _finish(None)
 
     def on_intervention(payload: dict) -> None:
-        """La politique a retenu une intervention : la router vers le client."""
+        """La politique a retenu une intervention : la router vers le client.
+
+        Jamais pendant une pause : la politique abandonne elle-même une décision
+        revenue pendant ce temps (cf. AssistantInterventionPolicy.set_paused)."""
+        pause.note_recommendation(str(payload.get("kind") or "offer_help"))
         page = int(payload.get("page") or state["page"])
         # Question automatique -> Q&R structurée et BLOQUANTE : on régénère une vraie
         # question évaluable (réponse attendue) plutôt que la question libre de
@@ -417,27 +436,57 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             away=bool(state["away"]),
         )
 
-    async def close_pause(now: float) -> None:
-        """Fin de pause : un crédit d'attention, au prorata du repos réellement pris.
+    def end_pause(now: float, ended_by: str):
+        """Ferme la pause en cours et rend son temps à toutes les horloges.
 
-        La pause a suspendu la dérive passive ; ce crédit est le bénéfice de la
-        pause elle-même. Au prorata parce qu'une reprise au bout de dix secondes
-        n'est pas un repos — sans quoi le raccourci « accepter puis reprendre »
-        remonterait la jauge gratuitement, et le profil avec elle.
+        Dwell et stagnation (`memory`), warm-up et cooldowns (`policy`), axe des
+        jauges, mode focus, chronomètre de réponse reculent de la durée de la
+        pause : la lecture repart exactement d'où elle s'était arrêtée. Renvoie
+        la pause terminée (services/pause), ou None s'il n'y en avait pas.
 
-        L'état est fermé ICI, dans la boucle asyncio (mono-thread) : l'expiration
-        du décompte et la reprise anticipée y arrivent toutes les deux, et ne
-        peuvent donc pas créditer deux fois. Seule l'écriture part en exécuteur."""
-        started = float(state["pause_started"] or now)
-        planned = float(state["pause_planned_s"] or 0.0)
-        state["pause_until"] = 0.0
-        state["pause_started"] = 0.0
-        state["pause_planned_s"] = 0.0
-        gauges = state["live_gauges"]
-        if gauges is None or planned <= 0.0:
+        Synchrone et appelé depuis la boucle asyncio (mono-thread) : une reprise
+        répétée ne peut ni créditer ni enregistrer deux fois."""
+        record = pause.stop(now, ended_by=ended_by)
+        if record is None:
+            return None
+        paused_s = record.duration_s
+        started = now - paused_s
+        memory.skip(paused_s)
+        policy.skip(paused_s)
+        policy.set_paused(False)
+        if state["live_gauges"] is not None:
+            state["live_gauges"].skip(paused_s)
+        if state["focus_until"] > started:
+            state["focus_until"] += paused_s
+        if state["qa_sent_at"]:
+            # Question émise avant la pause : la pause ne compte pas dans le
+            # temps de réponse. Émise PENDANT (génération déjà en vol) : le
+            # chronomètre part de la reprise, quand l'élève la découvre.
+            state["qa_sent_at"] = min(float(state["qa_sent_at"]) + paused_s, now)
+        return record
+
+    def persist_pause(record) -> None:
+        if not state["session_id"]:
             return
-        ratio = max(0.0, min(1.0, (now - started) / planned))
-        await loop.run_in_executor(None, gauges.recover_attention, PAUSE_ATTENTION_RECOVERY * ratio)
+        try:
+            save_pause(int(state["session_id"]), record.as_row())
+        except Exception:  # persistance best-effort : la lecture reprend quoi qu'il arrive
+            logger.debug("Persistance de la pause ignorée", exc_info=True)
+
+    async def resume_reading(now: float) -> None:
+        """Reprise : fin de pause, crédit d'attention éventuel, enregistrement.
+
+        Le crédit (pause conseillée seulement, au prorata) est décidé par
+        services/pause ; ici on ne fait que le verser. Les écritures partent en
+        exécuteur."""
+        record = end_pause(now, "resume")
+        if record is None:
+            return
+        credit = attention_credit(record)
+        gauges = state["live_gauges"]
+        if gauges is not None and credit > 0.0:
+            await loop.run_in_executor(None, gauges.recover_attention, credit)
+        await loop.run_in_executor(None, persist_pause, record)
 
     async def _ticker() -> None:
         last_tick = time.monotonic()
@@ -445,13 +494,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             await asyncio.sleep(_TICK_SECONDS)
             now = time.monotonic()
             elapsed, last_tick = now - last_tick, now
-            # Pause recommandée en cours : ni observation, ni intervention. Sans
-            # cette porte, la dérive passive punirait (fenêtre masquée, page qui
-            # ne bouge plus) le repos que Gemma vient elle-même de conseiller.
-            if state["pause_until"]:
-                if now < state["pause_until"]:
-                    continue
-                await close_pause(now)
+            # Pause en cours : ni observation, ni intervention. Sans cette porte,
+            # la dérive passive punirait (fenêtre masquée, page qui ne bouge plus)
+            # un repos que l'élève a choisi ou que Gemma a elle-même conseillé.
+            if pause.active:
                 continue
             # Écrit (au plus une fois par minute) dans session_gauges : executor.
             await loop.run_in_executor(None, passive_attention, elapsed, now)
@@ -482,7 +528,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         # Fige l'amorce de la session en base : la finalisation
                         # s'en sert pour ne remonter que les jauges exercées.
                         state["live_gauges"].attach_session(sid)
-                if page != state["page"]:
+                # En pause, la page ne bouge pas (le lecteur est masqué) : un
+                # viewport tardif ne doit pas ouvrir de dwell sur une autre page.
+                if page != state["page"] and not pause.active:
                     state["page"] = page
                     memory.on_page_view(page)
                 continue
@@ -492,22 +540,36 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # absent) et le geste (scroll, souris, clavier = présent, même si
                 # la page dominante ne change pas — deuxième colonne, retour sur
                 # un schéma). Le second remet la stagnation à zéro.
+                if pause.active:
+                    continue  # l'élève est parti : on ne l'observe plus
                 state["away"] = bool(msg.hidden)
                 if msg.engaged and not msg.hidden:
                     memory.on_interaction(time.monotonic())
                 continue
 
             if kind == "pause":
-                # Pause recommandée acceptée (ou reprise anticipée : minutes=0).
-                now = time.monotonic()
+                # Bouton « Pause » de l'élève, ou carte de Gemma acceptée (la
+                # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
                 minutes = PAUSE_DEFAULT_MIN if msg.minutes is None else int(msg.minutes)
-                if minutes <= 0:
-                    if state["pause_until"]:
-                        await close_pause(now)
-                    continue
-                state["pause_until"] = now + minutes * 60
-                state["pause_started"] = now
-                state["pause_planned_s"] = float(minutes * 60)
+                attention = (state["live_gauges"].snapshot() if state["live_gauges"] else {}).get("attention")
+                if pause.start(
+                    time.monotonic(),
+                    source=msg.source,
+                    planned_s=minutes * 60.0,
+                    page=state["page"],
+                    attention=attention,
+                ):
+                    state["away"] = False
+                    policy.set_paused(True)
+                continue
+
+            if kind == "resume":
+                await resume_reading(time.monotonic())
+                continue
+
+            if pause.active and kind in _PAUSED_ACTIONS:
+                # L'écran de pause couvre déjà le panneau : défense en profondeur,
+                # rien ne se génère ni ne s'évalue tant que l'élève n'est pas revenu.
                 continue
 
             if kind == "start_reading":
@@ -713,6 +775,15 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             cancel_pending_generations()
         except Exception:  # pragma: no cover - best-effort
             logger.debug("Annulation des générations en attente ignorée", exc_info=True)
+        # Séance close pendant une pause : la pause est enregistrée (sans crédit)
+        # et retirée du dwell AVANT qu'il soit figé ci-dessous. Synchrone, comme
+        # le reste de ce bloc : rien ne doit dépendre d'un await après la coupure.
+        try:
+            record = end_pause(time.monotonic(), "disconnect")
+            if record is not None:
+                persist_pause(record)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Clôture de la pause ignorée", exc_info=True)
         # Flush du dwell de la page courante + persistance fine par page.
         try:
             memory.flush()

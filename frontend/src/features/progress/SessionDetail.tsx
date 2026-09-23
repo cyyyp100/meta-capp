@@ -13,9 +13,10 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
 import { api } from "@/api/client";
-import type { ProgressChange } from "@/api/client";
+import type { ProgressChange, SessionPause } from "@/api/client";
 
 import { useT } from "../../i18n";
+import { formatDuration } from "../session/duration";
 import { criterionLabel } from "../stats/labels";
 import { GaugeCurves } from "./GaugeCurves";
 
@@ -64,6 +65,15 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
           <Metric label={t("exit.pages")} value={String(data.metrics.pages_read ?? 0)} />
           <Metric label={t("exit.questions")} value={String(data.metrics.questions_answered ?? 0)} />
           <Metric label={t("exit.success")} value={`${data.metrics.success_rate ?? 0} %`} />
+          {(data.metrics.pauses ?? 0) > 0 && (
+            <Metric
+              label={t("progress.pauses")}
+              value={t("progress.pauses_value", {
+                n: data.metrics.pauses ?? 0,
+                time: formatDuration(data.metrics.pause_s ?? 0),
+              })}
+            />
+          )}
         </dl>
       </Block>
 
@@ -107,6 +117,12 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
       {data.page_dwell.length > 0 && (
         <Block title={t("progress.dwell")}>
           <DwellBars dwell={data.page_dwell} />
+        </Block>
+      )}
+
+      {(data.pauses?.length ?? 0) > 0 && (
+        <Block title={t("progress.pauses_title")}>
+          <PauseList pauses={data.pauses ?? []} />
         </Block>
       )}
     </div>
@@ -169,6 +185,31 @@ function DwellBars({ dwell }: { dwell: { page: number; dwell_s: number; visits: 
           </span>
           <span className="w-12 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
             {Math.round(entry.dwell_s)}s
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Les pauses de la séance : où, combien de temps, et ce qui les a précédées —
+ *  la carte de Gemma acceptée, une recommandation juste avant, ou rien. */
+function PauseList({ pauses }: { pauses: SessionPause[] }) {
+  const t = useT();
+  return (
+    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+      {pauses.map((pause, index) => (
+        <li key={index} className="flex items-center gap-3 text-sm">
+          <span className="w-20 shrink-0 text-[12px] text-muted-foreground">
+            {pause.page ? t("progress.pause_page", { page: pause.page }) : ""}
+          </span>
+          <span className="w-14 shrink-0 font-bold tabular-nums">{formatDuration(pause.duration_s)}</span>
+          <span className="text-muted-foreground">
+            {pause.source === "suggested"
+              ? t("progress.pause_suggested")
+              : pause.after_recommendation
+                ? t("progress.pause_after_reco")
+                : t("progress.pause_spontaneous")}
           </span>
         </li>
       ))}

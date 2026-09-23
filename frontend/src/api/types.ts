@@ -223,6 +223,11 @@ export interface SessionMetrics {
   questions_answered: number;
   correct: number;
   success_rate: number;
+  /** Pauses prises pendant la lecture (déjà retirées de `duration_s`). */
+  pauses?: number;
+  pause_s?: number;
+  /** Combien suivaient une recommandation de Gemma (services/pause.py). */
+  pauses_after_recommendation?: number;
   /** Les questions FIXES du sas (deux) : affichées immédiatement. */
   reflection_questions: string[];
 }
