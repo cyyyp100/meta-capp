@@ -70,7 +70,9 @@ def main():
     if args.web:
         logger.debug("--web est désormais implicite (l'UI web est le seul mode).")
 
-    logger.info("Démarrage Meta-Capp v1.3")
+    from server.config import APP_VERSION
+
+    logger.info("Démarrage Meta-Capp v%s", APP_VERSION)
 
     from desktop.pywebview_main import main as run_web
 

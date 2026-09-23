@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -75,6 +76,18 @@ async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"error": "internal"}, status_code=500)
 
 
+def _pin_bundle_mime_types() -> None:
+    """Types MIME du bundle fixés, et non devinés par la machine.
+
+    `StaticFiles` s'appuie sur `mimetypes`, qui lit le REGISTRE sous Windows —
+    où `.js` vaut parfois `text/plain` (clé réécrite par un éditeur ou un
+    installeur). Un module ES servi ainsi est refusé par le navigateur, et avec
+    `nosniff` (S9, `server/security.py`) le script d'amorce aussi : l'application
+    s'ouvrirait sur une page blanche chez ces utilisateurs-là seulement."""
+    for mime, ext in (("text/javascript", ".js"), ("text/javascript", ".mjs"), ("text/css", ".css")):
+        mimetypes.add_type(mime, ext)
+
+
 def create_app() -> FastAPI:
     # Nonce de lancement : posé par la coque desktop (env) avant création.
     env_token = os.environ.get("NWOL_LAUNCH_TOKEN")
@@ -90,6 +103,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(security.SecurityHeaders)
     # Ajouté en dernier -> exécuté en premier (garde la plus externe, HTTP + WS).
     app.add_middleware(security.LocalOnlyGuard)
 
@@ -111,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding.router, prefix="/api")
 
     # En production, sert le frontend compilé depuis la même origine.
+    _pin_bundle_mime_types()
     if FRONTEND_DIST.is_dir():
         app.mount("/", _SpaStaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
         logger.info("Frontend servi depuis %s", FRONTEND_DIST)

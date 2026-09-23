@@ -121,7 +121,7 @@ def _enabled() -> bool:
 def _fetch_latest_version() -> str | None:
     """Un GET, un seul, et on n'en garde que le numéro de version.
 
-    `ssl.create_default_context()` vérifie la chaîne ET le nom d'hôte. Rien ici
+    Le contexte TLS (`_tls_context`) vérifie la chaîne ET le nom d'hôte. Rien ici
     ne doit jamais le désactiver, même temporairement pour déboguer : ce serait
     rendre la réponse — donc l'URL, donc l'exécution — modifiable en transit."""
     request = urllib.request.Request(
@@ -137,7 +137,7 @@ def _fetch_latest_version() -> str | None:
     )
     opener = urllib.request.build_opener(
         _NoRedirect,
-        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+        urllib.request.HTTPSHandler(context=_tls_context()),
     )
     try:
         with opener.open(request, timeout=TIMEOUT_S) as response:
@@ -152,6 +152,28 @@ def _fetch_latest_version() -> str | None:
     if not isinstance(payload, dict):
         return None
     return _clean_version(payload.get("tag_name") or payload.get("name"))
+
+
+def _tls_context() -> ssl.SSLContext:
+    """Contexte TLS strict, adossé à un magasin d'autorités qui existe VRAIMENT.
+
+    `ssl.create_default_context()` vérifie la chaîne et le nom d'hôte, mais lit
+    les autorités là où OpenSSL a été compilé. Dans le binaire PyInstaller, ce
+    chemin est celui de la machine de build (env conda, Homebrew du runner) :
+    absent chez l'utilisateur, et OpenSSL ne lit pas le Trousseau macOS. La
+    vérification échouait alors en `CERTIFICATE_VERIFY_FAILED`, avalée par
+    l'échec silencieux : la fonctionnalité était morte sans un bruit.
+
+    On AJOUTE donc le bundle de `certifi` (embarqué par PyInstaller) à ce que le
+    système fournit. Ajouter des autorités, jamais retirer une vérification."""
+    context = ssl.create_default_context()
+    try:
+        import certifi
+
+        context.load_verify_locations(cafile=certifi.where())
+    except (ImportError, OSError, ssl.SSLError):
+        logger.debug("Bundle certifi indisponible : magasin système seul", exc_info=True)
+    return context
 
 
 def _clean_version(raw: object) -> str | None:
@@ -170,9 +192,11 @@ def _clean_version(raw: object) -> str | None:
 def _is_newer(latest: str, current: str) -> bool:
     """Comparaison numérique. Une version courante illisible → aucune proposition.
 
-    `APP_VERSION` vaut aujourd'hui « 1.3-web » : la regex la rejette, et on
-    préfère ne rien proposer plutôt que d'annoncer une mise à jour à partir d'une
-    comparaison qu'on ne sait pas faire."""
+    On préfère ne rien proposer plutôt que d'annoncer une mise à jour à partir
+    d'une comparaison qu'on ne sait pas faire. Le revers : un `APP_VERSION` hors
+    format coupe la fonctionnalité EN SILENCE — c'est arrivé avec « 1.3-web ».
+    `tests/server/test_updates.py` exige donc qu'il reste comparable, et la
+    release refuse un tag qui ne lui correspond pas (`release.yml`)."""
     left, right = _parts(latest), _parts(current)
     if left is None or right is None:
         return False

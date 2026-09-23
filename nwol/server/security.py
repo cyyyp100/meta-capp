@@ -14,6 +14,9 @@
 # chemin absolu ; combiné à S1 c'était une primitive de lecture de fichier.
 # `import_path_allowed()` résout les liens symboliques et confine aux dossiers
 # utilisateur autorisés.
+#
+# S9 — en-têtes de sécurité (CSP sans script inline, nosniff…) : défense en
+# profondeur de l'échappement HTML du frontend (S6). Voir `SecurityHeaders`.
 from __future__ import annotations
 
 import os
@@ -28,14 +31,13 @@ ALLOWED_HOSTS = {
     f"localhost:{PORT}",
 }
 
-# Origines acceptées : le serveur lui-même (pywebview / prod même-origine)
-# + les origines de dev (Vite). Les requêtes sans header Origin (navigation,
-# outils locaux type curl) passent la garde Origin mais restent soumises au
-# Host et au nonce.
+# Origines acceptées : le serveur lui-même (pywebview / prod même-origine), et
+# les origines Vite en dev SEULEMENT (cf. `_origin_allowed`). Les requêtes sans
+# header Origin (navigation, outils locaux type curl) passent la garde Origin
+# mais restent soumises au Host et au nonce.
 ALLOWED_ORIGINS = {
     f"http://{HOST}:{PORT}",
     f"http://localhost:{PORT}",
-    *DEV_ORIGINS,
 }
 
 # Le nonce est exigé sur /api/* sauf le health-check (sonde de démarrage de la
@@ -94,6 +96,18 @@ def _query_token(scope: dict) -> str | None:
     return None
 
 
+def _origin_allowed(origin: str) -> bool:
+    """Les origines Vite (5173) ne valent qu'en dev, c'est-à-dire sans coque.
+
+    En production le frontend est servi par ce serveur, donc même origine : un
+    processus local qui écouterait sur 5173 n'a rien à faire ici. Il lui
+    faudrait encore le nonce, mais on retire l'exception plutôt que de compter
+    sur la garde suivante."""
+    if origin in ALLOWED_ORIGINS:
+        return True
+    return _launch_token is None and origin in DEV_ORIGINS
+
+
 class LocalOnlyGuard:
     """Middleware ASGI pur : couvre HTTP **et** WebSocket (les middlewares
     `@app.middleware("http")` de Starlette ignorent les scopes websocket, or
@@ -114,7 +128,7 @@ class LocalOnlyGuard:
             return
 
         origin = _header(scope, b"origin")
-        if origin is not None and origin not in ALLOWED_ORIGINS:
+        if origin is not None and not _origin_allowed(origin):
             await self._reject(scope, receive, send, "forbidden origin")
             return
 
@@ -158,6 +172,62 @@ class LocalOnlyGuard:
             ],
         })
         await send({"type": "http.response.body", "body": body})
+
+
+# ── S9 : en-têtes de sécurité — défense en profondeur de S6 ─────────────────
+#
+# S6 échappe tout texte injecté en HTML. La CSP est ce qui tient le jour où un
+# nouvel appelant l'oublie : sans `'unsafe-inline'` dans `script-src`, un
+# `<img onerror=…>` injecté (sortie de LLM, texte de document) ne s'exécute pas.
+# Et dans ce webview, un script qui s'exécute parle au pont natif
+# (`desktop/pywebview_main.py:_create_window`).
+#
+#   * `'unsafe-eval'` : pywebview fabrique ses fonctions d'API avec
+#     `new Function(…)` (`webview/js/api.js`) — sans lui, `pick_pdf` disparaît.
+#     Il n'ouvre rien à une injection HTML : il faut déjà exécuter du JS.
+#   * `style-src 'unsafe-inline'` : KaTeX et les surlignages produisent des
+#     attributs `style="…"`, et pywebview injecte des balises `<style>`.
+#   * `connect-src` nomme le WebSocket : WebKit n'a pas toujours fait
+#     correspondre `'self'` aux schémas `ws:`.
+#   * Aucun script inline : l'amorce du thème vit dans `public/theme-boot.js`.
+CONTENT_SECURITY_POLICY = "; ".join((
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    f"connect-src 'self' ws://{HOST}:{PORT} ws://localhost:{PORT}",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+))
+
+SECURITY_HEADERS = (
+    (b"content-security-policy", CONTENT_SECURITY_POLICY.encode()),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+)
+
+
+class SecurityHeaders:
+    """Middleware ASGI : pose `SECURITY_HEADERS` sur chaque réponse HTTP."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), *SECURITY_HEADERS]}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 # ── S2 : confinement de l'import PDF ────────────────────────────────────────

@@ -11,12 +11,19 @@ on:
     - cron: "17 6 * * 1" # lundi matin : capte les CVE publiées entre deux commits
   workflow_call: {}
 
+# Moindre privilège. `pull-requests: read` : gitleaks lit la liste des commits
+# d'une PR pour borner son scan. Appelé depuis release.yml, le job appelant doit
+# accorder au moins ces droits.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   pip-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11.9"
       - run: pip install pip-audit
@@ -26,8 +33,8 @@ jobs:
   npm-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Audit des dépendances npm (prod = bloquant dès « high »)
@@ -37,10 +44,10 @@ jobs:
   gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # tout l'historique : un secret commité puis retiré reste exposé
       - name: Détection de secrets (garde-fou — app local-only sans secret attendu)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

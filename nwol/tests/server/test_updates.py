@@ -147,3 +147,56 @@ def test_no_redirect_is_ever_followed():
 
     handler = _NoRedirect()
     assert handler.redirect_request(None, None, 302, "Found", {}, "http://evil.test") is None
+
+
+def test_newer_release_is_announced(enabled, monkeypatch):
+    """Le cas nominal, que rien ne vérifiait. Avec `APP_VERSION = "1.3-web"`,
+    la comparaison était impossible : `update_available` restait faux quoi que
+    GitHub publie, et la fonctionnalité était morte sans qu'aucun test ne rougisse."""
+    from server.config import APP_VERSION
+    from services.updates import _parts
+
+    major, minor, patch = _parts(APP_VERSION)
+    _fake_release(monkeypatch, {"tag_name": f"v{major}.{minor}.{patch + 1}"})
+
+    body = enabled.get("/api/updates/check").json()
+    assert body["checked"] is True
+    assert body["update_available"] is True
+
+
+@pytest.mark.parametrize("which", ["same", "older"])
+def test_same_or_older_release_is_not_announced(enabled, monkeypatch, which):
+    from server.config import APP_VERSION
+
+    _fake_release(monkeypatch, {"tag_name": APP_VERSION if which == "same" else "v0.0.1"})
+
+    body = enabled.get("/api/updates/check").json()
+    assert body["checked"] is True
+    assert body["update_available"] is False
+
+
+def test_app_version_stays_comparable():
+    """Un `APP_VERSION` hors format ne casse rien de visible : il coupe la
+    vérification en silence. Ce test est ce qui le rend visible."""
+    from server.config import APP_VERSION
+    from services.updates import _parts
+
+    assert _parts(APP_VERSION) is not None, APP_VERSION
+
+
+def test_tls_store_is_not_empty_without_system_certificates(monkeypatch, tmp_path):
+    """Simule le binaire gelé : le magasin compilé dans OpenSSL n'existe pas chez
+    l'utilisateur. Le contexte doit quand même porter des autorités — et ne rien
+    relâcher de la vérification pour autant."""
+    import ssl
+
+    from services.updates import _tls_context
+
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "absent"))
+
+    context = _tls_context()
+
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.cert_store_stats()["x509_ca"] > 0

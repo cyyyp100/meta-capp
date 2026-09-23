@@ -21,6 +21,33 @@ def no_semantic_search(monkeypatch):
     monkeypatch.setattr(pdf_rag, "_EMBED_STATE", {"retry_at": 0.0, "failure": ""})
 
 
+@pytest.fixture(autouse=True)
+def no_real_generation(monkeypatch):
+    """Aucune génération ne part vers un vrai Ollama pendant les tests.
+
+    Sans ce garde, le résultat dépendait de la machine. Ollama lancé : la suite
+    générait pour de vrai (lente, non déterministe). Ollama absent : chaque
+    tentative échouait — instantanément sous Linux, mais en ~2 s sous Windows,
+    qui retente le SYN avant d'accepter le refus. Les tâches de fond laissées
+    par un test (fiche de document : 4 tentatives) occupaient alors le worker
+    LLM UNIQUE bien après sa fin, et les tests suivants qui attendent ce worker
+    échouaient en CI Windows. La panne est désormais immédiate partout, et les
+    chemins de repli sont ceux que la CI a toujours vérifiés.
+
+    On coupe sous `llm_provider` : un test qui remplace `_call_ollama` garde la
+    main, et `test_llm_cancel.py` appelle `_call_ollama_http` directement contre
+    son propre faux serveur."""
+    from llm import ollama_client
+    from services import llm_provider, orchestrator
+
+    def _offline(*_args, **_kwargs):
+        raise RuntimeError("Ollama indisponible (tests)")
+
+    monkeypatch.setattr(llm_provider, "_ollama_generate", _offline)
+    monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: False)
+    monkeypatch.setattr(orchestrator, "is_ollama_available", lambda: False)
+
+
 @pytest.fixture
 def make_pdf():
     """Fabrique un PDF de test : une page par entrée de ``pages``.

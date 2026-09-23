@@ -23,7 +23,9 @@ datas = []
 binaries = []
 hiddenimports = []
 
-for pkg in ("uvicorn", "fastapi", "starlette", "pypdfium2", "pypdfium2_raw", "PIL", "webview"):
+# `certifi` : son cacert.pem est le magasin TLS de la vérification de mise à
+# jour dans le binaire (cf. services/updates.py:_tls_context).
+for pkg in ("uvicorn", "fastapi", "starlette", "pypdfium2", "pypdfium2_raw", "PIL", "webview", "certifi"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

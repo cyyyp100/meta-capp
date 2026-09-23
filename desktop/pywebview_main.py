@@ -16,6 +16,7 @@ import logging
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -32,13 +33,19 @@ from i18n import t  # noqa: E402
 from server import security  # noqa: E402
 from server.app import create_app  # noqa: E402
 from server.config import FRONTEND_DIST, HOST, PORT  # noqa: E402
+from services.secrets_store import register_secret  # noqa: E402
 from services.updates import RELEASES_PAGE  # noqa: E402
 
 logger = logging.getLogger("desktop")
 
 
 class NativeApi:
-    """API native exposée au frontend via window.pywebview.api.*"""
+    """Actions natives de la coque : sélecteur de fichier et ponts du menu.
+
+    UNE seule de ces méthodes est joignable depuis le JavaScript : `pick_pdf`,
+    publiée par `_create_window`. L'objet n'est jamais passé en `js_api` — voir
+    `_create_window` pour la raison. Les autres méthodes ne sont appelées que
+    par la barre de menu, côté Python."""
 
     def __init__(self) -> None:
         self.window = None
@@ -218,6 +225,65 @@ def _build_menu(api: NativeApi) -> list[Menu]:
     ]
 
 
+def _create_window(start_url: str, api: NativeApi):
+    """Fenêtre principale — et la liste EXHAUSTIVE de ce que le JS peut appeler.
+
+    pywebview 6.2.1 résout un appel venu du JavaScript par une chaîne de
+    `getattr` sur l'objet `js_api` (`webview/util.py:js_bridge_call`), sans
+    écarter les noms en `_` ni vérifier la liste qu'il a lui-même publiée.
+    Passer `NativeApi` en `js_api` rendait donc joignable tout ce qu'on atteint
+    par attributs depuis lui : `window.gui` est le module de plateforme, qui
+    importe `os`, et `pywebview._bridge.call("window.gui.os.system", [...])`
+    était une exécution de commande offerte à n'importe quel script injecté dans
+    la page. Une fonction passée à `window.expose` est cherchée par nom EXACT
+    dans un dict : aucune traversée possible.
+
+    Le frontend n'appelle que `pick_pdf` (`frontend/src/api/platform.ts`). Tout
+    ajout ici élargit la surface native atteignable depuis le webview :
+    `tests/test_desktop_bridge.py` fige la liste."""
+    window = webview.create_window("Meta-Capp", start_url, width=1280, height=860)
+    window.expose(api.pick_pdf)
+    api.window = window
+    return window
+
+
+_WEB_SCHEMES = ("https", "http")
+
+
+def _is_web_url(url: object) -> bool:
+    try:
+        parts = urllib.parse.urlsplit(str(url))
+    except ValueError:
+        return False
+    return parts.scheme.lower() in _WEB_SCHEMES and bool(parts.hostname)
+
+
+def _guard_external_links() -> None:
+    """N'ouvre dans le navigateur système QUE des URL web.
+
+    pywebview 6.2.1 ouvre tout lien `target="_blank"` du webview par
+    `webbrowser.open(url)` sans regarder le schéma (`platforms/cocoa.py`,
+    `platforms/edgechromium.py`). Sur macOS, `webbrowser.open()` passe par
+    `open(1)`, qui honore `file://` et les schémas d'application : un lien
+    injecté dans la page devenait, au premier clic, l'exécution locale que
+    `services/updates.py` s'interdit. Le garde est posé sur `webbrowser.open`
+    lui-même, par où passent les deux coques ET `open_releases_page`."""
+    import webbrowser
+
+    if getattr(webbrowser.open, "_metacapp_guard", False):
+        return
+    unguarded = webbrowser.open
+
+    def guarded_open(url, new=0, autoraise=True):
+        if not _is_web_url(url):
+            logger.warning("Ouverture externe refusée (schéma non web) : %.80r", url)
+            return False
+        return unguarded(url, new, autoraise)
+
+    guarded_open._metacapp_guard = True
+    webbrowser.open = guarded_open
+
+
 def _serve(holder: dict) -> None:
     config = uvicorn.Config(create_app(), host=HOST, port=PORT, log_level="warning")
     server = uvicorn.Server(config)
@@ -348,6 +414,9 @@ def main(pdf_path: str | None = None, debug: bool = False) -> None:
     # frontend via l'URL d'ouverture (il le pose en cookie SameSite=Strict).
     launch_token = security.new_launch_token()
     security.set_launch_token(launch_token)
+    # L'URL d'ouverture le porte en clair et pywebview la journalise en --debug :
+    # les logs sont exportables (« Exporter les logs »), le nonce n'y va pas.
+    register_secret(launch_token)
 
     holder: dict = {}
     threading.Thread(target=_serve, args=(holder,), daemon=True).start()
@@ -364,15 +433,9 @@ def main(pdf_path: str | None = None, debug: bool = False) -> None:
         if doc_id:
             start_url = f"http://{HOST}:{PORT}/reader/{doc_id}?lt={launch_token}"
 
+    _guard_external_links()
     api = NativeApi()
-    window = webview.create_window(
-        "Meta-Capp",
-        start_url,
-        js_api=api,
-        width=1280,
-        height=860,
-    )
-    api.window = window
+    _create_window(start_url, api)
     # La langue du menu est celle qu'a restaurée le lifespan du serveur : le
     # menu est construit APRÈS `_wait_until_ready()`, donc après cette
     # restauration. Sans cet ordre, le menu serait toujours en français.

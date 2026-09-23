@@ -25,6 +25,16 @@ from llm import ollama_client
 from services.llm_bridge import run_llm_sync
 
 
+def _wait_worker_idle(timeout: float = 10.0) -> None:
+    """La file LLM est PARTAGÉE par toute la suite : un test précédent peut y
+    avoir laissé des tâches de fond. On attend qu'elle soit vide avant de
+    raisonner sur ce que fait le worker."""
+    deadline = time.monotonic() + timeout
+    while ollama_client._LLM_QUEUE.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not ollama_client._LLM_QUEUE.unfinished_tasks, "worker LLM encore occupé par un test précédent"
+
+
 def test_budget_grows_with_the_token_budget_of_the_task():
     """Une tâche qui demande plus de tokens obtient plus de temps."""
     court = task_timeout_s("document_digest")        # num_predict = 260
@@ -98,6 +108,7 @@ def test_abandoned_task_is_dropped_by_the_worker(monkeypatch):
         release.wait(5)
 
     # 1) On occupe le worker unique.
+    _wait_worker_idle()
     ollama_client._LLM_QUEUE.put((0, -2, bloque_le_worker))
     assert started.wait(5)
 
@@ -140,6 +151,7 @@ def test_task_enqueued_outside_run_llm_sync_is_never_marked_abandoned(monkeypatc
     assert ollama_client._current_caller_slot() is None
 
     ran = threading.Event()
+    _wait_worker_idle()
     monkeypatch.setattr(
         ollama_client, "_generate_json",
         lambda *a, **kw: ran.set() or {"x": 1},

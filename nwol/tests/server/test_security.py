@@ -56,6 +56,39 @@ def launch_token():
     security.set_launch_token(None)
 
 
+def test_dev_origins_rejected_once_the_shell_runs(client, launch_token):
+    """Avec la coque (nonce configuré), le frontend est servi par ce serveur :
+    l'origine Vite n'a plus de raison d'être acceptée, même avec le bon nonce."""
+    headers = {"x-launch-token": launch_token}
+    assert client.get("/api/library/recent", headers={**headers, "origin": "http://localhost:5173"}).status_code == 403
+    assert client.get("/api/library/recent", headers={**headers, "origin": "http://127.0.0.1:8756"}).status_code == 200
+
+
+def test_security_headers_on_frontend_and_api(client):
+    """S9 : CSP sans script inline — un `<img onerror>` injecté ne s'exécute pas."""
+    response = client.get("/api/health")
+    csp = response.headers["content-security-policy"]
+    script_src = next(d for d in csp.split("; ") if d.startswith("script-src"))
+    assert "'unsafe-inline'" not in script_src
+    assert "frame-ancestors 'none'" in csp
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_bundle_mime_types_do_not_depend_on_the_windows_registry():
+    """Un registre Windows qui mappe `.js` sur `text/plain` ne doit pas atteindre
+    le bundle : avec `nosniff`, le navigateur refuserait d'exécuter les scripts."""
+    import mimetypes
+
+    from server.app import create_app
+
+    mimetypes.add_type("text/plain", ".js")  # ce que certains postes Windows déclarent
+    create_app()
+
+    assert mimetypes.guess_type("index-abc123.js")[0] == "text/javascript"
+    assert mimetypes.guess_type("index-abc123.css")[0] == "text/css"
+
+
 def test_token_required_when_configured(client, launch_token):
     assert client.get("/api/library/recent").status_code == 403
 

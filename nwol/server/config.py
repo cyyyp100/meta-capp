@@ -7,7 +7,7 @@ from pathlib import Path
 HOST = "127.0.0.1"
 PORT = 8756  # port local fixe ; interne, jamais exposé à l'extérieur.
 
-APP_VERSION = "1.3-web"
+APP_VERSION = "1.3.0"
 
 # Origines autorisées pendant le DÉVELOPPEMENT (Vite). En production (pywebview),
 # le frontend est servi par ce même serveur → même origine, CORS inutile.

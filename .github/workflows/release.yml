@@ -19,23 +19,43 @@ on:
   push:
     tags: ["v*"]
 
+# Moindre privilège par défaut : seul `publish` écrit (contents: write). Toutes
+# les actions sont épinglées par SHA — ce workflow manipule les certificats de
+# signature et produit ce que les utilisateurs installent (architecture/13 § 4).
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest
     env:
       NWOL_DISABLE_CONDA_REEXEC: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11.9"
           cache: pip
+      # Le tag publié DOIT être la version que le binaire annonce. Sinon la
+      # vérification de mise à jour compare deux numéros qui ne parlent pas de la
+      # même chose : un binaire v1.4.0 compilé avec APP_VERSION 1.3.0 se
+      # proposerait indéfiniment sa propre mise à jour. Pré-release : v1.4.0-beta.1
+      # doit correspondre à APP_VERSION 1.4.0.
+      - name: Le tag correspond à APP_VERSION
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${TAG%%-*}"
+          APP=$(python -c "import sys; sys.path.insert(0, 'nwol'); from server.config import APP_VERSION; print(APP_VERSION)")
+          if [ "$TAG" != "$APP" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME ≠ APP_VERSION $APP (nwol/server/config.py)"
+            exit 1
+          fi
       - run: pip install -r requirements.txt ruff
       - run: python -m compileall -q nwol desktop
       - run: ruff check .
       - run: python -m pytest -q
         working-directory: nwol
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
@@ -49,8 +69,13 @@ jobs:
         working-directory: frontend
 
   scans:
+    # Pas de `secrets: inherit` : les scans n'ont besoin que du GITHUB_TOKEN, qui
+    # est transmis d'office. Hériter aurait exposé les certificats de signature à
+    # une action tierce (gitleaks) qui n'en a que faire.
+    permissions:
+      contents: read
+      pull-requests: read
     uses: ./.github/workflows/security.yml
-    secrets: inherit
 
   build-macos:
     needs: [checks, scans]
@@ -60,11 +85,11 @@ jobs:
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       APPLE_ID_SET: ${{ secrets.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11.9"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Dépendances + frontend
@@ -113,7 +138,7 @@ jobs:
           xcrun stapler staple dist_app/Meta-Capp.app
       - name: Archive de distribution
         run: ditto -c -k --keepParent dist_app/Meta-Capp.app "Meta-Capp-${GITHUB_REF_NAME}-macos.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Meta-Capp-macos
           path: Meta-Capp-*-macos.zip
@@ -126,11 +151,11 @@ jobs:
       NWOL_DISABLE_CONDA_REEXEC: "1"
       HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11.9"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Dépendances + frontend
@@ -171,7 +196,7 @@ jobs:
           Remove-Item cert.pfx
       - name: Archive de distribution
         run: Compress-Archive -Path dist_app\Meta-Capp -DestinationPath "Meta-Capp-$env:GITHUB_REF_NAME-windows.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Meta-Capp-windows
           path: Meta-Capp-*-windows.zip
@@ -185,13 +210,20 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: Meta-Capp-*
           merge-multiple: true
+      # Empreintes publiées avec les archives : c'est ce qui permet à chacun de
+      # vérifier un binaire qui circule, et de prouver qu'un binaire n'est pas le
+      # nôtre (architecture/13 § 4).
+      - name: Empreintes SHA-256
+        run: sha256sum Meta-Capp-*.zip | tee SHA256SUMS.txt
       - name: Publication (canal beta si tag pré-release, sinon stable)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: Meta-Capp-*.zip
+          files: |
+            Meta-Capp-*.zip
+            SHA256SUMS.txt
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true

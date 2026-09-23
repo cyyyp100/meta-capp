@@ -27,4 +27,13 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Scripts classiques de public/ (amorce du thème, hors bundle : la CSP
+    // interdit le script inline). Exécutés tels quels par le navigateur.
+    files: ["public/**/*.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: { window: "readonly", document: "readonly", localStorage: "readonly" },
+    },
+  },
 );
