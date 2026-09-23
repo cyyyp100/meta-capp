@@ -492,7 +492,7 @@ export interface LangLesson {
   theme: string;
   dialogue: { speaker: string; target: string; phonetic: string; translation: string }[];
   notes: { grammar?: string; pronunciation?: string; cultural?: string };
-  vocabulary: { word: string; translation: string; example: string }[];
+  vocabulary: { word: string; phonetic?: string; translation: string; example: string }[];
   error?: string;
 }
 
@@ -531,7 +531,7 @@ export type LangSessionContent =
       title: string;
       text_target: string;
       text_translation: string;
-      glossary: { word: string; translation: string }[];
+      glossary: { word: string; phonetic?: string; translation: string }[];
       questions: LangQcm[];
     }
   | {

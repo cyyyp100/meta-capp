@@ -100,6 +100,8 @@ export interface Flashcard {
   source: string;
   document_title: string | null;
   chapter_title: string | null;
+  /** Prononciation d'une carte de vocabulaire de langue (jamais dans `back`, qui reste la réponse). */
+  pronunciation?: string | null;
 }
 
 export interface Chapter {

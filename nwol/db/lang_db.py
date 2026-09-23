@@ -573,7 +573,7 @@ def get_due_flashcards_for_language(
     """
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, front, back, interval_days, due_at
+        """SELECT id, front, back, pronunciation, interval_days, due_at
            FROM flashcards
            WHERE language=?
              AND user_id=(SELECT user_id FROM lang_profiles WHERE id=?)
@@ -592,7 +592,7 @@ def get_recent_flashcards_for_language(
     """Cartes les plus récentes de cette langue (complète le warm-up si peu sont dues)."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, front, back
+        """SELECT id, front, back, pronunciation
            FROM flashcards
            WHERE language=?
              AND user_id=(SELECT user_id FROM lang_profiles WHERE id=?)

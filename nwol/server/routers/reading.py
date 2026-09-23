@@ -8,6 +8,8 @@
 #                       souris / clavier -> alimentent la dérive passive d'attention
 #                     {"type":"pause","minutes":int}  # pause recommandée acceptée
 #                       (0 = reprise anticipée) -> silence + dérive suspendue
+#                     {"type":"start_reading"}  # sas d'entrée franchi -> départ du
+#                       warm-up de la première question (aucune intervention avant)
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
 #                     {"type":"error","message"} | {"type":"intervention",...}
 #                     {"type":"system","message"}
@@ -78,7 +80,7 @@ class ReaderMessage(BaseModel):
 
     type: Literal[
         "viewport", "mode", "focus", "ask", "rephrase", "recap", "hook",
-        "start_qa", "qa_answer", "activity", "pause",
+        "start_qa", "qa_answer", "activity", "pause", "start_reading",
     ]
     page: int | None = None
     hidden: bool = False
@@ -506,6 +508,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 state["pause_until"] = now + minutes * 60
                 state["pause_started"] = now
                 state["pause_planned_s"] = float(minutes * 60)
+                continue
+
+            if kind == "start_reading":
+                # Sas d'entrée franchi : le warm-up de la première question part
+                # d'ici, pas de l'ouverture du socket (cf. policy.start_reading).
+                policy.start_reading()
                 continue
 
             if kind == "mode":

@@ -1315,6 +1315,7 @@ export function Reader() {
         onGoToPage={goToPage}
         pageCount={data?.page_count}
         demo={demo}
+        reading={entered}
         ended={exit !== null}
         onDemoReady={handleDemoReady}
       />

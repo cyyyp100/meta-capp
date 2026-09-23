@@ -58,6 +58,12 @@ export function WarmUp({
               {flipped ? t("flash.a") : t("flash.q")}
             </div>
             {flipped ? card.back : card.front}
+            {/* Carte de langue : la prononciation accompagne le mot au verso. */}
+            {flipped && card.pronunciation && (
+              <div title={t("lang.phonetic")} style={{ marginTop: 10, fontSize: 18, fontStyle: "italic", color: "var(--muted)" }}>
+                [{card.pronunciation}]
+              </div>
+            )}
           </div>
         </div>
         <div style={{ marginTop: 16, display: "flex", gap: 14, justifyContent: "center", alignItems: "center" }}>

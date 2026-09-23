@@ -283,6 +283,12 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
               {flipped ? t("flash.a") : t("flash.q")}
             </div>
             {flipped ? card.back : card.front}
+            {/* Carte de langue : la prononciation accompagne le mot au verso. */}
+            {flipped && card.pronunciation && (
+              <div title={t("lang.phonetic")} className="mt-2.5 text-lg italic text-muted-foreground">
+                [{card.pronunciation}]
+              </div>
+            )}
           </div>
         </motion.div>
       </button>
@@ -321,7 +327,12 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
           <Trash2 className="size-4" aria-hidden />
         </button>
       </div>
-      <div className="mt-1.5 text-text-soft">{card.back}</div>
+      <div className="mt-1.5 text-text-soft">
+        {card.back}
+        {card.pronunciation && (
+          <span title={t("lang.phonetic")} className="italic text-muted-foreground"> [{card.pronunciation}]</span>
+        )}
+      </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {card.document_title && <Pill>{card.document_title}</Pill>}
         {card.tags.map((tg) => (

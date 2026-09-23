@@ -61,6 +61,7 @@ def save_flashcard(
     asset_paths: list[str] | None = None,
     language: str | None = None,
     dedup_key: str | None = None,
+    pronunciation: str | None = None,
 ) -> int:
     """Enregistre une carte ; renvoie son id.
 
@@ -84,8 +85,8 @@ def save_flashcard(
             """INSERT INTO flashcards
                (user_id, question_id, session_id, document_id, chapter_id, front, back,
                 tags, assets_json, difficulty, source, due_at, interval_days, language,
-                dedup_key)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                dedup_key, pronunciation)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(user_id, dedup_key) DO NOTHING""",
             (
                 user_id or DEFAULT_USER_ID,
@@ -103,6 +104,7 @@ def save_flashcard(
                 _SR_INITIAL_INTERVAL_DAYS,
                 language,
                 key,
+                (pronunciation or "").strip() or None,
             ),
         )
     if cur.rowcount == 0:
@@ -122,6 +124,27 @@ def lang_flashcard_exists(user_id: int, language: str, front: str) -> bool:
         (user_id or DEFAULT_USER_ID, language, (front or "").strip()),
     ).fetchone()
     return row is not None
+
+
+def fill_lang_flashcard_pronunciation(
+    user_id: int, language: str, front: str, pronunciation: str,
+) -> bool:
+    """Complète la prononciation d'une carte de vocabulaire qui n'en a pas encore.
+
+    Jamais d'écrasement : une prononciation déjà posée reste. Renvoie True si
+    une carte a été complétée."""
+    pronunciation = (pronunciation or "").strip()
+    if not pronunciation:
+        return False
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE flashcards SET pronunciation=?
+               WHERE user_id=? AND language=? AND lower(front)=lower(?)
+                 AND (pronunciation IS NULL OR pronunciation='')""",
+            (pronunciation, user_id or DEFAULT_USER_ID, language, (front or "").strip()),
+        )
+    return cur.rowcount > 0
 
 
 def get_flashcard(card_id: int) -> dict | None:

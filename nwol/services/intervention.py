@@ -83,7 +83,12 @@ class AssistantInterventionPolicy:
         self._interventions_count = 0
         self._due_card: dict | None = None
         self._flashcard_prompted = False
-        self._opened_at = time.monotonic()
+        # Départ du warm-up : posé par `start_reading()`, quand le lecteur franchit
+        # le sas d'entrée (mise en condition + cartes de révision). Le socket, lui,
+        # s'ouvre dès l'arrivée sur le document ; compter depuis là faisait fondre
+        # le warm-up pendant le sas, et la première question tombait à peine la
+        # lecture commencée. Tant qu'il est nul, la politique se tait.
+        self._opened_at: float | None = None
         self._warmed_up = False
         # Nombre de réponses au dernier signal de fatigue : il faut une fenêtre
         # ENTIÈRE de nouvelles réponses avant de pouvoir le redonner.
@@ -97,6 +102,14 @@ class AssistantInterventionPolicy:
         """L'assistant est occupé (réponse en cours, question Q&R active…)."""
         self._busy = busy
 
+    def start_reading(self) -> None:
+        """Le lecteur entre dans le document : le warm-up part d'ici.
+
+        Idempotent — seul le premier appel compte, un second ne relance pas le
+        silence d'entrée au milieu de la lecture."""
+        if self._opened_at is None:
+            self._opened_at = time.monotonic()
+
     def reset(self) -> None:
         self._busy = False
         self._pending = False
@@ -106,7 +119,7 @@ class AssistantInterventionPolicy:
         self._interventions_count = 0
         self._due_card = None
         self._flashcard_prompted = False
-        self._opened_at = time.monotonic()
+        self._opened_at = None
         self._warmed_up = False
         self._fatigue_at_answers = 0
         self._next_page_text = ""
@@ -123,9 +136,12 @@ class AssistantInterventionPolicy:
 
         now = time.monotonic()
         # Warm-up de début de lecture : silence le temps que le lecteur entre dans le
-        # document. Une fois écoulé, le verrou est posé pour la session et seuls les
-        # cooldowns par mode gouvernent.
+        # document — et, avant lui, tant qu'il est encore dans le sas d'entrée. Une
+        # fois écoulé, le verrou est posé pour la session et seuls les cooldowns par
+        # mode gouvernent.
         if not self._warmed_up:
+            if self._opened_at is None:
+                return
             if now - self._opened_at < ASSISTANT_WARMUP_S.get(mode, 180.0):
                 return
             self._warmed_up = True

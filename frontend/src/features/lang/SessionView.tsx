@@ -353,7 +353,8 @@ function DialogueView({ content, rtl }: { content: Extract<LangSessionContent, {
           <div style={{ display: "grid", gap: 6 }}>
             {content.vocabulary.map((v, i) => (
               <div key={i} style={{ fontSize: 13 }}>
-                <strong dir={targetDir(rtl)}>{v.word}</strong> — {v.translation}
+                <strong dir={targetDir(rtl)}>{v.word}</strong>
+                {v.phonetic && <span style={{ color: "var(--muted)", fontStyle: "italic" }}> [{v.phonetic}]</span>} — {v.translation}
                 {v.example && <span style={{ color: "var(--muted)" }}> · {v.example}</span>}
               </div>
             ))}
@@ -391,7 +392,8 @@ function ReadingView({ content, rtl, onScore }: { content: Extract<LangSessionCo
           <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
             {content.glossary.map((g, i) => (
               <div key={i}>
-                <strong dir={targetDir(rtl)}>{g.word}</strong> — {g.translation}
+                <strong dir={targetDir(rtl)}>{g.word}</strong>
+                {g.phonetic && <span style={{ color: "var(--muted)", fontStyle: "italic" }}> [{g.phonetic}]</span>} — {g.translation}
               </div>
             ))}
           </div>

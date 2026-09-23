@@ -413,6 +413,7 @@ def test_reader_ws_gated_question_from_intervention(client, monkeypatch):
     )
 
     with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
         ws.send_json({"type": "mode", "mode": "coach"})
         assert ws.receive_json()["type"] == "system"
         # Le ticker doit finir par émettre une question bloquante.
@@ -442,8 +443,32 @@ def test_reader_ws_warmup_silences_start_of_reading(client, monkeypatch):
     )
 
     with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
         ws.send_json({"type": "viewport", "page": 1})
         time.sleep(0.2)  # plusieurs ticks : tous doivent tomber dans le warm-up
+    assert decided == []
+
+
+def test_reader_ws_silent_during_entry_sas(client, monkeypatch):
+    # Le socket s'ouvre dès l'arrivée sur le document, sas d'entrée compris. Tant
+    # que le client n'a pas signalé l'entrée dans la lecture, aucune décision
+    # d'intervention — même warm-up, dwell et cooldowns à zéro.
+    import time
+
+    from server.routers import reading
+    from services import assistant
+
+    decided = []
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.01)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(
+        assistant, "build_intervention_context",
+        lambda *a, **k: decided.append(1) or {"trigger": "long_dwell", "page": 1},
+    )
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1})
+        time.sleep(0.2)
     assert decided == []
 
 

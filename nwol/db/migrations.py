@@ -160,6 +160,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 30)
         current = 30
 
+    if current < 31 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v31(conn)
+        _set_version(conn, 31)
+        current = 31
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1012,3 +1017,17 @@ def _migrate_to_v30(conn) -> None:
                )"""
         )
     logger.info("Migration SQLite v30 terminée")
+
+
+def _migrate_to_v31(conn) -> None:
+    """Prononciation des flashcards de vocabulaire (`flashcards.pronunciation`).
+
+    Le verso d'une carte de langue est la réponse attendue (traductions de la
+    séance, rapprochement SR par `find_lang_flashcard_id`) : la transcription
+    phonétique ne peut pas y être collée sans fausser la correction. Colonne à
+    part, nullable — une carte existante sans prononciation la reçoit la
+    prochaine fois que son mot revient dans un exercice."""
+    logger.info("Migration SQLite v31 démarrée")
+    with conn:
+        _ensure_column(conn, "flashcards", "pronunciation", "TEXT")
+    logger.info("Migration SQLite v31 terminée")

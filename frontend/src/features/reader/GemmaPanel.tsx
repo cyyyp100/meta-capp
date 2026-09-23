@@ -150,6 +150,7 @@ export function GemmaPanel({
   onGoToPage,
   pageCount,
   demo = false,
+  reading = false,
   ended = false,
   onDemoReady,
 }: {
@@ -177,6 +178,12 @@ export function GemmaPanel({
    * garantit que la visite n'écrit rien et ne dépend pas d'Ollama.
    */
   demo?: boolean;
+  /**
+   * Le sas d'entrée est franchi : la lecture commence. Le WebSocket, lui, est
+   * ouvert dès l'arrivée sur le document ; c'est ce signal, pas l'ouverture,
+   * qui fait partir le warm-up avant la première question de Gemma.
+   */
+  reading?: boolean;
   /**
    * La session est terminée (« Terminer ») : le WebSocket se ferme tout de
    * suite, pendant que le sas de sortie recouvre le lecteur. Côté serveur, la
@@ -430,6 +437,11 @@ export function GemmaPanel({
           if (evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
           else onGatedChangeRef.current?.(true, gatedPageRef.current);
         }
+        // Réponse juste : rien à reprendre, la lecture enchaîne sans passer par
+        // « Terminer ». L'encadré reste dans le fil avec sa correction, en
+        // lecture seule, et la zone cadrée est rendue au lecteur. Une réponse
+        // partielle ou fausse garde ses boutons : il y a encore une suite à choisir.
+        if (evt.verdict === "correct") closeQa();
       }
     };
     // Présence : fenêtre masquée ou application passée au second plan. C'est le
@@ -473,6 +485,14 @@ export function GemmaPanel({
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "viewport", page: currentPage, session_id: sessionId ?? null }));
   }, [currentPage, sessionId]);
+
+  // Entrée dans la lecture : le serveur démarre le warm-up de la première
+  // question. `connected` couvre le socket pas encore ouvert à la sortie du sas ;
+  // un envoi répété est sans effet côté serveur.
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (reading && connected && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "start_reading" }));
+  }, [reading, connected]);
 
   // ── La séance de démonstration ──────────────────────────────────────────
   //

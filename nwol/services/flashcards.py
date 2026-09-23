@@ -10,6 +10,7 @@ import logging
 
 from db.flashcards import (
     delete_flashcard as _delete_flashcard,
+    fill_lang_flashcard_pronunciation,
     find_flashcard_id,
     flashcard_key,
     get_due_flashcards,
@@ -88,6 +89,7 @@ def create_flashcard(
     asset_paths: list[str] | None = None,
     language: str | None = None,
     origin: tuple[str, str] | None = None,
+    pronunciation: str | None = None,
 ) -> int:
     """Crée une carte — ou renvoie l'id de celle qui existe déjà.
 
@@ -123,6 +125,7 @@ def create_flashcard(
         asset_paths=asset_paths,
         language=language,
         dedup_key=flashcard_key(*origin) if origin else None,
+        pronunciation=pronunciation,
     )
 
 
@@ -138,6 +141,11 @@ def create_lang_vocab_flashcards(
     langue donner la traduction. Le code langue est déjà le nom français de la langue
     (« anglais », « mandarin »…), d'où le suffixe « en {language} ». Dédup sur
     (utilisateur, langue, recto) pour ne pas réaccumuler le même mot. Renvoie le nb créé.
+
+    La prononciation (`phonetic` de l'item : transcription, ou translittération
+    tonée pour un script non latin) va dans sa propre colonne, jamais dans le
+    verso, qui reste la réponse attendue. Une carte déjà connue qui n'en avait
+    pas la reçoit au passage.
     """
     created = 0
     for it in items or []:
@@ -149,7 +157,9 @@ def create_lang_vocab_flashcards(
         if not gloss or not back:
             continue
         front = f"{gloss} en {language}"
+        pronunciation = (it.get("phonetic") or "").strip()
         if lang_flashcard_exists(user_id, language, front):
+            fill_lang_flashcard_pronunciation(user_id, language, front, pronunciation)
             continue
         try:
             create_flashcard(
@@ -159,6 +169,7 @@ def create_lang_vocab_flashcards(
                 tags=[language],
                 source="lang_vocab",
                 language=language,
+                pronunciation=pronunciation or None,
             )
             created += 1
         except Exception:  # une carte ratée ne doit pas casser la génération d'exercice

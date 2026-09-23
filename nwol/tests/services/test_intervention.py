@@ -42,6 +42,7 @@ def make_policy(monkeypatch, **overrides):
         request_decision=lambda ctx, done: (contexts.append(ctx), done({"should_intervene": True, "kind": "offer_help"}))[1],
         on_intervention=fired.append,
     )
+    policy.start_reading()
     return policy, memory, fired, contexts, page
 
 
@@ -85,6 +86,42 @@ def test_first_intervention_fires_on_a_freshly_booted_machine(monkeypatch):
     policy.tick()
 
     assert len(fired) == 1
+
+
+def test_silent_until_reading_starts(monkeypatch):
+    # Le sas d'entrée (mise en condition + cartes de révision) n'est pas de la
+    # lecture : tant que le lecteur ne l'a pas franchi, aucune intervention, même
+    # warm-up à zéro.
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch)
+    policy._opened_at = None  # socket ouvert, sas pas encore franchi
+
+    for _ in range(5):
+        policy.tick()
+    assert fired == []
+
+    policy.start_reading()
+    policy.tick()
+    assert len(fired) == 1
+
+
+def test_warmup_counts_from_reading_start_not_from_opening(monkeypatch):
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, warmup=240.0)
+    policy._opened_at = None  # ouverture du document à t=1000
+
+    clock["t"] = 1300.0  # cinq minutes dans le sas : plus que le warm-up entier
+    policy.start_reading()
+    policy.tick()
+    assert fired == []  # le warm-up part de l'entrée dans la lecture
+
+    clock["t"] = 1300.0 + 240.0
+    policy.tick()
+    assert len(fired) == 1
+
+    # Un second signal d'entrée ne relance pas le silence en pleine lecture.
+    policy.start_reading()
+    assert policy._opened_at == 1300.0
 
 
 def test_hard_page_trigger_on_math_density(monkeypatch):

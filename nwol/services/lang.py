@@ -359,19 +359,21 @@ def review_lang_card(
 def _vocab_items_from_exercise(content: dict) -> list[dict]:
     """Extrait les items de vocabulaire d'un exercice, quel que soit son render_kind.
 
-    Normalise tout vers {word(cible), translation(FR)} attendu par
+    Normalise tout vers {word(cible), translation(FR), phonetic} attendu par
     create_lang_vocab_flashcards. Couvre dialogue/reading/vocabulary.
     """
     if not isinstance(content, dict):
         return []
     items: list[dict] = []
-    for src_key in ("vocabulary", "items"):
+    # reading : glossaire = {word, translation, phonetic}, même forme que les autres.
+    for src_key in ("vocabulary", "items", "glossary"):
         for it in content.get(src_key) or []:
             if isinstance(it, dict) and it.get("word") and it.get("translation"):
-                items.append({"word": it["word"], "translation": it["translation"]})
-    for g in content.get("glossary") or []:  # reading : glossaire = {word, translation}
-        if isinstance(g, dict) and g.get("word") and g.get("translation"):
-            items.append({"word": g["word"], "translation": g["translation"]})
+                items.append({
+                    "word": it["word"],
+                    "translation": it["translation"],
+                    "phonetic": it.get("phonetic") or "",
+                })
     return items
 
 
@@ -654,7 +656,10 @@ def lang_warmup_cards(language: str, limit: int = 5, user_id: int = DEFAULT_USER
                 cards.append(extra)
             if len(cards) >= limit:
                 break
-    return [{"id": c["id"], "front": c["front"], "back": c["back"]} for c in cards[:limit]]
+    return [
+        {"id": c["id"], "front": c["front"], "back": c["back"], "pronunciation": c.get("pronunciation")}
+        for c in cards[:limit]
+    ]
 
 
 def lang_lesson_analysis(lesson_id: int, user_id: int = DEFAULT_USER_ID) -> dict:

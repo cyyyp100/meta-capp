@@ -1482,6 +1482,8 @@ def parse_lang_lesson(raw: str | dict) -> dict | None:
         if _non_empty_str(word):
             vocabulary.append({
                 "word": (word or "").strip(),
+                # Prononciation : suit le mot jusqu'au verso de sa flashcard.
+                "phonetic": (_coerce_text(v.get("phonetic", "")) or "").strip(),
                 "translation": (_coerce_text(v.get("translation", "")) or "").strip(),
                 "example": (_coerce_text(v.get("example", "")) or "").strip(),
             })
@@ -1636,6 +1638,7 @@ def parse_session_reading(raw: str | dict) -> dict | None:
         if _non_empty_str(word):
             glossary.append({
                 "word": (word or "").strip(),
+                "phonetic": (_coerce_text(g.get("phonetic", "")) or "").strip(),
                 "translation": (_coerce_text(g.get("translation", "")) or "").strip(),
             })
     return {

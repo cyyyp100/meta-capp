@@ -2428,6 +2428,13 @@ Règles :
 Réponds : {{"chosen_type": "<un code de la liste>", "reason": "<courte justification>"}}"""
 
 
+# Prononciation d'une entrée de vocabulaire/glossaire. Elle suit le mot jusqu'au
+# verso de sa flashcard (services.flashcards.create_lang_vocab_flashcards) : sans
+# audio, c'est ce qui dit à l'apprenant comment le mot se prononce. Pour un script
+# non latin, la consigne de script (`_lang_script_hint`) y impose la translittération.
+_VOCAB_PHONETIC = "prononciation du mot (transcription phonétique)"
+
+
 def build_lang_dialogue_ecoute_prompt(language: str, profile: dict, weak_points=None) -> str:
     return f"""Tu es auteur d'une méthode {language} type Assimil. Génère un court dialogue \
 d'ÉCOUTE (compréhension orale) à révéler progressivement. {_lang_level_hint(profile)}
@@ -2437,7 +2444,7 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
   "theme": "thème courant et concret",
   "dialogue": [{{"speaker": "A", "target": "phrase en {language}", "phonetic": "transcription phonétique (obligatoire)", "translation": "traduction française"}}],
   "notes": {{"grammar": "max 200 car.", "pronunciation": "conseil d'écoute clé, max 200 car.", "cultural": "max 150 car."}},
-  "vocabulary": [{{"word": "mot en {language}", "translation": "français", "example": "exemple court"}}]
+  "vocabulary": [{{"word": "mot en {language}", "phonetic": "{_VOCAB_PHONETIC}", "translation": "français", "example": "exemple court"}}]
 }}
 
 Contraintes : 4 à 8 répliques alternant A/B ; "phonetic" jamais vide ; 3 à 6 mots de vocabulaire."""
@@ -2452,10 +2459,11 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
   "theme": "thème courant et concret",
   "dialogue": [{{"speaker": "A", "target": "phrase en {language}", "phonetic": "", "translation": "traduction française"}}],
   "notes": {{"grammar": "explication du point clé, max 250 car.", "pronunciation": "max 150 car.", "cultural": "max 150 car."}},
-  "vocabulary": [{{"word": "mot en {language}", "translation": "français", "example": "exemple court"}}]
+  "vocabulary": [{{"word": "mot en {language}", "phonetic": "{_VOCAB_PHONETIC}", "translation": "français", "example": "exemple court"}}]
 }}
 
-Contraintes : 5 à 9 répliques alternant A/B ; toutes les "translation" en français ; 4 à 6 mots de vocabulaire."""
+Contraintes : 5 à 9 répliques alternant A/B ; toutes les "translation" en français ; 4 à 6 mots de \
+vocabulaire, chacun avec son "phonetic" (jamais vide)."""
 
 
 def build_lang_vocabulaire_contextuel_prompt(language: str, profile: dict, weak_points=None) -> str:
@@ -2464,11 +2472,12 @@ def build_lang_vocabulaire_contextuel_prompt(language: str, profile: dict, weak_
 
 Réponds UNIQUEMENT en JSON valide, sans markdown :
 {{
-  "items": [{{"word": "mot en {language}", "translation": "français", "example_target": "phrase exemple en {language}", "example_translation": "traduction de l'exemple"}}],
+  "items": [{{"word": "mot en {language}", "phonetic": "{_VOCAB_PHONETIC}", "translation": "français", "example_target": "phrase exemple en {language}", "example_translation": "traduction de l'exemple"}}],
   "questions": [{{"question": "question de compréhension en français", "choices": ["A: ...", "B: ...", "C: ..."], "correct": "A", "explanation": "courte", "depth": "literal"}}]
 }}
 {_INFERENCE_HINT}
-Contraintes : 6 à 8 items ; chaque "example_target" contient le mot ; exactement 2 questions."""
+Contraintes : 6 à 8 items ; chaque "example_target" contient le mot ; "phonetic" jamais vide ; \
+exactement 2 questions."""
 
 
 def build_lang_culture_courte_prompt(language: str, profile: dict, weak_points=None) -> str:
@@ -2480,11 +2489,12 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
   "title": "titre court",
   "text_target": "texte de 3 à 5 phrases en {language}",
   "text_translation": "traduction française intégrale",
-  "glossary": [{{"word": "mot utile en {language}", "translation": "français"}}],
+  "glossary": [{{"word": "mot utile en {language}", "phonetic": "{_VOCAB_PHONETIC}", "translation": "français"}}],
   "questions": [{{"question": "question de compréhension en français", "choices": ["A: ...", "B: ...", "C: ..."], "correct": "A", "explanation": "courte", "depth": "literal"}}]
 }}
 {_INFERENCE_HINT}
-Contraintes : 3 à 5 phrases ; 4 à 6 entrées de glossaire ; exactement 2 questions."""
+Contraintes : 3 à 5 phrases ; 4 à 6 entrées de glossaire, chacune avec son "phonetic" (jamais vide) ; \
+exactement 2 questions."""
 
 
 def build_lang_phonetique_ciblee_prompt(language: str, profile: dict, weak_points=None) -> str:
@@ -2518,11 +2528,12 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
   "title": "titre du récit",
   "text_target": "récit de 4 à 6 phrases en {language}",
   "text_translation": "traduction française intégrale",
-  "glossary": [{{"word": "mot utile en {language}", "translation": "français"}}],
+  "glossary": [{{"word": "mot utile en {language}", "phonetic": "{_VOCAB_PHONETIC}", "translation": "français"}}],
   "questions": [{{"question": "question de compréhension en français", "choices": ["A: ...", "B: ...", "C: ..."], "correct": "A", "explanation": "courte", "depth": "literal"}}]
 }}
 {_INFERENCE_HINT}
-Contraintes : 4 à 6 phrases qui s'enchaînent ; 4 à 6 entrées de glossaire ; exactement 2 questions."""
+Contraintes : 4 à 6 phrases qui s'enchaînent ; 4 à 6 entrées de glossaire, chacune avec son \
+"phonetic" (jamais vide) ; exactement 2 questions."""
 
 
 def _lang_production_two_step_json(language: str) -> str:

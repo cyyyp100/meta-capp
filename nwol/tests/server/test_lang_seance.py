@@ -16,7 +16,7 @@ def _fake_vocab_content(language, session_type, profile, weak_points, ok, err, m
         "render_kind": "vocabulary",
         "session_type": session_type,
         "items": [{
-            "word": "soon", "translation": "bientôt",
+            "word": "soon", "translation": "bientôt", "phonetic": "suːn",
             "example_target": "see you soon", "example_translation": "à bientôt",
         }],
         "questions": [],
@@ -130,13 +130,45 @@ def test_full_lesson_flow_and_vocab_flashcards(client, monkeypatch):
     assert n_ex == 10
 
     # Flashcards : recto = mot connu + langue cible (« bientôt en anglais »),
-    # verso = langue cible, dédupliquées (1 carte).
+    # verso = langue cible, dédupliquées (1 carte). La prononciation a sa propre
+    # colonne : le verso reste la réponse attendue, sans transcription collée.
     rows = get_connection().execute(
-        "SELECT front, back, source FROM flashcards WHERE language='anglais'"
+        "SELECT front, back, source, pronunciation FROM flashcards WHERE language='anglais'"
     ).fetchall()
     assert len(rows) == 1
     assert rows[0]["front"] == "bientôt en anglais" and rows[0]["back"] == "soon"
     assert rows[0]["source"] == "lang_vocab"
+    assert rows[0]["pronunciation"] == "suːn"
+
+    # Et elle arrive jusqu'au warm-up du sas d'entrée de la séance suivante.
+    cards = client.get("/api/lang/warmup-cards", params={"language": "anglais"}).json()
+    assert [c["pronunciation"] for c in cards] == ["suːn"]
+
+
+def test_vocab_pronunciation_from_glossary_and_backfill(client):
+    # Un glossaire de lecture porte aussi la prononciation. Une carte déjà connue
+    # sans prononciation la reçoit au passage ; une prononciation posée reste.
+    from db import get_connection
+    from services.lang import _harvest_vocab
+
+    reading = {"kind": "reading", "glossary": [{"word": "hola", "translation": "bonjour", "phonetic": ""}]}
+    assert _harvest_vocab("espagnol", reading, 1) == 1
+
+    reading["glossary"] = [
+        {"word": "hola", "translation": "bonjour", "phonetic": "ˈola"},
+        {"word": "gracias", "translation": "merci", "phonetic": "ˈɡɾa.θjas"},
+    ]
+    assert _harvest_vocab("espagnol", reading, 1) == 1  # seule « merci » est neuve
+    reading["glossary"] = [{"word": "hola", "translation": "bonjour", "phonetic": "autre"}]
+    _harvest_vocab("espagnol", reading, 1)
+
+    rows = get_connection().execute(
+        "SELECT front, back, pronunciation FROM flashcards WHERE language='espagnol' ORDER BY id"
+    ).fetchall()
+    assert [(r["front"], r["back"], r["pronunciation"]) for r in rows] == [
+        ("bonjour en espagnol", "hola", "ˈola"),
+        ("merci en espagnol", "gracias", "ˈɡɾa.θjas"),
+    ]
 
 
 # ── Signal de difficulté continue ─────────────────────────────────────────────

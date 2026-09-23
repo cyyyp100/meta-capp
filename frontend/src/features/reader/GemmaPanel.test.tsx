@@ -218,7 +218,8 @@ describe("GemmaPanel", () => {
   // plus sous les messages suivants.
   it("garde l'encadré de la question dans le fil, et continue à la suite", async () => {
     await renderOpenPanel();
-    await playOneQuestion("correct");
+    // Partielle : l'encadré attend un choix (« Nouvelle question » / « Terminer »).
+    await playOneQuestion("partial");
 
     const card = screen.getByTestId("qa-card");
     expect(card).toHaveAttribute("data-live", "true");
@@ -411,10 +412,41 @@ describe("GemmaPanel", () => {
   it("transmet la zone de la question au lecteur, puis la retire", async () => {
     const onZone = vi.fn();
     await renderOpenPanel({ onZone });
-    await playOneQuestion("correct", { zone: { quote: "le passage exact visé" }, page: 4 });
+    await playOneQuestion("partial", { zone: { quote: "le passage exact visé" }, page: 4 });
     expect(onZone).toHaveBeenCalledWith("le passage exact visé", 4);
 
     await userEvent.click(screen.getByRole("button", { name: /terminer|finish/i }));
     expect(onZone).toHaveBeenLastCalledWith(null, expect.any(Number));
+  });
+
+  // Réponse juste : on enchaîne. Plus de « Terminer » à cliquer — l'encadré se
+  // clôt seul, garde sa correction, et le lecteur récupère la zone cadrée.
+  it("enchaîne sans « Terminer » après une réponse juste", async () => {
+    const onZone = vi.fn();
+    const onMask = vi.fn();
+    await renderOpenPanel({ onZone, onMask });
+    await playOneQuestion("correct", { zone: { quote: "le passage exact visé" }, page: 4 });
+
+    const played = screen.getByTestId("qa-card");
+    expect(played).not.toHaveAttribute("data-live");
+    expect(played).toHaveTextContent(/c'est bien ça/i);
+    expect(screen.queryByRole("button", { name: /terminer|finish/i })).not.toBeInTheDocument();
+    expect(onZone).toHaveBeenLastCalledWith(null, expect.any(Number));
+    expect(onMask).toHaveBeenLastCalledWith(null, expect.any(Number));
+  });
+
+  // Le socket s'ouvre dès l'arrivée sur le document, sas d'entrée compris : le
+  // warm-up de la première question ne part qu'à l'entrée dans la lecture.
+  it("ne signale l'entrée dans la lecture qu'une fois le sas franchi", async () => {
+    const sentTypes = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m).type);
+    const view = await renderOpenPanel({ reading: false });
+    expect(sentTypes()).not.toContain("start_reading");
+
+    view.rerender(
+      <TooltipProvider>
+        <GemmaPanel docId={1} currentPage={1} sessionId={null} reading />
+      </TooltipProvider>,
+    );
+    await waitFor(() => expect(sentTypes()).toContain("start_reading"));
   });
 });
