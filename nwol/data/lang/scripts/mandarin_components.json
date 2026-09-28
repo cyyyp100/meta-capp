@@ -1,0 +1,2033 @@
+{
+ "script": "mandarin_components",
+ "version": 1,
+ "note": "Une cinquantaine de clés parmi les plus utiles, avec leur sens et des caractères courants qui les contiennent (liste `chars`, relue à la main : c'est elle qui déclenche la note automatique M8, pas une décomposition calculée).",
+ "components": [
+  {
+   "id": "zh.c.01",
+   "char": "氵",
+   "name": "sān diǎn shuǐ",
+   "meaning": "eau",
+   "meaning_en": "water",
+   "variants": [
+    "水"
+   ],
+   "chars": [
+    "没",
+    "河",
+    "海",
+    "洗",
+    "汉",
+    "酒",
+    "汤",
+    "活",
+    "渴",
+    "湖",
+    "江",
+    "法",
+    "注",
+    "游",
+    "清",
+    "满",
+    "温",
+    "流",
+    "泳",
+    "油",
+    "深",
+    "济",
+    "演"
+   ],
+   "examples": [
+    {
+     "hanzi": "河",
+     "meaning": "rivière"
+    },
+    {
+     "hanzi": "海",
+     "meaning": "mer"
+    },
+    {
+     "hanzi": "洗",
+     "meaning": "laver"
+    }
+   ],
+   "order": 1
+  },
+  {
+   "id": "zh.c.02",
+   "char": "扌",
+   "name": "tí shǒu páng",
+   "meaning": "main",
+   "meaning_en": "hand",
+   "variants": [
+    "手"
+   ],
+   "chars": [
+    "打",
+    "找",
+    "把",
+    "报",
+    "拉",
+    "挂",
+    "推",
+    "换",
+    "接",
+    "抱",
+    "拍",
+    "提",
+    "指",
+    "持",
+    "扫",
+    "担",
+    "技",
+    "抓",
+    "投",
+    "护",
+    "挤"
+   ],
+   "examples": [
+    {
+     "hanzi": "打",
+     "meaning": "frapper"
+    },
+    {
+     "hanzi": "找",
+     "meaning": "chercher"
+    },
+    {
+     "hanzi": "推",
+     "meaning": "pousser"
+    }
+   ],
+   "order": 2
+  },
+  {
+   "id": "zh.c.03",
+   "char": "亻",
+   "name": "dān rén páng",
+   "meaning": "personne",
+   "meaning_en": "person",
+   "variants": [
+    "人"
+   ],
+   "chars": [
+    "你",
+    "他",
+    "们",
+    "做",
+    "住",
+    "体",
+    "休",
+    "作",
+    "件",
+    "但",
+    "位",
+    "使",
+    "信",
+    "候",
+    "借",
+    "值",
+    "什",
+    "份",
+    "何",
+    "低",
+    "例",
+    "便"
+   ],
+   "examples": [
+    {
+     "hanzi": "你",
+     "meaning": "tu"
+    },
+    {
+     "hanzi": "休",
+     "meaning": "se reposer"
+    },
+    {
+     "hanzi": "住",
+     "meaning": "habiter"
+    }
+   ],
+   "order": 3
+  },
+  {
+   "id": "zh.c.04",
+   "char": "口",
+   "name": "kǒu",
+   "meaning": "bouche",
+   "meaning_en": "mouth",
+   "variants": [],
+   "chars": [
+    "吃",
+    "喝",
+    "叫",
+    "吗",
+    "呢",
+    "吧",
+    "唱",
+    "听",
+    "哪",
+    "号",
+    "告",
+    "名",
+    "问",
+    "呀",
+    "嘴",
+    "味",
+    "响",
+    "员",
+    "品",
+    "啊"
+   ],
+   "examples": [
+    {
+     "hanzi": "吃",
+     "meaning": "manger"
+    },
+    {
+     "hanzi": "喝",
+     "meaning": "boire"
+    },
+    {
+     "hanzi": "叫",
+     "meaning": "appeler"
+    }
+   ],
+   "order": 4
+  },
+  {
+   "id": "zh.c.05",
+   "char": "木",
+   "name": "mù",
+   "meaning": "arbre, bois",
+   "meaning_en": "tree, wood",
+   "variants": [],
+   "chars": [
+    "林",
+    "森",
+    "树",
+    "桌",
+    "椅",
+    "机",
+    "校",
+    "杯",
+    "样",
+    "楼",
+    "本",
+    "李",
+    "村",
+    "板",
+    "查",
+    "果",
+    "植"
+   ],
+   "examples": [
+    {
+     "hanzi": "林",
+     "meaning": "bosquet"
+    },
+    {
+     "hanzi": "树",
+     "meaning": "arbre"
+    },
+    {
+     "hanzi": "桌",
+     "meaning": "table"
+    }
+   ],
+   "order": 5
+  },
+  {
+   "id": "zh.c.06",
+   "char": "艹",
+   "name": "cǎo zì tóu",
+   "meaning": "herbe, plante",
+   "meaning_en": "grass, plant",
+   "variants": [
+    "草"
+   ],
+   "chars": [
+    "花",
+    "草",
+    "茶",
+    "菜",
+    "药",
+    "苹",
+    "英",
+    "节",
+    "蓝",
+    "苦",
+    "落",
+    "荷"
+   ],
+   "examples": [
+    {
+     "hanzi": "花",
+     "meaning": "fleur"
+    },
+    {
+     "hanzi": "茶",
+     "meaning": "thé"
+    },
+    {
+     "hanzi": "菜",
+     "meaning": "légume, plat"
+    }
+   ],
+   "order": 6
+  },
+  {
+   "id": "zh.c.07",
+   "char": "讠",
+   "name": "yán zì páng",
+   "meaning": "parole",
+   "meaning_en": "speech",
+   "variants": [
+    "言"
+   ],
+   "chars": [
+    "说",
+    "话",
+    "语",
+    "读",
+    "认",
+    "识",
+    "谢",
+    "请",
+    "让",
+    "试",
+    "课",
+    "词",
+    "记",
+    "议",
+    "谁",
+    "许",
+    "计",
+    "诉",
+    "该",
+    "调",
+    "论"
+   ],
+   "examples": [
+    {
+     "hanzi": "说",
+     "meaning": "dire"
+    },
+    {
+     "hanzi": "话",
+     "meaning": "parole"
+    },
+    {
+     "hanzi": "读",
+     "meaning": "lire"
+    }
+   ],
+   "order": 7
+  },
+  {
+   "id": "zh.c.08",
+   "char": "女",
+   "name": "nǚ",
+   "meaning": "femme",
+   "meaning_en": "woman",
+   "variants": [],
+   "chars": [
+    "妈",
+    "姐",
+    "妹",
+    "奶",
+    "她",
+    "好",
+    "婚",
+    "姓",
+    "娘",
+    "始",
+    "要",
+    "如",
+    "姑",
+    "嫁",
+    "安"
+   ],
+   "examples": [
+    {
+     "hanzi": "妈",
+     "meaning": "maman"
+    },
+    {
+     "hanzi": "姐",
+     "meaning": "grande sœur"
+    },
+    {
+     "hanzi": "好",
+     "meaning": "bien"
+    }
+   ],
+   "order": 8
+  },
+  {
+   "id": "zh.c.09",
+   "char": "忄",
+   "name": "shù xīn páng",
+   "meaning": "cœur (sentiment)",
+   "meaning_en": "heart (feeling)",
+   "variants": [
+    "心"
+   ],
+   "chars": [
+    "忙",
+    "快",
+    "慢",
+    "怕",
+    "情",
+    "懂",
+    "怪",
+    "惯",
+    "性",
+    "想",
+    "意",
+    "思",
+    "念",
+    "您",
+    "感",
+    "忘",
+    "息",
+    "总",
+    "急",
+    "愿"
+   ],
+   "examples": [
+    {
+     "hanzi": "忙",
+     "meaning": "occupé"
+    },
+    {
+     "hanzi": "快",
+     "meaning": "rapide"
+    },
+    {
+     "hanzi": "想",
+     "meaning": "penser"
+    }
+   ],
+   "order": 9
+  },
+  {
+   "id": "zh.c.10",
+   "char": "日",
+   "name": "rì",
+   "meaning": "soleil, jour",
+   "meaning_en": "sun, day",
+   "variants": [],
+   "chars": [
+    "明",
+    "时",
+    "早",
+    "晚",
+    "昨",
+    "星",
+    "晴",
+    "春",
+    "是",
+    "暖",
+    "易",
+    "普",
+    "景",
+    "暗",
+    "晒",
+    "映"
+   ],
+   "examples": [
+    {
+     "hanzi": "明",
+     "meaning": "clair"
+    },
+    {
+     "hanzi": "早",
+     "meaning": "tôt"
+    },
+    {
+     "hanzi": "晚",
+     "meaning": "tard"
+    }
+   ],
+   "order": 10
+  },
+  {
+   "id": "zh.c.11",
+   "char": "月",
+   "name": "yuè",
+   "meaning": "lune ; chair",
+   "meaning_en": "moon; flesh",
+   "variants": [],
+   "chars": [
+    "期",
+    "朋",
+    "服",
+    "脑",
+    "脸",
+    "胖",
+    "腿",
+    "肚",
+    "脚",
+    "有",
+    "背",
+    "能",
+    "育",
+    "胜"
+   ],
+   "examples": [
+    {
+     "hanzi": "朋",
+     "meaning": "ami"
+    },
+    {
+     "hanzi": "脸",
+     "meaning": "visage"
+    },
+    {
+     "hanzi": "脚",
+     "meaning": "pied"
+    }
+   ],
+   "order": 11
+  },
+  {
+   "id": "zh.c.12",
+   "char": "土",
+   "name": "tǔ",
+   "meaning": "terre",
+   "meaning_en": "earth",
+   "variants": [],
+   "chars": [
+    "地",
+    "场",
+    "城",
+    "在",
+    "坐",
+    "块",
+    "坏",
+    "堂",
+    "墙",
+    "址",
+    "培",
+    "基",
+    "境",
+    "去",
+    "走"
+   ],
+   "examples": [
+    {
+     "hanzi": "地",
+     "meaning": "sol"
+    },
+    {
+     "hanzi": "城",
+     "meaning": "ville"
+    },
+    {
+     "hanzi": "坐",
+     "meaning": "s'asseoir"
+    }
+   ],
+   "order": 12
+  },
+  {
+   "id": "zh.c.13",
+   "char": "火",
+   "name": "huǒ",
+   "meaning": "feu",
+   "meaning_en": "fire",
+   "variants": [
+    "灬"
+   ],
+   "chars": [
+    "灯",
+    "烧",
+    "炒",
+    "烤",
+    "热",
+    "点",
+    "然",
+    "照",
+    "熊",
+    "煮",
+    "烦",
+    "炸",
+    "焦",
+    "灾"
+   ],
+   "examples": [
+    {
+     "hanzi": "灯",
+     "meaning": "lampe"
+    },
+    {
+     "hanzi": "炒",
+     "meaning": "faire sauter"
+    },
+    {
+     "hanzi": "热",
+     "meaning": "chaud"
+    }
+   ],
+   "order": 13
+  },
+  {
+   "id": "zh.c.14",
+   "char": "纟",
+   "name": "jiǎo sī páng",
+   "meaning": "fil de soie",
+   "meaning_en": "silk thread",
+   "variants": [
+    "糸"
+   ],
+   "chars": [
+    "红",
+    "给",
+    "绿",
+    "经",
+    "结",
+    "级",
+    "练",
+    "组",
+    "细",
+    "终",
+    "线",
+    "纸",
+    "约",
+    "绍",
+    "继",
+    "续"
+   ],
+   "examples": [
+    {
+     "hanzi": "红",
+     "meaning": "rouge"
+    },
+    {
+     "hanzi": "给",
+     "meaning": "donner"
+    },
+    {
+     "hanzi": "线",
+     "meaning": "fil"
+    }
+   ],
+   "order": 14
+  },
+  {
+   "id": "zh.c.15",
+   "char": "钅",
+   "name": "jīn zì páng",
+   "meaning": "métal",
+   "meaning_en": "metal",
+   "variants": [
+    "金"
+   ],
+   "chars": [
+    "钱",
+    "铁",
+    "银",
+    "错",
+    "钟",
+    "铅",
+    "锅",
+    "镜",
+    "铃",
+    "针"
+   ],
+   "examples": [
+    {
+     "hanzi": "钱",
+     "meaning": "argent"
+    },
+    {
+     "hanzi": "铁",
+     "meaning": "fer"
+    },
+    {
+     "hanzi": "钟",
+     "meaning": "horloge"
+    }
+   ],
+   "order": 15
+  },
+  {
+   "id": "zh.c.16",
+   "char": "辶",
+   "name": "zǒu zhī",
+   "meaning": "marcher, avancer",
+   "meaning_en": "walk, move forward",
+   "variants": [],
+   "chars": [
+    "这",
+    "还",
+    "进",
+    "过",
+    "送",
+    "近",
+    "远",
+    "道",
+    "边",
+    "选",
+    "迟",
+    "通",
+    "连",
+    "运",
+    "适",
+    "遇",
+    "追",
+    "退",
+    "逛",
+    "迎"
+   ],
+   "examples": [
+    {
+     "hanzi": "进",
+     "meaning": "entrer"
+    },
+    {
+     "hanzi": "远",
+     "meaning": "loin"
+    },
+    {
+     "hanzi": "道",
+     "meaning": "chemin"
+    }
+   ],
+   "order": 16
+  },
+  {
+   "id": "zh.c.17",
+   "char": "宀",
+   "name": "bǎo gài tóu",
+   "meaning": "toit",
+   "meaning_en": "roof",
+   "variants": [],
+   "chars": [
+    "家",
+    "字",
+    "安",
+    "室",
+    "客",
+    "宝",
+    "定",
+    "宿",
+    "宫",
+    "实",
+    "容",
+    "害",
+    "寒",
+    "察",
+    "完",
+    "它",
+    "宜"
+   ],
+   "examples": [
+    {
+     "hanzi": "家",
+     "meaning": "maison"
+    },
+    {
+     "hanzi": "室",
+     "meaning": "pièce"
+    },
+    {
+     "hanzi": "客",
+     "meaning": "invité"
+    }
+   ],
+   "order": 17
+  },
+  {
+   "id": "zh.c.18",
+   "char": "门",
+   "name": "mén",
+   "meaning": "porte",
+   "meaning_en": "door",
+   "variants": [
+    "門"
+   ],
+   "chars": [
+    "问",
+    "间",
+    "闻",
+    "闭",
+    "闹",
+    "闲",
+    "阅",
+    "们"
+   ],
+   "examples": [
+    {
+     "hanzi": "问",
+     "meaning": "demander"
+    },
+    {
+     "hanzi": "间",
+     "meaning": "intervalle"
+    },
+    {
+     "hanzi": "闭",
+     "meaning": "fermer"
+    }
+   ],
+   "order": 18
+  },
+  {
+   "id": "zh.c.19",
+   "char": "雨",
+   "name": "yǔ",
+   "meaning": "pluie",
+   "meaning_en": "rain",
+   "variants": [],
+   "chars": [
+    "雪",
+    "雷",
+    "需",
+    "零",
+    "露",
+    "霜",
+    "雾"
+   ],
+   "examples": [
+    {
+     "hanzi": "雪",
+     "meaning": "neige"
+    },
+    {
+     "hanzi": "雷",
+     "meaning": "tonnerre"
+    },
+    {
+     "hanzi": "零",
+     "meaning": "zéro"
+    }
+   ],
+   "order": 19
+  },
+  {
+   "id": "zh.c.20",
+   "char": "⻊",
+   "name": "zú zì páng",
+   "meaning": "pied",
+   "meaning_en": "foot",
+   "variants": [
+    "足"
+   ],
+   "chars": [
+    "跑",
+    "跳",
+    "路",
+    "踢",
+    "跟",
+    "踩",
+    "距",
+    "跌",
+    "蹲"
+   ],
+   "examples": [
+    {
+     "hanzi": "跑",
+     "meaning": "courir"
+    },
+    {
+     "hanzi": "跳",
+     "meaning": "sauter"
+    },
+    {
+     "hanzi": "路",
+     "meaning": "route"
+    }
+   ],
+   "order": 20
+  },
+  {
+   "id": "zh.c.21",
+   "char": "目",
+   "name": "mù",
+   "meaning": "œil",
+   "meaning_en": "eye",
+   "variants": [],
+   "chars": [
+    "看",
+    "睡",
+    "眼",
+    "睛",
+    "盲",
+    "相",
+    "省",
+    "真",
+    "瞧",
+    "直"
+   ],
+   "examples": [
+    {
+     "hanzi": "看",
+     "meaning": "regarder"
+    },
+    {
+     "hanzi": "眼",
+     "meaning": "œil"
+    },
+    {
+     "hanzi": "睡",
+     "meaning": "dormir"
+    }
+   ],
+   "order": 21
+  },
+  {
+   "id": "zh.c.22",
+   "char": "耳",
+   "name": "ěr",
+   "meaning": "oreille",
+   "meaning_en": "ear",
+   "variants": [],
+   "chars": [
+    "聊",
+    "职",
+    "聪",
+    "闻",
+    "取",
+    "联",
+    "聋",
+    "耻",
+    "最"
+   ],
+   "examples": [
+    {
+     "hanzi": "聊",
+     "meaning": "bavarder"
+    },
+    {
+     "hanzi": "聪",
+     "meaning": "intelligent"
+    },
+    {
+     "hanzi": "取",
+     "meaning": "prendre"
+    }
+   ],
+   "order": 22
+  },
+  {
+   "id": "zh.c.23",
+   "char": "饣",
+   "name": "shí zì páng",
+   "meaning": "nourriture",
+   "meaning_en": "food",
+   "variants": [
+    "食"
+   ],
+   "chars": [
+    "饭",
+    "饿",
+    "饺",
+    "饮",
+    "饼",
+    "馆",
+    "饱",
+    "饰",
+    "馒"
+   ],
+   "examples": [
+    {
+     "hanzi": "饭",
+     "meaning": "riz cuit, repas"
+    },
+    {
+     "hanzi": "饿",
+     "meaning": "avoir faim"
+    },
+    {
+     "hanzi": "饺",
+     "meaning": "raviolis"
+    }
+   ],
+   "order": 23
+  },
+  {
+   "id": "zh.c.24",
+   "char": "马",
+   "name": "mǎ",
+   "meaning": "cheval",
+   "meaning_en": "horse",
+   "variants": [
+    "馬"
+   ],
+   "chars": [
+    "妈",
+    "吗",
+    "骑",
+    "骂",
+    "码",
+    "驾",
+    "验",
+    "骗",
+    "驶"
+   ],
+   "examples": [
+    {
+     "hanzi": "骑",
+     "meaning": "monter à cheval"
+    },
+    {
+     "hanzi": "妈",
+     "meaning": "maman"
+    },
+    {
+     "hanzi": "吗",
+     "meaning": "particule interrogative"
+    }
+   ],
+   "order": 24
+  },
+  {
+   "id": "zh.c.25",
+   "char": "鸟",
+   "name": "niǎo",
+   "meaning": "oiseau",
+   "meaning_en": "bird",
+   "variants": [
+    "鳥"
+   ],
+   "chars": [
+    "鸡",
+    "鸭",
+    "鸣",
+    "鹅",
+    "鸽",
+    "鹰",
+    "鹤"
+   ],
+   "examples": [
+    {
+     "hanzi": "鸡",
+     "meaning": "poulet"
+    },
+    {
+     "hanzi": "鸭",
+     "meaning": "canard"
+    },
+    {
+     "hanzi": "鸣",
+     "meaning": "chanter (oiseau)"
+    }
+   ],
+   "order": 25
+  },
+  {
+   "id": "zh.c.26",
+   "char": "鱼",
+   "name": "yú",
+   "meaning": "poisson",
+   "meaning_en": "fish",
+   "variants": [
+    "魚"
+   ],
+   "chars": [
+    "鲜",
+    "鲸",
+    "鲁",
+    "鲤",
+    "渔"
+   ],
+   "examples": [
+    {
+     "hanzi": "鲜",
+     "meaning": "frais"
+    },
+    {
+     "hanzi": "鲸",
+     "meaning": "baleine"
+    },
+    {
+     "hanzi": "渔",
+     "meaning": "pêcher"
+    }
+   ],
+   "order": 26
+  },
+  {
+   "id": "zh.c.27",
+   "char": "虫",
+   "name": "chóng",
+   "meaning": "insecte",
+   "meaning_en": "insect",
+   "variants": [],
+   "chars": [
+    "蛇",
+    "蚊",
+    "蜂",
+    "蝴",
+    "蝶",
+    "虾",
+    "蛋",
+    "强",
+    "虽",
+    "蚂"
+   ],
+   "examples": [
+    {
+     "hanzi": "蛇",
+     "meaning": "serpent"
+    },
+    {
+     "hanzi": "蚊",
+     "meaning": "moustique"
+    },
+    {
+     "hanzi": "蛋",
+     "meaning": "œuf"
+    }
+   ],
+   "order": 27
+  },
+  {
+   "id": "zh.c.28",
+   "char": "贝",
+   "name": "bèi",
+   "meaning": "coquillage, argent",
+   "meaning_en": "shell, money",
+   "variants": [
+    "貝"
+   ],
+   "chars": [
+    "贵",
+    "货",
+    "贸",
+    "财",
+    "购",
+    "费",
+    "资",
+    "贴",
+    "赛",
+    "员",
+    "质",
+    "负"
+   ],
+   "examples": [
+    {
+     "hanzi": "贵",
+     "meaning": "cher"
+    },
+    {
+     "hanzi": "货",
+     "meaning": "marchandise"
+    },
+    {
+     "hanzi": "购",
+     "meaning": "acheter"
+    }
+   ],
+   "order": 28
+  },
+  {
+   "id": "zh.c.29",
+   "char": "车",
+   "name": "chē",
+   "meaning": "véhicule",
+   "meaning_en": "vehicle",
+   "variants": [
+    "車"
+   ],
+   "chars": [
+    "辆",
+    "轻",
+    "较",
+    "转",
+    "轮",
+    "输",
+    "软",
+    "连",
+    "军",
+    "库",
+    "阵"
+   ],
+   "examples": [
+    {
+     "hanzi": "辆",
+     "meaning": "classificateur des véhicules"
+    },
+    {
+     "hanzi": "轻",
+     "meaning": "léger"
+    },
+    {
+     "hanzi": "转",
+     "meaning": "tourner"
+    }
+   ],
+   "order": 29
+  },
+  {
+   "id": "zh.c.30",
+   "char": "刂",
+   "name": "lì dāo páng",
+   "meaning": "couteau",
+   "meaning_en": "knife",
+   "variants": [
+    "刀"
+   ],
+   "chars": [
+    "到",
+    "别",
+    "刚",
+    "刻",
+    "刮",
+    "利",
+    "判",
+    "前",
+    "剧",
+    "副",
+    "制",
+    "剩"
+   ],
+   "examples": [
+    {
+     "hanzi": "到",
+     "meaning": "arriver"
+    },
+    {
+     "hanzi": "别",
+     "meaning": "ne pas ; autre"
+    },
+    {
+     "hanzi": "刻",
+     "meaning": "graver ; quart d'heure"
+    }
+   ],
+   "order": 30
+  },
+  {
+   "id": "zh.c.31",
+   "char": "力",
+   "name": "lì",
+   "meaning": "force",
+   "meaning_en": "strength",
+   "variants": [],
+   "chars": [
+    "办",
+    "加",
+    "动",
+    "助",
+    "努",
+    "男",
+    "劳",
+    "勇",
+    "功",
+    "务",
+    "边",
+    "历",
+    "另"
+   ],
+   "examples": [
+    {
+     "hanzi": "动",
+     "meaning": "bouger"
+    },
+    {
+     "hanzi": "男",
+     "meaning": "homme"
+    },
+    {
+     "hanzi": "努",
+     "meaning": "s'efforcer"
+    }
+   ],
+   "order": 31
+  },
+  {
+   "id": "zh.c.32",
+   "char": "犭",
+   "name": "fǎn quǎn páng",
+   "meaning": "animal",
+   "meaning_en": "animal",
+   "variants": [
+    "犬"
+   ],
+   "chars": [
+    "狗",
+    "猫",
+    "猪",
+    "狼",
+    "独",
+    "猜",
+    "狮",
+    "猴",
+    "狐",
+    "狂"
+   ],
+   "examples": [
+    {
+     "hanzi": "狗",
+     "meaning": "chien"
+    },
+    {
+     "hanzi": "猫",
+     "meaning": "chat"
+    },
+    {
+     "hanzi": "猪",
+     "meaning": "cochon"
+    }
+   ],
+   "order": 32
+  },
+  {
+   "id": "zh.c.33",
+   "char": "礻",
+   "name": "shì zì páng",
+   "meaning": "esprit, rite",
+   "meaning_en": "spirit, rite",
+   "variants": [
+    "示"
+   ],
+   "chars": [
+    "礼",
+    "社",
+    "神",
+    "视",
+    "祝",
+    "福",
+    "祖",
+    "祥"
+   ],
+   "examples": [
+    {
+     "hanzi": "礼",
+     "meaning": "cadeau, politesse"
+    },
+    {
+     "hanzi": "神",
+     "meaning": "esprit"
+    },
+    {
+     "hanzi": "福",
+     "meaning": "bonheur"
+    }
+   ],
+   "order": 33
+  },
+  {
+   "id": "zh.c.34",
+   "char": "衤",
+   "name": "yī zì páng",
+   "meaning": "vêtement",
+   "meaning_en": "clothing",
+   "variants": [
+    "衣"
+   ],
+   "chars": [
+    "衬",
+    "衫",
+    "裤",
+    "裙",
+    "被",
+    "袜",
+    "初",
+    "补",
+    "袖"
+   ],
+   "examples": [
+    {
+     "hanzi": "衫",
+     "meaning": "chemise"
+    },
+    {
+     "hanzi": "裤",
+     "meaning": "pantalon"
+    },
+    {
+     "hanzi": "裙",
+     "meaning": "jupe"
+    }
+   ],
+   "order": 34
+  },
+  {
+   "id": "zh.c.35",
+   "char": "石",
+   "name": "shí",
+   "meaning": "pierre",
+   "meaning_en": "stone",
+   "variants": [],
+   "chars": [
+    "碗",
+    "础",
+    "破",
+    "研",
+    "硬",
+    "确",
+    "磁",
+    "码",
+    "砖",
+    "碰"
+   ],
+   "examples": [
+    {
+     "hanzi": "碗",
+     "meaning": "bol"
+    },
+    {
+     "hanzi": "破",
+     "meaning": "cassé"
+    },
+    {
+     "hanzi": "硬",
+     "meaning": "dur"
+    }
+   ],
+   "order": 35
+  },
+  {
+   "id": "zh.c.36",
+   "char": "禾",
+   "name": "hé",
+   "meaning": "céréale",
+   "meaning_en": "grain",
+   "variants": [],
+   "chars": [
+    "种",
+    "秋",
+    "科",
+    "秒",
+    "租",
+    "和",
+    "利",
+    "私",
+    "香",
+    "季",
+    "秀",
+    "税",
+    "稳",
+    "程"
+   ],
+   "examples": [
+    {
+     "hanzi": "秋",
+     "meaning": "automne"
+    },
+    {
+     "hanzi": "种",
+     "meaning": "espèce ; semer"
+    },
+    {
+     "hanzi": "香",
+     "meaning": "parfumé"
+    }
+   ],
+   "order": 36
+  },
+  {
+   "id": "zh.c.37",
+   "char": "⺮",
+   "name": "zhú zì tóu",
+   "meaning": "bambou",
+   "meaning_en": "bamboo",
+   "variants": [
+    "竹"
+   ],
+   "chars": [
+    "笔",
+    "笑",
+    "第",
+    "等",
+    "答",
+    "简",
+    "算",
+    "管",
+    "篮",
+    "筷",
+    "篇",
+    "签"
+   ],
+   "examples": [
+    {
+     "hanzi": "笔",
+     "meaning": "pinceau, stylo"
+    },
+    {
+     "hanzi": "筷",
+     "meaning": "baguette"
+    },
+    {
+     "hanzi": "答",
+     "meaning": "répondre"
+    }
+   ],
+   "order": 37
+  },
+  {
+   "id": "zh.c.38",
+   "char": "米",
+   "name": "mǐ",
+   "meaning": "riz",
+   "meaning_en": "rice",
+   "variants": [],
+   "chars": [
+    "粉",
+    "粮",
+    "糖",
+    "精",
+    "糕",
+    "类",
+    "粥",
+    "料",
+    "迷"
+   ],
+   "examples": [
+    {
+     "hanzi": "糖",
+     "meaning": "sucre"
+    },
+    {
+     "hanzi": "粥",
+     "meaning": "bouillie de riz"
+    },
+    {
+     "hanzi": "粉",
+     "meaning": "poudre, farine"
+    }
+   ],
+   "order": 38
+  },
+  {
+   "id": "zh.c.39",
+   "char": "田",
+   "name": "tián",
+   "meaning": "champ",
+   "meaning_en": "field",
+   "variants": [],
+   "chars": [
+    "男",
+    "界",
+    "思",
+    "留",
+    "累",
+    "略",
+    "番",
+    "画",
+    "备"
+   ],
+   "examples": [
+    {
+     "hanzi": "男",
+     "meaning": "homme"
+    },
+    {
+     "hanzi": "界",
+     "meaning": "frontière, monde"
+    },
+    {
+     "hanzi": "画",
+     "meaning": "peindre"
+    }
+   ],
+   "order": 39
+  },
+  {
+   "id": "zh.c.40",
+   "char": "山",
+   "name": "shān",
+   "meaning": "montagne",
+   "meaning_en": "mountain",
+   "variants": [],
+   "chars": [
+    "岁",
+    "岛",
+    "峰",
+    "岸",
+    "岩",
+    "崇",
+    "密"
+   ],
+   "examples": [
+    {
+     "hanzi": "岛",
+     "meaning": "île"
+    },
+    {
+     "hanzi": "峰",
+     "meaning": "sommet"
+    },
+    {
+     "hanzi": "岁",
+     "meaning": "an (âge)"
+    }
+   ],
+   "order": 40
+  },
+  {
+   "id": "zh.c.41",
+   "char": "王",
+   "name": "wáng zì páng",
+   "meaning": "jade ; roi",
+   "meaning_en": "jade; king",
+   "variants": [
+    "玉"
+   ],
+   "chars": [
+    "玩",
+    "现",
+    "班",
+    "球",
+    "理",
+    "环",
+    "珍",
+    "玻",
+    "璃",
+    "望",
+    "全"
+   ],
+   "examples": [
+    {
+     "hanzi": "玩",
+     "meaning": "jouer"
+    },
+    {
+     "hanzi": "球",
+     "meaning": "balle"
+    },
+    {
+     "hanzi": "现",
+     "meaning": "maintenant"
+    }
+   ],
+   "order": 41
+  },
+  {
+   "id": "zh.c.42",
+   "char": "冫",
+   "name": "liǎng diǎn shuǐ",
+   "meaning": "glace",
+   "meaning_en": "ice",
+   "variants": [],
+   "chars": [
+    "冷",
+    "冰",
+    "次",
+    "准",
+    "决",
+    "况",
+    "凉",
+    "净",
+    "凝"
+   ],
+   "examples": [
+    {
+     "hanzi": "冷",
+     "meaning": "froid"
+    },
+    {
+     "hanzi": "冰",
+     "meaning": "glace"
+    },
+    {
+     "hanzi": "凉",
+     "meaning": "frais"
+    }
+   ],
+   "order": 42
+  },
+  {
+   "id": "zh.c.43",
+   "char": "广",
+   "name": "guǎng",
+   "meaning": "abri",
+   "meaning_en": "shelter",
+   "variants": [],
+   "chars": [
+    "店",
+    "床",
+    "座",
+    "应",
+    "度",
+    "庭",
+    "庆",
+    "府",
+    "康",
+    "麻",
+    "底",
+    "废"
+   ],
+   "examples": [
+    {
+     "hanzi": "店",
+     "meaning": "boutique"
+    },
+    {
+     "hanzi": "床",
+     "meaning": "lit"
+    },
+    {
+     "hanzi": "座",
+     "meaning": "siège"
+    }
+   ],
+   "order": 43
+  },
+  {
+   "id": "zh.c.44",
+   "char": "疒",
+   "name": "bìng zì páng",
+   "meaning": "maladie",
+   "meaning_en": "illness",
+   "variants": [],
+   "chars": [
+    "病",
+    "疼",
+    "痛",
+    "疗",
+    "瘦",
+    "疯",
+    "痒",
+    "疲",
+    "症"
+   ],
+   "examples": [
+    {
+     "hanzi": "病",
+     "meaning": "maladie"
+    },
+    {
+     "hanzi": "疼",
+     "meaning": "avoir mal"
+    },
+    {
+     "hanzi": "瘦",
+     "meaning": "maigre"
+    }
+   ],
+   "order": 44
+  },
+  {
+   "id": "zh.c.45",
+   "char": "阝",
+   "name": "ěr duo páng",
+   "meaning": "colline ; ville",
+   "meaning_en": "hill; town",
+   "variants": [
+    "阜",
+    "邑"
+   ],
+   "chars": [
+    "那",
+    "都",
+    "邮",
+    "部",
+    "院",
+    "阳",
+    "阴",
+    "陪",
+    "除",
+    "附",
+    "队",
+    "际",
+    "险",
+    "随"
+   ],
+   "examples": [
+    {
+     "hanzi": "院",
+     "meaning": "cour, institution"
+    },
+    {
+     "hanzi": "阳",
+     "meaning": "soleil (yang)"
+    },
+    {
+     "hanzi": "邮",
+     "meaning": "poste"
+    }
+   ],
+   "order": 45
+  },
+  {
+   "id": "zh.c.46",
+   "char": "彳",
+   "name": "shuāng rén páng",
+   "meaning": "pas, marcher",
+   "meaning_en": "step, walk",
+   "variants": [],
+   "chars": [
+    "很",
+    "得",
+    "往",
+    "街",
+    "律",
+    "行",
+    "待",
+    "德",
+    "徒",
+    "微",
+    "彼",
+    "征"
+   ],
+   "examples": [
+    {
+     "hanzi": "往",
+     "meaning": "vers"
+    },
+    {
+     "hanzi": "街",
+     "meaning": "rue"
+    },
+    {
+     "hanzi": "很",
+     "meaning": "très"
+    }
+   ],
+   "order": 46
+  },
+  {
+   "id": "zh.c.47",
+   "char": "攵",
+   "name": "fǎn wén",
+   "meaning": "action, frapper",
+   "meaning_en": "action, strike",
+   "variants": [
+    "攴"
+   ],
+   "chars": [
+    "教",
+    "收",
+    "放",
+    "改",
+    "故",
+    "数",
+    "散",
+    "政",
+    "敢",
+    "效",
+    "敌",
+    "救",
+    "致",
+    "整"
+   ],
+   "examples": [
+    {
+     "hanzi": "教",
+     "meaning": "enseigner"
+    },
+    {
+     "hanzi": "放",
+     "meaning": "poser, lâcher"
+    },
+    {
+     "hanzi": "改",
+     "meaning": "changer"
+    }
+   ],
+   "order": 47
+  },
+  {
+   "id": "zh.c.48",
+   "char": "页",
+   "name": "yè",
+   "meaning": "tête ; page",
+   "meaning_en": "head; page",
+   "variants": [
+    "頁"
+   ],
+   "chars": [
+    "顺",
+    "须",
+    "题",
+    "颜",
+    "预",
+    "领",
+    "顾",
+    "额",
+    "顿",
+    "颗",
+    "顶",
+    "项"
+   ],
+   "examples": [
+    {
+     "hanzi": "题",
+     "meaning": "sujet"
+    },
+    {
+     "hanzi": "颜",
+     "meaning": "couleur, visage"
+    },
+    {
+     "hanzi": "顶",
+     "meaning": "sommet"
+    }
+   ],
+   "order": 48
+  },
+  {
+   "id": "zh.c.49",
+   "char": "见",
+   "name": "jiàn",
+   "meaning": "voir",
+   "meaning_en": "see",
+   "variants": [
+    "見"
+   ],
+   "chars": [
+    "现",
+    "觉",
+    "视",
+    "观",
+    "规",
+    "览",
+    "宽"
+   ],
+   "examples": [
+    {
+     "hanzi": "觉",
+     "meaning": "sentir"
+    },
+    {
+     "hanzi": "视",
+     "meaning": "regarder"
+    },
+    {
+     "hanzi": "观",
+     "meaning": "observer"
+    }
+   ],
+   "order": 49
+  },
+  {
+   "id": "zh.c.50",
+   "char": "子",
+   "name": "zǐ",
+   "meaning": "enfant",
+   "meaning_en": "child",
+   "variants": [],
+   "chars": [
+    "字",
+    "学",
+    "孩",
+    "孙",
+    "存",
+    "季",
+    "好",
+    "游",
+    "孔"
+   ],
+   "examples": [
+    {
+     "hanzi": "学",
+     "meaning": "étudier"
+    },
+    {
+     "hanzi": "孩",
+     "meaning": "enfant"
+    },
+    {
+     "hanzi": "字",
+     "meaning": "caractère"
+    }
+   ],
+   "order": 50
+  },
+  {
+   "id": "zh.c.51",
+   "char": "大",
+   "name": "dà",
+   "meaning": "grand",
+   "meaning_en": "big",
+   "variants": [],
+   "chars": [
+    "天",
+    "太",
+    "夫",
+    "奇",
+    "奖",
+    "美",
+    "奋",
+    "类",
+    "头",
+    "套",
+    "奥"
+   ],
+   "examples": [
+    {
+     "hanzi": "天",
+     "meaning": "ciel, jour"
+    },
+    {
+     "hanzi": "太",
+     "meaning": "trop"
+    },
+    {
+     "hanzi": "美",
+     "meaning": "beau"
+    }
+   ],
+   "order": 51
+  },
+  {
+   "id": "zh.c.52",
+   "char": "立",
+   "name": "lì",
+   "meaning": "se tenir debout",
+   "meaning_en": "stand",
+   "variants": [],
+   "chars": [
+    "站",
+    "位",
+    "端",
+    "童",
+    "竞",
+    "意",
+    "新",
+    "音"
+   ],
+   "examples": [
+    {
+     "hanzi": "站",
+     "meaning": "se tenir ; station"
+    },
+    {
+     "hanzi": "新",
+     "meaning": "nouveau"
+    },
+    {
+     "hanzi": "音",
+     "meaning": "son"
+    }
+   ],
+   "order": 52
+  },
+  {
+   "id": "zh.c.53",
+   "char": "走",
+   "name": "zǒu",
+   "meaning": "marcher",
+   "meaning_en": "walk",
+   "variants": [],
+   "chars": [
+    "起",
+    "越",
+    "趣",
+    "赶",
+    "超",
+    "趟"
+   ],
+   "examples": [
+    {
+     "hanzi": "起",
+     "meaning": "se lever"
+    },
+    {
+     "hanzi": "超",
+     "meaning": "dépasser"
+    },
+    {
+     "hanzi": "趣",
+     "meaning": "intérêt"
+    }
+   ],
+   "order": 53
+  }
+ ]
+}

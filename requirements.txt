@@ -39,6 +39,12 @@ pywebview==6.2.1
 # Windows-only: pywebview's EdgeChromium/WebView2 backend needs the .NET binding.
 pythonnet==3.0.5 ; sys_platform == "win32"
 
+# Pinyin of the Mandarin lessons (services/lang_mandarin.py). MIT code, pure
+# Python, no network; dictionaries derived from Unihan, CC-CEDICT and zdic.
+# Imported optionally: without it Mandarin stays readable but has no pinyin.
+# Ships its own PyInstaller hook, which collects its JSON dictionaries.
+pypinyin==0.55.0
+
 # HTTP client — required by FastAPI's TestClient
 httpx==0.28.1
 

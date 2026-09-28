@@ -1,10 +1,11 @@
 # server/routers/lang.py — Module Langues (profil + séquenceur adaptatif).
 from __future__ import annotations
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from db.lang_db import SESSION_TYPES_SEED
+from services import lang_runs
 from services.lang import (
     complete_lesson,
     complete_session,
@@ -53,7 +54,8 @@ class SrReviewBody(BaseModel):
 
 
 class LessonCompleteBody(BaseModel):
-    exercise_scores: list[float] = []
+    # None = exercice sans aucun item noté : il ne compte pas dans la moyenne (K1).
+    exercise_scores: list[float | None] = []
     duration_s: int = 0
 
 
@@ -87,7 +89,10 @@ def stats() -> list[dict]:
 
 @router.get("/warmup-cards")
 def warmup_cards(language: str) -> list[dict]:
-    """Cartes du warm-up (SAS d'entrée) filtrées par langue."""
+    """Cartes du warm-up (SAS d'entrée) filtrées par langue. Langue du pilote :
+    cartes dues seulement, plafonnées (E10, P13)."""
+    if lang_runs.is_pilot(language):
+        return lang_runs.warmup_cards(language)
     return lang_warmup_cards(language)
 
 
@@ -171,3 +176,123 @@ def placement_submit_route(body: PlacementSubmitBody) -> dict:
 @router.post("/placement/skip")
 def placement_skip_route(body: LessonBody) -> dict:
     return placement_skip(body.language)
+
+
+
+# ── Méthode « feuilleton » (langues du pilote, plan § 15.1) ──────────────────
+# Aucun de ces endpoints n'attend Gemma : ils répondent immédiatement, la
+# génération des épisodes tourne en tâche de fond (services/lang_episodes.py).
+# La logique vit dans services/lang_runs.py ; ici, seulement la forme HTTP.
+
+class OnboardingBody(BaseModel):
+    interests: list[str] = Field(default_factory=list, max_length=12)
+    has_studied: bool = False
+
+
+class PlacementAnswersBody(BaseModel):
+    answers: dict[str, int] = Field(default_factory=dict)
+
+
+class RunStartBody(BaseModel):
+    mode: str | None = None
+
+
+class RunEventsBody(BaseModel):
+    events: list[dict] = Field(default_factory=list, max_length=2000)
+    current_step: str | None = None
+
+
+class RunCompleteBody(BaseModel):
+    end_reason: str = "fini"
+    feeling: str | None = None
+
+
+class ReportBody(BaseModel):
+    episode_id: int
+    line: int | None = None
+    token: int | None = None
+    kind: str = "autre"
+    comment: str = ""
+
+
+class CompareBody(BaseModel):
+    original: str = Field(default="", max_length=2000)
+    typed: str = Field(default="", max_length=2000)
+
+
+def _call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except lang_runs.RunError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{language}/status")
+def feuilleton_status(language: str) -> dict:
+    """E9 : écran d'accueil d'une langue (épisode prêt, génération, niveau)."""
+    return _call(lang_runs.language_status, language)
+
+
+@router.post("/{language}/onboarding")
+def feuilleton_onboarding(language: str, body: OnboardingBody) -> dict:
+    return _call(lang_runs.onboarding, language, body.interests, body.has_studied)
+
+
+@router.get("/{language}/placement")
+def feuilleton_placement(language: str) -> dict:
+    """E2 : items du test de niveau, SANS les clés."""
+    return _call(lang_runs.placement_items, language)
+
+
+@router.post("/{language}/placement/submit")
+def feuilleton_placement_submit(language: str, body: PlacementAnswersBody) -> dict:
+    return _call(lang_runs.placement_submit, language, body.answers)
+
+
+@router.post("/{language}/run/start")
+def feuilleton_run_start(language: str, body: RunStartBody) -> dict:
+    """E3 : plan complet de la séance (mode facultatif : court, relecture)."""
+    mode = body.mode if body.mode in ("court", "relecture") else None
+    return _call(lang_runs.start_run, language, mode)
+
+
+@router.get("/run/{run_id}")
+def feuilleton_run(run_id: int) -> dict:
+    return _call(lang_runs.run_view, run_id)
+
+
+@router.post("/run/{run_id}/events")
+def feuilleton_run_events(run_id: int, body: RunEventsBody) -> dict:
+    return _call(lang_runs.record_events, run_id, body.events, body.current_step)
+
+
+@router.post("/run/{run_id}/complete")
+def feuilleton_run_complete(run_id: int, body: RunCompleteBody) -> dict:
+    return _call(lang_runs.complete_run, run_id, body.end_reason, body.feeling)
+
+
+@router.get("/{language}/library")
+def feuilleton_library(language: str) -> list[dict]:
+    return _call(lang_runs.library, language)
+
+
+@router.get("/episode/{episode_id}")
+def feuilleton_episode(episode_id: int) -> dict:
+    return _call(lang_runs.episode_view, episode_id)
+
+
+@router.post("/report")
+def feuilleton_report(body: ReportBody) -> dict:
+    return _call(lang_runs.report, body.episode_id, body.line, body.token, body.kind, body.comment)
+
+
+@router.post("/compare")
+def feuilleton_compare(body: CompareBody) -> dict:
+    """N5 : différences entre l'original et une retraduction saisie."""
+    return lang_runs.compare_retranslation(body.original, body.typed)
+
+
+@router.post("/{language}/rewind")
+def feuilleton_rewind(language: str) -> dict:
+    """§ 14.2 : l'apprenant accepte de relire les derniers épisodes."""
+    return _call(lang_runs.accept_rewind, language)

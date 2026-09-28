@@ -98,12 +98,16 @@ _TASK_PRIORITY: dict[str, int] = {
     # l'utilisateur ouvre déjà le PDF. Doit céder le pas à TOUT ce qui est
     # interactif — une question du lecteur ne doit jamais attendre derrière elle.
     "document_digest":          7,
-    # ── Module langue ────────────────────────────────────────────────────────
-    "lang_curriculum":          7,
-    "lang_curiosity":           7,
-    "lang_lesson":              7,
-    "lang_exercises":           7,
-    "lang_correction":          7,
+    # ── Module langue, flux hérité ───────────────────────────────────────────
+    # TOUTES les tâches `lang_*` sont déclarées (défaut n° 8 : quatre d'entre
+    # elles retombaient à 6 par défaut). Ce que l'apprenant attend l'écran
+    # ouvert (sa correction, le test, le thème de la séance) passe devant le
+    # préchargement de l'exercice suivant : à priorité égale, une correction
+    # attendait jusqu'à ~80 s derrière lui.
+    "lang_correction":          5,
+    "lang_placement":           5,
+    "lang_placement_eval":      5,
+    "lang_lesson_plan":         5,
     "lang_revision_quiz":       7,
     "lang_session_select":      7,
     "lang_content_dialogue":    7,
@@ -113,11 +117,35 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_content_translation": 7,
     "lang_content_dictation":   7,
     "lang_content_production":  7,
+    "lang_content_writing":     7,
     "lang_content_cloze":       7,
     "lang_content_ordering":    7,
     "lang_content_matching":    7,
     "lang_content_transform":   7,
+    "lang_curriculum":          7,
+    "lang_curiosity":           7,
+    "lang_lesson":              7,
+    "lang_exercises":           7,
+    # ── Module langue, méthode feuilleton (G17) ──────────────────────────────
+    # Aucune tâche interactive : une séance n'attend jamais Gemma. La
+    # génération d'un épisode passe après tout ce que le lecteur demande, mais
+    # devant la fiche d'un document importé (7).
+    "lang_story_bible":         6,
+    "lang_story_arc":           6,
+    "lang_episode_text":        6,
+    "lang_episode_text_hanzi":  6,
+    "lang_episode_glossary":    6,
+    "lang_episode_notes_point": 6,
+    # Analyse hebdomadaire : usage interne, rien ne l'attend.
+    "lang_weekly_analysis":     8,
 }
+
+
+def _task_domain(label: str) -> str:
+    """Domaine d'annulation d'une tâche. Fermer le lecteur PDF coupe ses
+    générations, jamais la pré-génération d'un épisode de langue (G18) : les
+    deux vivent dans la même file, pas dans le même écran."""
+    return "lang" if (label or "").startswith("lang_") else "default"
 _LLM_QUEUE: queue.PriorityQueue = queue.PriorityQueue()
 _QUEUE_COUNTER = itertools.count()
 _RAW_LATEX_OUTSIDE_MATH_RE = re.compile(
@@ -130,7 +158,14 @@ _EMPTY_SQRT_RE = re.compile(r"\\+sqrt\s*\{\s*\}")
 # un token obsolète ne sont pas lancées : leur `on_error` reçoit
 # CANCELLED_MESSAGE, pour qu'un appelant qui attend (pont synchrone) soit
 # libéré tout de suite et qu'un travail de fond puisse se remettre en file.
+# Un token par domaine (`_task_domain`) : `_generation_token` est celui du
+# domaine par défaut (lecteur, quiz, brainstorming…), le module langue a le sien.
 _generation_token: int = 0
+_lang_generation_token: int = 0
+
+
+def _domain_token(domain: str) -> int:
+    return _lang_generation_token if domain == "lang" else _generation_token
 
 
 class GenerationCancelled(RuntimeError):
@@ -158,21 +193,31 @@ def is_cancelled_error(message) -> bool:
 # est le seul signal qu'Ollama écoute : il abandonne la génération dès que le
 # client raccroche.
 _INFLIGHT_LOCK = threading.Lock()
-_inflight: dict = {"conn": None, "cancelled": False}
+_inflight: dict = {"conn": None, "cancelled": False, "domain": "default"}
 
 
-def cancel_pending_generations() -> None:
-    """Invalide toutes les tâches LLM en attente ET coupe celle en vol."""
-    global _generation_token
-    _generation_token += 1
-    _abort_inflight_generation()
-    logger.info("Génération LLM annulée (token=%s)", _generation_token)
+def cancel_pending_generations(domain: str = "default") -> None:
+    """Invalide les tâches LLM en attente du domaine ET coupe celle en vol si
+    elle en fait partie.
+
+    Les appelants historiques (fermeture du lecteur, fin de session PDF)
+    passent par le domaine par défaut : ils ne touchent plus à la génération
+    d'un épisode de langue, qui avait perdu son travail à chaque fois (G18)."""
+    global _generation_token, _lang_generation_token
+    if domain == "lang":
+        _lang_generation_token += 1
+        token = _lang_generation_token
+    else:
+        _generation_token += 1
+        token = _generation_token
+    _abort_inflight_generation(domain)
+    logger.info("Génération LLM annulée (domaine=%s, token=%s)", domain, token)
 
 
-def _abort_inflight_generation() -> None:
+def _abort_inflight_generation(domain: str = "default") -> None:
     with _INFLIGHT_LOCK:
         conn = _inflight["conn"]
-        if conn is None:
+        if conn is None or _inflight.get("domain", "default") != domain:
             return
         _inflight["cancelled"] = True
     # `shutdown` réveille le `recv` bloqué dans l'autre thread ; `close` seul
@@ -194,6 +239,55 @@ def _inflight_was_cancelled(conn) -> bool:
         return _inflight["conn"] is conn and bool(_inflight["cancelled"])
 
 
+# ── Mesures réelles des appels (G19) ─────────────────────────────────────────
+# Ollama renvoie avec chaque réponse ce qu'elle a coûté : tokens lus et écrits,
+# temps de chargement du modèle (le « à froid »), temps de lecture du prompt et
+# de génération. Ces nombres n'étaient jamais gardés : les budgets de
+# config.settings sont des PLAFONDS calculés, pas des mesures. Chaque appel est
+# désormais journalisé ; une tâche qui veut ses mesures (génération d'un
+# épisode : `generation_json`) les reçoit via `on_metrics`. La collecte est
+# locale au thread du worker — il n'y en a qu'un.
+_CALL_METRICS = threading.local()
+
+
+def _ns_to_s(value) -> float | None:
+    try:
+        return round(float(value) / 1e9, 3) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_call_metrics(task: str, data: dict, wall_s: float) -> None:
+    metrics = {
+        "task": task or "?",
+        "wall_s": round(wall_s, 3),
+        "load_s": _ns_to_s(data.get("load_duration")),
+        "prompt_eval_s": _ns_to_s(data.get("prompt_eval_duration")),
+        "eval_s": _ns_to_s(data.get("eval_duration")),
+        "prompt_tokens": data.get("prompt_eval_count"),
+        "output_tokens": data.get("eval_count"),
+        "done_reason": data.get("done_reason"),
+    }
+    logger.info(
+        "Appel LLM %s : %.1f s (chargement %s s), %s tokens lus, %s écrits",
+        metrics["task"], wall_s, metrics["load_s"], metrics["prompt_tokens"], metrics["output_tokens"],
+    )
+    sink = getattr(_CALL_METRICS, "value", None)
+    if isinstance(sink, list):
+        sink.append(metrics)
+
+
+def _flush_call_metrics(on_metrics) -> None:
+    sink = getattr(_CALL_METRICS, "value", None)
+    _CALL_METRICS.value = None
+    if on_metrics is None:
+        return
+    try:
+        on_metrics(list(sink or []))
+    except Exception:  # pragma: no cover - l'observabilité ne casse jamais une tâche
+        logger.debug("on_metrics a échoué", exc_info=True)
+
+
 class CallerSlot:
     """Canal ténu entre un appelant synchrone et la tâche qu'il vient d'enfiler.
 
@@ -201,18 +295,22 @@ class CallerSlot:
     `*_async` ; celle-ci, qui s'exécute dans le même thread, y publie le budget
     de sa tâche et y lit de quoi savoir si l'appelant a renoncé.
 
-    Deux problèmes en un seul objet :
+    Trois problèmes en un seul objet :
       * `timeout_s` — l'attente synchrone reprend le budget RÉEL de la tâche au
         lieu d'un nombre saisi à la main qui contredisait le timeout socket ;
       * `abandon` — sur timeout, l'appelant lève le drapeau et le worker jette
         la tâche au lieu de la lancer. Il n'y a qu'UN worker LLM : sans ça, un
-        travail dont plus personne ne veut le résultat bloque toute la file.
+        travail dont plus personne ne veut le résultat bloque toute la file ;
+      * `started` — levé par le worker quand la tâche sort de la file (ou par
+        l'appelant quand elle se termine sans y passer) : un appelant de fond
+        fait partir le budget de là, pas de la mise en file.
     """
 
-    __slots__ = ("abandon", "timeout_s")
+    __slots__ = ("abandon", "started", "timeout_s")
 
     def __init__(self) -> None:
         self.abandon = threading.Event()
+        self.started = threading.Event()
         self.timeout_s: float | None = None
 
 
@@ -233,6 +331,17 @@ def close_caller_slot() -> None:
 
 def _current_caller_slot() -> "CallerSlot | None":
     return getattr(_caller_slot, "value", None)
+
+
+# Langue de la consigne système pour la tâche en cours sur le worker. Par
+# défaut celle de l'interface (build_system_prompt) ; une tâche du feuilleton
+# impose celle du profil (`explain_lang`), qui peut différer : la consigne
+# système et le prompt ne doivent pas demander deux langues différentes.
+_SYSTEM_LANG = threading.local()
+
+
+def _task_system_lang() -> str | None:
+    return getattr(_SYSTEM_LANG, "value", None)
 
 
 def _queue_worker() -> None:
@@ -971,28 +1080,43 @@ def _run_json_async(
     on_error,
     model: str,
     image_paths: list[str] | None = None,
+    on_metrics=None,
+    system_lang: str | None = None,
 ) -> None:
+    """`on_metrics(list[dict])`, s'il est fourni, reçoit les mesures de CHAQUE
+    appel HTTP de la tâche (tentatives et réparations comprises), avant
+    `on_success`/`on_error` — cf. `_record_call_metrics`. `system_lang` impose
+    la langue de la consigne système (sinon : celle de l'interface)."""
     task_options = OLLAMA_TASK_OPTIONS.get(label, OLLAMA_OPTIONS)
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
+    domain = _task_domain(label)
+    captured_token = _domain_token(domain)
     slot = _current_caller_slot()
     if slot is not None:
         slot.timeout_s = task_wall_timeout_s(label)
 
     def _run() -> None:
-        if _generation_token != captured_token:
+        if _domain_token(domain) != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
             on_error(CANCELLED_MESSAGE)
             return
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
+        if slot is not None:
+            slot.started.set()
+        _CALL_METRICS.value = [] if on_metrics is not None else None
+        _SYSTEM_LANG.value = system_lang
         try:
             logger.info("Génération LLM %s lancée modèle=%s", label, model)
-            parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [], options=task_options)
+            try:
+                parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [], options=task_options)
+            finally:
+                _flush_call_metrics(on_metrics)
+                _SYSTEM_LANG.value = None
             logger.info("Génération LLM %s terminée", label)
-            if _generation_token != captured_token:
+            if _domain_token(domain) != captured_token:
                 logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
                 on_error(CANCELLED_MESSAGE)
                 return
@@ -1027,19 +1151,22 @@ def _run_text_async(
     task_options = OLLAMA_TASK_OPTIONS.get(label, OLLAMA_OPTIONS)
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
+    domain = _task_domain(label)
+    captured_token = _domain_token(domain)
     slot = _current_caller_slot()
     if slot is not None:
         slot.timeout_s = task_wall_timeout_s(label)
 
     def _run() -> None:
-        if _generation_token != captured_token:
+        if _domain_token(domain) != captured_token:
             logger.debug("Tâche LLM %s annulée (token obsolète)", label)
             on_error(CANCELLED_MESSAGE)
             return
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
+        if slot is not None:
+            slot.started.set()
         try:
             logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model)
             images = _load_ollama_images(image_paths or [])
@@ -1054,7 +1181,7 @@ def _run_text_async(
                 else:
                     raise
             logger.info("Génération LLM %s terminée", label)
-            if _generation_token != captured_token:
+            if _domain_token(domain) != captured_token:
                 logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
                 on_error(CANCELLED_MESSAGE)
                 return
@@ -2204,7 +2331,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     # c'est ce qui empêche un document anglais d'entraîner la réponse en anglais.
     payload_data = {
         "model": model,
-        "system": build_system_prompt(),
+        "system": build_system_prompt(_task_system_lang()),
         "prompt": prompt,
         "stream": False,
         "think": False,
@@ -2229,6 +2356,8 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     with _INFLIGHT_LOCK:
         _inflight["conn"] = conn
         _inflight["cancelled"] = False
+        _inflight["domain"] = _task_domain(task)
+    started = time.monotonic()
     try:
         conn.connect()
         # Annulation arrivée avant l'envoi : on ne lance pas chez Ollama un
@@ -2248,6 +2377,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         if "error" in data:
             raise RuntimeError(f"Ollama error: {data['error']}")
         response = data.get("response", "")
+        _record_call_metrics(task, data, time.monotonic() - started)
         _warn_if_context_overflow(task, data, payload_data["options"], bool(images))
     except GenerationCancelled:
         raise
@@ -2541,6 +2671,75 @@ def generate_session_content_async(
     prompt = builder(language, profile, weak_points or [])
     task_label = _RENDER_KIND_TASK_LABEL.get(render_kind, "lang_content_dialogue")
     return _run_json_async(task_label, prompt, parser, _wrapped_ok, on_error, model)
+
+
+# ── Module langue — méthode « feuilleton » ────────────────────────────────────
+# Trois appels étroits par épisode (texte, glossaire, notes + point), plus la
+# bible, l'arc et l'analyse hebdomadaire. Tous en tâche de fond : aucune séance
+# ne les attend (services/lang_episodes.py). `params` est construit par le
+# service ; `on_metrics` reçoit les mesures réelles de chaque appel (G19).
+
+def generate_lang_story_bible_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_story_bible_prompt
+    from llm.schema_json import parse_lang_story_bible
+    return _run_json_async(
+        "lang_story_bible", build_lang_story_bible_prompt(params), parse_lang_story_bible,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_story_arc_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_story_arc_prompt
+    from llm.schema_json import parse_lang_story_arc
+    return _run_json_async(
+        "lang_story_arc", build_lang_story_arc_prompt(params), parse_lang_story_arc,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    """`params["task"]` choisit le budget : `lang_episode_text_hanzi` pour le
+    mandarin (les jetons doublent presque la sortie)."""
+    from llm.prompts import build_lang_episode_text_prompt
+    from llm.schema_json import parse_lang_episode_text
+    label = params.get("task") or "lang_episode_text"
+    return _run_json_async(
+        label, build_lang_episode_text_prompt(params), parse_lang_episode_text,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_episode_glossary_prompt
+    from llm.schema_json import parse_lang_episode_glossary
+    return _run_json_async(
+        "lang_episode_glossary", build_lang_episode_glossary_prompt(params), parse_lang_episode_glossary,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_episode_notes_point_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_episode_notes_point_prompt
+    from llm.schema_json import parse_lang_episode_notes_point
+    return _run_json_async(
+        "lang_episode_notes_point", build_lang_episode_notes_point_prompt(params),
+        parse_lang_episode_notes_point, on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_weekly_analysis_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_weekly_analysis_prompt
+    from llm.schema_json import parse_lang_weekly_analysis
+    return _run_json_async(
+        "lang_weekly_analysis", build_lang_weekly_analysis_prompt(params), parse_lang_weekly_analysis,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
 
 
 def _load_ollama_images(image_paths: list[str]) -> list[str]:

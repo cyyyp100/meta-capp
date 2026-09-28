@@ -1,0 +1,311 @@
+{
+ "language": "mandarin",
+ "version": 1,
+ "reviewed": false,
+ "note": "Test de niveau statique : clés écrites à la main, corrigé déterministe. Un item réussi vaut le point du programme indiqué ; le départ est fixé au dernier point réussi de façon consécutive, moins une marge (LANG_PLACEMENT_SAFETY_MARGIN). Caractères simplifiés uniquement.",
+ "items": [
+  {
+   "id": "zh.p01",
+   "cefr": "A1",
+   "program_point": "zh.a1.tons",
+   "kind": "signes",
+   "prompt": "Comment se lit « 妈妈 » (maman) ?",
+   "choices": [
+    "mǎmà",
+    "māma",
+    "màma",
+    "máma"
+   ],
+   "answer": 1,
+   "prompt_en": "How do you read “妈妈” (mum)?"
+  },
+  {
+   "id": "zh.p02",
+   "cefr": "A1",
+   "program_point": "zh.a1.shi",
+   "kind": "qcm",
+   "prompt": "我___法国人。",
+   "choices": [
+    "很",
+    "有",
+    "是",
+    "在"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "zh.p03",
+   "cefr": "A1",
+   "program_point": "zh.a1.you_meiyou",
+   "kind": "qcm",
+   "prompt": "我___有哥哥。",
+   "choices": [
+    "不",
+    "没",
+    "别",
+    "很"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "zh.p04",
+   "cefr": "A1",
+   "program_point": "zh.a1.cles_1",
+   "kind": "signes",
+   "prompt": "Quelle clé indique que 河, 海 et 汉 ont un rapport avec l'eau ?",
+   "choices": [
+    "亻",
+    "口",
+    "氵",
+    "女"
+   ],
+   "answer": 2,
+   "prompt_en": "Which radical shows that 河, 海 and 汉 have to do with water?"
+  },
+  {
+   "id": "zh.p05",
+   "cefr": "A1",
+   "program_point": "zh.a1.zai_lieu",
+   "kind": "qcm",
+   "prompt": "他___医院工作。",
+   "choices": [
+    "去",
+    "是",
+    "有",
+    "在"
+   ],
+   "answer": 3
+  },
+  {
+   "id": "zh.p06",
+   "cefr": "A1",
+   "program_point": "zh.a1.le_accompli",
+   "kind": "lecture",
+   "prompt": "« 我昨天买了一本书。» Cela veut dire…",
+   "choices": [
+    "je vais acheter un livre demain",
+    "j'ai acheté un livre hier",
+    "j'achète un livre chaque jour",
+    "je n'ai pas acheté de livre hier"
+   ],
+   "answer": 1,
+   "prompt_en": "“我昨天买了一本书。” This means…",
+   "choices_en": [
+    "I am going to buy a book tomorrow",
+    "I bought a book yesterday",
+    "I buy a book every day",
+    "I did not buy a book yesterday"
+   ]
+  },
+  {
+   "id": "zh.p07",
+   "cefr": "A2",
+   "program_point": "zh.a2.guo_experience",
+   "kind": "qcm",
+   "prompt": "我没吃___饺子。",
+   "choices": [
+    "过",
+    "了",
+    "着",
+    "得"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "zh.p08",
+   "cefr": "A2",
+   "program_point": "zh.a2.bi_comparaison",
+   "kind": "qcm",
+   "prompt": "今天___昨天冷。",
+   "choices": [
+    "跟",
+    "对",
+    "比",
+    "给"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "zh.p09",
+   "cefr": "A2",
+   "program_point": "zh.a2.de_degre",
+   "kind": "qcm",
+   "prompt": "她唱歌唱___很好。",
+   "choices": [
+    "的",
+    "地",
+    "了",
+    "得"
+   ],
+   "answer": 3
+  },
+  {
+   "id": "zh.p10",
+   "cefr": "A2",
+   "program_point": "zh.a2.jiu_cai",
+   "kind": "qcm",
+   "prompt": "电影八点开始，他十点___来。",
+   "choices": [
+    "就",
+    "才",
+    "再",
+    "又"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "zh.p11",
+   "cefr": "B1",
+   "program_point": "zh.b1.ba_phrase",
+   "kind": "qcm",
+   "prompt": "请___门关上。",
+   "choices": [
+    "被",
+    "对",
+    "把",
+    "让"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "zh.p12",
+   "cefr": "B1",
+   "program_point": "zh.b1.potentiel",
+   "kind": "qcm",
+   "prompt": "他说得太快，我听___懂。",
+   "choices": [
+    "得",
+    "不",
+    "没",
+    "了"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "zh.p13",
+   "cefr": "B1",
+   "program_point": "zh.b1.lian_dou",
+   "kind": "qcm",
+   "prompt": "他忙得连饭___没吃。",
+   "choices": [
+    "就",
+    "才",
+    "都",
+    "还"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "zh.p14",
+   "cefr": "B1",
+   "program_point": "zh.b1.zhiyao_zhiyou",
+   "kind": "qcm",
+   "prompt": "只有每天练习，___能说好汉语。",
+   "choices": [
+    "就",
+    "才",
+    "都",
+    "也"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "zh.p15",
+   "cefr": "B2",
+   "program_point": "zh.b2.jishi",
+   "kind": "qcm",
+   "prompt": "___下雨，比赛也不会取消。",
+   "choices": [
+    "因为",
+    "所以",
+    "只要",
+    "即使"
+   ],
+   "answer": 3
+  },
+  {
+   "id": "zh.p16",
+   "cefr": "B2",
+   "program_point": "zh.b2.nandao",
+   "kind": "lecture",
+   "prompt": "« 难道你不知道吗？» La personne…",
+   "choices": [
+    "demande poliment une information",
+    "s'étonne que l'autre ne le sache pas",
+    "affirme qu'elle-même ne sait rien",
+    "propose d'expliquer plus tard"
+   ],
+   "answer": 1,
+   "prompt_en": "“难道你不知道吗？” The person…",
+   "choices_en": [
+    "is politely asking for information",
+    "is surprised that the other does not know",
+    "says that they themselves know nothing",
+    "offers to explain later"
+   ]
+  },
+  {
+   "id": "zh.p17",
+   "cefr": "B2",
+   "program_point": "zh.b2.zhisuoyi",
+   "kind": "qcm",
+   "prompt": "他___所以成功，是因为很努力。",
+   "choices": [
+    "之",
+    "因",
+    "而",
+    "所"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "zh.p18",
+   "cefr": "C1",
+   "program_point": "zh.c1.jiang",
+   "kind": "qcm",
+   "prompt": "会议___于明天上午九点举行。",
+   "choices": [
+    "把",
+    "被",
+    "将",
+    "让"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "zh.p19",
+   "cefr": "C1",
+   "program_point": "zh.c1.euphemismes",
+   "kind": "lecture",
+   "prompt": "Vous demandez un service à un collègue, qui répond : « 这个嘛，我考虑考虑。» Le plus souvent, il…",
+   "choices": [
+    "accepte avec enthousiasme",
+    "refuse poliment sans dire non",
+    "demande qu'on répète",
+    "se met en colère"
+   ],
+   "answer": 1,
+   "prompt_en": "You ask a colleague for a favour, and they answer: “这个嘛，我考虑考虑。” Most often, they…",
+   "choices_en": [
+    "accept enthusiastically",
+    "refuse politely without saying no",
+    "ask you to repeat",
+    "get angry"
+   ]
+  },
+  {
+   "id": "zh.p20",
+   "cefr": "C1",
+   "program_point": "zh.c1.passif_ecrit",
+   "kind": "qcm",
+   "prompt": "这位作家的作品早已为大家所___。",
+   "choices": [
+    "熟知",
+    "知道了",
+    "被知道",
+    "认识过"
+   ],
+   "answer": 0
+  }
+ ]
+}

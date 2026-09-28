@@ -1,0 +1,590 @@
+{
+ "language": "espagnol",
+ "version": 1,
+ "reviewed": false,
+ "note": "Faux-amis fréquents pour un francophone. Une entrée dont le lemme correspond à une entrée du glossaire ajoute une note automatique (N2).",
+ "entries": [
+  {
+   "lemma": "embarazada",
+   "looks_like": "embarrassée",
+   "means": "enceinte",
+   "note": "veut dire « enceinte », pas « embarrassée ». « Estoy avergonzada » pour « je suis gênée »."
+  },
+  {
+   "lemma": "embarazo",
+   "looks_like": "embarras",
+   "means": "grossesse",
+   "note": "veut dire « grossesse », pas « embarras »."
+  },
+  {
+   "lemma": "constipado",
+   "looks_like": "constipé",
+   "means": "enrhumé",
+   "note": "veut dire « enrhumé », pas « constipé »."
+  },
+  {
+   "lemma": "largo",
+   "looks_like": "large",
+   "means": "long",
+   "note": "veut dire « long », pas « large ». Large se dit ancho."
+  },
+  {
+   "lemma": "ancho",
+   "looks_like": "anche",
+   "means": "large",
+   "note": "veut dire « large », pas « anche »."
+  },
+  {
+   "lemma": "carpeta",
+   "looks_like": "carpette",
+   "means": "dossier, classeur",
+   "note": "veut dire « dossier, classeur », pas « carpette »."
+  },
+  {
+   "lemma": "vaso",
+   "looks_like": "vase",
+   "means": "verre (à boire)",
+   "note": "veut dire « verre (à boire) », pas « vase ». Un vase se dit un florero."
+  },
+  {
+   "lemma": "contestar",
+   "looks_like": "contester",
+   "means": "répondre",
+   "note": "veut dire « répondre », pas « contester ». Contester se dit discutir ou impugnar."
+  },
+  {
+   "lemma": "quitar",
+   "looks_like": "quitter",
+   "means": "enlever, retirer",
+   "note": "veut dire « enlever, retirer », pas « quitter ». Quitter se dit dejar ou irse."
+  },
+  {
+   "lemma": "firma",
+   "looks_like": "firme",
+   "means": "signature",
+   "note": "veut dire « signature », pas « firme ». Une firme se dit una empresa."
+  },
+  {
+   "lemma": "sobre",
+   "looks_like": "sobre",
+   "means": "enveloppe (nom) ; sur (préposition)",
+   "note": "veut dire « enveloppe (nom) ; sur (préposition) »."
+  },
+  {
+   "lemma": "tienda",
+   "looks_like": "tienda",
+   "means": "boutique ; tente",
+   "note": "veut dire « boutique ; tente »."
+  },
+  {
+   "lemma": "rato",
+   "looks_like": "rat",
+   "means": "moment",
+   "note": "veut dire « moment », pas « rat ». Un rat se dit una rata."
+  },
+  {
+   "lemma": "salir",
+   "looks_like": "salir",
+   "means": "sortir",
+   "note": "veut dire « sortir », pas « salir ». Salir (tacher) se dit ensuciar."
+  },
+  {
+   "lemma": "oficina",
+   "looks_like": "officine",
+   "means": "bureau (lieu de travail)",
+   "note": "veut dire « bureau (lieu de travail) », pas « officine »."
+  },
+  {
+   "lemma": "bolsa",
+   "looks_like": "bourse",
+   "means": "sac ; la Bourse",
+   "note": "veut dire « sac ; la Bourse », pas « bourse »."
+  },
+  {
+   "lemma": "suceso",
+   "looks_like": "succès",
+   "means": "événement, fait divers",
+   "note": "veut dire « événement, fait divers », pas « succès ». Le succès se dit el éxito."
+  },
+  {
+   "lemma": "éxito",
+   "looks_like": "exit",
+   "means": "succès",
+   "note": "veut dire « succès », pas « exit »."
+  },
+  {
+   "lemma": "tasa",
+   "looks_like": "tasse",
+   "means": "taux ; taxe",
+   "note": "veut dire « taux ; taxe », pas « tasse ». Une tasse se dit una taza."
+  },
+  {
+   "lemma": "jubilación",
+   "looks_like": "jubilation",
+   "means": "retraite",
+   "note": "veut dire « retraite », pas « jubilation ». Jubilarse : prendre sa retraite."
+  },
+  {
+   "lemma": "ocio",
+   "looks_like": "oisiveté",
+   "means": "loisirs",
+   "note": "veut dire « loisirs », pas « oisiveté »."
+  },
+  {
+   "lemma": "pretender",
+   "looks_like": "prétendre",
+   "means": "chercher à, avoir l'intention de",
+   "note": "veut dire « chercher à, avoir l'intention de », pas « prétendre ». Prétendre (affirmer) se dit afirmar."
+  },
+  {
+   "lemma": "molestia",
+   "looks_like": "molestation",
+   "means": "gêne, dérangement",
+   "note": "veut dire « gêne, dérangement », pas « molestation ». Molestar : déranger."
+  },
+  {
+   "lemma": "ropa",
+   "looks_like": "robe",
+   "means": "vêtements",
+   "note": "veut dire « vêtements », pas « robe ». Une robe se dit un vestido."
+  },
+  {
+   "lemma": "vestido",
+   "looks_like": "vêtement",
+   "means": "robe",
+   "note": "veut dire « robe », pas « vêtement »."
+  },
+  {
+   "lemma": "cuadro",
+   "looks_like": "cadre",
+   "means": "tableau",
+   "note": "veut dire « tableau », pas « cadre ». Un cadre se dit un marco."
+  },
+  {
+   "lemma": "marco",
+   "looks_like": "marc",
+   "means": "cadre",
+   "note": "veut dire « cadre », pas « marc »."
+  },
+  {
+   "lemma": "nombre",
+   "looks_like": "nombre",
+   "means": "prénom, nom",
+   "note": "veut dire « prénom, nom », pas « nombre ». Un nombre se dit un número."
+  },
+  {
+   "lemma": "pastel",
+   "looks_like": "pastel",
+   "means": "gâteau",
+   "note": "veut dire « gâteau », pas « pastel »."
+  },
+  {
+   "lemma": "boda",
+   "looks_like": "bodega",
+   "means": "mariage (cérémonie)",
+   "note": "veut dire « mariage (cérémonie) », pas « bodega »."
+  },
+  {
+   "lemma": "gamba",
+   "looks_like": "jambe",
+   "means": "crevette",
+   "note": "veut dire « crevette », pas « jambe ». La jambe se dit la pierna."
+  },
+  {
+   "lemma": "broma",
+   "looks_like": "brume",
+   "means": "plaisanterie",
+   "note": "veut dire « plaisanterie », pas « brume ». La brume se dit la niebla."
+  },
+  {
+   "lemma": "barato",
+   "looks_like": "baratin",
+   "means": "bon marché",
+   "note": "veut dire « bon marché », pas « baratin »."
+  },
+  {
+   "lemma": "bufete",
+   "looks_like": "buffet",
+   "means": "cabinet d'avocat",
+   "note": "veut dire « cabinet d'avocat », pas « buffet ». Un buffet se dit un bufé."
+  },
+  {
+   "lemma": "toalla",
+   "looks_like": "toile",
+   "means": "serviette de bain",
+   "note": "veut dire « serviette de bain », pas « toile ». Une serviette de table se dit una servilleta."
+  },
+  {
+   "lemma": "colegio",
+   "looks_like": "collège",
+   "means": "école (primaire ou privée)",
+   "note": "veut dire « école (primaire ou privée) », pas « collège ». Le collège se dit el instituto (ESO)."
+  },
+  {
+   "lemma": "carrera",
+   "looks_like": "carrière",
+   "means": "études universitaires ; course",
+   "note": "veut dire « études universitaires ; course », pas « carrière »."
+  },
+  {
+   "lemma": "asignatura",
+   "looks_like": "assignation",
+   "means": "matière (scolaire)",
+   "note": "veut dire « matière (scolaire) », pas « assignation »."
+  },
+  {
+   "lemma": "globo",
+   "looks_like": "globe",
+   "means": "ballon de baudruche ; globe",
+   "note": "veut dire « ballon de baudruche ; globe », pas « globe »."
+  },
+  {
+   "lemma": "gorra",
+   "looks_like": "gorre",
+   "means": "casquette",
+   "note": "veut dire « casquette », pas « gorre »."
+  },
+  {
+   "lemma": "taquilla",
+   "looks_like": "taquet",
+   "means": "guichet, billetterie",
+   "note": "veut dire « guichet, billetterie », pas « taquet »."
+  },
+  {
+   "lemma": "fuente",
+   "looks_like": "fonte",
+   "means": "fontaine ; source ; plat de service",
+   "note": "veut dire « fontaine ; source ; plat de service », pas « fonte »."
+  },
+  {
+   "lemma": "pila",
+   "looks_like": "pile",
+   "means": "pile ; évier",
+   "note": "veut dire « pile ; évier », pas « pile »."
+  },
+  {
+   "lemma": "tirar",
+   "looks_like": "tirer",
+   "means": "jeter (et tirer)",
+   "note": "veut dire « jeter (et tirer) »."
+  },
+  {
+   "lemma": "echar",
+   "looks_like": "écharper",
+   "means": "jeter, verser, mettre",
+   "note": "veut dire « jeter, verser, mettre », pas « écharper »."
+  },
+  {
+   "lemma": "coger",
+   "looks_like": "cogner",
+   "means": "prendre (en Espagne)",
+   "note": "veut dire « prendre (en Espagne) », pas « cogner ». Mot vulgaire dans une grande partie de l'Amérique latine : dire tomar."
+  },
+  {
+   "lemma": "mancha",
+   "looks_like": "manche",
+   "means": "tache",
+   "note": "veut dire « tache », pas « manche ». La manche se dit la manga."
+  },
+  {
+   "lemma": "manga",
+   "looks_like": "manga",
+   "means": "manche (de vêtement)",
+   "note": "veut dire « manche (de vêtement) », pas « manga »."
+  },
+  {
+   "lemma": "lío",
+   "looks_like": "lie",
+   "means": "pagaille, embrouille",
+   "note": "veut dire « pagaille, embrouille », pas « lie »."
+  },
+  {
+   "lemma": "estancia",
+   "looks_like": "instance",
+   "means": "séjour",
+   "note": "veut dire « séjour », pas « instance »."
+  },
+  {
+   "lemma": "acera",
+   "looks_like": "acier",
+   "means": "trottoir",
+   "note": "veut dire « trottoir », pas « acier ». L'acier se dit el acero."
+  },
+  {
+   "lemma": "hueso",
+   "looks_like": "osier",
+   "means": "os",
+   "note": "veut dire « os », pas « osier »."
+  },
+  {
+   "lemma": "seta",
+   "looks_like": "soie",
+   "means": "champignon",
+   "note": "veut dire « champignon », pas « soie »."
+  },
+  {
+   "lemma": "bolsillo",
+   "looks_like": "bouillon",
+   "means": "poche",
+   "note": "veut dire « poche », pas « bouillon »."
+  },
+  {
+   "lemma": "galleta",
+   "looks_like": "galette",
+   "means": "biscuit",
+   "note": "veut dire « biscuit », pas « galette »."
+  },
+  {
+   "lemma": "tortilla",
+   "looks_like": "tortilla",
+   "means": "omelette (en Espagne) ; galette de maïs (au Mexique)",
+   "note": "veut dire « omelette (en Espagne) ; galette de maïs (au Mexique) »."
+  },
+  {
+   "lemma": "judía",
+   "looks_like": "juive",
+   "means": "haricot",
+   "note": "veut dire « haricot », pas « juive ». Aussi l'adjectif « juive »."
+  },
+  {
+   "lemma": "pimiento",
+   "looks_like": "piment",
+   "means": "poivron",
+   "note": "veut dire « poivron », pas « piment ». Le poivre se dit la pimienta ; le piment, la guindilla ou el chile."
+  },
+  {
+   "lemma": "cuento",
+   "looks_like": "compte",
+   "means": "conte, histoire",
+   "note": "veut dire « conte, histoire », pas « compte ». Le compte, l'addition : la cuenta."
+  },
+  {
+   "lemma": "quedar",
+   "looks_like": "caler",
+   "means": "rester ; avoir rendez-vous ; aller bien (vêtement)",
+   "note": "veut dire « rester ; avoir rendez-vous ; aller bien (vêtement) », pas « caler »."
+  },
+  {
+   "lemma": "cita",
+   "looks_like": "cité",
+   "means": "rendez-vous ; citation",
+   "note": "veut dire « rendez-vous ; citation », pas « cité ». La cité se dit la ciudad."
+  },
+  {
+   "lemma": "cartel",
+   "looks_like": "cartel",
+   "means": "affiche",
+   "note": "veut dire « affiche », pas « cartel »."
+  },
+  {
+   "lemma": "recado",
+   "looks_like": "récade",
+   "means": "commission, message",
+   "note": "veut dire « commission, message », pas « récade »."
+  },
+  {
+   "lemma": "multa",
+   "looks_like": "multe",
+   "means": "amende",
+   "note": "veut dire « amende », pas « multe »."
+  },
+  {
+   "lemma": "pelota",
+   "looks_like": "pelote",
+   "means": "balle, ballon",
+   "note": "veut dire « balle, ballon », pas « pelote »."
+  },
+  {
+   "lemma": "sello",
+   "looks_like": "selle",
+   "means": "timbre (poste) ; tampon",
+   "note": "veut dire « timbre (poste) ; tampon », pas « selle ». La selle se dit el sillín."
+  },
+  {
+   "lemma": "timbre",
+   "looks_like": "timbre",
+   "means": "sonnette",
+   "note": "veut dire « sonnette », pas « timbre ». Le timbre-poste se dit el sello."
+  },
+  {
+   "lemma": "chaqueta",
+   "looks_like": "jaquette",
+   "means": "veste",
+   "note": "veut dire « veste », pas « jaquette »."
+  },
+  {
+   "lemma": "jaqueca",
+   "looks_like": "jaquette",
+   "means": "migraine",
+   "note": "veut dire « migraine », pas « jaquette »."
+  },
+  {
+   "lemma": "exquisito",
+   "looks_like": "exquis",
+   "means": "délicieux",
+   "note": "veut dire « délicieux »."
+  },
+  {
+   "lemma": "sensible",
+   "looks_like": "sensible",
+   "means": "sensible (émotif)",
+   "note": "veut dire « sensible (émotif) ». Sensé (raisonnable) se dit sensato."
+  },
+  {
+   "lemma": "discutir",
+   "looks_like": "discuter",
+   "means": "se disputer ; débattre",
+   "note": "veut dire « se disputer ; débattre », pas « discuter ». Discuter (bavarder) se dit charlar."
+  },
+  {
+   "lemma": "rata",
+   "looks_like": "rate",
+   "means": "rat",
+   "note": "veut dire « rat », pas « rate ». La rate (organe) se dit el bazo."
+  },
+  {
+   "lemma": "polvo",
+   "looks_like": "poulpe",
+   "means": "poussière",
+   "note": "veut dire « poussière », pas « poulpe ». Le poulpe se dit el pulpo."
+  },
+  {
+   "lemma": "cena",
+   "looks_like": "cène",
+   "means": "dîner",
+   "note": "veut dire « dîner », pas « cène »."
+  },
+  {
+   "lemma": "tapa",
+   "looks_like": "tape",
+   "means": "couvercle ; tapa (amuse-bouche)",
+   "note": "veut dire « couvercle ; tapa (amuse-bouche) », pas « tape »."
+  },
+  {
+   "lemma": "mando",
+   "looks_like": "mandat",
+   "means": "télécommande ; commandement",
+   "note": "veut dire « télécommande ; commandement », pas « mandat »."
+  },
+  {
+   "lemma": "ramo",
+   "looks_like": "rameau",
+   "means": "bouquet",
+   "note": "veut dire « bouquet », pas « rameau »."
+  },
+  {
+   "lemma": "prenda",
+   "looks_like": "prendre",
+   "means": "vêtement ; gage",
+   "note": "veut dire « vêtement ; gage », pas « prendre »."
+  },
+  {
+   "lemma": "pendiente",
+   "looks_like": "pendentif",
+   "means": "boucle d'oreille ; en attente ; pente",
+   "note": "veut dire « boucle d'oreille ; en attente ; pente », pas « pendentif »."
+  },
+  {
+   "lemma": "esposas",
+   "looks_like": "épouses",
+   "means": "menottes (au pluriel)",
+   "note": "veut dire « menottes (au pluriel) », pas « épouses ». Au singulier, esposa = épouse."
+  },
+  {
+   "lemma": "curso",
+   "looks_like": "course",
+   "means": "année scolaire ; cours",
+   "note": "veut dire « année scolaire ; cours », pas « course »."
+  },
+  {
+   "lemma": "plato",
+   "looks_like": "plateau",
+   "means": "assiette ; plat",
+   "note": "veut dire « assiette ; plat », pas « plateau ». Le plateau se dit la bandeja."
+  },
+  {
+   "lemma": "mostrador",
+   "looks_like": "montreur",
+   "means": "comptoir",
+   "note": "veut dire « comptoir », pas « montreur »."
+  },
+  {
+   "lemma": "disfrutar",
+   "looks_like": "défruiter",
+   "means": "profiter, apprécier",
+   "note": "veut dire « profiter, apprécier », pas « défruiter »."
+  },
+  {
+   "lemma": "ganga",
+   "looks_like": "gangue",
+   "means": "bonne affaire",
+   "note": "veut dire « bonne affaire », pas « gangue »."
+  },
+  {
+   "lemma": "raya",
+   "looks_like": "raie",
+   "means": "rayure ; raie (cheveux, poisson)",
+   "note": "veut dire « rayure ; raie (cheveux, poisson) », pas « raie »."
+  },
+  {
+   "lemma": "rayo",
+   "looks_like": "rayon",
+   "means": "éclair ; rayon",
+   "note": "veut dire « éclair ; rayon », pas « rayon »."
+  },
+  {
+   "lemma": "cierre",
+   "looks_like": "cierge",
+   "means": "fermeture",
+   "note": "veut dire « fermeture », pas « cierge ». Un cierge se dit una vela."
+  },
+  {
+   "lemma": "tipo",
+   "looks_like": "type",
+   "means": "type ; taux (d'intérêt)",
+   "note": "veut dire « type ; taux (d'intérêt) »."
+  },
+  {
+   "lemma": "guardería",
+   "looks_like": "garderie",
+   "means": "crèche",
+   "note": "veut dire « crèche », pas « garderie »."
+  },
+  {
+   "lemma": "despacho",
+   "looks_like": "dépêche",
+   "means": "bureau (pièce)",
+   "note": "veut dire « bureau (pièce) », pas « dépêche »."
+  },
+  {
+   "lemma": "apellido",
+   "looks_like": "appellation",
+   "means": "nom de famille",
+   "note": "veut dire « nom de famille », pas « appellation »."
+  },
+  {
+   "lemma": "constipación",
+   "looks_like": "constipation",
+   "means": "rhume",
+   "note": "veut dire « rhume », pas « constipation ». La constipation se dit el estreñimiento."
+  },
+  {
+   "lemma": "regalar",
+   "looks_like": "régaler",
+   "means": "offrir (un cadeau)",
+   "note": "veut dire « offrir (un cadeau) », pas « régaler »."
+  },
+  {
+   "lemma": "mantel",
+   "looks_like": "manteau",
+   "means": "nappe",
+   "note": "veut dire « nappe », pas « manteau ». Le manteau se dit el abrigo."
+  },
+  {
+   "lemma": "manta",
+   "looks_like": "mante",
+   "means": "couverture",
+   "note": "veut dire « couverture », pas « mante »."
+  }
+ ]
+}

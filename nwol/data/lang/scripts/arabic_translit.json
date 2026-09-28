@@ -1,0 +1,91 @@
+{
+ "scheme": "DIN 31635",
+ "version": 1,
+ "decision": "Décision ouverte au § 19.2 du plan : schéma savant ou simplifié. Défaut retenu : DIN 31635 (celui qu'emploie déjà le plan : fuṣḥā, iʿrāb, šadda). Changer de schéma = changer ce fichier, aucun code.",
+ "consonants": {
+  "ء": "ʾ",
+  "أ": "ʾ",
+  "إ": "ʾ",
+  "ؤ": "ʾ",
+  "ئ": "ʾ",
+  "ب": "b",
+  "ت": "t",
+  "ث": "ṯ",
+  "ج": "ǧ",
+  "ح": "ḥ",
+  "خ": "ḫ",
+  "د": "d",
+  "ذ": "ḏ",
+  "ر": "r",
+  "ز": "z",
+  "س": "s",
+  "ش": "š",
+  "ص": "ṣ",
+  "ض": "ḍ",
+  "ط": "ṭ",
+  "ظ": "ẓ",
+  "ع": "ʿ",
+  "غ": "ġ",
+  "ف": "f",
+  "ق": "q",
+  "ك": "k",
+  "ل": "l",
+  "م": "m",
+  "ن": "n",
+  "ه": "h",
+  "و": "w",
+  "ي": "y",
+  "ة": "t"
+ },
+ "vowels": {
+  "َ": "a",
+  "ُ": "u",
+  "ِ": "i",
+  "ً": "an",
+  "ٌ": "un",
+  "ٍ": "in"
+ },
+ "long_vowels": {
+  "alif": "ā",
+  "و": "ū",
+  "ي": "ī"
+ },
+ "sun_letters": [
+  "ت",
+  "ث",
+  "د",
+  "ذ",
+  "ر",
+  "ز",
+  "س",
+  "ش",
+  "ص",
+  "ض",
+  "ط",
+  "ظ",
+  "ل",
+  "ن"
+ ],
+ "proclitics": [
+  "و",
+  "ف",
+  "ب",
+  "ك"
+ ],
+ "punctuation": {
+  "،": ",",
+  "؟": "?",
+  "؛": ";"
+ },
+ "rules": [
+  "Le texte source est entièrement vocalisé ; la translittération rend ce qui est écrit.",
+  "Article al- ; devant une lettre solaire portant la šadda, il s'assimile : aš-šams.",
+  "Proclitique + article : wa-l-bayt, bi-l-qalam ; li- + article s'écrit لِلْ et se rend li-l-.",
+  "Šadda : consonne doublée (muḥammad).",
+  "Voyelle brève + lettre de prolongation nue : ā (ا, ى), ū (و), ī (ي) ; fatḥa + wāw/yāʾ au sukūn : diphtongues aw, ay.",
+  "Tanwīn écrit : -un, -an, -in ; l'alif qui porte le tanwīn fatḥ n'est pas rendu.",
+  "Tāʾ marbūṭa : -at devant une voyelle, rien en pause (la fatḥa qui la précède donne -a).",
+  "Hamza initiale non notée ; ailleurs ʾ.",
+  "Alif suscrit (dagger) : ā."
+ ]
+}

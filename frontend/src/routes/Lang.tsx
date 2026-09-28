@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
+import { FeuilletonHome } from "../features/lang/feuilleton/FeuilletonHome";
 import { SKILL_ORDER } from "../features/lang/skills";
 import { scoreColor, scoreInk } from "../features/stats/labels";
 import { useT } from "../i18n";
@@ -13,13 +14,14 @@ export function Lang() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const { data: languages } = useQuery({ queryKey: ["lang", "languages"], queryFn: api.languages });
+  const selectedLang = languages?.find((l) => l.code === selected);
+  // Langue du pilote : accueil du feuilleton ; les autres gardent le flux hérité (K8).
+  const feuilleton = selectedLang?.flow === "feuilleton";
   const { data: profile } = useQuery({
     queryKey: ["lang", "profile", selected],
     queryFn: () => api.languageProfile(selected as string),
-    enabled: !!selected,
+    enabled: !!selected && !feuilleton,
   });
-
-  const selectedLang = languages?.find((l) => l.code === selected);
 
   // Nombre de colonnes réel de la grille (auto-fill responsive) : mesuré depuis le
   // style calculé, recalculé au redimensionnement. Sert à insérer l'encart stats
@@ -87,8 +89,14 @@ export function Lang() {
               <div style={{ fontWeight: 600, marginTop: 6, color: "var(--text)" }}>{l.label}</div>
             </button>
 
+            {i === panelAfter && selected && feuilleton && selectedLang && (
+              <div style={{ gridColumn: "1 / -1", background: "var(--surface)", border: "1px solid var(--accent)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-sm)", padding: "var(--space-lg)" }}>
+                <FeuilletonHome language={selectedLang.code} label={selectedLang.label} rtl={!!selectedLang.rtl} />
+              </div>
+            )}
+
             {/* Encart stats inséré pleine largeur juste sous la ligne de la langue choisie. */}
-            {i === panelAfter && selected && profile && (
+            {i === panelAfter && selected && !feuilleton && profile && (
               <div style={{ gridColumn: "1 / -1", background: "var(--surface)", border: "1px solid var(--accent)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-sm)", padding: "var(--space-lg)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h2 style={{ fontSize: 16, margin: 0 }}>{selectedLang?.label}</h2>

@@ -1,0 +1,336 @@
+{
+ "language": "arabe",
+ "version": 1,
+ "reviewed": false,
+ "note": "Test de niveau statique : clés écrites à la main, corrigé déterministe. Un item réussi vaut le point du programme indiqué ; le départ est fixé au dernier point réussi de façon consécutive, moins une marge (LANG_PLACEMENT_SAFETY_MARGIN). Arabe littéraire entièrement vocalisé.",
+ "items": [
+  {
+   "id": "ar.p01",
+   "cefr": "A1",
+   "program_point": "ar.a1.ecriture_liaison",
+   "kind": "signes",
+   "prompt": "Quelle lettre ne se lie JAMAIS à la lettre qui la suit ?",
+   "choices": [
+    "ب",
+    "د",
+    "س",
+    "م"
+   ],
+   "answer": 1,
+   "prompt_en": "Which letter NEVER joins the letter that follows it?"
+  },
+  {
+   "id": "ar.p02",
+   "cefr": "A1",
+   "program_point": "ar.a1.voyelles_breves",
+   "kind": "signes",
+   "prompt": "Comment se lit « بُ » ?",
+   "choices": [
+    "ba",
+    "bu",
+    "bi",
+    "b"
+   ],
+   "answer": 1,
+   "prompt_en": "How do you read “بُ”?"
+  },
+  {
+   "id": "ar.p03",
+   "cefr": "A1",
+   "program_point": "ar.a1.phrase_nominale",
+   "kind": "lecture",
+   "prompt": "« أَنَا طَالِبٌ. » Cela veut dire…",
+   "choices": [
+    "j'étais étudiant",
+    "tu es étudiant",
+    "je suis étudiant",
+    "je ne suis pas étudiant"
+   ],
+   "answer": 2,
+   "prompt_en": "“أَنَا طَالِبٌ.” This means…",
+   "choices_en": [
+    "I was a student",
+    "you are a student",
+    "I am a student",
+    "I am not a student"
+   ]
+  },
+  {
+   "id": "ar.p04",
+   "cefr": "A1",
+   "program_point": "ar.a1.article",
+   "kind": "qcm",
+   "prompt": "C'est un beau livre : « هٰذَا ___ جَمِيلٌ. »",
+   "choices": [
+    "الْكِتَابُ",
+    "كِتَابٌ",
+    "كِتَابِي",
+    "الْكُتُبُ"
+   ],
+   "answer": 1,
+   "prompt_en": "It is a beautiful book: “هٰذَا ___ جَمِيلٌ.”"
+  },
+  {
+   "id": "ar.p05",
+   "cefr": "A1",
+   "program_point": "ar.a1.possessifs",
+   "kind": "qcm",
+   "prompt": "Où est mon stylo ? « أَيْنَ ___؟ »",
+   "choices": [
+    "قَلَمِي",
+    "قَلَمُكَ",
+    "قَلَمُهُ",
+    "الْقَلَمُ"
+   ],
+   "answer": 0,
+   "prompt_en": "Where is my pen? “أَيْنَ ___؟”"
+  },
+  {
+   "id": "ar.p06",
+   "cefr": "A1",
+   "program_point": "ar.a1.present_singulier",
+   "kind": "qcm",
+   "prompt": "Elle étudie l'arabe : « هِيَ ___ الْعَرَبِيَّةَ. »",
+   "choices": [
+    "أَدْرُسُ",
+    "يَدْرُسُ",
+    "تَدْرُسُ",
+    "نَدْرُسُ"
+   ],
+   "answer": 2,
+   "prompt_en": "She studies Arabic: “هِيَ ___ الْعَرَبِيَّةَ.”"
+  },
+  {
+   "id": "ar.p07",
+   "cefr": "A2",
+   "program_point": "ar.a2.passe_pluriel",
+   "kind": "qcm",
+   "prompt": "Hier, nous sommes allés au marché : « أَمْسِ ___ إِلَى السُّوقِ. »",
+   "choices": [
+    "ذَهَبْنَا",
+    "نَذْهَبُ",
+    "ذَهَبُوا",
+    "ذَهَبْتُ"
+   ],
+   "answer": 0,
+   "prompt_en": "Yesterday, we went to the market: “أَمْسِ ___ إِلَى السُّوقِ.”"
+  },
+  {
+   "id": "ar.p08",
+   "cefr": "A2",
+   "program_point": "ar.a2.negation_passe",
+   "kind": "qcm",
+   "prompt": "« لَمْ ___ شَيْئًا. »",
+   "choices": [
+    "أَفْهَمُ",
+    "أَفْهَمْ",
+    "فَهِمْتُ",
+    "أَفْهَمَ"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p09",
+   "cefr": "A2",
+   "program_point": "ar.a2.duel",
+   "kind": "qcm",
+   "prompt": "J'ai deux sœurs : « عِنْدِي ___. »",
+   "choices": [
+    "أَخَوَاتٌ",
+    "أُخْتٌ",
+    "أُخْتَيْنِ",
+    "أُخْتَانِ"
+   ],
+   "answer": 3
+  },
+  {
+   "id": "ar.p10",
+   "cefr": "A2",
+   "program_point": "ar.a2.comparatif",
+   "kind": "qcm",
+   "prompt": "« الْقَاهِرَةُ ___ مِنْ تُونِسَ. »",
+   "choices": [
+    "كَبِيرَةٌ",
+    "أَكْبَرُ",
+    "الْكُبْرَى",
+    "كُبْرَى"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p11",
+   "cefr": "B1",
+   "program_point": "ar.b1.passif",
+   "kind": "lecture",
+   "prompt": "« سُرِقَتِ السَّيَّارَةُ. » Cela veut dire…",
+   "choices": [
+    "il a volé la voiture",
+    "la voiture va être volée",
+    "la voiture a été volée",
+    "la voiture est garée"
+   ],
+   "answer": 2,
+   "prompt_en": "“سُرِقَتِ السَّيَّارَةُ.” This means…",
+   "choices_en": [
+    "he stole the car",
+    "the car is going to be stolen",
+    "the car was stolen",
+    "the car is parked"
+   ]
+  },
+  {
+   "id": "ar.p12",
+   "cefr": "B1",
+   "program_point": "ar.b1.i3rab_verbes",
+   "kind": "qcm",
+   "prompt": "« أُرِيدُ أَنْ ___ مَعَكَ. »",
+   "choices": [
+    "أَذْهَبُ",
+    "أَذْهَبَ",
+    "أَذْهَبْ",
+    "ذَهَبْتُ"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p13",
+   "cefr": "B1",
+   "program_point": "ar.b1.kana_akhawat",
+   "kind": "qcm",
+   "prompt": "« أَصْبَحَ الْجَوُّ ___. »",
+   "choices": [
+    "بَارِدٌ",
+    "بَارِدًا",
+    "بَارِدٍ",
+    "الْبَارِدُ"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p14",
+   "cefr": "B1",
+   "program_point": "ar.b1.conditions_in_law",
+   "kind": "lecture",
+   "prompt": "« لَوْ كُنْتُ غَنِيًّا لَسَافَرْتُ. » La personne…",
+   "choices": [
+    "va voyager, car elle est riche",
+    "n'est pas riche et ne voyage pas",
+    "a voyagé quand elle était riche",
+    "voyagera si elle devient riche"
+   ],
+   "answer": 1,
+   "prompt_en": "“لَوْ كُنْتُ غَنِيًّا لَسَافَرْتُ.” The person…",
+   "choices_en": [
+    "is going to travel, because they are rich",
+    "is not rich and does not travel",
+    "travelled when they were rich",
+    "will travel if they become rich"
+   ]
+  },
+  {
+   "id": "ar.p15",
+   "cefr": "B2",
+   "program_point": "ar.b2.taajjub",
+   "kind": "qcm",
+   "prompt": "« مَا ___ هٰذَا الْمَنْظَرَ! »",
+   "choices": [
+    "أَجْمَلُ",
+    "أَجْمَلَ",
+    "جَمِيلٌ",
+    "الْأَجْمَلُ"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p16",
+   "cefr": "B2",
+   "program_point": "ar.b2.discours_rapporte",
+   "kind": "qcm",
+   "prompt": "« قَالَ الْوَزِيرُ ___ الْمَشْرُوعَ سَيَبْدَأُ قَرِيبًا. »",
+   "choices": [
+    "أَنْ",
+    "إِنَّ",
+    "لِأَنَّ",
+    "لٰكِنْ"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "ar.p17",
+   "cefr": "B2",
+   "program_point": "ar.b2.la_nafiya",
+   "kind": "lecture",
+   "prompt": "« لَا بُدَّ مِنَ الصَّبْرِ. » Cela veut dire…",
+   "choices": [
+    "la patience est inutile",
+    "il faut absolument être patient",
+    "il n'y a plus de patience",
+    "la patience ne suffit pas"
+   ],
+   "answer": 1,
+   "prompt_en": "“لَا بُدَّ مِنَ الصَّبْرِ.” This means…",
+   "choices_en": [
+    "patience is useless",
+    "you absolutely have to be patient",
+    "there is no patience left",
+    "patience is not enough"
+   ]
+  },
+  {
+   "id": "ar.p18",
+   "cefr": "C1",
+   "program_point": "ar.c1.mahma",
+   "kind": "qcm",
+   "prompt": "« ___ كَانَتِ الصُّعُوبَاتُ، فَلَنْ نَسْتَسْلِمَ. »",
+   "choices": [
+    "لِأَنَّ",
+    "كَيْ",
+    "مَهْمَا",
+    "بَلْ"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "ar.p19",
+   "cefr": "C1",
+   "program_point": "ar.c1.negation_litteraire",
+   "kind": "lecture",
+   "prompt": "« لَمَّا يَصِلِ الْقِطَارُ. » Cela veut dire…",
+   "choices": [
+    "le train est arrivé",
+    "lorsque le train arrivera",
+    "le train n'est pas encore arrivé",
+    "le train n'arrivera jamais"
+   ],
+   "answer": 2,
+   "prompt_en": "“لَمَّا يَصِلِ الْقِطَارُ.” This means…",
+   "choices_en": [
+    "the train has arrived",
+    "when the train arrives",
+    "the train has not arrived yet",
+    "the train will never arrive"
+   ]
+  },
+  {
+   "id": "ar.p20",
+   "cefr": "C1",
+   "program_point": "ar.c1.euphemismes",
+   "kind": "lecture",
+   "prompt": "Vous demandez un service ; on vous répond : « سَأَرَى… الْأَمْرُ لَيْسَ بِيَدِي. » Le plus souvent, cela signifie…",
+   "choices": [
+    "un accord enthousiaste",
+    "un refus poli",
+    "une demande d'argent",
+    "une promesse ferme"
+   ],
+   "answer": 1,
+   "prompt_en": "You ask for a favour; the answer is: “سَأَرَى… الْأَمْرُ لَيْسَ بِيَدِي.” Most often, this means…",
+   "choices_en": [
+    "an enthusiastic yes",
+    "a polite refusal",
+    "a request for money",
+    "a firm promise"
+   ]
+  }
+ ]
+}

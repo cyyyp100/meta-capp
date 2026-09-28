@@ -67,10 +67,12 @@ export function LangLesson() {
   const [genStatus, setGenStatus] = useState<"pending" | "ready" | "error">("pending"); // génération en fond
   const [done, setDone] = useState(false);          // séance terminée → SAS de sortie
   const [showRest, setShowRest] = useState(false);  // SAS de repos (étude d'Édimbourg)
-  const [finalScore, setFinalScore] = useState(0);
+  const [finalScore, setFinalScore] = useState<number | null>(null);
   const [finalDuration, setFinalDuration] = useState(0);
 
-  const scores = useRef<number[]>([]);   // score final par exercice
+  // Score final par exercice ; `null` quand rien n'y a été noté (lecture d'un
+  // dialogue, exercice passé) : un exercice sans réponse ne vaut pas 100 %.
+  const scores = useRef<(number | null)[]>([]);
   const curAcc = useRef<number[]>([]);   // scores ponctuels de l'exercice courant
   const startedAt = useRef<number>(Date.now());
 
@@ -156,9 +158,9 @@ export function LangLesson() {
 
   async function next() {
     if (!lesson || loadingEx) return;
-    // Fige le score de l'exercice courant (1 par défaut si aucun item noté).
+    // Fige le score de l'exercice courant (`null` si aucun item noté).
     const acc = curAcc.current;
-    scores.current[index] = acc.length ? acc.reduce((a, b) => a + b, 0) / acc.length : 1;
+    scores.current[index] = acc.length ? acc.reduce((a, b) => a + b, 0) / acc.length : null;
     curAcc.current = [];
 
     if (index >= lesson.size - 1) {
@@ -174,10 +176,10 @@ export function LangLesson() {
 
   async function finish() {
     if (!lesson) return;
-    const arr: number[] = [];
-    for (let i = 0; i < lesson.size; i++) arr.push(scores.current[i] ?? 1);
-    const avg = arr.reduce((a, b) => a + b, 0) / (arr.length || 1);
-    setFinalScore(avg);
+    const arr: (number | null)[] = [];
+    for (let i = 0; i < lesson.size; i++) arr.push(scores.current[i] ?? null);
+    const scored = arr.filter((v): v is number => v !== null);
+    setFinalScore(scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null);
     const durationS = Math.round((Date.now() - startedAt.current) / 1000);
     setFinalDuration(durationS);
     try {

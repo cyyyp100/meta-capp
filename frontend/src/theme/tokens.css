@@ -123,6 +123,19 @@
   --hl-explain: #4d9de0;
   --hl-reference: #5fbf77;
 
+  /* Module langues (feuilleton) : tons du mandarin et genre des noms allemands.
+     Toujours DOUBLÉS d'un indicateur non coloré (chiffre du ton, article) :
+     la couleur aide, elle ne porte jamais seule l'information (F17). Les cinq
+     tons suivent la convention répandue rouge / orange / vert / bleu / gris. */
+  --tone-1: #c92a2a;
+  --tone-2: #b7600b;
+  --tone-3: #2b8a3e;
+  --tone-4: #1864ab;
+  --tone-5: #6b7280;
+  --gender-m: #1864ab;
+  --gender-f: #b0265a;
+  --gender-n: #2b8a3e;
+
   /* Coloration syntaxique (lecteur de code) */
   /* Aucun de ces quatre ne doit friser l'ambre de la marque : un mot-clé qu'on
      prend pour un élément d'interface est pire qu'un mot-clé terne. Le violet
@@ -247,6 +260,15 @@
   --danger-soft: #2e1620;
   /* Les trois statuts s'éclaircissent en sombre : c'est l'encre qui fonce. */
   --on-status: #0b1220;
+
+  --tone-1: #ff8787;
+  --tone-2: #ffa94d;
+  --tone-3: #69db7c;
+  --tone-4: #74c0fc;
+  --tone-5: #adb5bd;
+  --gender-m: #74c0fc;
+  --gender-f: #f783ac;
+  --gender-n: #69db7c;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.3);

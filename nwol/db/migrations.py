@@ -180,6 +180,16 @@ def run_migrations(conn) -> None:
         _set_version(conn, 34)
         current = 34
 
+    if current < 35 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v35(conn)
+        _set_version(conn, 35)
+        current = 35
+
+    if current < 36 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v36(conn)
+        _set_version(conn, 36)
+        current = 36
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1149,3 +1159,350 @@ def _migrate_to_v34(conn) -> None:
     if removed:
         logger.info("Migration v34 : %s discussion(s) vierge(s) en double supprimée(s)", removed)
     logger.info("Migration SQLite v34 terminée")
+
+
+def _migrate_to_v35(conn) -> None:
+    """Module langues, méthode « feuilleton » (plan de refonte, § 5).
+
+    Tables NEUVES uniquement : le flux hérité (lang_lessons, lang_sessions,
+    lang_exercises_cache…) reste intact et continue de servir les langues hors
+    pilote. `lang_profiles.flow` décide du flux d'un profil ; toute ligne
+    existante reste 'legacy' — le passage d'une langue du pilote au feuilleton
+    se fait au premier accès (services/lang_runs.ensure_feuilleton), pas ici,
+    parce qu'il importe aussi les flashcards dans le lexique.
+
+    Idempotente (CREATE … IF NOT EXISTS, _ensure_column) : rejouée sur une base
+    déjà en v35, elle ne change rien (tests/test_migrations.py, D22).
+
+    Trois familles :
+      * référence (D1-D3), réinjectée depuis nwol/data/lang/ au démarrage, avec
+        `source_version` (empreinte du fichier) pour détecter une mise à jour ;
+      * contenu et traces (D4-D11, D16-D19), en cascade sur le profil ;
+      * acquis (D12-D15), ce que l'apprenant sait, mot par mot et signe par signe.
+    """
+    logger.info("Migration SQLite v35 démarrée")
+    with conn:
+        # ── Référence (D1-D3) ────────────────────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_program_points (
+                   language       TEXT NOT NULL,
+                   point_id       TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   cefr           TEXT NOT NULL,
+                   kind           TEXT NOT NULL,
+                   title          TEXT NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (language, point_id)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_program_points_ord ON lang_program_points(language, ord)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_script_units (
+                   script         TEXT NOT NULL,
+                   unit_id        TEXT NOT NULL,
+                   kind           TEXT NOT NULL,
+                   display        TEXT NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (script, unit_id)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_placement_items (
+                   language       TEXT NOT NULL,
+                   item_id        TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (language, item_id)
+               )"""
+        )
+        # ── Feuilleton et épisodes (D4-D6) ───────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_story_bibles (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   version         INTEGER NOT NULL DEFAULT 1,
+                   characters_json TEXT NOT NULL,
+                   setting         TEXT NOT NULL DEFAULT '',
+                   comic_springs   TEXT NOT NULL DEFAULT '',
+                   interests_json  TEXT,
+                   register_notes  TEXT NOT NULL DEFAULT '',
+                   source          TEXT NOT NULL DEFAULT 'gemma',
+                   created_at      DATETIME DEFAULT (datetime('now'))
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_story_bibles_profile ON lang_story_bibles(profile_id, version)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_story_arcs (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   arc_n           INTEGER NOT NULL,
+                   start_episode_n INTEGER NOT NULL,
+                   beats_json      TEXT NOT NULL,
+                   source          TEXT NOT NULL DEFAULT 'gemma',
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(profile_id, arc_n)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_episodes (
+                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id       INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   episode_n        INTEGER NOT NULL,
+                   kind             TEXT NOT NULL DEFAULT 'normal',
+                   program_point_id TEXT,
+                   format           TEXT NOT NULL DEFAULT 'dialogue',
+                   ladder_step      INTEGER NOT NULL DEFAULT 0,
+                   params_json      TEXT,
+                   title            TEXT NOT NULL DEFAULT '',
+                   summary          TEXT NOT NULL DEFAULT '',
+                   teaser           TEXT NOT NULL DEFAULT '',
+                   lines_json       TEXT,
+                   glossary_json    TEXT,
+                   notes_json       TEXT,
+                   point_json       TEXT,
+                   aids_json        TEXT,
+                   status           TEXT NOT NULL DEFAULT 'queued',
+                   generation_json  TEXT,
+                   created_at       DATETIME DEFAULT (datetime('now')),
+                   ready_at         DATETIME,
+                   first_played_at  DATETIME,
+                   UNIQUE(profile_id, episode_n)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_episodes_status ON lang_episodes(profile_id, status)"
+        )
+        # ── Séances et événements (D7-D11) ───────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_runs (
+                   id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id             INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   mode                   TEXT NOT NULL,
+                   episode_id             INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   second_wave_episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   plan_json              TEXT NOT NULL,
+                   absence_days           INTEGER,
+                   status                 TEXT NOT NULL DEFAULT 'in_progress',
+                   current_step           TEXT,
+                   started_at             DATETIME DEFAULT (datetime('now')),
+                   ended_at               DATETIME,
+                   effective_seconds      INTEGER NOT NULL DEFAULT 0,
+                   end_reason             TEXT,
+                   feeling                TEXT,
+                   study_date             TEXT
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_runs_profile ON lang_runs(profile_id, started_at)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_run_steps (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step       TEXT NOT NULL,
+                   started_at DATETIME,
+                   ended_at   DATETIME,
+                   seconds    INTEGER NOT NULL DEFAULT 0,
+                   skipped    INTEGER NOT NULL DEFAULT 0,
+                   signal     TEXT,
+                   UNIQUE(run_id, step)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_reveal_events (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE CASCADE,
+                   line_idx   INTEGER NOT NULL,
+                   token_idx  INTEGER NOT NULL,
+                   lexeme_id  INTEGER REFERENCES lang_lexicon(id) ON DELETE SET NULL,
+                   pass       TEXT NOT NULL,
+                   at         DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(run_id, episode_id, line_idx, token_idx, pass)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_reveal_events_run ON lang_reveal_events(run_id)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_item_attempts (
+                   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id        INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step          TEXT NOT NULL,
+                   game_kind     TEXT NOT NULL,
+                   item_ref      TEXT NOT NULL,
+                   expected_json TEXT,
+                   given_json    TEXT,
+                   correct       INTEGER,
+                   ms            INTEGER,
+                   at            DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(run_id, step, item_ref)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_item_attempts_run ON lang_item_attempts(run_id)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_second_wave_ratings (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE CASCADE,
+                   line_idx   INTEGER NOT NULL,
+                   typed      TEXT,
+                   rating     TEXT NOT NULL,
+                   UNIQUE(run_id, episode_id, line_idx)
+               )"""
+        )
+        # ── Acquis (D12-D15) ─────────────────────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_lexicon (
+                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id       INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   form             TEXT NOT NULL,
+                   lemma            TEXT NOT NULL,
+                   translation      TEXT NOT NULL DEFAULT '',
+                   pos              TEXT,
+                   gender           TEXT,
+                   pron             TEXT,
+                   vocalized        TEXT,
+                   transparent      INTEGER NOT NULL DEFAULT 0,
+                   first_episode_n  INTEGER,
+                   last_episode_n   INTEGER,
+                   episodes_seen    INTEGER NOT NULL DEFAULT 0,
+                   exposures        INTEGER NOT NULL DEFAULT 0,
+                   reveals          INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ok  INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ko  INTEGER NOT NULL DEFAULT 0,
+                   acquired_at      DATETIME,
+                   card_id          INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+                   UNIQUE(profile_id, lemma)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_lexicon_form ON lang_lexicon(profile_id, form)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_script_progress (
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   script          TEXT NOT NULL,
+                   unit_key        TEXT NOT NULL,
+                   exposures       INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ok INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ko INTEGER NOT NULL DEFAULT 0,
+                   episodes_seen   INTEGER NOT NULL DEFAULT 0,
+                   last_episode_n  INTEGER,
+                   acquired_at     DATETIME,
+                   PRIMARY KEY (profile_id, script, unit_key)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_program_progress (
+                   profile_id           INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   point_id             TEXT NOT NULL,
+                   status               TEXT NOT NULL,
+                   introduced_episode_n INTEGER,
+                   consolidated_at      DATETIME,
+                   PRIMARY KEY (profile_id, point_id)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_level_history (
+                   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id    INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   at            DATETIME DEFAULT (datetime('now')),
+                   cefr          TEXT NOT NULL,
+                   program_order INTEGER NOT NULL,
+                   source        TEXT NOT NULL
+               )"""
+        )
+        # ── Qualité du contenu (D16-D17) ─────────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_vocalized_forms (
+                   language         TEXT NOT NULL,
+                   bare             TEXT NOT NULL,
+                   stem_vocalized   TEXT NOT NULL,
+                   status           TEXT NOT NULL DEFAULT 'candidat',
+                   first_episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   occurrences      INTEGER NOT NULL DEFAULT 1,
+                   reports          INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (language, bare, stem_vocalized)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_reports (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   line_idx   INTEGER,
+                   token_idx  INTEGER,
+                   kind       TEXT NOT NULL,
+                   comment    TEXT NOT NULL DEFAULT '',
+                   status     TEXT NOT NULL DEFAULT 'ouvert',
+                   created_at DATETIME DEFAULT (datetime('now'))
+               )"""
+        )
+        # ── Activité et analyse (D18-D19) ────────────────────────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_daily_activity (
+                   profile_id        INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   study_date        TEXT NOT NULL,
+                   effective_seconds INTEGER NOT NULL DEFAULT 0,
+                   runs_completed    INTEGER NOT NULL DEFAULT 0,
+                   rereads           INTEGER NOT NULL DEFAULT 0,
+                   cards_reviewed    INTEGER NOT NULL DEFAULT 0,
+                   reveals           INTEGER NOT NULL DEFAULT 0,
+                   items_answered    INTEGER NOT NULL DEFAULT 0,
+                   first_start_local TEXT,
+                   counted           INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (profile_id, study_date)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_weekly_analysis (
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   week_start      TEXT NOT NULL,
+                   aggregates_json TEXT NOT NULL,
+                   analysis_json   TEXT,
+                   status          TEXT NOT NULL DEFAULT 'pending',
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   PRIMARY KEY (profile_id, week_start)
+               )"""
+        )
+        # ── Colonnes ajoutées à lang_profiles (D20) ──────────────────────────
+        # `flow` : 'legacy' par défaut — aucune ligne existante ne change de flux
+        # dans la migration. Les compteurs partent de 0 (aucun épisode joué).
+        _ensure_column(conn, "lang_profiles", "flow", "TEXT DEFAULT 'legacy'")
+        _ensure_column(conn, "lang_profiles", "episode_n", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "program_order", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "ladder_step", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "interests_json", "TEXT")
+        _ensure_column(conn, "lang_profiles", "onboarding_done", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "second_wave_started", "INTEGER DEFAULT 0")
+        # Hors liste du plan, nécessaires à l'assembleur : épisode après lequel
+        # le dernier bilan a eu lieu, respiration imposée après une reprise, et
+        # file d'épisodes à relire quand l'apprenant accepte de reculer (§ 14.2).
+        _ensure_column(conn, "lang_profiles", "last_bilan_episode_n", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "force_respiration", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "lang_profiles", "replay_queue_json", "TEXT")
+    logger.info("Migration SQLite v35 terminée")
+
+
+def _migrate_to_v36(conn) -> None:
+    """Feuilleton : langue d'explication du profil (`explain_lang`).
+
+    Gemma écrivait tout en français, même pour une interface en anglais. La
+    langue est désormais choisie au début du parcours (services/lang_runs.
+    onboarding) puis figée. Les profils existants ont été écrits en français :
+    'fr' par défaut, leur contenu reste cohérent."""
+    logger.info("Migration SQLite v36 démarrée")
+    with conn:
+        _ensure_column(conn, "lang_profiles", "explain_lang", "TEXT DEFAULT 'fr'")
+    logger.info("Migration SQLite v36 terminée")

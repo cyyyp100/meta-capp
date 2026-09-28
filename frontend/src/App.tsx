@@ -14,6 +14,7 @@ const Flashcards = lazy(() => import("./routes/Flashcards").then((m) => ({ defau
 const Quiz = lazy(() => import("./routes/Quiz").then((m) => ({ default: m.Quiz })));
 const Lang = lazy(() => import("./routes/Lang").then((m) => ({ default: m.Lang })));
 const LangLesson = lazy(() => import("./routes/LangLesson").then((m) => ({ default: m.LangLesson })));
+const LangEpisode = lazy(() => import("./routes/LangEpisode").then((m) => ({ default: m.LangEpisode })));
 const Brainstorming = lazy(() => import("./routes/Brainstorming").then((m) => ({ default: m.Brainstorming })));
 const Reader = lazy(() => import("./routes/Reader").then((m) => ({ default: m.Reader })));
 const Progress = lazy(() => import("./routes/Progress").then((m) => ({ default: m.Progress })));
@@ -59,6 +60,8 @@ export function App() {
         {/* Le Reader et la séance de langue sont plein écran (pas de barre latérale). */}
         <Route path="/reader/:docId" element={<Reader />} />
         <Route path="/lang/lesson" element={<LangLesson />} />
+        {/* Méthode « feuilleton » : langues du pilote (plan de refonte, § 15.2). */}
+        <Route path="/lang/episode" element={<LangEpisode />} />
       </Routes>
     </Suspense>
   );

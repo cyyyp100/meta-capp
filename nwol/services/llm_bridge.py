@@ -19,7 +19,8 @@ logger = logging.getLogger("services.llm_bridge")
 DEFAULT_WAIT_S = 90.0
 
 
-def run_llm_sync(call: Callable[[Callable, Callable], None], timeout: float | None = None) -> Any:
+def run_llm_sync(call: Callable[[Callable, Callable], None], timeout: float | None = None,
+                 queue_wait_s: float | None = None) -> Any:
     """`call(on_success, on_error)` lance le LLM ; renvoie le résultat ou lève.
 
     Le temps d'attente n'est PAS choisi ici : la fonction `*_async` publie dans
@@ -29,27 +30,39 @@ def run_llm_sync(call: Callable[[Callable, Callable], None], timeout: float | No
     jeter une génération sur le point d'aboutir, attendre plus longtemps était
     une échéance que personne n'atteignait jamais.
 
+    `queue_wait_s` (appelants de FOND : épisode de langue, analyse
+    hebdomadaire) : le budget ne part qu'au moment où le worker prend la
+    tâche, et l'attente en file est bornée à part par ce nombre. Sans lui (un
+    endpoint que l'utilisateur attend), la file compte dans le budget : mieux
+    vaut une erreur qu'un écran qui attend indéfiniment.
+
     Sur timeout, on lève le drapeau d'abandon : il n'y a qu'UN worker LLM, et
     une tâche encore en file dont plus personne ne veut le résultat retarderait
     tout ce qui suit.
     """
     box: dict[str, Any] = {}
     done = threading.Event()
+    slot = open_caller_slot()
 
     def on_success(result: Any) -> None:
         box["result"] = result
         done.set()
+        slot.started.set()
 
     def on_error(message: Any) -> None:
         box["error"] = str(message)
         done.set()
+        slot.started.set()
 
-    slot = open_caller_slot()
     try:
         call(on_success, on_error)
     finally:
         close_caller_slot()
 
+    if queue_wait_s is not None and not slot.started.wait(queue_wait_s):
+        slot.abandon.set()
+        logger.warning("LLM : tâche restée %.0f s en file sans partir — abandonnée", queue_wait_s)
+        raise TimeoutError("LLM : file d'attente")
     wait_s = slot.timeout_s or timeout or DEFAULT_WAIT_S
     if not done.wait(wait_s):
         slot.abandon.set()

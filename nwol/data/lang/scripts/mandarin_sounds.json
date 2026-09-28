@@ -1,0 +1,587 @@
+{
+ "script": "mandarin_sounds",
+ "version": 1,
+ "note": "Sons du mandarin (pinyin) : initiales, finales, tons, règles de sandhi et paires de confusion utilisées par les jeux visuels. Les descriptions sont des repères pour un francophone, pas une transcription phonétique.",
+ "initials": [
+  {
+   "id": "zh.i.b",
+   "pinyin": "b",
+   "display": "b",
+   "description": "b sans souffle, entre b et p",
+   "example": "爸 bà",
+   "order": 1
+  },
+  {
+   "id": "zh.i.p",
+   "pinyin": "p",
+   "display": "p",
+   "description": "p soufflé",
+   "example": "跑 pǎo",
+   "order": 2
+  },
+  {
+   "id": "zh.i.m",
+   "pinyin": "m",
+   "display": "m",
+   "description": "m",
+   "example": "妈 mā",
+   "order": 3
+  },
+  {
+   "id": "zh.i.f",
+   "pinyin": "f",
+   "display": "f",
+   "description": "f",
+   "example": "饭 fàn",
+   "order": 4
+  },
+  {
+   "id": "zh.i.d",
+   "pinyin": "d",
+   "display": "d",
+   "description": "d sans souffle, proche de t",
+   "example": "大 dà",
+   "order": 5
+  },
+  {
+   "id": "zh.i.t",
+   "pinyin": "t",
+   "display": "t",
+   "description": "t soufflé",
+   "example": "他 tā",
+   "order": 6
+  },
+  {
+   "id": "zh.i.n",
+   "pinyin": "n",
+   "display": "n",
+   "description": "n",
+   "example": "你 nǐ",
+   "order": 7
+  },
+  {
+   "id": "zh.i.l",
+   "pinyin": "l",
+   "display": "l",
+   "description": "l",
+   "example": "来 lái",
+   "order": 8
+  },
+  {
+   "id": "zh.i.g",
+   "pinyin": "g",
+   "display": "g",
+   "description": "g sans souffle, proche de k",
+   "example": "哥 gē",
+   "order": 9
+  },
+  {
+   "id": "zh.i.k",
+   "pinyin": "k",
+   "display": "k",
+   "description": "k soufflé",
+   "example": "口 kǒu",
+   "order": 10
+  },
+  {
+   "id": "zh.i.h",
+   "pinyin": "h",
+   "display": "h",
+   "description": "h raclé, comme la jota",
+   "example": "好 hǎo",
+   "order": 11
+  },
+  {
+   "id": "zh.i.j",
+   "pinyin": "j",
+   "display": "j",
+   "description": "tch mouillé, langue contre les dents du bas",
+   "example": "家 jiā",
+   "order": 12
+  },
+  {
+   "id": "zh.i.q",
+   "pinyin": "q",
+   "display": "q",
+   "description": "tch mouillé et soufflé",
+   "example": "去 qù",
+   "order": 13
+  },
+  {
+   "id": "zh.i.x",
+   "pinyin": "x",
+   "display": "x",
+   "description": "ch mouillé, sourire",
+   "example": "小 xiǎo",
+   "order": 14
+  },
+  {
+   "id": "zh.i.zh",
+   "pinyin": "zh",
+   "display": "zh",
+   "description": "dj rétroflexe, pointe de la langue relevée",
+   "example": "中 zhōng",
+   "order": 15
+  },
+  {
+   "id": "zh.i.ch",
+   "pinyin": "ch",
+   "display": "ch",
+   "description": "tch rétroflexe soufflé",
+   "example": "吃 chī",
+   "order": 16
+  },
+  {
+   "id": "zh.i.sh",
+   "pinyin": "sh",
+   "display": "sh",
+   "description": "ch rétroflexe",
+   "example": "是 shì",
+   "order": 17
+  },
+  {
+   "id": "zh.i.r",
+   "pinyin": "r",
+   "display": "r",
+   "description": "j rétroflexe, proche du r anglais",
+   "example": "人 rén",
+   "order": 18
+  },
+  {
+   "id": "zh.i.z",
+   "pinyin": "z",
+   "display": "z",
+   "description": "dz",
+   "example": "在 zài",
+   "order": 19
+  },
+  {
+   "id": "zh.i.c",
+   "pinyin": "c",
+   "display": "c",
+   "description": "ts soufflé",
+   "example": "菜 cài",
+   "order": 20
+  },
+  {
+   "id": "zh.i.s",
+   "pinyin": "s",
+   "display": "s",
+   "description": "s",
+   "example": "四 sì",
+   "order": 21
+  },
+  {
+   "id": "zh.i.y",
+   "pinyin": "y",
+   "display": "y",
+   "description": "y (i en début de syllabe)",
+   "example": "有 yǒu",
+   "order": 22
+  },
+  {
+   "id": "zh.i.w",
+   "pinyin": "w",
+   "display": "w",
+   "description": "w (u en début de syllabe)",
+   "example": "我 wǒ",
+   "order": 23
+  }
+ ],
+ "finals": [
+  {
+   "id": "zh.f.a",
+   "pinyin": "a",
+   "display": "a",
+   "description": "a ouvert",
+   "order": 1
+  },
+  {
+   "id": "zh.f.o",
+   "pinyin": "o",
+   "display": "o",
+   "description": "o, suivi d'un léger ou",
+   "order": 2
+  },
+  {
+   "id": "zh.f.e",
+   "pinyin": "e",
+   "display": "e",
+   "description": "e fermé du fond de la gorge, entre eu et o",
+   "order": 3
+  },
+  {
+   "id": "zh.f.i",
+   "pinyin": "i",
+   "display": "i",
+   "description": "i ; après z c s zh ch sh r, voyelle bourdonnée",
+   "order": 4
+  },
+  {
+   "id": "zh.f.u",
+   "pinyin": "u",
+   "display": "u",
+   "description": "ou",
+   "order": 5
+  },
+  {
+   "id": "zh.f.v",
+   "pinyin": "ü",
+   "display": "ü",
+   "description": "u français (écrit u après j q x y)",
+   "order": 6
+  },
+  {
+   "id": "zh.f.ai",
+   "pinyin": "ai",
+   "display": "ai",
+   "description": "aï",
+   "order": 7
+  },
+  {
+   "id": "zh.f.ei",
+   "pinyin": "ei",
+   "display": "ei",
+   "description": "eï",
+   "order": 8
+  },
+  {
+   "id": "zh.f.ao",
+   "pinyin": "ao",
+   "display": "ao",
+   "description": "ao, comme dans cacao",
+   "order": 9
+  },
+  {
+   "id": "zh.f.ou",
+   "pinyin": "ou",
+   "display": "ou",
+   "description": "o-ou",
+   "order": 10
+  },
+  {
+   "id": "zh.f.an",
+   "pinyin": "an",
+   "display": "an",
+   "description": "ann, n dental",
+   "order": 11
+  },
+  {
+   "id": "zh.f.en",
+   "pinyin": "en",
+   "display": "en",
+   "description": "eunn",
+   "order": 12
+  },
+  {
+   "id": "zh.f.ang",
+   "pinyin": "ang",
+   "display": "ang",
+   "description": "ang, n du fond de la gorge",
+   "order": 13
+  },
+  {
+   "id": "zh.f.eng",
+   "pinyin": "eng",
+   "display": "eng",
+   "description": "eung",
+   "order": 14
+  },
+  {
+   "id": "zh.f.ong",
+   "pinyin": "ong",
+   "display": "ong",
+   "description": "oung",
+   "order": 15
+  },
+  {
+   "id": "zh.f.er",
+   "pinyin": "er",
+   "display": "er",
+   "description": "eur rétroflexe",
+   "order": 16
+  },
+  {
+   "id": "zh.f.ia",
+   "pinyin": "ia",
+   "display": "ia",
+   "description": "ia",
+   "order": 17
+  },
+  {
+   "id": "zh.f.ie",
+   "pinyin": "ie",
+   "display": "ie",
+   "description": "yé",
+   "order": 18
+  },
+  {
+   "id": "zh.f.iao",
+   "pinyin": "iao",
+   "display": "iao",
+   "description": "yao",
+   "order": 19
+  },
+  {
+   "id": "zh.f.iu",
+   "pinyin": "iu",
+   "display": "iu",
+   "description": "yo-ou (écrit iu, prononcé iou)",
+   "order": 20
+  },
+  {
+   "id": "zh.f.ian",
+   "pinyin": "ian",
+   "display": "ian",
+   "description": "yenn (a fermé en é)",
+   "order": 21
+  },
+  {
+   "id": "zh.f.in",
+   "pinyin": "in",
+   "display": "in",
+   "description": "inn",
+   "order": 22
+  },
+  {
+   "id": "zh.f.iang",
+   "pinyin": "iang",
+   "display": "iang",
+   "description": "yang",
+   "order": 23
+  },
+  {
+   "id": "zh.f.ing",
+   "pinyin": "ing",
+   "display": "ing",
+   "description": "ing",
+   "order": 24
+  },
+  {
+   "id": "zh.f.iong",
+   "pinyin": "iong",
+   "display": "iong",
+   "description": "yong",
+   "order": 25
+  },
+  {
+   "id": "zh.f.ua",
+   "pinyin": "ua",
+   "display": "ua",
+   "description": "oua",
+   "order": 26
+  },
+  {
+   "id": "zh.f.uo",
+   "pinyin": "uo",
+   "display": "uo",
+   "description": "ouo",
+   "order": 27
+  },
+  {
+   "id": "zh.f.uai",
+   "pinyin": "uai",
+   "display": "uai",
+   "description": "ouaï",
+   "order": 28
+  },
+  {
+   "id": "zh.f.ui",
+   "pinyin": "ui",
+   "display": "ui",
+   "description": "oueï (écrit ui)",
+   "order": 29
+  },
+  {
+   "id": "zh.f.uan",
+   "pinyin": "uan",
+   "display": "uan",
+   "description": "ouann",
+   "order": 30
+  },
+  {
+   "id": "zh.f.un",
+   "pinyin": "un",
+   "display": "un",
+   "description": "ouenn (écrit un)",
+   "order": 31
+  },
+  {
+   "id": "zh.f.uang",
+   "pinyin": "uang",
+   "display": "uang",
+   "description": "ouang",
+   "order": 32
+  },
+  {
+   "id": "zh.f.ve",
+   "pinyin": "üe",
+   "display": "üe",
+   "description": "uè (écrit ue après j q x y)",
+   "order": 33
+  },
+  {
+   "id": "zh.f.van",
+   "pinyin": "üan",
+   "display": "üan",
+   "description": "uènn (écrit uan après j q x y)",
+   "order": 34
+  },
+  {
+   "id": "zh.f.vn",
+   "pinyin": "ün",
+   "display": "ün",
+   "description": "unn (écrit un après j q x y)",
+   "order": 35
+  }
+ ],
+ "tones": [
+  {
+   "id": "zh.t.1",
+   "pinyin": "ā",
+   "display": "ā",
+   "tone": 1,
+   "name": "1er ton",
+   "description": "haut et plat, comme une note tenue",
+   "example": "妈 mā (maman)",
+   "order": 1
+  },
+  {
+   "id": "zh.t.2",
+   "pinyin": "á",
+   "display": "á",
+   "tone": 2,
+   "name": "2e ton",
+   "description": "montant, comme une question étonnée",
+   "example": "麻 má (chanvre)",
+   "order": 2
+  },
+  {
+   "id": "zh.t.3",
+   "pinyin": "ǎ",
+   "display": "ǎ",
+   "tone": 3,
+   "name": "3e ton",
+   "description": "bas ; descend puis remonte en fin de phrase",
+   "example": "马 mǎ (cheval)",
+   "order": 3
+  },
+  {
+   "id": "zh.t.4",
+   "pinyin": "à",
+   "display": "à",
+   "tone": 4,
+   "name": "4e ton",
+   "description": "descendant et bref, comme un ordre",
+   "example": "骂 mà (gronder)",
+   "order": 4
+  },
+  {
+   "id": "zh.t.5",
+   "pinyin": "a",
+   "display": "a",
+   "tone": 5,
+   "name": "ton neutre",
+   "description": "léger et court, sans marque",
+   "example": "吗 ma (particule interrogative)",
+   "order": 5
+  }
+ ],
+ "sandhi": [
+  {
+   "id": "tone3",
+   "rule": "Deux 3e tons de suite : le premier se prononce au 2e ton.",
+   "example": "你好 nǐ hǎo -> ní hǎo"
+  },
+  {
+   "id": "yi",
+   "rule": "一 yī se prononce yí devant un 4e ton, yì devant un 1er, 2e ou 3e ton ; il reste yī seul, en fin de groupe, dans un nombre et après 第.",
+   "example": "一个 yí ge ; 一天 yì tiān ; 第一 dì yī"
+  },
+  {
+   "id": "bu",
+   "rule": "不 bù se prononce bú devant un 4e ton.",
+   "example": "不是 bú shì ; 不好 bù hǎo"
+  }
+ ],
+ "confusions": [
+  [
+   "zh",
+   "j"
+  ],
+  [
+   "ch",
+   "q"
+  ],
+  [
+   "sh",
+   "x"
+  ],
+  [
+   "z",
+   "zh"
+  ],
+  [
+   "c",
+   "ch"
+  ],
+  [
+   "s",
+   "sh"
+  ],
+  [
+   "r",
+   "l"
+  ],
+  [
+   "u",
+   "ü"
+  ],
+  [
+   "an",
+   "ang"
+  ],
+  [
+   "en",
+   "eng"
+  ],
+  [
+   "in",
+   "ing"
+  ],
+  [
+   "ian",
+   "iang"
+  ],
+  [
+   "uan",
+   "uang"
+  ],
+  [
+   "ie",
+   "üe"
+  ],
+  [
+   "ou",
+   "uo"
+  ],
+  [
+   "ei",
+   "ai"
+  ]
+ ],
+ "tone_confusions": [
+  [
+   2,
+   3
+  ],
+  [
+   1,
+   4
+  ],
+  [
+   3,
+   4
+  ]
+ ]
+}

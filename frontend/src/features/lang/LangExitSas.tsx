@@ -23,7 +23,7 @@ export function LangExitSas({
   lessonId: number;
   durationS: number;
   exerciseCount: number;
-  score: number; // 0–1
+  score: number | null; // 0–1 ; null = rien n'a été noté
   onClose: () => void;
 }) {
   const t = useT();
@@ -65,7 +65,7 @@ export function LangExitSas({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, margin: "18px 0" }}>
           <Metric label={t("exit.duration")} value={formatDuration(durationS)} />
           <Metric label={t("lang.exit_exercises")} value={String(exerciseCount)} />
-          <Metric label={t("exit.success")} value={`${Math.round(score * 100)}%`} />
+          <Metric label={t("exit.success")} value={score === null ? "—" : `${Math.round(score * 100)}%`} />
         </div>
 
         {skillRows.length > 0 && (

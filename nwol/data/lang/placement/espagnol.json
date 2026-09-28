@@ -1,0 +1,295 @@
+{
+ "language": "espagnol",
+ "version": 1,
+ "reviewed": false,
+ "note": "Test de niveau statique : clés écrites à la main, corrigé déterministe. Un item réussi vaut le point du programme indiqué ; le départ est fixé au dernier point réussi de façon consécutive, moins une marge (LANG_PLACEMENT_SAFETY_MARGIN).",
+ "items": [
+  {
+   "id": "es.p01",
+   "cefr": "A1",
+   "program_point": "es.a1.ser_identidad",
+   "kind": "qcm",
+   "prompt": "Yo ___ francés.",
+   "choices": [
+    "soy",
+    "estoy",
+    "eres",
+    "es"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p02",
+   "cefr": "A1",
+   "program_point": "es.a1.estar_lugar",
+   "kind": "lecture",
+   "prompt": "« ¿Dónde está la estación? » On demande…",
+   "choices": [
+    "l'heure du train",
+    "où se trouve la gare",
+    "le prix du billet",
+    "le nom de la gare"
+   ],
+   "answer": 1,
+   "prompt_en": "“¿Dónde está la estación?” The person is asking…",
+   "choices_en": [
+    "the time of the train",
+    "where the station is",
+    "the price of the ticket",
+    "the name of the station"
+   ]
+  },
+  {
+   "id": "es.p03",
+   "cefr": "A1",
+   "program_point": "es.a1.gustar",
+   "kind": "qcm",
+   "prompt": "A mí me ___ los perros.",
+   "choices": [
+    "gusta",
+    "gustan",
+    "gusto",
+    "gustas"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p04",
+   "cefr": "A1",
+   "program_point": "es.a1.e_ie",
+   "kind": "qcm",
+   "prompt": "Nosotros ___ ir al cine esta noche. (querer)",
+   "choices": [
+    "quieremos",
+    "queremos",
+    "quiero",
+    "quieren"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p05",
+   "cefr": "A1",
+   "program_point": "es.a1.ser_estar_1",
+   "kind": "qcm",
+   "prompt": "¡Cuidado! La sopa ___ muy caliente.",
+   "choices": [
+    "es",
+    "está",
+    "hay",
+    "son"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p06",
+   "cefr": "A2",
+   "program_point": "es.a2.indefinido_ar",
+   "kind": "qcm",
+   "prompt": "El año pasado ___ a México por primera vez.",
+   "choices": [
+    "viajé",
+    "viajaba",
+    "viajo",
+    "viajaré"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p07",
+   "cefr": "A2",
+   "program_point": "es.a2.participios_irreg",
+   "kind": "qcm",
+   "prompt": "¿Quién ha ___ la ventana?",
+   "choices": [
+    "abierto",
+    "abrido",
+    "abrió",
+    "abre"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p08",
+   "cefr": "A2",
+   "program_point": "es.a2.doble_pronombre",
+   "kind": "qcm",
+   "prompt": "¿El libro? Ya ___ he dado a Juan.",
+   "choices": [
+    "se lo",
+    "le lo",
+    "lo le",
+    "se le"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p09",
+   "cefr": "A2",
+   "program_point": "es.a2.subj_deseo",
+   "kind": "qcm",
+   "prompt": "Quiero que tú ___ conmigo a la fiesta.",
+   "choices": [
+    "vienes",
+    "vengas",
+    "venir",
+    "vendrás"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p10",
+   "cefr": "B1",
+   "program_point": "es.b1.subj_duda",
+   "kind": "qcm",
+   "prompt": "No creo que ___ razón.",
+   "choices": [
+    "tienes",
+    "tengas",
+    "tener",
+    "tendrás"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p11",
+   "cefr": "B1",
+   "program_point": "es.b1.si_hipotetico",
+   "kind": "qcm",
+   "prompt": "Si ___ más dinero, me compraría una casa en la playa.",
+   "choices": [
+    "tengo",
+    "tendría",
+    "tuviera",
+    "tenga"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "es.p12",
+   "cefr": "B1",
+   "program_point": "es.b1.estilo_indirecto_pasado",
+   "kind": "qcm",
+   "prompt": "« Vendré mañana. » → Me dijo que ___ al día siguiente.",
+   "choices": [
+    "viene",
+    "vendría",
+    "venga",
+    "vino"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p13",
+   "cefr": "B1",
+   "program_point": "es.b1.como_si",
+   "kind": "qcm",
+   "prompt": "Habla como si ___ el jefe.",
+   "choices": [
+    "es",
+    "sea",
+    "fuera",
+    "será"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "es.p14",
+   "cefr": "B2",
+   "program_point": "es.b2.si_irreal_pasado",
+   "kind": "qcm",
+   "prompt": "Si lo ___ sabido, te habría avisado.",
+   "choices": [
+    "hubiera",
+    "habría",
+    "había",
+    "haya"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p15",
+   "cefr": "B2",
+   "program_point": "es.b2.cuyo",
+   "kind": "qcm",
+   "prompt": "El autor ___ novela leí ayer es chileno.",
+   "choices": [
+    "cuya",
+    "cuyo",
+    "que su",
+    "del cual"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p16",
+   "cefr": "B2",
+   "program_point": "es.b2.valoracion_2",
+   "kind": "qcm",
+   "prompt": "No es que no ___, es que no puedo.",
+   "choices": [
+    "quiero",
+    "quiera",
+    "querría",
+    "quise"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "es.p17",
+   "cefr": "C1",
+   "program_point": "es.c1.dequeismo",
+   "kind": "qcm",
+   "prompt": "Me acuerdo ___ aquel día llovía mucho.",
+   "choices": [
+    "de que",
+    "que",
+    "de",
+    "en que"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "es.p18",
+   "cefr": "C1",
+   "program_point": "es.c1.futuro_concesivo",
+   "kind": "lecture",
+   "prompt": "« Será muy listo, pero no sabe escuchar. » Ici, « será » veut dire…",
+   "choices": [
+    "il sera intelligent plus tard",
+    "il est peut-être intelligent, je l'admets",
+    "il était intelligent",
+    "il faut qu'il soit intelligent"
+   ],
+   "answer": 1,
+   "prompt_en": "“Será muy listo, pero no sabe escuchar.” Here, “será” means…",
+   "choices_en": [
+    "he will be clever later",
+    "he may well be clever, I grant that",
+    "he was clever",
+    "he has to be clever"
+   ]
+  },
+  {
+   "id": "es.p19",
+   "cefr": "C1",
+   "program_point": "es.c1.condicional_rumor",
+   "kind": "lecture",
+   "prompt": "Titre de presse : « El ministro habría dimitido esta mañana. » Cela signifie…",
+   "choices": [
+    "le ministre a démissionné, c'est confirmé",
+    "le ministre aurait démissionné (information non confirmée)",
+    "le ministre doit démissionner",
+    "le ministre démissionnerait s'il le pouvait"
+   ],
+   "answer": 1,
+   "prompt_en": "Newspaper headline: “El ministro habría dimitido esta mañana.” This means…",
+   "choices_en": [
+    "the minister resigned, it is confirmed",
+    "the minister reportedly resigned (unconfirmed news)",
+    "the minister must resign",
+    "the minister would resign if he could"
+   ]
+  }
+ ]
+}

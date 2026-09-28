@@ -102,10 +102,11 @@ def test_writing_phase_plan_uses_script_types(client):
 # ── Séance complète + flashcards de vocabulaire ───────────────────────────────
 
 def test_full_lesson_flow_and_vocab_flashcards(client, monkeypatch):
+    # Langue hors pilote : le flux hérité (l'anglais joue désormais le feuilleton).
     _patch_lesson_llm(monkeypatch)
-    client.post("/api/lang/placement/skip", json={"language": "anglais"})
+    client.post("/api/lang/placement/skip", json={"language": "italien"})
 
-    start = client.post("/api/lang/lesson/start", json={"language": "anglais"}).json()
+    start = client.post("/api/lang/lesson/start", json={"language": "italien"}).json()
     lesson_id = start["lesson_id"]
     assert start["index"] == 0 and start["exercise"]["kind"] == "vocabulary"
     assert len(start["plan"]) == 10
@@ -133,15 +134,15 @@ def test_full_lesson_flow_and_vocab_flashcards(client, monkeypatch):
     # verso = langue cible, dédupliquées (1 carte). La prononciation a sa propre
     # colonne : le verso reste la réponse attendue, sans transcription collée.
     rows = get_connection().execute(
-        "SELECT front, back, source, pronunciation FROM flashcards WHERE language='anglais'"
+        "SELECT front, back, source, pronunciation FROM flashcards WHERE language='italien'"
     ).fetchall()
     assert len(rows) == 1
-    assert rows[0]["front"] == "bientôt en anglais" and rows[0]["back"] == "soon"
+    assert rows[0]["front"] == "bientôt en italien" and rows[0]["back"] == "soon"
     assert rows[0]["source"] == "lang_vocab"
     assert rows[0]["pronunciation"] == "suːn"
 
     # Et elle arrive jusqu'au warm-up du sas d'entrée de la séance suivante.
-    cards = client.get("/api/lang/warmup-cards", params={"language": "anglais"}).json()
+    cards = client.get("/api/lang/warmup-cards", params={"language": "italien"}).json()
     assert [c["pronunciation"] for c in cards] == ["suːn"]
 
 

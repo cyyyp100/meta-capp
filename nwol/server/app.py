@@ -49,6 +49,11 @@ async def _lifespan(_app: FastAPI):
     from services.onboarding import reconcile_demo_document
 
     reconcile_demo_document()
+    # Module langues : programmes et registres réinjectés s'ils ont changé
+    # (D23), épisodes interrompus en pleine génération remis en file (G20).
+    from services.lang_runs import on_startup as lang_on_startup
+
+    lang_on_startup()
     logger.info("Serveur Meta-Capp prêt (v%s).", APP_VERSION)
     yield
 

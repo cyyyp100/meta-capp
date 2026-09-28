@@ -242,10 +242,10 @@ def get_skill_scores(profile_id: int) -> dict[str, dict]:
     """
     conn = get_connection()
     rows = conn.execute(
-        """SELECT t.skill AS skill, AVG(s.score) AS avg01, COUNT(*) AS n
+        """SELECT t.skill AS skill, AVG(s.score) AS avg01, COUNT(s.score) AS n
            FROM lang_sessions s
            JOIN lang_session_types t ON t.code = s.session_type
-           WHERE s.profile_id=?
+           WHERE s.profile_id=? AND s.score IS NOT NULL
            GROUP BY t.skill""",
         (profile_id,),
     ).fetchall()
@@ -505,14 +505,15 @@ def get_lang_lesson(lesson_id: int) -> dict | None:
     return d
 
 
-def complete_lang_lesson(lesson_id: int, *, score: float, duration_s: int) -> None:
+def complete_lang_lesson(lesson_id: int, *, score: float | None, duration_s: int) -> None:
+    """`score` 0–100, ou None si aucun exercice n'a été noté (K1)."""
     conn = get_connection()
     with conn:
         conn.execute(
             """UPDATE lang_lessons
                SET status='completed', score=?, duration_s=?, completed_at=datetime('now')
                WHERE id=?""",
-            (float(score or 0.0), int(duration_s or 0), lesson_id),
+            (float(score) if score is not None else None, int(duration_s or 0), lesson_id),
         )
 
 
@@ -532,16 +533,22 @@ def save_lang_exercise(
     slot_index: int,
     temps: str,
     session_type: str,
-    score: float,
+    score: float | None,
 ) -> None:
-    """Trace un exercice joué dans lang_sessions (grain compétence + rattachement séance)."""
+    """Trace un exercice joué dans lang_sessions (grain compétence + rattachement séance).
+
+    `score` None = rien n'a été noté : la ligne compte pour la répartition des
+    compétences, mais pas dans les moyennes (AVG SQL ignore NULL)."""
     conn = get_connection()
     with conn:
         conn.execute(
             """INSERT INTO lang_sessions
                (profile_id, lesson_n, duration_s, score, session_type, lesson_id, slot_index, temps)
                VALUES (?, ?, 0, ?, ?, ?, ?, ?)""",
-            (profile_id, lesson_n, float(score or 0.0), session_type, lesson_id, slot_index, temps),
+            (
+                profile_id, lesson_n, float(score) if score is not None else None,
+                session_type, lesson_id, slot_index, temps,
+            ),
         )
 
 
@@ -708,14 +715,14 @@ def get_lang_progress(profile_id: int) -> dict:
     ).fetchall()
     lesson_scores = [r["score"] for r in lessons if r["score"] is not None]
     avg_lesson = sum(lesson_scores) / len(lesson_scores) if lesson_scores else 0.0
-    avg_score = (
-        sum(s["score"] for s in sessions if s["score"] is not None) / len(sessions)
-        if sessions else 0.0
-    )
+    # Les exercices non notés (NULL) ne comptent ni au numérateur ni au
+    # dénominateur : avant, ils tiraient la moyenne vers 0 (K1).
+    scored = [s["score"] for s in sessions if s["score"] is not None]
+    avg_score = sum(scored) / len(scored) if scored else 0.0
     return {
         "sessions": sessions,
         "total_sessions": len(sessions),
         "total_lessons": len(lessons),
-        "avg_score": avg_lesson if lessons else avg_score,
+        "avg_score": avg_lesson if lesson_scores else avg_score,
         "avg_exercise_score": avg_score,
     }

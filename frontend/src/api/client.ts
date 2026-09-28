@@ -1,5 +1,19 @@
 // client.ts — Appels typés à l'API locale. Chemins /api relatifs : fonctionnent
 // en dev (proxy Vite) comme en prod (FastAPI sert le bundle, même origine).
+import type {
+  DiffOp,
+  EpisodeNote,
+  EpisodeView,
+  EventsResult,
+  FeuilletonStatus,
+  LibraryEntry,
+  PlacementItemView,
+  PlacementOutcome,
+  PointView,
+  RunCompletion,
+  RunEvent,
+  RunPlan,
+} from "./feuilleton";
 import { extraTokenParam } from "./security";
 import type {
   DocumentDetail,
@@ -208,7 +222,40 @@ export const api = {
   // d'une session, plus à l'ouverture de l'app (cf. nwol/db/user.py).
   streak: () => getJSON<StudyStreak>("/api/streak"),
   languages: () =>
-    getJSON<{ code: string; label: string; flag: string; script?: string; rtl?: boolean }[]>("/api/lang/languages"),
+    getJSON<{ code: string; label: string; flag: string; script?: string; rtl?: boolean; flow?: "feuilleton" | "legacy" }[]>(
+      "/api/lang/languages",
+    ),
+  // ── Méthode « feuilleton » (langues du pilote) ─────────────────────────────
+  // Aucun de ces appels n'attend Gemma : le serveur répond tout de suite, la
+  // génération des épisodes tourne en tâche de fond.
+  feuilletonStatus: (language: string) =>
+    getJSON<FeuilletonStatus>(`/api/lang/${encodeURIComponent(language)}/status`),
+  feuilletonOnboarding: (language: string, interests: string[], hasStudied: boolean) =>
+    postJSON<{ ok: boolean; next: "zero" | "placement" | "home" }>(`/api/lang/${encodeURIComponent(language)}/onboarding`, {
+      interests,
+      has_studied: hasStudied,
+    }),
+  feuilletonPlacement: (language: string) =>
+    getJSON<{ items: PlacementItemView[] }>(`/api/lang/${encodeURIComponent(language)}/placement`),
+  feuilletonPlacementSubmit: (language: string, answers: Record<string, number>) =>
+    postJSON<PlacementOutcome>(`/api/lang/${encodeURIComponent(language)}/placement/submit`, { answers }),
+  feuilletonRunStart: (language: string, mode?: "court" | "relecture") =>
+    postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, mode ? { mode } : {}),
+  feuilletonRun: (runId: number) => getJSON<RunPlan>(`/api/lang/run/${runId}`),
+  feuilletonEvents: (runId: number, events: RunEvent[], currentStep: string | null) =>
+    postJSON<EventsResult>(`/api/lang/run/${runId}/events`, { events, current_step: currentStep }),
+  feuilletonComplete: (runId: number, endReason: "fini" | "plafond" | "quitte", feeling: string | null) =>
+    postJSON<RunCompletion>(`/api/lang/run/${runId}/complete`, { end_reason: endReason, feeling }),
+  feuilletonLibrary: (language: string) =>
+    getJSON<LibraryEntry[]>(`/api/lang/${encodeURIComponent(language)}/library`),
+  feuilletonEpisode: (episodeId: number) =>
+    getJSON<EpisodeView & { notes: EpisodeNote[]; point: PointView }>(`/api/lang/episode/${episodeId}`),
+  feuilletonReport: (episodeId: number, line: number | null, token: number | null, kind: string, comment = "") =>
+    postJSON<{ ok: boolean }>("/api/lang/report", { episode_id: episodeId, line, token, kind, comment }),
+  feuilletonCompare: (original: string, typed: string) =>
+    postJSON<{ ops: DiffOp[] }>("/api/lang/compare", { original, typed }),
+  feuilletonRewind: (language: string) =>
+    postJSON<{ ok: boolean; queued: number }>(`/api/lang/${encodeURIComponent(language)}/rewind`, {}),
   languageProfile: (language: string) =>
     getJSON<{
       profile: Record<string, unknown>;
@@ -254,7 +301,8 @@ export const api = {
     postJSON<LangLessonStart>("/api/lang/lesson/start", { language }),
   languageLessonExercise: (lessonId: number, index: number) =>
     getJSON<LangLessonExerciseResp>(`/api/lang/lesson/${lessonId}/exercise/${index}`),
-  languageLessonComplete: (lessonId: number, exerciseScores: number[], durationS: number) =>
+  // `null` = exercice sans item noté : il ne compte pas dans la moyenne.
+  languageLessonComplete: (lessonId: number, exerciseScores: (number | null)[], durationS: number) =>
     postJSON<{ ok: boolean; total_lessons: number }>(`/api/lang/lesson/${lessonId}/complete`, {
       exercise_scores: exerciseScores,
       duration_s: durationS,

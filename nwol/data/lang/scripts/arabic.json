@@ -1,0 +1,628 @@
+{
+ "script": "arabic",
+ "version": 1,
+ "note": "Registre des 28 lettres (4 formes, liaison à gauche, lettres solaires) et des signes, dans l'ordre pédagogique d'introduction. Les formes utilisent le liant sans chasse (U+200D) pour que la WebView calcule la forme contextuelle.",
+ "letters": [
+  {
+   "id": "ar.l.alif",
+   "char": "ا",
+   "name": "alif",
+   "translit": "ā / ʾ",
+   "forms": {
+    "isolated": "ا",
+    "initial": "ا",
+    "medial": "‍ا",
+    "final": "‍ا"
+   },
+   "connects_left": false,
+   "sun_letter": false,
+   "group": "alif",
+   "alphabet_order": 1,
+   "order": 1,
+   "note": "Support de la hamza en début de mot ; voyelle longue ā au milieu."
+  },
+  {
+   "id": "ar.l.ba",
+   "char": "ب",
+   "name": "bāʾ",
+   "translit": "b",
+   "forms": {
+    "isolated": "ب",
+    "initial": "ب‍",
+    "medial": "‍ب‍",
+    "final": "‍ب"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "b-t-ṯ",
+   "alphabet_order": 2,
+   "order": 2,
+   "note": "Un point dessous."
+  },
+  {
+   "id": "ar.l.ta",
+   "char": "ت",
+   "name": "tāʾ",
+   "translit": "t",
+   "forms": {
+    "isolated": "ت",
+    "initial": "ت‍",
+    "medial": "‍ت‍",
+    "final": "‍ت"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "b-t-ṯ",
+   "alphabet_order": 3,
+   "order": 3,
+   "note": "Deux points dessus."
+  },
+  {
+   "id": "ar.l.tha",
+   "char": "ث",
+   "name": "ṯāʾ",
+   "translit": "ṯ",
+   "forms": {
+    "isolated": "ث",
+    "initial": "ث‍",
+    "medial": "‍ث‍",
+    "final": "‍ث"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "b-t-ṯ",
+   "alphabet_order": 4,
+   "order": 4,
+   "note": "Trois points dessus ; le « th » de l'anglais think."
+  },
+  {
+   "id": "ar.l.nun",
+   "char": "ن",
+   "name": "nūn",
+   "translit": "n",
+   "forms": {
+    "isolated": "ن",
+    "initial": "ن‍",
+    "medial": "‍ن‍",
+    "final": "‍ن"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "m-n-h",
+   "alphabet_order": 25,
+   "order": 5,
+   "note": "Un point dessus, comme bāʾ en position liée."
+  },
+  {
+   "id": "ar.l.ya",
+   "char": "ي",
+   "name": "yāʾ",
+   "translit": "y / ī",
+   "forms": {
+    "isolated": "ي",
+    "initial": "ي‍",
+    "medial": "‍ي‍",
+    "final": "‍ي"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "w-y",
+   "alphabet_order": 28,
+   "order": 6,
+   "note": "Consonne y ou voyelle longue ī ; deux points dessous."
+  },
+  {
+   "id": "ar.l.mim",
+   "char": "م",
+   "name": "mīm",
+   "translit": "m",
+   "forms": {
+    "isolated": "م",
+    "initial": "م‍",
+    "medial": "‍م‍",
+    "final": "‍م"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "m-n-h",
+   "alphabet_order": 24,
+   "order": 7,
+   "note": "Boucle en bas."
+  },
+  {
+   "id": "ar.l.lam",
+   "char": "ل",
+   "name": "lām",
+   "translit": "l",
+   "forms": {
+    "isolated": "ل",
+    "initial": "ل‍",
+    "medial": "‍ل‍",
+    "final": "‍ل"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "k-l",
+   "alphabet_order": 23,
+   "order": 8,
+   "note": "Lettre de l'article al-."
+  },
+  {
+   "id": "ar.l.kaf",
+   "char": "ك",
+   "name": "kāf",
+   "translit": "k",
+   "forms": {
+    "isolated": "ك",
+    "initial": "ك‍",
+    "medial": "‍ك‍",
+    "final": "‍ك"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "k-l",
+   "alphabet_order": 22,
+   "order": 9,
+   "note": "Porte une petite hamza en position isolée et finale."
+  },
+  {
+   "id": "ar.l.dal",
+   "char": "د",
+   "name": "dāl",
+   "translit": "d",
+   "forms": {
+    "isolated": "د",
+    "initial": "د",
+    "medial": "‍د",
+    "final": "‍د"
+   },
+   "connects_left": false,
+   "sun_letter": true,
+   "group": "d-ḏ",
+   "alphabet_order": 8,
+   "order": 10,
+   "note": "Ne se lie jamais à la lettre suivante."
+  },
+  {
+   "id": "ar.l.dhal",
+   "char": "ذ",
+   "name": "ḏāl",
+   "translit": "ḏ",
+   "forms": {
+    "isolated": "ذ",
+    "initial": "ذ",
+    "medial": "‍ذ",
+    "final": "‍ذ"
+   },
+   "connects_left": false,
+   "sun_letter": true,
+   "group": "d-ḏ",
+   "alphabet_order": 9,
+   "order": 11,
+   "note": "Un point dessus ; le « th » de l'anglais this."
+  },
+  {
+   "id": "ar.l.ra",
+   "char": "ر",
+   "name": "rāʾ",
+   "translit": "r",
+   "forms": {
+    "isolated": "ر",
+    "initial": "ر",
+    "medial": "‍ر",
+    "final": "‍ر"
+   },
+   "connects_left": false,
+   "sun_letter": true,
+   "group": "r-z",
+   "alphabet_order": 10,
+   "order": 12,
+   "note": "R roulé ; ne se lie pas à gauche."
+  },
+  {
+   "id": "ar.l.zay",
+   "char": "ز",
+   "name": "zāy",
+   "translit": "z",
+   "forms": {
+    "isolated": "ز",
+    "initial": "ز",
+    "medial": "‍ز",
+    "final": "‍ز"
+   },
+   "connects_left": false,
+   "sun_letter": true,
+   "group": "r-z",
+   "alphabet_order": 11,
+   "order": 13,
+   "note": "Un point dessus."
+  },
+  {
+   "id": "ar.l.waw",
+   "char": "و",
+   "name": "wāw",
+   "translit": "w / ū",
+   "forms": {
+    "isolated": "و",
+    "initial": "و",
+    "medial": "‍و",
+    "final": "‍و"
+   },
+   "connects_left": false,
+   "sun_letter": false,
+   "group": "w-y",
+   "alphabet_order": 27,
+   "order": 14,
+   "note": "Consonne w ou voyelle longue ū ; ne se lie pas à gauche."
+  },
+  {
+   "id": "ar.l.sin",
+   "char": "س",
+   "name": "sīn",
+   "translit": "s",
+   "forms": {
+    "isolated": "س",
+    "initial": "س‍",
+    "medial": "‍س‍",
+    "final": "‍س"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "s-š",
+   "alphabet_order": 12,
+   "order": 15,
+   "note": "Trois dents."
+  },
+  {
+   "id": "ar.l.shin",
+   "char": "ش",
+   "name": "šīn",
+   "translit": "š",
+   "forms": {
+    "isolated": "ش",
+    "initial": "ش‍",
+    "medial": "‍ش‍",
+    "final": "‍ش"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "s-š",
+   "alphabet_order": 13,
+   "order": 16,
+   "note": "Trois dents et trois points ; « ch »."
+  },
+  {
+   "id": "ar.l.fa",
+   "char": "ف",
+   "name": "fāʾ",
+   "translit": "f",
+   "forms": {
+    "isolated": "ف",
+    "initial": "ف‍",
+    "medial": "‍ف‍",
+    "final": "‍ف"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "f-q",
+   "alphabet_order": 20,
+   "order": 17,
+   "note": "Un point dessus."
+  },
+  {
+   "id": "ar.l.qaf",
+   "char": "ق",
+   "name": "qāf",
+   "translit": "q",
+   "forms": {
+    "isolated": "ق",
+    "initial": "ق‍",
+    "medial": "‍ق‍",
+    "final": "‍ق"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "f-q",
+   "alphabet_order": 21,
+   "order": 18,
+   "note": "Deux points dessus ; k du fond de la gorge."
+  },
+  {
+   "id": "ar.l.ha",
+   "char": "ه",
+   "name": "hāʾ",
+   "translit": "h",
+   "forms": {
+    "isolated": "ه",
+    "initial": "ه‍",
+    "medial": "‍ه‍",
+    "final": "‍ه"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "m-n-h",
+   "alphabet_order": 26,
+   "order": 19,
+   "note": "Change beaucoup de forme selon la position."
+  },
+  {
+   "id": "ar.l.jim",
+   "char": "ج",
+   "name": "ǧīm",
+   "translit": "ǧ",
+   "forms": {
+    "isolated": "ج",
+    "initial": "ج‍",
+    "medial": "‍ج‍",
+    "final": "‍ج"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "ǧ-ḥ-ḫ",
+   "alphabet_order": 5,
+   "order": 20,
+   "note": "Un point dans le ventre ; « dj »."
+  },
+  {
+   "id": "ar.l.hha",
+   "char": "ح",
+   "name": "ḥāʾ",
+   "translit": "ḥ",
+   "forms": {
+    "isolated": "ح",
+    "initial": "ح‍",
+    "medial": "‍ح‍",
+    "final": "‍ح"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "ǧ-ḥ-ḫ",
+   "alphabet_order": 6,
+   "order": 21,
+   "note": "Sans point ; souffle rauque du fond de la gorge."
+  },
+  {
+   "id": "ar.l.kha",
+   "char": "خ",
+   "name": "ḫāʾ",
+   "translit": "ḫ",
+   "forms": {
+    "isolated": "خ",
+    "initial": "خ‍",
+    "medial": "‍خ‍",
+    "final": "‍خ"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "ǧ-ḥ-ḫ",
+   "alphabet_order": 7,
+   "order": 22,
+   "note": "Un point dessus ; la jota espagnole."
+  },
+  {
+   "id": "ar.l.ayn",
+   "char": "ع",
+   "name": "ʿayn",
+   "translit": "ʿ",
+   "forms": {
+    "isolated": "ع",
+    "initial": "ع‍",
+    "medial": "‍ع‍",
+    "final": "‍ع"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "ʿ-ġ",
+   "alphabet_order": 18,
+   "order": 23,
+   "note": "Contraction de la gorge, sans équivalent en français."
+  },
+  {
+   "id": "ar.l.ghayn",
+   "char": "غ",
+   "name": "ġayn",
+   "translit": "ġ",
+   "forms": {
+    "isolated": "غ",
+    "initial": "غ‍",
+    "medial": "‍غ‍",
+    "final": "‍غ"
+   },
+   "connects_left": true,
+   "sun_letter": false,
+   "group": "ʿ-ġ",
+   "alphabet_order": 19,
+   "order": 24,
+   "note": "R grasseyé, comme dans « Paris »."
+  },
+  {
+   "id": "ar.l.sad",
+   "char": "ص",
+   "name": "ṣād",
+   "translit": "ṣ",
+   "forms": {
+    "isolated": "ص",
+    "initial": "ص‍",
+    "medial": "‍ص‍",
+    "final": "‍ص"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "ṣ-ḍ",
+   "alphabet_order": 14,
+   "order": 25,
+   "note": "S emphatique, bouche arrondie."
+  },
+  {
+   "id": "ar.l.dad",
+   "char": "ض",
+   "name": "ḍād",
+   "translit": "ḍ",
+   "forms": {
+    "isolated": "ض",
+    "initial": "ض‍",
+    "medial": "‍ض‍",
+    "final": "‍ض"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "ṣ-ḍ",
+   "alphabet_order": 15,
+   "order": 26,
+   "note": "D emphatique : la lettre qui donne son nom à la langue."
+  },
+  {
+   "id": "ar.l.tta",
+   "char": "ط",
+   "name": "ṭāʾ",
+   "translit": "ṭ",
+   "forms": {
+    "isolated": "ط",
+    "initial": "ط‍",
+    "medial": "‍ط‍",
+    "final": "‍ط"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "ṭ-ẓ",
+   "alphabet_order": 16,
+   "order": 27,
+   "note": "T emphatique."
+  },
+  {
+   "id": "ar.l.zza",
+   "char": "ظ",
+   "name": "ẓāʾ",
+   "translit": "ẓ",
+   "forms": {
+    "isolated": "ظ",
+    "initial": "ظ‍",
+    "medial": "‍ظ‍",
+    "final": "‍ظ"
+   },
+   "connects_left": true,
+   "sun_letter": true,
+   "group": "ṭ-ẓ",
+   "alphabet_order": 17,
+   "order": 28,
+   "note": "Ḏ emphatique."
+  }
+ ],
+ "marks": [
+  {
+   "id": "ar.v.fatha",
+   "char": "َ",
+   "kind": "voyelle",
+   "name": "fatḥa",
+   "translit": "a",
+   "note": "Petit trait au-dessus : a bref.",
+   "order": 29
+  },
+  {
+   "id": "ar.v.damma",
+   "char": "ُ",
+   "kind": "voyelle",
+   "name": "ḍamma",
+   "translit": "u",
+   "note": "Petit wāw au-dessus : ou bref.",
+   "order": 30
+  },
+  {
+   "id": "ar.v.kasra",
+   "char": "ِ",
+   "kind": "voyelle",
+   "name": "kasra",
+   "translit": "i",
+   "note": "Petit trait au-dessous : i bref.",
+   "order": 31
+  },
+  {
+   "id": "ar.v.sukun",
+   "char": "ْ",
+   "kind": "voyelle",
+   "name": "sukūn",
+   "translit": "",
+   "note": "Petit rond : aucune voyelle après la consonne.",
+   "order": 32
+  },
+  {
+   "id": "ar.v.shadda",
+   "char": "ّ",
+   "kind": "voyelle",
+   "name": "šadda",
+   "translit": "(consonne doublée)",
+   "note": "Petit « w » : la consonne est doublée.",
+   "order": 33
+  },
+  {
+   "id": "ar.v.fathatan",
+   "char": "ً",
+   "kind": "voyelle",
+   "name": "tanwīn fatḥ",
+   "translit": "an",
+   "note": "Deux traits au-dessus, souvent sur un alif final.",
+   "order": 34
+  },
+  {
+   "id": "ar.v.dammatan",
+   "char": "ٌ",
+   "kind": "voyelle",
+   "name": "tanwīn ḍamm",
+   "translit": "un",
+   "note": "Double ḍamma : terminaison -un.",
+   "order": 35
+  },
+  {
+   "id": "ar.v.kasratan",
+   "char": "ٍ",
+   "kind": "voyelle",
+   "name": "tanwīn kasr",
+   "translit": "in",
+   "note": "Deux traits au-dessous : terminaison -in.",
+   "order": 36
+  },
+  {
+   "id": "ar.s.hamza",
+   "char": "ء",
+   "kind": "lettre",
+   "name": "hamza",
+   "translit": "ʾ",
+   "supports": [
+    "ء",
+    "أ",
+    "إ",
+    "ؤ",
+    "ئ"
+   ],
+   "note": "Coup de glotte ; seule ou sur un support (alif, wāw, yāʾ).",
+   "order": 37
+  },
+  {
+   "id": "ar.s.ta_marbuta",
+   "char": "ة",
+   "kind": "lettre",
+   "name": "tāʾ marbūṭa",
+   "translit": "a / at",
+   "note": "Fin des mots féminins : -a en pause, -at devant une voyelle.",
+   "order": 38
+  },
+  {
+   "id": "ar.s.alif_maqsura",
+   "char": "ى",
+   "kind": "lettre",
+   "name": "alif maqṣūra",
+   "translit": "ā",
+   "note": "Yāʾ sans points en fin de mot, lue ā.",
+   "order": 39
+  },
+  {
+   "id": "ar.s.alif_madda",
+   "char": "آ",
+   "kind": "lettre",
+   "name": "alif madda",
+   "translit": "ʾā",
+   "note": "Alif surmonté d'un tilde : ʾā.",
+   "order": 40
+  }
+ ]
+}

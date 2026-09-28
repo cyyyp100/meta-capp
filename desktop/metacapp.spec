@@ -44,6 +44,10 @@ datas += [
     # dans tout checkout, donc embarqué sans condition. Le service le lit sous
     # sys._MEIPASS (services/onboarding.py:RESOURCES_DIR).
     (os.path.join(ROOT, "nwol", "resources"), "resources"),
+    # Données statiques du module langues (programmes, registres d'écriture,
+    # test de niveau, phrases de survie) : versionnées, relues, réinjectées en
+    # base au démarrage (services/lang_static.py:LANG_DATA_DIR).
+    (os.path.join(ROOT, "nwol", "data", "lang"), "data/lang"),
 ]
 # nwol/assets/ n'est PAS versionné (caches runtime, gitignoré) : absent des
 # checkouts CI. L'app gelée lit ses assets depuis le dossier données OS

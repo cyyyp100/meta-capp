@@ -1,0 +1,80 @@
+{
+ "language": "anglais",
+ "version": 1,
+ "phrases": [
+  {
+   "target": "Hi, how are you?",
+   "translation": "Salut, comment ça va ?"
+  },
+  {
+   "target": "My name is…",
+   "translation": "Je m'appelle…"
+  },
+  {
+   "target": "Please. Thank you.",
+   "translation": "S'il vous plaît. Merci."
+  },
+  {
+   "target": "Sorry, I don't understand.",
+   "translation": "Pardon, je ne comprends pas."
+  },
+  {
+   "target": "Could you say that again, please?",
+   "translation": "Pourriez-vous répéter, s'il vous plaît ?"
+  },
+  {
+   "target": "Do you speak French?",
+   "translation": "Parlez-vous français ?"
+  },
+  {
+   "target": "Where are the toilets?",
+   "translation": "Où sont les toilettes ?"
+  },
+  {
+   "target": "How much is it?",
+   "translation": "Combien ça coûte ?"
+  },
+  {
+   "target": "A cup of tea, please.",
+   "translation": "Un thé, s'il vous plaît."
+  },
+  {
+   "target": "See you later!",
+   "translation": "À plus tard !"
+  }
+ ],
+ "default_bible": {
+  "characters": [
+   {
+    "name": "Maggie",
+    "role": "libraire qui tient une petite librairie d'occasion à Bristol",
+    "trait": "sait retrouver n'importe quel livre, jamais ses lunettes"
+   },
+   {
+    "name": "Tom",
+    "role": "livreur à vélo",
+    "trait": "optimiste, se perd dans les rues mais arrive toujours avec une histoire"
+   },
+   {
+    "name": "Mr Patel",
+    "role": "épicier d'en face",
+    "trait": "commente la météo et les nouvelles du quartier avec le plus grand sérieux"
+   },
+   {
+    "name": "Chloe",
+    "role": "étudiante en cinéma qui loge au-dessus de la librairie",
+    "trait": "filme tout, persuadée que chaque scène fera un grand film"
+   }
+  ],
+  "setting": "Une librairie d'occasion dans une rue animée de Bristol, face à une petite épicerie.",
+  "comic_springs": "Les lunettes perdues de Maggie ; les détours de Tom ; les prévisions météo de Mr Patel ; Chloe qui filme au mauvais moment.",
+  "register_notes": "Anglais britannique courant, conversations de tous les jours entre voisins et clients."
+ },
+ "prompt_params": {
+  "language_label": "anglais",
+  "register": "Registre : anglais britannique d'aujourd'hui, situations de la vie quotidienne.",
+  "script_rules": "Écris en anglais britannique (orthographe britannique : colour, centre), avec la ponctuation anglaise.",
+  "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en anglais\", \"translation\": \"traduction française\"}",
+  "form_rule": ""
+ }
+}

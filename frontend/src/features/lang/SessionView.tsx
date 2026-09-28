@@ -737,7 +737,8 @@ function RevisionView({ content, language, onScore }: { content: Extract<LangSes
           language={language}
           promptText={ex.prompt_fr}
           expected={ex.expected}
-          hint={ex.hint || ex.target_word}
+          // Jamais `target_word` en indice : c'est la réponse attendue (K5).
+          hint={ex.hint || undefined}
           onScore={onScore}
           onResult={(r) => {
             // Bouclage du pont SR : repousse/rapproche l'échéance de la carte révisée.

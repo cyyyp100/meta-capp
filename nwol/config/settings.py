@@ -118,6 +118,31 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "lang_content_ordering":   {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.10},
     "lang_content_matching":   {"num_ctx": 2048, "num_predict": 700,  "temperature": 0.10},
     "lang_content_transform":  {"num_ctx": 3072, "num_predict": 900,  "temperature": 0.10},
+    # ── Module langue, méthode « feuilleton » (services/lang_episodes.py) ─────────
+    # Trois appels étroits par épisode, jamais pendant une séance : l'épisode N+1
+    # est écrit pendant la séance N. Température HAUTE pour ce qui doit varier
+    # d'un épisode à l'autre (bible, arc, texte : c'est la diversité qui manquait
+    # au flux hérité, figé à 0.10), BASSE pour ce qui doit être exact (glossaire,
+    # notes, analyse). num_ctx : cf. tests/services/test_lang_prompt_budget.py,
+    # qui mesure les prompts sur les cas maximaux (dernier palier, bible complète)
+    # et échoue si `prompt + num_predict > num_ctx` (C12, G2).
+    "lang_story_bible":         {"num_ctx": 2048, "num_predict": 500,  "temperature": 0.70},
+    # Six temps forts et leurs accroches en français : ~110 tokens par épisode
+    # au banc (2026-09-24), où 400 coupait l'arc à chaque essai.
+    "lang_story_arc":           {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.70},
+    # num_predict mesuré au banc (tools/lang_bench.py, 2026-09-24) : à 900, un
+    # texte B1 de 17 à 23 répliques était coupé avant son résumé. Une réplique
+    # et sa traduction coûtent ~60 tokens au palier le plus long. La génération
+    # s'arrête à la fin du JSON : un texte A1 ne paie pas ce plafond.
+    "lang_episode_text":        {"num_ctx": 4096, "num_predict": 1600, "temperature": 0.70},
+    # Mandarin : les jetons (segmentation) allongent la sortie.
+    "lang_episode_text_hanzi":  {"num_ctx": 4096, "num_predict": 1900, "temperature": 0.70},
+    # Une entrée par mot inconnu de l'apprenant (au plus LANG_GLOSSARY_MAX_ENTRIES),
+    # ~18 tokens chacune en liste compacte.
+    "lang_episode_glossary":    {"num_ctx": 4096, "num_predict": 900,  "temperature": 0.20},
+    # Notes + explication + micro-exercices : 700 coupait au banc dès l'A2.
+    "lang_episode_notes_point": {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
+    "lang_weekly_analysis":     {"num_ctx": 2048, "num_predict": 300,  "temperature": 0.20},
     # ── Brainstorming (chat libre + RAG sur la base utilisateur) ────────────────
     # Décision de recherche : JSON court (faut-il chercher + mots-clés).
     "brainstorm_search_decide": {"num_ctx": 2048, "num_predict": 160, "temperature": 0.10},
@@ -150,6 +175,11 @@ OLLAMA_TIMEOUT_MAX = 240.0
 # tentative sur le point d'aboutir est tuée par un appelant déjà parti.
 OLLAMA_RETRY_BUDGET_FACTOR = 2.0
 OLLAMA_WALL_TIMEOUT_MAX = 300.0
+# Tâche de FOND (épisode de langue, analyse hebdomadaire) : son budget ne court
+# qu'une fois partie chez Ollama. Le temps passé en file derrière le lecteur
+# (priorités plus hautes, un seul worker) est borné à part, par ce plafond :
+# sans lui, un appel d'épisode pouvait expirer avant d'avoir commencé.
+OLLAMA_BACKGROUND_QUEUE_WAIT_S = 1800.0
 
 
 def task_timeout_s(task: str) -> float:
@@ -310,6 +340,272 @@ TONAL_LANGUAGES: set[str] = {"vietnamien"}
 # Consignes de script dérivées (compat. ascendante de `_lang_script_hint`).
 SCRIPT_HINTS: dict[str, str] = {key: meta["hint"] for key, meta in SCRIPTS.items()}
 
+# ── Module Langues, flux hérité (10 exercices, arc à 4 temps) ─────────────────
+# Ces valeurs vivaient en littéraux dans services/lang*.py (défaut n° 9 de
+# architecture/18-pipeline-lang.md). Le flux hérité ne sert plus qu'aux langues
+# hors pilote ; il n'évolue pas, mais ses seuils suivent la règle du dépôt (C14).
+LANG_LEGACY_REVISION_EVERY = 7          # une session de révision imposée toutes les N
+LANG_LEGACY_LESSON_SIZE = 10            # exercices par séance
+LANG_LEGACY_ARC_TEMPLATE: tuple[str, ...] = (
+    ("ancrage",) + ("exposition",) * 3 + ("manipulation",) * 5 + ("cloture",)
+)
+# Paliers de phase, en séances TERMINÉES.
+LANG_LEGACY_WRITING_TO_PASSIVE = 6              # alphabet fini (cyrillique, grec…)
+LANG_LEGACY_WRITING_TO_PASSIVE_CONTINUOUS = 12  # script logographique (hanzi, kanji)
+LANG_LEGACY_PASSIVE_TO_ACTIVE = 20
+# Repli sans LLM du test de niveau : part de QCM réussis -> niveau CECR.
+LANG_LEGACY_PLACEMENT_CEFR_THRESHOLDS: tuple[tuple[float, str], ...] = (
+    (0.85, "C1"), (0.70, "B2"), (0.55, "B1"), (0.35, "A2"),
+)
+LANG_LEGACY_CONTEXT_WORDS = 12          # mots de la séance transmis au prompt suivant
+LANG_LEGACY_WEAK_POINTS = 5             # points faibles transmis au prompt
+LANG_LEGACY_REVISION_DUE_CARDS = 8      # cartes dues ajoutées à un créneau de révision
+
+# ── Module Langues, méthode « feuilleton » (langues du pilote) ────────────────
+# Une séance = un épisode d'un feuilleton, écrit autour d'UN point du programme.
+# Tout ce qui suit est lu par services/lang_{runs,episodes,progress,activity}.py
+# et nulle part ailleurs redéfini. Valeurs de DÉPART, à calibrer pendant le
+# pilote (plan § 6) : chaque constante dit ce qu'elle règle, pas pourquoi cette
+# valeur — le pourquoi viendra des mesures (V19).
+#
+# C1 — périmètre. Les autres langues restent sur le flux hérité (K8).
+LANG_PILOT_LANGUAGES: tuple[str, ...] = ("espagnol", "anglais", "allemand", "mandarin", "arabe")
+# Famille d'écriture d'une langue du pilote : choisit l'échelle de difficulté,
+# les aides à la lecture et les jeux propres au script.
+LANG_SCRIPT_FAMILY: dict[str, str] = {
+    "espagnol": "latin", "anglais": "latin", "allemand": "latin",
+    "mandarin": "hanzi", "arabe": "arabe",
+}
+# Langue d'explication : celle dans laquelle Gemma écrit pour l'apprenant
+# (traductions, glossaire, notes, point du jour, résumés) et dans laquelle
+# s'affichent les données écrites à la main qui ont une version traduite.
+# Choisie au début du parcours d'après la langue de l'interface, puis figée dans
+# le profil (`lang_profiles.explain_lang`) : un feuilleton ne change pas de
+# langue en cours de route. La première de la liste est le repli, et une langue
+# ne s'explique jamais dans elle-même (l'anglais s'apprend en français).
+LANG_EXPLAIN_LANGUAGES: tuple[str, ...] = ("fr", "en")
+
+# C2 — durées (secondes). Le plafond est strict : au-delà, les étapes non
+# essentielles sont sautées et l'au revoir est toujours joué (R24).
+LANG_RUN_TARGET_S = 900
+LANG_RUN_MAX_S = 1200
+LANG_RUN_SHORT_TARGET_S = 480
+# Budget indicatif par étape : sert à ordonner ce qu'on saute quand le plafond
+# approche, et à la barre de progression. Jamais un compte à rebours affiché.
+LANG_STEP_BUDGET_S: dict[str, int] = {
+    "rappel": 120, "episode_p1": 210, "episode_p2": 150, "notes": 60,
+    "point": 150, "jeux": 180, "deuxieme_vague": 180, "au_revoir": 30,
+    "accueil": 120, "phrases": 360, "ecriture": 180, "interets": 90,
+    "recap": 240, "relecture": 360, "cartes": 180, "controle": 240, "jalon": 180,
+}
+# Étapes jamais sautées par le plafond de durée.
+LANG_ESSENTIAL_STEPS: tuple[str, ...] = ("episode_p1", "au_revoir")
+# Au-delà de ce silence (aucune interaction), le temps n'est plus « effectif ».
+LANG_IDLE_CUTOFF_S = 90
+
+# C3 — rythme. Une séance sur LANG_BILAN_EVERY est un bilan : il suit chaque
+# bloc de LANG_BILAN_EVERY − 1 = 6 épisodes (un groupe du programme, S2).
+LANG_BILAN_EVERY = 7
+LANG_SECOND_WAVE_START = 50             # épisode à partir duquel la 2e vague commence
+LANG_SECOND_WAVE_OFFSET = 49            # retraduire l'épisode N − 49
+LANG_SECOND_WAVE_LINES = (3, 6)         # répliques proposées (min, max)
+LANG_MILESTONES_EPISODE_1: tuple[int, ...] = (20, 50, 100)
+LANG_ARC_LENGTH = 6                     # épisodes par arc narratif
+LANG_RECAP_LONG_EPISODES = 3            # résumés concaténés en rappel long / reprise
+LANG_RELECTURE_EPISODES = 2             # épisodes relus en mode relecture
+LANG_REPRISE_CONTROLE_EPISODES = 3      # épisodes du mini-contrôle après 21 j
+LANG_REWIND_EPISODES = 3                # recul proposé après un contrôle raté
+LANG_REPRISE_CONTROLE_OK = 0.6          # part de « su » en dessous de laquelle on propose de reculer
+
+# C4 — échelle de difficulté (§ 9.1). Chaque famille déclare des PALIERS
+# d'ancrage ; entre deux paliers, les bornes numériques sont interpolées cran par
+# cran (LANG_LADDER_STEPS_PER_TIER crans), les valeurs qualitatives (traduction,
+# formes de texte) restent celles du palier inférieur. `None` = libre.
+#   lines          : répliques (min, max)
+#   words_per_line : mots par réplique (min, max)
+#   new_words      : mots nouveaux par épisode (min, max) — caractères pour le hanzi
+#   translation    : "toujours" | "masquable" | "masquee_p2" | "tap"
+#   formats        : formes de texte autorisées à ce palier (famille latine ;
+#                    LANG_TEXT_FORMATS peut les remplacer par langue)
+LANG_LADDER_STEPS_PER_TIER = 6
+LANG_DIFFICULTY_LADDER: dict[str, tuple[dict, ...]] = {
+    "latin": (
+        {"tier": "A1", "lines": (6, 8), "words_per_line": (3, 6), "new_words": (5, 7), "translation": "toujours"},
+        {"tier": "A1-A2", "lines": (10, 12), "words_per_line": (5, 9), "new_words": (7, 9), "translation": "masquable"},
+        {"tier": "A2-B1", "lines": (12, 16), "words_per_line": (8, 12), "new_words": (8, 10), "translation": "masquee_p2"},
+        {"tier": "B1-B2", "lines": (15, 20), "words_per_line": None, "new_words": (10, 12), "translation": "tap"},
+        {"tier": "B2-C1", "lines": (18, 24), "words_per_line": None, "new_words": (12, 16), "translation": "tap"},
+    ),
+    # Mandarin : l'axe principal est le nombre de CARACTÈRES nouveaux ; la
+    # longueur d'une réplique se compte en caractères.
+    "hanzi": (
+        {"tier": "A1", "lines": (6, 8), "words_per_line": (4, 10), "new_words": (5, 8), "translation": "toujours"},
+        {"tier": "A1-A2", "lines": (8, 10), "words_per_line": (6, 14), "new_words": (6, 9), "translation": "masquable"},
+        {"tier": "A2-B1", "lines": (10, 14), "words_per_line": (8, 18), "new_words": (8, 10), "translation": "masquee_p2"},
+        {"tier": "B1-B2", "lines": (12, 16), "words_per_line": None, "new_words": (9, 12), "translation": "tap"},
+        {"tier": "B2-C1", "lines": (14, 20), "words_per_line": None, "new_words": (10, 14), "translation": "tap"},
+    ),
+    # Arabe : la longueur suit l'échelle générale ; l'effacement de la
+    # vocalisation suit LANG_AR_VOCALIZATION_LEVELS.
+    "arabe": (
+        {"tier": "A1", "lines": (5, 7), "words_per_line": (2, 5), "new_words": (4, 6), "translation": "toujours"},
+        {"tier": "A1-A2", "lines": (8, 10), "words_per_line": (4, 8), "new_words": (6, 8), "translation": "masquable"},
+        {"tier": "A2-B1", "lines": (10, 14), "words_per_line": (6, 11), "new_words": (7, 9), "translation": "masquee_p2"},
+        {"tier": "B1-B2", "lines": (12, 18), "words_per_line": None, "new_words": (9, 11), "translation": "tap"},
+        {"tier": "B2-C1", "lines": (16, 22), "words_per_line": None, "new_words": (10, 14), "translation": "tap"},
+    ),
+}
+# Palier d'ancrage associé à un niveau CECR du programme : un point A1 vit
+# entre les paliers 0 et 1, un point B2 entre 3 et 4, etc.
+LANG_CEFR_TIER_INDEX: dict[str, int] = {"A1": 0, "A2": 1, "B1": 2, "B2": 3, "C1": 4}
+LANG_CEFR_ORDER: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1")
+# Le cran réel ne s'écarte jamais de plus de N crans de celui qu'impose la
+# position dans le programme : un texte A1 ne porte pas un point B1.
+LANG_LADDER_BAND = 3
+
+# C5 — adaptation (signaux déterministes, § 9.2).
+LANG_REVEAL_RATE_HIGH = 12.0    # taps / 100 jetons au passage 2 : au-delà, trop dur
+LANG_REVEAL_RATE_LOW = 3.0      # en deçà, facile
+LANG_GAMES_SUCCESS_EASY = 0.85  # réussite aux jeux et micro-items (items non répondus exclus)
+LANG_GAMES_SUCCESS_HARD = 0.5
+LANG_SECOND_WAVE_WEIGHT = 0.5   # poids de l'auto-évaluation « su » dans la réussite du jour
+LANG_EASY_STREAK_TO_STEP_UP = 2  # « tout facile » deux fois de suite -> un cran de plus
+LANG_LADDER_MAX_STEP_PER_EPISODE = 1
+LANG_MAX_CONSECUTIVE_RESPIRATION = 2
+# Épisode de respiration : moins de mots nouveaux (facteur sur la borne du
+# palier), davantage de mots recyclés.
+LANG_RESPIRATION_NEW_WORDS_FACTOR = 0.6
+LANG_RECYCLE_WORDS = (5, 8)             # mots vus mais non acquis réinjectés dans le texte
+LANG_RECYCLE_WORDS_RESPIRATION = (8, 10)
+LANG_FORMAT_AVOID_LAST = 2              # ne pas reprendre le format des N derniers épisodes
+# Tolérance des validateurs sur les bornes du palier (G4) : un petit modèle rate
+# souvent d'une ou deux répliques, et chaque rejet coûte un appel complet.
+# (en dessous du minimum, au-dessus du maximum).
+LANG_LINES_SLACK = (1, 2)
+LANG_WORDS_SLACK = (1, 3)
+# Aux paliers « longueur libre », une réplique reste une phrase : au-delà, le
+# glossaire et les notes ne tiennent plus dans leur fenêtre de contexte (G2).
+LANG_MAX_UNITS_PER_LINE = 40
+# Un personnage secondaire hors bible est toléré (le serveur, une touriste),
+# pour au plus cette part des répliques.
+LANG_EXTRA_SPEAKERS_MAX = 1
+LANG_EXTRA_SPEAKER_SHARE = 0.34
+# Longueur totale d'un épisode (mots ; caractères pour le hanzi), tous paliers :
+# c'est elle qui garantit que glossaire et notes, qui relisent le texte ET sa
+# traduction, tiennent dans num_ctx 4096 (G2). Un mot arabe vocalisé (clitiques
+# et voyelles compris) coûte près de deux fois les tokens d'un mot espagnol.
+# Au-delà, il faudrait élargir num_ctx — et Ollama recharge le modèle à chaque
+# changement de fenêtre.
+LANG_MAX_UNITS_PER_EPISODE: dict[str, int] = {"latin": 450, "hanzi": 700, "arabe": 300}
+# Mots nouveaux (G4/G7) : le contrôle ne s'applique qu'une fois le lexique
+# amorcé — au premier épisode, tout est nouveau — et avec une marge.
+LANG_NEW_WORDS_CHECK_MIN_LEXICON = 60
+LANG_NEW_WORDS_TOLERANCE = 1.5
+# Glossaire : mots inconnus de l'apprenant demandés à Gemma par épisode, par
+# palier d'ancrage (index 0-4). Les mots déjà au lexique sont glosés depuis
+# le lexique ; au-delà de la borne, le tap montre la traduction de la réplique.
+LANG_GLOSSARY_MAX_ENTRIES = (35, 40, 45, 45, 45)
+# Mesuré au banc : sur une longue liste, Gemma s'arrête parfois après UNE
+# entrée. Les mots sont donc demandés par lots, et chaque tentative ne
+# redemande que ceux qui manquent encore (les entrées valides s'additionnent).
+LANG_GLOSSARY_CHUNK = 20
+# Part des mots demandés qui peut rester sans entrée (le tap montre alors la
+# traduction de la réplique).
+LANG_GLOSSARY_MAX_MISSING = 0.1
+# Cartes créées par épisode (P12) : les mots touchés au passage 2 d'abord, puis
+# les mots nouveaux non transparents. Au-delà, la pile déborde.
+LANG_CARDS_PER_EPISODE = 8
+LANG_GAMES_AVOID_LAST_RUNS = 2          # ne pas reprendre les jeux des N séances précédentes
+LANG_GAMES_PER_RUN = 2
+LANG_POINT_MICRO_ITEMS = 3
+
+# C6 — acquisition (mot, puis signe d'écriture). Un mot est acquis après N
+# reconnaissances (lu au passage 2 sans le toucher, ou bien répondu dans un jeu)
+# réparties sur au moins M épisodes distincts.
+LANG_ACQUIRED_RECOGNITIONS = 3
+LANG_ACQUIRED_MIN_EPISODES = 2
+LANG_SCRIPT_ACQUIRED_RECOGNITIONS = 4
+LANG_SCRIPT_ACQUIRED_MIN_EPISODES = 2
+
+# C7 — absence (jours depuis le dernier jour d'étude de CETTE langue).
+# (borne haute incluse, palier) ; None = au-delà.
+LANG_ABSENCE_TIERS: tuple[tuple[int | None, str], ...] = (
+    (2, "normal"), (6, "rappel_long"), (20, "reprise"), (None, "reprise_controle"),
+)
+LANG_DUE_CARDS_CAP = 15                 # cartes dues servies par séance, les plus anciennes d'abord
+
+# C8 — jour d'étude (décompte par langue, backend seulement, jamais affiché en série).
+LANG_STUDY_DAY_CUTOFF_HOUR = 4
+LANG_STUDY_DAY_MIN_S = 300
+
+# C9 — pré-génération. L'épisode N+1 part à l'étape LANG_PREGEN_TRIGGER_STEP de
+# la séance N, avec les signaux du jour (taps du passage 2 déjà connus).
+LANG_PREGEN_BUFFER = 1
+LANG_PREGEN_TRIGGER_STEP = "notes"
+LANG_GEN_MAX_ATTEMPTS_PER_CALL = 3
+# G9 : similarité (Jaccard sur les mots) du titre + résumé avec les N derniers
+# épisodes, au-dessus de laquelle l'épisode est rejeté comme redite.
+LANG_REPEAT_WINDOW = 20
+LANG_REPEAT_MAX_JACCARD = 0.6
+# G8 : longueurs maximales des sorties Gemma (caractères).
+LANG_NOTE_MAX_CHARS = 260
+LANG_EXPLANATION_MAX_CHARS = 420
+LANG_TITLE_MAX_CHARS = 80
+LANG_SUMMARY_MAX_CHARS = 220
+LANG_TEASER_MAX_CHARS = 160
+LANG_NOTES_PER_EPISODE = (3, 5)
+LANG_POINT_EXAMPLES = (2, 4)
+# G6 : part minimale des lettres arabes portant une voyelle brève ou un sukūn
+# (texte « entièrement vocalisé » ; les lettres de prolongation et l'article
+# en sont dispensés par le calcul).
+LANG_AR_MIN_VOCALIZED_RATIO = 0.8
+# Test de niveau : marge de sécurité, en points du programme, en deçà du dernier
+# point réussi de façon consécutive (R25).
+LANG_PLACEMENT_SAFETY_MARGIN = 3
+
+# C10 — formes de texte par palier d'ancrage (index 0-4), par langue. La fuṣḥā
+# n'a pas de conversation naturelle au café : lettres, annonces, récits et
+# journal dès le début.
+LANG_TEXT_FORMATS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "_default": (
+        ("dialogue",),
+        ("dialogue",),
+        ("dialogue", "sms", "lettre"),
+        ("dialogue", "sms", "lettre", "article", "journal"),
+        ("dialogue", "sms", "lettre", "article", "journal", "recit"),
+    ),
+    "arabe": (
+        ("dialogue", "lettre", "annonce", "recit", "journal"),
+        ("dialogue", "lettre", "annonce", "recit", "journal"),
+        ("dialogue", "lettre", "annonce", "recit", "journal", "recette"),
+        ("dialogue", "lettre", "annonce", "recit", "journal", "recette", "article"),
+        ("dialogue", "lettre", "annonce", "recit", "journal", "recette", "article"),
+    ),
+}
+LANG_ALL_TEXT_FORMATS: tuple[str, ...] = (
+    "dialogue", "sms", "lettre", "annonce", "recette", "journal", "article", "recit",
+)
+
+# C11 — aides à la lecture. Arabe : (niveau CECR, part du niveau déjà parcourue,
+# niveau d'aide), lu du plus avancé au moins avancé (§ 13.2) :
+#   1 = translittération sous les lettres non acquises + vocalisation complète
+#   2 = vocalisation complète        3 = vocalisation des mots non acquis
+#   4 = vocalisation au tap
+LANG_AR_VOCALIZATION_LEVELS: tuple[tuple[str, float, int], ...] = (
+    ("A1", 0.0, 1), ("A1", 0.5, 2), ("A2", 0.0, 3), ("B1", 0.0, 4),
+)
+LANG_ZH_TONE_COLORS = True      # couleurs de tons (désactivables dans l'écran d'épisode)
+LANG_DE_GENDER_COLORS = True    # code couleur der/die/das
+# N1 : distance d'édition normalisée lemme ↔ traduction sous laquelle un mot
+# est « transparent » ; signalé pendant les N premiers épisodes seulement.
+LANG_TRANSPARENT_MAX_DISTANCE = 0.34
+LANG_TRANSPARENT_FLAG_UNTIL_EPISODE = 15
+
+# T8-T11 — analyse hebdomadaire : usage interne (ton des messages de rappel et
+# de reprise). La montrer à l'apprenant est une décision ouverte (plan § 19.1).
+LANG_WEEKLY_ANALYSIS_VISIBLE = False
+LANG_WEEKLY_WINDOWS_DAYS = (7, 28)
+
 # Vitesse de lecture progressive par défaut (ms/caractère), servie par
 # db.user.get_user_speed quand l'utilisateur n'en a pas choisi une.
 READING_SPEED_INITIAL_MS = 500
@@ -375,7 +671,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 34
+DB_SCHEMA_VERSION = 36
 
 # Logs
 LOG_MAX_BYTES = 1_000_000

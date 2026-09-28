@@ -1,0 +1,125 @@
+{
+ "language": "espagnol",
+ "version": 1,
+ "phrases": [
+  {
+   "target": "Hola, ¿qué tal?",
+   "translation": "Salut, ça va ?",
+   "translation_en": "Hi, how are you?"
+  },
+  {
+   "target": "Me llamo…",
+   "translation": "Je m'appelle…",
+   "translation_en": "My name is…"
+  },
+  {
+   "target": "Por favor. Gracias.",
+   "translation": "S'il te plaît. Merci.",
+   "translation_en": "Please. Thank you."
+  },
+  {
+   "target": "Perdón, no entiendo.",
+   "translation": "Pardon, je ne comprends pas.",
+   "translation_en": "Sorry, I don't understand."
+  },
+  {
+   "target": "¿Puede repetir, por favor?",
+   "translation": "Pouvez-vous répéter, s'il vous plaît ?",
+   "translation_en": "Could you say that again, please?"
+  },
+  {
+   "target": "¿Habla usted francés?",
+   "translation": "Parlez-vous français ?",
+   "target_en": "¿Habla usted inglés?",
+   "translation_en": "Do you speak English?"
+  },
+  {
+   "target": "¿Dónde está el baño?",
+   "translation": "Où sont les toilettes ?",
+   "translation_en": "Where is the toilet?"
+  },
+  {
+   "target": "¿Cuánto cuesta?",
+   "translation": "Combien ça coûte ?",
+   "translation_en": "How much is it?"
+  },
+  {
+   "target": "Un café, por favor.",
+   "translation": "Un café, s'il vous plaît.",
+   "translation_en": "A coffee, please."
+  },
+  {
+   "target": "¡Hasta luego!",
+   "translation": "À plus tard !",
+   "translation_en": "See you later!"
+  }
+ ],
+ "default_bible": {
+  "characters": [
+   {
+    "name": "Lucía",
+    "role": "patronne d'un petit café de Salamanque",
+    "trait": "perfectionniste, elle recompte tout deux fois"
+   },
+   {
+    "name": "Pablo",
+    "role": "étudiant en architecture",
+    "trait": "toujours en retard, avec une excuse incroyable"
+   },
+   {
+    "name": "Carmen",
+    "role": "voisine à la retraite",
+    "trait": "connaît les nouvelles du quartier avant qu'elles arrivent"
+   },
+   {
+    "name": "Iñaki",
+    "role": "cuisinier basque du café",
+    "trait": "persuadé que ses recettes sont les meilleures d'Espagne"
+   }
+  ],
+  "setting": "Un petit café sur une place de Salamanque, où tout le quartier finit par passer.",
+  "comic_springs": "Les excuses de Pablo ; les rumeurs de Carmen ; Lucía et Iñaki qui se disputent le menu du jour.",
+  "register_notes": "Espagnol courant d'Espagne, conversations de tous les jours au café et dans le quartier."
+ },
+ "default_bible_en": {
+  "characters": [
+   {
+    "name": "Lucía",
+    "role": "owner of a small café in Salamanca",
+    "trait": "a perfectionist, she counts everything twice"
+   },
+   {
+    "name": "Pablo",
+    "role": "architecture student",
+    "trait": "always late, with an unbelievable excuse"
+   },
+   {
+    "name": "Carmen",
+    "role": "retired neighbour",
+    "trait": "knows the neighbourhood news before it happens"
+   },
+   {
+    "name": "Iñaki",
+    "role": "the café's Basque cook",
+    "trait": "convinced his recipes are the best in Spain"
+   }
+  ],
+  "setting": "A small café on a square in Salamanca, where the whole neighbourhood ends up passing by.",
+  "comic_springs": "Pablo's excuses; Carmen's rumours; Lucía and Iñaki arguing over the menu of the day.",
+  "register_notes": "Everyday Spanish from Spain, day-to-day conversations at the café and in the neighbourhood."
+ },
+ "prompt_params": {
+  "language_label": "espagnol",
+  "register": "Registre : espagnol d'Espagne d'aujourd'hui, situations de la vie quotidienne.",
+  "script_rules": "Écris en espagnol d'Espagne, avec tous les accents et la ponctuation espagnole (¿ ? ¡ !).",
+  "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en espagnol\", \"translation\": \"traduction française\"}",
+  "form_rule": ""
+ },
+ "prompt_params_en": {
+  "language_label": "Spanish",
+  "register": "Register: present-day Spanish from Spain, everyday situations.",
+  "script_rules": "Write in Spanish from Spain, with all the accents and the Spanish punctuation (¿ ? ¡ !).",
+  "line_schema": "{\"speaker\": \"first name\", \"text\": \"line in Spanish\", \"translation\": \"English translation\"}",
+  "form_rule": ""
+ }
+}

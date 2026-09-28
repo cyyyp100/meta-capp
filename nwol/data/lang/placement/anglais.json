@@ -1,0 +1,274 @@
+{
+ "language": "anglais",
+ "version": 1,
+ "reviewed": false,
+ "note": "Test de niveau statique : clés écrites à la main, corrigé déterministe. Un item réussi vaut le point du programme indiqué ; le départ est fixé au dernier point réussi de façon consécutive, moins une marge (LANG_PLACEMENT_SAFETY_MARGIN).",
+ "items": [
+  {
+   "id": "en.p01",
+   "cefr": "A1",
+   "program_point": "en.a1.be_present",
+   "kind": "qcm",
+   "prompt": "She ___ a doctor.",
+   "choices": [
+    "is",
+    "are",
+    "am",
+    "be"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "en.p02",
+   "cefr": "A1",
+   "program_point": "en.a1.present_simple",
+   "kind": "qcm",
+   "prompt": "My brother ___ in London.",
+   "choices": [
+    "live",
+    "lives",
+    "living",
+    "is live"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p03",
+   "cefr": "A1",
+   "program_point": "en.a1.do_questions",
+   "kind": "qcm",
+   "prompt": "___ you like coffee?",
+   "choices": [
+    "Are",
+    "Does",
+    "Do",
+    "Is"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "en.p04",
+   "cefr": "A1",
+   "program_point": "en.a1.there_is",
+   "kind": "lecture",
+   "prompt": "« There are two cats in the garden. » Dans le jardin, il y a…",
+   "choices": [
+    "un chat",
+    "deux chats",
+    "deux chiens",
+    "aucun chat"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p05",
+   "cefr": "A1",
+   "program_point": "en.a1.past_irregular",
+   "kind": "qcm",
+   "prompt": "Yesterday we ___ to the beach.",
+   "choices": [
+    "go",
+    "goed",
+    "went",
+    "gone"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "en.p06",
+   "cefr": "A2",
+   "program_point": "en.a2.present_perfect_experience",
+   "kind": "qcm",
+   "prompt": "Have you ever ___ sushi?",
+   "choices": [
+    "eat",
+    "ate",
+    "eaten",
+    "eating"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "en.p07",
+   "cefr": "A2",
+   "program_point": "en.a2.for_since",
+   "kind": "qcm",
+   "prompt": "I've lived here ___ 2019.",
+   "choices": [
+    "for",
+    "since",
+    "during",
+    "from"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p08",
+   "cefr": "A2",
+   "program_point": "en.a2.first_conditional",
+   "kind": "qcm",
+   "prompt": "If it ___ tomorrow, we'll stay at home.",
+   "choices": [
+    "rains",
+    "will rain",
+    "rained",
+    "rain"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "en.p09",
+   "cefr": "A2",
+   "program_point": "en.a2.gerund_infinitive",
+   "kind": "qcm",
+   "prompt": "I enjoy ___ in the mountains.",
+   "choices": [
+    "to walk",
+    "walk",
+    "walking",
+    "walked"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "en.p10",
+   "cefr": "B1",
+   "program_point": "en.b1.second_conditional",
+   "kind": "qcm",
+   "prompt": "If I ___ rich, I would travel the world.",
+   "choices": [
+    "am",
+    "were",
+    "will be",
+    "have been"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p11",
+   "cefr": "B1",
+   "program_point": "en.b1.reported_statements",
+   "kind": "qcm",
+   "prompt": "« I'm tired. » → She said she ___ tired.",
+   "choices": [
+    "is",
+    "was",
+    "has been",
+    "will be"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p12",
+   "cefr": "B1",
+   "program_point": "en.b1.deduction_past",
+   "kind": "qcm",
+   "prompt": "The ground is wet. It ___ rained last night.",
+   "choices": [
+    "must have",
+    "should",
+    "can't have",
+    "must"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "en.p13",
+   "cefr": "B1",
+   "program_point": "en.b1.be_used_to",
+   "kind": "lecture",
+   "prompt": "« I'm used to getting up early. » Cela veut dire…",
+   "choices": [
+    "j'avais l'habitude de me lever tôt",
+    "je suis habitué à me lever tôt",
+    "je vais me lever tôt",
+    "je dois me lever tôt"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p14",
+   "cefr": "B2",
+   "program_point": "en.b2.mixed_conditionals",
+   "kind": "qcm",
+   "prompt": "If I had taken that job, I ___ in New York now.",
+   "choices": [
+    "would live",
+    "will live",
+    "had lived",
+    "lived"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "en.p15",
+   "cefr": "B2",
+   "program_point": "en.b2.inversion_negative",
+   "kind": "qcm",
+   "prompt": "Never ___ such a beautiful sunset.",
+   "choices": [
+    "I have seen",
+    "have I seen",
+    "I saw",
+    "did I saw"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p16",
+   "cefr": "B2",
+   "program_point": "en.b2.wish_would",
+   "kind": "lecture",
+   "prompt": "« I wish you would stop interrupting me. » La personne est…",
+   "choices": [
+    "agacée",
+    "reconnaissante",
+    "inquiète pour l'autre",
+    "triste d'être partie"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "en.p17",
+   "cefr": "C1",
+   "program_point": "en.c1.unreal_advanced",
+   "kind": "qcm",
+   "prompt": "___ it not for her help, I would have given up.",
+   "choices": [
+    "Had",
+    "Were",
+    "Should",
+    "If"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p18",
+   "cefr": "C1",
+   "program_point": "en.c1.understatement",
+   "kind": "lecture",
+   "prompt": "Après une panne de trois heures, un Britannique dit : « Well, that was not ideal. » Il veut dire…",
+   "choices": [
+    "que c'était presque parfait",
+    "que c'était vraiment pénible",
+    "qu'il n'a rien remarqué",
+    "qu'il a trouvé ça drôle"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "en.p19",
+   "cefr": "C1",
+   "program_point": "en.c1.reporting_nuance",
+   "kind": "lecture",
+   "prompt": "Titre de presse : « Minister allegedly took bribes. » Le journal…",
+   "choices": [
+    "affirme que c'est prouvé",
+    "rapporte une accusation sans la confirmer",
+    "dément l'information",
+    "annonce une condamnation"
+   ],
+   "answer": 1
+  }
+ ]
+}

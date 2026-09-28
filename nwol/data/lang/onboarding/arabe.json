@@ -1,0 +1,212 @@
+{
+ "language": "arabe",
+ "version": 1,
+ "phrases": [
+  {
+   "target": "السلام عليكم",
+   "vocalized": "السَّلَامُ عَلَيْكُمْ",
+   "translation": "Bonjour (la paix sur vous)",
+   "note": "Réponse : وَعَلَيْكُمُ السَّلَامُ.",
+   "translation_en": "Hello (peace be upon you)",
+   "note_en": "Reply: وَعَلَيْكُمُ السَّلَامُ."
+  },
+  {
+   "target": "اسمي…",
+   "vocalized": "اِسْمِي…",
+   "translation": "Je m'appelle…",
+   "translation_en": "My name is…"
+  },
+  {
+   "target": "شكرا. عفوا.",
+   "vocalized": "شُكْرًا. عَفْوًا.",
+   "translation": "Merci. De rien.",
+   "translation_en": "Thank you. You're welcome."
+  },
+  {
+   "target": "آسف، لا أفهم.",
+   "vocalized": "آسِفٌ، لَا أَفْهَمْ.",
+   "translation": "Pardon, je ne comprends pas.",
+   "note": "Au féminin : آسِفَةٌ.",
+   "translation_en": "Sorry, I don't understand.",
+   "note_en": "Said by a woman: آسِفَةٌ."
+  },
+  {
+   "target": "أعد من فضلك.",
+   "vocalized": "أَعِدْ مِنْ فَضْلِكْ.",
+   "translation": "Répète, s'il te plaît.",
+   "translation_en": "Say it again, please."
+  },
+  {
+   "target": "هل تتكلم الفرنسية؟",
+   "vocalized": "هَلْ تَتَكَلَّمُ الْفَرَنْسِيَّةْ؟",
+   "translation": "Parles-tu français ?",
+   "target_en": "هل تتكلم الإنجليزية؟",
+   "vocalized_en": "هَلْ تَتَكَلَّمُ الْإِنْجِلِيزِيَّةْ؟",
+   "translation_en": "Do you speak English?"
+  },
+  {
+   "target": "أين الحمام؟",
+   "vocalized": "أَيْنَ الْحَمَّامْ؟",
+   "translation": "Où sont les toilettes ?",
+   "translation_en": "Where is the toilet?"
+  },
+  {
+   "target": "بكم هذا؟",
+   "vocalized": "بِكَمْ هٰذَا؟",
+   "translation": "Combien ça coûte ?",
+   "translation_en": "How much is this?"
+  },
+  {
+   "target": "أريد شايا من فضلك.",
+   "vocalized": "أُرِيدُ شَايًا مِنْ فَضْلِكْ.",
+   "translation": "Je voudrais un thé, s'il vous plaît.",
+   "translation_en": "I'd like some tea, please."
+  },
+  {
+   "target": "مع السلامة!",
+   "vocalized": "مَعَ السَّلَامَةْ!",
+   "translation": "Au revoir !",
+   "translation_en": "Goodbye!"
+  }
+ ],
+ "script_preview": {
+  "intro": "L'arabe s'écrit de droite à gauche, en lettres liées. Il note surtout les consonnes : les voyelles brèves sont de petits signes, écrits ici au début, puis effacés peu à peu, comme dans les livres et la presse.",
+  "items": [
+   {
+    "sign": "ب ت ث",
+    "name": "bāʾ, tāʾ, ṯāʾ",
+    "note": "une même forme, les points font la différence : b, t, ṯ"
+   },
+   {
+    "sign": "بـ ـبـ ـب",
+    "name": "trois formes",
+    "note": "la même lettre en début, au milieu et en fin de mot"
+   },
+   {
+    "sign": "بَ بُ بِ",
+    "name": "ba, bu, bi",
+    "note": "les voyelles brèves : un petit trait ou un petit wāw"
+   },
+   {
+    "sign": "بَاب",
+    "name": "bāb",
+    "note": "porte : l'alif note le ā long"
+   },
+   {
+    "sign": "سَلَام",
+    "name": "salām",
+    "note": "paix : la racine s-l-m, celle de « salut »"
+   },
+   {
+    "sign": "ع ح",
+    "name": "ʿayn, ḥāʾ",
+    "note": "deux sons de la gorge, sans équivalent en français"
+   }
+  ],
+  "aids": "Pendant la lecture, la translittération s'affiche sous les lettres encore inconnues, les voyelles sont d'abord toutes écrites puis s'effacent pour les mots acquis, et un tap sur un mot donne son sens et sa prononciation."
+ },
+ "script_preview_en": {
+  "intro": "Arabic is written from right to left, in joined letters. It mostly writes the consonants: short vowels are small marks, written here at first, then removed little by little, as in books and newspapers.",
+  "items": [
+   {
+    "sign": "ب ت ث",
+    "name": "bāʾ, tāʾ, ṯāʾ",
+    "note": "one shape, the dots make the difference: b, t, ṯ"
+   },
+   {
+    "sign": "بـ ـبـ ـب",
+    "name": "three forms",
+    "note": "the same letter at the start, in the middle and at the end of a word"
+   },
+   {
+    "sign": "بَ بُ بِ",
+    "name": "ba, bu, bi",
+    "note": "the short vowels: a small stroke or a small wāw"
+   },
+   {
+    "sign": "بَاب",
+    "name": "bāb",
+    "note": "door: the alif writes the long ā"
+   },
+   {
+    "sign": "سَلَام",
+    "name": "salām",
+    "note": "peace: the root s-l-m, the one in “salaam”"
+   },
+   {
+    "sign": "ع ح",
+    "name": "ʿayn, ḥāʾ",
+    "note": "two sounds from the throat, with no equivalent in English"
+   }
+  ],
+  "aids": "While you read, the transliteration is shown under the letters you do not know yet, the vowels are all written at first and then disappear on the words you have acquired, and tapping a word gives its meaning and pronunciation."
+ },
+ "default_bible": {
+  "characters": [
+   {
+    "name": "سَلْمَى",
+    "role": "bibliothécaire du centre culturel",
+    "trait": "range tout par ordre alphabétique, jusqu'à ses courses"
+   },
+   {
+    "name": "كَرِيم",
+    "role": "étudiant en journalisme",
+    "trait": "voit des mystères partout et court après des scoops imaginaires"
+   },
+   {
+    "name": "أَبُو يُوسُف",
+    "role": "facteur à la retraite",
+    "trait": "connaît l'adresse de tout le quartier et oublie la sienne"
+   },
+   {
+    "name": "نَادِيَة",
+    "role": "cuisinière du café du centre",
+    "trait": "persuadée que tout problème se règle autour d'un bon repas"
+   }
+  ],
+  "setting": "Un petit centre culturel d'Amman, avec sa bibliothèque, son café et son tableau d'annonces, où le quartier vient lire, écrire et bavarder.",
+  "comic_springs": "Les scoops imaginaires de كَرِيم ; l'ordre maniaque de سَلْمَى ; أَبُو يُوسُف qui se perd dans son propre quartier ; les remèdes culinaires de نَادِيَة.",
+  "register_notes": "Arabe littéraire moderne (fuṣḥā) : lettres, annonces du centre, récits et conversations soignées, comme dans un feuilleton télévisé en arabe standard."
+ },
+ "default_bible_en": {
+  "characters": [
+   {
+    "name": "سَلْمَى",
+    "role": "librarian at the cultural centre",
+    "trait": "sorts everything alphabetically, even her shopping"
+   },
+   {
+    "name": "كَرِيم",
+    "role": "journalism student",
+    "trait": "sees mysteries everywhere and chases imaginary scoops"
+   },
+   {
+    "name": "أَبُو يُوسُف",
+    "role": "retired postman",
+    "trait": "knows the address of the whole neighbourhood and forgets his own"
+   },
+   {
+    "name": "نَادِيَة",
+    "role": "cook at the centre's café",
+    "trait": "convinced that any problem can be solved over a good meal"
+   }
+  ],
+  "setting": "A small cultural centre in Amman, with its library, its café and its notice board, where the neighbourhood comes to read, write and chat.",
+  "comic_springs": "كَرِيم's imaginary scoops; سَلْمَى's obsessive order; أَبُو يُوسُف getting lost in his own neighbourhood; نَادِيَة's culinary remedies.",
+  "register_notes": "Modern standard Arabic (fuṣḥā): letters, notices at the centre, stories and careful conversations, as in a TV series in standard Arabic."
+ },
+ "prompt_params": {
+  "language_label": "arabe littéraire",
+  "register": "Registre : arabe littéraire moderne (fuṣḥā), celui des livres, de la presse et des feuilletons en arabe standard ; aucun mot de dialecte. Les prénoms s'écrivent uniquement en lettres arabes, sans translittération.",
+  "script_rules": "Écris en arabe ENTIÈREMENT VOCALISÉ : chaque consonne porte sa voyelle brève, son sukūn ou sa šadda, et les noms indéfinis leur tanwīn. Le DERNIER mot de chaque réplique est en forme pausale : sa dernière lettre porte un sukūn au lieu de sa voyelle finale. N'ajoute aucun mot pour cela : garde la phrase telle quelle. Ponctuation arabe (، ؛ ؟). Aucune lettre latine, aucun chiffre latin.",
+  "line_schema": "{\"speaker\": \"nom\", \"text\": \"réplique en arabe entièrement vocalisé\", \"translation\": \"traduction française\"}",
+  "form_rule": "Pour un mot arabe, recopie le mot tel qu'il est écrit dans le texte, voyelles comprises ; le lemme est la forme du dictionnaire, vocalisée (le singulier pour un nom, le passé à la 3e personne du masculin singulier pour un verbe : كَتَبَ) ; le genre est m ou f pour un nom."
+ },
+ "prompt_params_en": {
+  "language_label": "Modern Standard Arabic",
+  "register": "Register: modern standard Arabic (fuṣḥā), the Arabic of books, the press and TV series in standard Arabic; no dialect words. First names are written in Arabic letters only, without transliteration.",
+  "script_rules": "Write FULLY VOCALIZED Arabic: every consonant carries its short vowel, its sukūn or its šadda, and indefinite nouns their tanwīn. The LAST word of every line is in pausal form: its last letter carries a sukūn instead of its final vowel. Do not add any word for this: keep the sentence as it is. Arabic punctuation (، ؛ ؟). No Latin letter, no Latin digit.",
+  "line_schema": "{\"speaker\": \"name\", \"text\": \"line in fully vocalized Arabic\", \"translation\": \"English translation\"}",
+  "form_rule": "For an Arabic word, copy the word as it is written in the text, vowels included; the lemma is the dictionary form, vocalized (the singular for a noun, the past 3rd person masculine singular for a verb: كَتَبَ); the gender is m or f for a noun."
+ }
+}

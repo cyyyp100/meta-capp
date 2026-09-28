@@ -2897,6 +2897,404 @@ LANG_SESSION_PROMPT_BUILDERS: dict = {
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Module langue — méthode « feuilleton » (services/lang_episodes.py)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Un prompt étroit par appel, SANS branchement : ce qui varie d'une langue à
+# l'autre (registre, règles d'écriture, forme d'une réplique, jetons du
+# mandarin) arrive en paramètre, tiré de nwol/data/lang/onboarding/<langue>.json
+# (`prompt_params`). Une sortie refusée par un validateur est rejouée avec la
+# raison du refus (`rejected`) : c'est la seule chose qui change d'une tentative
+# à l'autre. Tout ce qui est vérifiable (pinyin, translittération, corrigés)
+# est calculé après coup, jamais demandé ici.
+
+# Consigne propre à chaque forme de texte (C10). La réplique reste l'unité de
+# stockage : dans une lettre, une réplique est une phrase, le locuteur son auteur.
+LANG_FORMAT_RULES: dict[str, str] = {
+    "dialogue": "un DIALOGUE : répliques alternées entre deux ou trois personnages de la bible",
+    "sms": "un ÉCHANGE DE MESSAGES écrits courts (SMS) entre deux personnages ; une réplique = un message",
+    "lettre": "une LETTRE ou un courriel d'un personnage à un autre ; une réplique = une phrase, le locuteur est l'auteur",
+    "annonce": "une ANNONCE ou un avis public lu par les personnages ; une réplique = une phrase, le locuteur est celui qui la lit",
+    "recette": "une RECETTE expliquée par un personnage ; une réplique = une étape",
+    "journal": "une page de JOURNAL INTIME d'un personnage ; une réplique = une phrase",
+    "article": "un court ARTICLE de presse sur un événement du feuilleton ; une réplique = une phrase, le locuteur est le journaliste",
+    "recit": "un RÉCIT au passé raconté par un narrateur ; une réplique = une phrase, le locuteur est « Narrateur » ou un personnage",
+}
+# Les mêmes, pour un profil dont la langue d'explication est l'anglais.
+LANG_FORMAT_RULES_EN: dict[str, str] = {
+    "dialogue": "a DIALOGUE: alternating lines between two or three characters from the bible",
+    "sms": "an EXCHANGE of short written MESSAGES (texts) between two characters; one line = one message",
+    "lettre": "a LETTER or an e-mail from one character to another; one line = one sentence, the speaker is the author",
+    "annonce": "an ANNOUNCEMENT or public notice read by the characters; one line = one sentence, the speaker is the reader",
+    "recette": "a RECIPE explained by a character; one line = one step",
+    "journal": "a page of a character's DIARY; one line = one sentence",
+    "article": "a short NEWS ARTICLE about an event of the series; one line = one sentence, the speaker is the journalist",
+    "recit": "a NARRATIVE in the past told by a narrator; one line = one sentence, the speaker is \"Narrator\" or a character",
+}
+
+# Une partie des données de référence (notice, contrainte, explication de
+# référence d'un point) n'existe qu'en français : un prompt anglais le dit, pour
+# que le modèle s'en serve sans se mettre à écrire en français.
+_EN_REFERENCE_NOTE = "Some reference material below may be written in French: use it, but write for the learner in English."
+
+
+def _explain_en(p: dict) -> bool:
+    """Langue d'explication du profil (`explain_lang`) : anglais, ou français par défaut."""
+    return p.get("explain_lang") == "en"
+
+
+def estimate_prompt_tokens(text: str) -> int:
+    """Estimation PESSIMISTE du nombre de tokens d'un prompt (G2).
+
+    Ollama ne signale pas un prompt tronqué (cf. `_warn_if_context_overflow`) :
+    le budget se vérifie avant, sur les cas maximaux (tests/services/
+    test_lang_prompt_budget.py). Un caractère chinois compte pour un token, une
+    lettre arabe pour un demi, le reste un token pour trois caractères — le
+    français tourne plutôt autour de quatre avec le tokenizer de Gemma. Le
+    banc (tools/lang_bench.py) relève les vrais `prompt_eval_count`."""
+    han = sum(1 for c in text if "\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf")
+    arabic = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
+    rest = len(text) - han - arabic
+    return han + (arabic + 1) // 2 + (rest + 2) // 3
+
+
+def _rejected_block(rejected: str, en: bool = False) -> str:
+    rejected = (rejected or "").strip()
+    if not rejected:
+        return ""
+    if en:
+        return f"\nYour previous answer was REJECTED: {rejected}\nFix exactly these points.\n"
+    return f"\nTa proposition précédente a été REFUSÉE : {rejected}\nCorrige exactement ces points.\n"
+
+
+def _characters_line(characters: list[dict], en: bool = False) -> str:
+    return "; ".join(
+        f"{c.get('name', '?')} ({c.get('role', '')}{', ' + c['trait'] if c.get('trait') else ''})"
+        for c in characters or []
+    ) or ("(none)" if en else "(aucun)")
+
+
+def build_lang_story_bible_prompt(p: dict) -> str:
+    if _explain_en(p):
+        return _build_lang_story_bible_prompt_en(p)
+    interests = ", ".join(p.get("interests") or []) or "aucun précisé"
+    return f"""Tu écris la BIBLE d'un feuilleton pédagogique en {p['language_label']} pour un apprenant francophone.
+Centres d'intérêt de l'apprenant : {interests}.
+{p.get('register', '')}
+
+Invente {p['characters_min']} ou {p['characters_max']} personnages récurrents, chacun avec un travers comique, un lieu
+unique où ils se croisent, et deux ou trois ressorts comiques qui reviendront d'épisode en épisode.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{
+  "characters": [{{"name": "prénom usuel dans les pays de la langue", "role": "qui il est (fr)", "trait": "son travers comique (fr)"}}],
+  "setting": "le lieu, une phrase (fr)",
+  "comic_springs": "les ressorts comiques, une ou deux phrases (fr)",
+  "register_notes": "les situations où la langue écrite ou parlée est naturelle pour ces personnages, une phrase (fr)"
+}}
+
+Contraintes : tout en français sauf les prénoms ; humour bienveillant ; ni violence, ni politique, ni religion ;
+des personnages d'âges et de métiers variés. Les travers sont des traits de CARACTÈRE (distraction, gourmandise,
+retards, maladresse…), JAMAIS une façon de parler : aucun jargon, aucun anglicisme, aucun mot étranger, aucune
+grammaire compliquée — les textes doivent rester simples pour un apprenant."""
+
+
+def build_lang_story_arc_prompt(p: dict) -> str:
+    if _explain_en(p):
+        return _build_lang_story_arc_prompt_en(p)
+    recent = "\n".join(f"- {s}" for s in p.get("recent") or []) or "- (début du feuilleton)"
+    points = "\n".join(f"{i}. {pt['title']} — {pt['notice']}" for i, pt in enumerate(p["points"], start=1))
+    skeleton = ", ".join(
+        f'{{"n": {i}, "beat": "…", "hook": "…"}}' for i in range(1, len(p["points"]) + 1)
+    )
+    return f"""Tu es scénariste d'un feuilleton pédagogique en {p['language_label']} pour un francophone.
+Personnages : {_characters_line(p.get('characters') or [])}.
+Lieu : {p.get('setting', '')}
+Ressorts comiques : {p.get('comic_springs', '')}
+
+Ce qui s'est passé récemment :
+{recent}
+
+Chacun des {len(p['points'])} prochains épisodes fait travailler UN point de langue, dans cet ordre :
+{points}
+
+Écris l'ARC des {len(p['points'])} prochains épisodes : pour chacun, un temps fort de l'histoire qui permet
+d'employer naturellement son point de langue, et une accroche qui donne envie de lire la suite.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown, en remplissant CHACUN des {len(p['points'])} temps forts
+(« beat » : ce qui arrive dans l'épisode, une phrase en français ; « hook » : l'accroche vers l'épisode suivant) :
+{{"beats": [{skeleton}]}}
+
+Contraintes : exactement {len(p['points'])} temps forts, un par point de langue et dans le même ordre ;
+continuité avec ce qui précède ; une petite intrigue qui avance à chaque épisode ; tout en français."""
+
+
+def build_lang_episode_text_prompt(p: dict) -> str:
+    if _explain_en(p):
+        return _build_lang_episode_text_prompt_en(p)
+    recent = "\n".join(f"- {s}" for s in p.get("recent") or []) or "- (premier épisode)"
+    recycle = ", ".join(p.get("recycle") or []) or "(aucun)"
+    return f"""Tu écris l'épisode {p['episode_n']} d'un feuilleton pédagogique en {p['language_label']} pour un francophone.
+Personnages : {_characters_line(p.get('characters') or [])}.
+Lieu : {p.get('setting', '')}
+Épisodes précédents :
+{recent}
+Aujourd'hui : {p.get('beat', '')}
+
+Forme du texte : {p['format_rule']}.
+Point de langue du jour : {p['point_title']}. {p['point_constraint']}
+Contraintes de niveau : {p['constraints']}
+Réemploie si possible ces mots déjà vus : {recycle}.
+{p.get('script_rules', '')}
+{_rejected_block(p.get('rejected', ''))}
+Réponds UNIQUEMENT en JSON valide, sans markdown, avec EXACTEMENT {p['lines_target']} répliques dans "lines" :
+{{
+  "title": "titre de l'épisode (fr, 6 mots au plus)",
+  "summary": "ce qui se passe, une phrase (fr)",
+  "teaser": "une phrase qui donne envie de lire l'épisode suivant (fr)",
+  "lines": [{p['line_schema']}]
+}}
+
+Règles : "speaker" est un personnage de la bible (ou « Narrateur » pour un récit), plus au besoin UN personnage
+secondaire désigné par son rôle (le serveur, une touriste…) ; "text" est en
+{p['language_label']} UNIQUEMENT : ni français, ni anglicisme, ni mot étranger, ni astérisque ou autre mise en
+forme ; chaque "translation" est la traduction française fidèle de sa réplique ; une situation drôle ou
+touchante de la vie courante, pas un manuel ; le point du jour apparaît au moins deux fois."""
+
+
+def build_lang_episode_glossary_prompt(p: dict) -> str:
+    """Le service fournit la liste des mots à gloser (ceux du texte que le
+    lexique de l'apprenant ne connaît pas encore) : remplir une entrée par mot
+    donné est à la portée d'un petit modèle, « relever tous les mots » ne l'est
+    pas (mesuré : une seule entrée recopiée de l'exemple)."""
+    if _explain_en(p):
+        return _build_lang_episode_glossary_prompt_en(p)
+    lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
+    wanted = " | ".join(p["words"])
+    return f"""Voici un texte en {p['language_label']} avec sa traduction française, réplique par réplique :
+{lines}
+
+Pour CHACUN des {len(p['words'])} mots suivants, dans cet ordre, donne son lemme (forme du dictionnaire), sa
+traduction française DANS CE TEXTE, sa nature et son genre :
+{wanted}
+{p.get('form_rule', '')}
+{_rejected_block(p.get('rejected', ''))}
+Réponds UNIQUEMENT en JSON valide, sans markdown, avec exactement {len(p['words'])} entrées dans le même ordre.
+Chaque entrée est une liste de cinq chaînes : [mot tel que donné, lemme, traduction, nature, genre].
+Ajoute dans "expressions", au même format, jusqu'à 5 expressions de plusieurs mots du texte utiles à un
+débutant (par exemple une formule de politesse), recopiées exactement ; liste vide s'il n'y en a pas.
+{{"entries": [["mot", "lemme", "traduction", "nature", "genre"]], "expressions": []}}
+
+"nature" parmi : nom, verbe, adjectif, adverbe, pronom, préposition, conjonction, déterminant, interjection,
+expression. "genre" : m, f ou n pour un nom, sinon chaîne vide."""
+
+
+def build_lang_episode_notes_point_prompt(p: dict) -> str:
+    if _explain_en(p):
+        return _build_lang_episode_notes_point_prompt_en(p)
+    lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
+    return f"""Voici l'épisode d'un feuilleton en {p['language_label']}, réplique par réplique, avec la traduction :
+{lines}
+
+Point de langue du jour : {p['point_title']}.
+Ce qu'il faut remarquer : {p['point_notice']}
+Explication de référence (à adapter au texte, sans la contredire) : {p['point_seed']}
+{_rejected_block(p.get('rejected', ''))}
+Écris :
+1. de {p['notes_min']} à {p['notes_max']} NOTES courtes pour un francophone, chacune ancrée sur un passage d'une
+   réplique : grammaire, usage, culture ou prononciation ;
+2. le POINT DU JOUR : une question d'observation (l'apprenant doit remarquer le phénomène dans le texte), une
+   explication courte, de {p['examples_min']} à {p['examples_max']} exemples recopiés du texte, et pour chaque
+   exemple deux formes FAUSSES plausibles.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{
+  "notes": [{{"line": 1, "anchor": "passage recopié EXACTEMENT de la réplique", "kind": "grammaire", "text": "la note (fr, {p['note_max']} caractères au plus)"}}],
+  "point": {{
+    "observation": "question d'observation (fr)",
+    "explanation": "explication (fr, {p['explanation_max']} caractères au plus)",
+    "examples": ["passage recopié EXACTEMENT du texte"],
+    "variants": [{{"example": "un des exemples", "distractors": ["forme fausse 1", "forme fausse 2"]}}]
+  }}
+}}
+
+"kind" parmi : grammaire, usage, culture, prononciation. "line" est le numéro de la réplique. Les ancres et
+les exemples sont des sous-chaînes EXACTES du texte en {p['language_label']}, jamais de la traduction."""
+
+
+def build_lang_weekly_analysis_prompt(p: dict) -> str:
+    if _explain_en(p):
+        return _build_lang_weekly_analysis_prompt_en(p)
+    return f"""Tu observes la semaine d'étude d'un apprenant de {p['language_label']}. Voici des chiffres CALCULÉS
+(ne les recalcule pas, ne les invente pas) :
+{_json(p['aggregates'])}
+
+Formule deux ou trois observations bienveillantes et concrètes sur sa régularité et ses progrès, le ton à
+adopter avec lui cette semaine, et au plus une suggestion. Tu ne décides de rien : ni difficulté, ni programme.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{"observations": ["phrase (fr)"], "tone": "encourager", "suggestion": "une phrase (fr) ou chaîne vide"}}
+
+"tone" parmi : encourager, feliciter, rassurer."""
+
+
+# ── Les mêmes prompts, langue d'explication anglaise (§ 14, n° 14) ───────────
+# Même structure, mêmes champs JSON, mêmes contraintes : seule la langue de ce
+# qu'écrit Gemma change. Les valeurs d'énumération anglaises (noun, grammar,
+# encourage…) sont ramenées aux valeurs canoniques par llm/schema_json.
+
+def _build_lang_story_bible_prompt_en(p: dict) -> str:
+    interests = ", ".join(p.get("interests") or []) or "none given"
+    return f"""You are writing the BIBLE of a language-learning soap opera in {p['language_label']} for an English-speaking learner.
+The learner's interests: {interests}.
+{p.get('register', '')}
+
+Invent {p['characters_min']} or {p['characters_max']} recurring characters, each with a comic quirk, one single
+place where they meet, and two or three comic springs that will come back from episode to episode.
+
+Answer ONLY with valid JSON, no markdown:
+{{
+  "characters": [{{"name": "a usual first name in the countries of the language", "role": "who they are (en)", "trait": "their comic quirk (en)"}}],
+  "setting": "the place, one sentence (en)",
+  "comic_springs": "the comic springs, one or two sentences (en)",
+  "register_notes": "the situations where written or spoken language is natural for these characters, one sentence (en)"
+}}
+
+Constraints: everything in English except the first names; kind humour; no violence, no politics, no religion;
+characters of varied ages and jobs. The quirks are CHARACTER traits (absent-mindedness, greed, lateness,
+clumsiness…), NEVER a way of speaking: no jargon, no borrowed English words, no foreign words, no complicated
+grammar — the texts must stay simple for a learner."""
+
+
+def _build_lang_story_arc_prompt_en(p: dict) -> str:
+    recent = "\n".join(f"- {s}" for s in p.get("recent") or []) or "- (start of the series)"
+    points = "\n".join(f"{i}. {pt['title']} — {pt['notice']}" for i, pt in enumerate(p["points"], start=1))
+    skeleton = ", ".join(
+        f'{{"n": {i}, "beat": "…", "hook": "…"}}' for i in range(1, len(p["points"]) + 1)
+    )
+    return f"""You are the scriptwriter of a language-learning soap opera in {p['language_label']} for an English speaker.
+Characters: {_characters_line(p.get('characters') or [], en=True)}.
+Setting: {p.get('setting', '')}
+Comic springs: {p.get('comic_springs', '')}
+{_EN_REFERENCE_NOTE}
+
+What happened recently:
+{recent}
+
+Each of the next {len(p['points'])} episodes practises ONE language point, in this order:
+{points}
+
+Write the ARC of the next {len(p['points'])} episodes: for each one, a story beat in which its language point
+is used naturally, and a hook that makes the learner want to read on.
+
+Answer ONLY with valid JSON, no markdown, filling EACH of the {len(p['points'])} beats
+("beat": what happens in the episode, one sentence in English; "hook": the hook towards the next episode):
+{{"beats": [{skeleton}]}}
+
+Constraints: exactly {len(p['points'])} beats, one per language point and in the same order; continuity with
+what came before; a small plot that moves forward in every episode; everything in English."""
+
+
+def _build_lang_episode_text_prompt_en(p: dict) -> str:
+    recent = "\n".join(f"- {s}" for s in p.get("recent") or []) or "- (first episode)"
+    recycle = ", ".join(p.get("recycle") or []) or "(none)"
+    return f"""You are writing episode {p['episode_n']} of a language-learning soap opera in {p['language_label']} for an English speaker.
+Characters: {_characters_line(p.get('characters') or [], en=True)}.
+Setting: {p.get('setting', '')}
+Previous episodes:
+{recent}
+Today: {p.get('beat', '')}
+
+Text form: {p['format_rule']}.
+Language point of the day: {p['point_title']}. {p['point_constraint']}
+Level constraints: {p['constraints']}
+If possible, reuse these words the learner has already seen: {recycle}.
+{p.get('script_rules', '')}
+{_EN_REFERENCE_NOTE}
+{_rejected_block(p.get('rejected', ''), en=True)}
+Answer ONLY with valid JSON, no markdown, with EXACTLY {p['lines_target']} lines in "lines":
+{{
+  "title": "episode title (en, 6 words at most)",
+  "summary": "what happens, one sentence (en)",
+  "teaser": "one sentence that makes the learner want to read the next episode (en)",
+  "lines": [{p['line_schema']}]
+}}
+
+Rules: "speaker" is a character of the bible (or "Narrator" for a narrative), plus if needed ONE secondary
+character named by their role (the waiter, a tourist…); "text" is in {p['language_label']} ONLY: no English,
+no French, no foreign word, no asterisk or other formatting; each "translation" is the faithful ENGLISH
+translation of its line; a funny or touching everyday situation, not a textbook; the point of the day appears
+at least twice."""
+
+
+def _build_lang_episode_glossary_prompt_en(p: dict) -> str:
+    lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
+    wanted = " | ".join(p["words"])
+    return f"""Here is a text in {p['language_label']} with its English translation, line by line:
+{lines}
+
+For EACH of the {len(p['words'])} following words, in this order, give its lemma (dictionary form), its English
+translation IN THIS TEXT, its part of speech and its gender:
+{wanted}
+{p.get('form_rule', '')}
+{_rejected_block(p.get('rejected', ''), en=True)}
+Answer ONLY with valid JSON, no markdown, with exactly {len(p['words'])} entries in the same order.
+Each entry is a list of five strings: [word as given, lemma, translation, part of speech, gender].
+Add in "expressions", in the same format, up to 5 multi-word expressions of the text that are useful to a
+beginner (a polite formula, for instance), copied exactly; an empty list if there are none.
+{{"entries": [["word", "lemma", "translation", "part of speech", "gender"]], "expressions": []}}
+
+"part of speech" among: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner,
+interjection, expression. "gender": m, f or n for a noun, otherwise an empty string."""
+
+
+def _build_lang_episode_notes_point_prompt_en(p: dict) -> str:
+    lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
+    return f"""Here is an episode of a soap opera in {p['language_label']}, line by line, with its English translation:
+{lines}
+
+Language point of the day: {p['point_title']}.
+What to notice: {p['point_notice']}
+Reference explanation (adapt it to the text, never contradict it): {p['point_seed']}
+{_EN_REFERENCE_NOTE}
+{_rejected_block(p.get('rejected', ''), en=True)}
+Write:
+1. from {p['notes_min']} to {p['notes_max']} short NOTES for an English speaker, each anchored on a passage of
+   one line: grammar, usage, culture or pronunciation;
+2. the POINT OF THE DAY: an observation question (the learner must spot the phenomenon in the text), a short
+   explanation, from {p['examples_min']} to {p['examples_max']} examples copied from the text, and for each
+   example two plausible WRONG forms.
+
+Answer ONLY with valid JSON, no markdown:
+{{
+  "notes": [{{"line": 1, "anchor": "passage copied EXACTLY from the line", "kind": "grammar", "text": "the note (en, {p['note_max']} characters at most)"}}],
+  "point": {{
+    "observation": "observation question (en)",
+    "explanation": "explanation (en, {p['explanation_max']} characters at most)",
+    "examples": ["passage copied EXACTLY from the text"],
+    "variants": [{{"example": "one of the examples", "distractors": ["wrong form 1", "wrong form 2"]}}]
+  }}
+}}
+
+"kind" among: grammar, usage, culture, pronunciation. "line" is the number of the line. Anchors and examples
+are EXACT substrings of the {p['language_label']} text, never of the translation."""
+
+
+def _build_lang_weekly_analysis_prompt_en(p: dict) -> str:
+    return f"""You are looking at the study week of a learner of {p['language_label']}. Here are CALCULATED figures
+(do not recompute them, do not invent any):
+{_json(p['aggregates'])}
+
+Write two or three kind and concrete observations about their regularity and progress, the tone to take with
+them this week, and at most one suggestion. You decide nothing: neither difficulty nor curriculum.
+
+Answer ONLY with valid JSON, no markdown:
+{{"observations": ["sentence (en)"], "tone": "encourage", "suggestion": "one sentence (en) or an empty string"}}
+
+"tone" among: encourage, congratulate, reassure."""
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Assistant bulle (lecteur scroll libre)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -2917,7 +3315,7 @@ def is_figure_question(question: str) -> bool:
     return bool(_FIGURE_QUESTION_RE.search(question or ""))
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(lang: str | None = None) -> str:
     """Consigne système envoyée avec CHAQUE génération (`/api/generate`, champ
     `system`) : la langue de l'interface pilote la langue des réponses.
 
@@ -2925,8 +3323,10 @@ def build_system_prompt() -> str:
     la langue du document (titre ou pages en anglais) plutôt qu'une contrainte
     perdue au milieu d'une liste. Répétée en position système, la règle tient.
     Elle n'écrase pas les tâches qui produisent explicitement une autre langue
-    (module langues) : le prompt de la tâche garde le dernier mot."""
-    if _i18n.current_lang() == "en":
+    (module langues) : le prompt de la tâche garde le dernier mot. `lang`
+    remplace la langue de l'interface : une tâche du feuilleton écrit dans la
+    langue d'explication de son profil, qui peut en différer."""
+    if (lang or _i18n.current_lang()) == "en":
         return (
             "The learner's interface language is ENGLISH. Every sentence addressed "
             "to the learner (answers, hooks, questions, summaries, hints) is written "

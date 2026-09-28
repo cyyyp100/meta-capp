@@ -2117,3 +2117,186 @@ def _normalize_curiosity_tone(value: Any) -> str | None:
         "playful": "playful",
     }
     return aliases.get(token)
+
+
+# ── Module langue — méthode « feuilleton » (G3) ───────────────────────────────
+# Parseurs STRUCTURELS : types, champs requis, formes normalisées. Ce qui
+# dépend du contexte (bornes du palier, locuteurs de la bible, sous-chaînes du
+# texte, lexique de l'apprenant) est vérifié ensuite par les validateurs
+# déterministes de services/lang_episodes.py (G4-G10), qui disent POURQUOI une
+# sortie est refusée — c'est cette raison que reçoit la tentative suivante.
+
+_LANG_NOTE_KINDS = ("grammaire", "usage", "culture", "prononciation")
+_LANG_POS = (
+    "nom", "verbe", "adjectif", "adverbe", "pronom", "préposition", "conjonction",
+    "déterminant", "interjection", "expression", "nom propre", "numéral", "particule",
+)
+_LANG_TONES = ("encourager", "feliciter", "rassurer")
+# Un profil à la langue d'explication anglaise reçoit des prompts anglais : les
+# valeurs d'énumération qu'il renvoie sont ramenées aux valeurs canoniques, que
+# le code compare (`pos.startswith("nom")`, genre allemand, ton des messages).
+_LANG_ENUM_SYNONYMS = {
+    "noun": "nom", "common noun": "nom", "proper noun": "nom propre", "verb": "verbe",
+    "adjective": "adjectif", "adverb": "adverbe", "pronoun": "pronom", "preposition": "préposition",
+    "conjunction": "conjonction", "determiner": "déterminant", "article": "déterminant",
+    "numeral": "numéral", "number": "numéral", "particle": "particule",
+    "grammar": "grammaire", "pronunciation": "prononciation",
+    "encourage": "encourager", "congratulate": "feliciter", "reassure": "rassurer",
+}
+
+
+def _lang_enum(value: str) -> str:
+    return _LANG_ENUM_SYNONYMS.get(value, value)
+
+
+def _str(value) -> str:
+    text = _coerce_text(value)
+    return (text or "").strip()
+
+
+def parse_lang_story_bible(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    characters = []
+    for c in data.get("characters") or []:
+        if isinstance(c, dict) and _str(c.get("name")):
+            characters.append({"name": _str(c.get("name")), "role": _str(c.get("role")), "trait": _str(c.get("trait"))})
+    if len(characters) < 2:
+        return None
+    return {
+        "characters": characters[:6],
+        "setting": _str(data.get("setting")),
+        "comic_springs": _str(data.get("comic_springs")),
+        "register_notes": _str(data.get("register_notes")),
+    }
+
+
+def parse_lang_story_arc(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if isinstance(data, list):
+        data = {"beats": data}
+    if not isinstance(data, dict):
+        return None
+    beats = []
+    for i, b in enumerate(data.get("beats") or [], start=1):
+        if isinstance(b, dict) and _str(b.get("beat")):
+            beats.append({"n": _int_value(b.get("n")) or i, "beat": _str(b.get("beat")), "hook": _str(b.get("hook"))})
+    if not beats:
+        return None
+    beats.sort(key=lambda b: b["n"])
+    return {"beats": beats}
+
+
+def parse_lang_episode_text(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    lines = []
+    for ln in data.get("lines") or data.get("dialogue") or []:
+        if not isinstance(ln, dict):
+            continue
+        text = _str(ln.get("text", ln.get("target")))
+        if not text:
+            continue
+        entry = {
+            "speaker": _str(ln.get("speaker")),
+            "text": text,
+            "translation": _str(ln.get("translation")),
+        }
+        tokens = ln.get("tokens")
+        if isinstance(tokens, list):
+            entry["tokens"] = [t if isinstance(t, str) else str(t) for t in tokens]
+        lines.append(entry)
+    if not lines:
+        return None
+    return {
+        "title": _str(data.get("title")),
+        "lines": lines,
+        "summary": _str(data.get("summary")),
+        "teaser": _str(data.get("teaser")),
+    }
+
+
+def _glossary_entry(item) -> dict | None:
+    if isinstance(item, (list, tuple)):
+        parts = [_str(x) for x in item] + [""] * 5
+        form, lemma, translation, pos, gender = parts[:5]
+    elif isinstance(item, dict):
+        form = _str(item.get("form", item.get("word")))
+        lemma = _str(item.get("lemma"))
+        translation = _str(item.get("translation"))
+        pos = _str(item.get("pos"))
+        gender = _str(item.get("gender"))
+    else:
+        return None
+    if not form or not translation:
+        return None
+    pos = _lang_enum(pos.lower())
+    gender = gender.lower()[:1] if gender.lower()[:1] in ("m", "f", "n") else ""
+    return {
+        "form": form, "lemma": lemma or form, "translation": translation,
+        "pos": pos if pos in _LANG_POS else (pos or "expression"), "gender": gender or None,
+    }
+
+
+def parse_lang_episode_glossary(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if isinstance(data, list):
+        data = {"entries": data}
+    if not isinstance(data, dict):
+        return None
+    entries = [e for e in (_glossary_entry(it) for it in data.get("entries") or data.get("glossary") or []) if e]
+    expressions = [e for e in (_glossary_entry(it) for it in data.get("expressions") or []) if e]
+    for e in expressions:
+        e["pos"] = "expression"
+    return {"entries": entries, "expressions": expressions} if entries or expressions else None
+
+
+def parse_lang_episode_notes_point(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    notes = []
+    for n in data.get("notes") or []:
+        if not isinstance(n, dict):
+            continue
+        line = _int_value(n.get("line"))
+        text, anchor = _str(n.get("text")), _str(n.get("anchor"))
+        if line is None or not text or not anchor:
+            continue
+        kind = _lang_enum(_str(n.get("kind")).lower())
+        notes.append({"line": line, "anchor": anchor, "kind": kind if kind in _LANG_NOTE_KINDS else "usage", "text": text})
+    point = data.get("point")
+    if not isinstance(point, dict):
+        return None
+    examples = [e for e in (_str(x) for x in point.get("examples") or []) if e]
+    variants = []
+    for v in point.get("variants") or []:
+        if isinstance(v, dict) and _str(v.get("example")):
+            distractors = [d for d in (_str(x) for x in v.get("distractors") or []) if d]
+            variants.append({"example": _str(v.get("example")), "distractors": distractors})
+    parsed_point = {
+        "observation": _str(point.get("observation")),
+        "explanation": _str(point.get("explanation")),
+        "examples": examples,
+        "variants": variants,
+    }
+    if not parsed_point["explanation"] or not examples:
+        return None
+    return {"notes": notes, "point": parsed_point}
+
+
+def parse_lang_weekly_analysis(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    observations = [o for o in _coerce_str_list(data.get("observations")) if o.strip()][:4]
+    if not observations:
+        return None
+    tone = _lang_enum(_str(data.get("tone")).lower())
+    return {
+        "observations": [o.strip() for o in observations],
+        "tone": tone if tone in _LANG_TONES else "encourager",
+        "suggestion": _str(data.get("suggestion")),
+    }

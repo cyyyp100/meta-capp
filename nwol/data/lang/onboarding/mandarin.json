@@ -1,0 +1,208 @@
+{
+ "language": "mandarin",
+ "version": 1,
+ "phrases": [
+  {
+   "target": "你好！",
+   "pinyin": "nǐ hǎo !",
+   "translation": "Bonjour !",
+   "translation_en": "Hello!"
+  },
+  {
+   "target": "我叫…",
+   "pinyin": "wǒ jiào…",
+   "translation": "Je m'appelle…",
+   "translation_en": "My name is…"
+  },
+  {
+   "target": "谢谢。不客气。",
+   "pinyin": "xièxie. bú kèqi.",
+   "translation": "Merci. De rien.",
+   "translation_en": "Thank you. You're welcome."
+  },
+  {
+   "target": "对不起，我听不懂。",
+   "pinyin": "duìbuqǐ, wǒ tīng bu dǒng.",
+   "translation": "Pardon, je ne comprends pas.",
+   "translation_en": "Sorry, I don't understand."
+  },
+  {
+   "target": "请再说一遍。",
+   "pinyin": "qǐng zài shuō yí biàn.",
+   "translation": "Pouvez-vous répéter, s'il vous plaît ?",
+   "translation_en": "Please say it again."
+  },
+  {
+   "target": "你会说法语吗？",
+   "pinyin": "nǐ huì shuō Fǎyǔ ma ?",
+   "translation": "Parlez-vous français ?",
+   "target_en": "你会说英语吗？",
+   "pinyin_en": "nǐ huì shuō Yīngyǔ ma ?",
+   "translation_en": "Do you speak English?"
+  },
+  {
+   "target": "洗手间在哪儿？",
+   "pinyin": "xǐshǒujiān zài nǎr ?",
+   "translation": "Où sont les toilettes ?",
+   "translation_en": "Where is the toilet?"
+  },
+  {
+   "target": "这个多少钱？",
+   "pinyin": "zhège duōshao qián ?",
+   "translation": "Combien ça coûte ?",
+   "translation_en": "How much is this?"
+  },
+  {
+   "target": "我要一杯茶。",
+   "pinyin": "wǒ yào yì bēi chá.",
+   "translation": "Je voudrais un thé.",
+   "translation_en": "I'd like a cup of tea."
+  },
+  {
+   "target": "再见！",
+   "pinyin": "zàijiàn !",
+   "translation": "Au revoir !",
+   "translation_en": "Goodbye!"
+  }
+ ],
+ "script_preview": {
+  "intro": "Le chinois s'écrit en caractères : chacun se lit en une syllabe et porte un sens. Pas d'alphabet, pas d'espace entre les mots, pas de conjugaison. Chaque syllabe a un ton, qui change le sens.",
+  "items": [
+   {
+    "sign": "人",
+    "name": "rén",
+    "note": "personne : deux traits, comme une silhouette qui marche"
+   },
+   {
+    "sign": "口",
+    "name": "kǒu",
+    "note": "bouche : un carré ouvert"
+   },
+   {
+    "sign": "木",
+    "name": "mù",
+    "note": "arbre ; deux arbres, 林 : un bois"
+   },
+   {
+    "sign": "好",
+    "name": "hǎo",
+    "note": "bien = 女 (femme) + 子 (enfant)"
+   },
+   {
+    "sign": "妈",
+    "name": "mā",
+    "note": "maman : 女 donne le sens, 马 (mǎ) donne le son"
+   },
+   {
+    "sign": "mā · má · mǎ · mà",
+    "name": "les quatre tons",
+    "note": "une même syllabe, quatre mots : maman, chanvre, cheval, gronder"
+   }
+  ],
+  "aids": "Pendant la lecture, le pinyin s'affiche au-dessus des mots, les tons sont en couleur, et un tap sur un mot donne son sens et sa prononciation. Les caractères s'apprennent petit à petit, quelques-uns par épisode."
+ },
+ "script_preview_en": {
+  "intro": "Chinese is written in characters: each one is read as one syllable and carries a meaning. No alphabet, no spaces between words, no conjugation. Every syllable has a tone, which changes the meaning.",
+  "items": [
+   {
+    "sign": "人",
+    "name": "rén",
+    "note": "person: two strokes, like a figure walking"
+   },
+   {
+    "sign": "口",
+    "name": "kǒu",
+    "note": "mouth: an open square"
+   },
+   {
+    "sign": "木",
+    "name": "mù",
+    "note": "tree; two trees, 林: a wood"
+   },
+   {
+    "sign": "好",
+    "name": "hǎo",
+    "note": "good = 女 (woman) + 子 (child)"
+   },
+   {
+    "sign": "妈",
+    "name": "mā",
+    "note": "mum: 女 gives the meaning, 马 (mǎ) gives the sound"
+   },
+   {
+    "sign": "mā · má · mǎ · mà",
+    "name": "the four tones",
+    "note": "one syllable, four words: mum, hemp, horse, to scold"
+   }
+  ],
+  "aids": "While you read, pinyin is shown above the words, tones are in colour, and tapping a word gives its meaning and pronunciation. Characters are learnt little by little, a few per episode."
+ },
+ "default_bible": {
+  "characters": [
+   {
+    "name": "王阿姨",
+    "role": "patronne d'une petite maison de thé à Chengdu",
+    "trait": "donne des conseils à tout le monde, surtout à ceux qui n'en demandent pas"
+   },
+   {
+    "name": "小林",
+    "role": "étudiant en informatique, serveur à mi-temps",
+    "trait": "toujours plongé dans son téléphone, il rate tout ce qui se passe autour de lui"
+   },
+   {
+    "name": "陈老师",
+    "role": "professeur de calligraphie à la retraite",
+    "trait": "persuadé d'avoir toujours raison, il perd pourtant tous ses paris"
+   },
+   {
+    "name": "美美",
+    "role": "livreuse à scooter",
+    "trait": "connaît toutes les rues de la ville, mais se trompe souvent de commande"
+   }
+  ],
+  "setting": "Une petite maison de thé dans une ruelle de Chengdu, où les habitués jouent au mahjong et commentent la vie du quartier.",
+  "comic_springs": "Les conseils non sollicités de 王阿姨 ; 小林 qui ne lève jamais les yeux de son téléphone ; les paris perdus de 陈老师 ; 美美 qui livre toujours la mauvaise commande.",
+  "register_notes": "Mandarin standard d'aujourd'hui (putonghua) : conversations de quartier, messages sur téléphone et petites annonces de la maison de thé."
+ },
+ "default_bible_en": {
+  "characters": [
+   {
+    "name": "王阿姨",
+    "role": "owner of a small teahouse in Chengdu",
+    "trait": "gives advice to everyone, especially to those who do not ask for it"
+   },
+   {
+    "name": "小林",
+    "role": "computer science student, part-time waiter",
+    "trait": "always glued to his phone, he misses everything happening around him"
+   },
+   {
+    "name": "陈老师",
+    "role": "retired calligraphy teacher",
+    "trait": "convinced he is always right, yet he loses every bet"
+   },
+   {
+    "name": "美美",
+    "role": "scooter delivery rider",
+    "trait": "knows every street in town, but often mixes up the orders"
+   }
+  ],
+  "setting": "A small teahouse in an alley of Chengdu, where the regulars play mahjong and comment on neighbourhood life.",
+  "comic_springs": "王阿姨's unsolicited advice; 小林 who never looks up from his phone; 陈老师's lost bets; 美美 who always delivers the wrong order.",
+  "register_notes": "Present-day standard Mandarin (putonghua): neighbourhood conversations, phone messages and small notices at the teahouse."
+ },
+ "prompt_params": {
+  "language_label": "chinois mandarin",
+  "register": "Registre : mandarin standard de Chine continentale d'aujourd'hui (putonghua), situations de la vie quotidienne. Les prénoms s'écrivent uniquement en caractères chinois, sans pinyin.",
+  "script_rules": "Écris UNIQUEMENT en caractères chinois SIMPLIFIÉS, avec la ponctuation chinoise (，。？！、：“”). JAMAIS de pinyin ni de lettres latines dans \"text\" ; écris de préférence les nombres en caractères (三点, 二十块). Découpe chaque réplique en mots dans \"tokens\" : un jeton = un mot (你好, 朋友, 喜欢) ou un signe de ponctuation ; les jetons mis bout à bout redonnent EXACTEMENT \"text\", sans espace.",
+  "line_schema": "{\"speaker\": \"nom\", \"text\": \"réplique en caractères simplifiés\", \"tokens\": [\"mot\", \"mot\", \"。\"], \"translation\": \"traduction française\"}",
+  "form_rule": "Pour un mot chinois, le lemme est le mot lui-même, en caractères simplifiés, sans pinyin ; le genre est toujours une chaîne vide."
+ },
+ "prompt_params_en": {
+  "language_label": "Mandarin Chinese",
+  "register": "Register: present-day standard Mandarin of mainland China (putonghua), everyday situations. First names are written in Chinese characters only, without pinyin.",
+  "script_rules": "Write ONLY in SIMPLIFIED Chinese characters, with Chinese punctuation (，。？！、：“”). NEVER any pinyin or Latin letters in \"text\"; preferably write numbers in characters (三点, 二十块). Split each line into words in \"tokens\": one token = one word (你好, 朋友, 喜欢) or one punctuation mark; the tokens put end to end give back EXACTLY \"text\", without spaces.",
+  "line_schema": "{\"speaker\": \"name\", \"text\": \"line in simplified characters\", \"tokens\": [\"word\", \"word\", \"。\"], \"translation\": \"English translation\"}",
+  "form_rule": "For a Chinese word, the lemma is the word itself, in simplified characters, without pinyin; the gender is always an empty string."
+ }
+}

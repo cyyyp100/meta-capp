@@ -1,0 +1,309 @@
+{
+ "language": "allemand",
+ "version": 1,
+ "reviewed": false,
+ "note": "Test de niveau statique : clés écrites à la main, corrigé déterministe. Un item réussi vaut le point du programme indiqué ; le départ est fixé au dernier point réussi de façon consécutive, moins une marge (LANG_PLACEMENT_SAFETY_MARGIN).",
+ "items": [
+  {
+   "id": "de.p01",
+   "cefr": "A1",
+   "program_point": "de.a1.sein_praesens",
+   "kind": "qcm",
+   "prompt": "Wir ___ aus Frankreich.",
+   "choices": [
+    "sind",
+    "seid",
+    "bin",
+    "ist"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "de.p02",
+   "cefr": "A1",
+   "program_point": "de.a1.genus",
+   "kind": "qcm",
+   "prompt": "___ Mädchen spielt im Garten.",
+   "choices": [
+    "Der",
+    "Die",
+    "Das",
+    "Den"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "de.p03",
+   "cefr": "A1",
+   "program_point": "de.a1.akkusativ",
+   "kind": "qcm",
+   "prompt": "Ich kaufe ___ Kuchen.",
+   "choices": [
+    "ein",
+    "einen",
+    "einem",
+    "eine"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p04",
+   "cefr": "A1",
+   "program_point": "de.a1.trennbare_verben",
+   "kind": "lecture",
+   "prompt": "« Ich rufe dich morgen an. » Cela veut dire…",
+   "choices": [
+    "je t'appelle demain",
+    "je t'attends demain",
+    "je t'ai appelé hier",
+    "je viens chez toi demain"
+   ],
+   "answer": 0,
+   "prompt_en": "“Ich rufe dich morgen an.” This means…",
+   "choices_en": [
+    "I'll call you tomorrow",
+    "I'll wait for you tomorrow",
+    "I called you yesterday",
+    "I'm coming to your place tomorrow"
+   ]
+  },
+  {
+   "id": "de.p05",
+   "cefr": "A1",
+   "program_point": "de.a1.perfekt_sein",
+   "kind": "qcm",
+   "prompt": "Gestern ___ wir nach Berlin gefahren.",
+   "choices": [
+    "haben",
+    "sind",
+    "werden",
+    "hatten"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p06",
+   "cefr": "A2",
+   "program_point": "de.a2.wechselpraepositionen",
+   "kind": "qcm",
+   "prompt": "Ich lege das Buch auf ___ Tisch.",
+   "choices": [
+    "dem",
+    "der",
+    "den",
+    "des"
+   ],
+   "answer": 2
+  },
+  {
+   "id": "de.p07",
+   "cefr": "A2",
+   "program_point": "de.a2.weil",
+   "kind": "qcm",
+   "prompt": "Ich bleibe zu Hause, weil ich krank ___.",
+   "choices": [
+    "bin",
+    "war",
+    "sein",
+    "ist"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "de.p08",
+   "cefr": "A2",
+   "program_point": "de.a2.dativ_verben",
+   "kind": "qcm",
+   "prompt": "Kannst du ___ helfen?",
+   "choices": [
+    "mich",
+    "mir",
+    "ich",
+    "mein"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p09",
+   "cefr": "A2",
+   "program_point": "de.a2.adjektiv_bestimmt",
+   "kind": "qcm",
+   "prompt": "Der ___ Mann ist mein Nachbar.",
+   "choices": [
+    "alter",
+    "alte",
+    "alten",
+    "altes"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p10",
+   "cefr": "B1",
+   "program_point": "de.b1.irreale_bedingung",
+   "kind": "qcm",
+   "prompt": "Wenn ich mehr Zeit ___, würde ich öfter lesen.",
+   "choices": [
+    "habe",
+    "hätte",
+    "hatte",
+    "würde"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p11",
+   "cefr": "B1",
+   "program_point": "de.b1.passiv_vergangenheit",
+   "kind": "qcm",
+   "prompt": "Die Brücke ___ im Jahr 1890 gebaut.",
+   "choices": [
+    "wurde",
+    "wird",
+    "hat",
+    "war worden"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "de.p12",
+   "cefr": "B1",
+   "program_point": "de.b1.relativsatz_2",
+   "kind": "qcm",
+   "prompt": "Das ist die Frau, mit ___ ich arbeite.",
+   "choices": [
+    "die",
+    "der",
+    "den",
+    "dem"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p13",
+   "cefr": "B1",
+   "program_point": "de.b1.verben_praepositionen",
+   "kind": "lecture",
+   "prompt": "« Ich freue mich auf die Ferien. » La personne…",
+   "choices": [
+    "est contente des vacances passées",
+    "attend les vacances avec impatience",
+    "part en vacances aujourd'hui",
+    "n'aime pas les vacances"
+   ],
+   "answer": 1,
+   "prompt_en": "“Ich freue mich auf die Ferien.” The person…",
+   "choices_en": [
+    "is happy about the last holidays",
+    "is looking forward to the holidays",
+    "is going on holiday today",
+    "does not like holidays"
+   ]
+  },
+  {
+   "id": "de.p14",
+   "cefr": "B2",
+   "program_point": "de.b2.konjunktiv1",
+   "kind": "lecture",
+   "prompt": "Dans un article : « Der Minister sagte, er sei nicht informiert gewesen. » Le journaliste…",
+   "choices": [
+    "affirme que le ministre n'était pas informé",
+    "rapporte les paroles du ministre sans les confirmer",
+    "doute ouvertement du ministre",
+    "cite une lettre du ministre"
+   ],
+   "answer": 1,
+   "prompt_en": "In an article: “Der Minister sagte, er sei nicht informiert gewesen.” The journalist…",
+   "choices_en": [
+    "states that the minister was not informed",
+    "reports the minister's words without confirming them",
+    "openly doubts the minister",
+    "quotes a letter from the minister"
+   ]
+  },
+  {
+   "id": "de.p15",
+   "cefr": "B2",
+   "program_point": "de.b2.konjunktiv2_modal_vergangenheit",
+   "kind": "qcm",
+   "prompt": "Du ___ mich anrufen sollen!",
+   "choices": [
+    "hast",
+    "hättest",
+    "würdest",
+    "solltest"
+   ],
+   "answer": 1
+  },
+  {
+   "id": "de.p16",
+   "cefr": "B2",
+   "program_point": "de.b2.relativ_genitiv",
+   "kind": "qcm",
+   "prompt": "Der Autor, ___ Buch ich lese, kommt aus Wien.",
+   "choices": [
+    "dessen",
+    "deren",
+    "dem",
+    "den"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "de.p17",
+   "cefr": "C1",
+   "program_point": "de.c1.subjektive_modale_vergangenheit",
+   "kind": "lecture",
+   "prompt": "« Der Zeuge will nichts gesehen haben. » Cela veut dire…",
+   "choices": [
+    "le témoin ne veut rien voir",
+    "le témoin prétend n'avoir rien vu",
+    "le témoin n'a sûrement rien vu",
+    "le témoin voudrait voir quelque chose"
+   ],
+   "answer": 1,
+   "prompt_en": "“Der Zeuge will nichts gesehen haben.” This means…",
+   "choices_en": [
+    "the witness does not want to see anything",
+    "the witness claims to have seen nothing",
+    "the witness surely saw nothing",
+    "the witness would like to see something"
+   ]
+  },
+  {
+   "id": "de.p18",
+   "cefr": "C1",
+   "program_point": "de.c1.gerundiv",
+   "kind": "qcm",
+   "prompt": "Das ist eine nicht zu ___ Gefahr.",
+   "choices": [
+    "unterschätzende",
+    "unterschätzen",
+    "unterschätzt",
+    "unterschätzten"
+   ],
+   "answer": 0
+  },
+  {
+   "id": "de.p19",
+   "cefr": "C1",
+   "program_point": "de.c1.untertreibung",
+   "kind": "lecture",
+   "prompt": "Après un projet raté, la cheffe dit : « Das Ergebnis ist ausbaufähig. » Elle pense que…",
+   "choices": [
+    "le résultat est excellent",
+    "le résultat laisse à désirer",
+    "le projet doit être agrandi",
+    "le projet est terminé"
+   ],
+   "answer": 1,
+   "prompt_en": "After a failed project, the boss says: “Das Ergebnis ist ausbaufähig.” She thinks that…",
+   "choices_en": [
+    "the result is excellent",
+    "the result leaves something to be desired",
+    "the project must be extended",
+    "the project is finished"
+   ]
+  }
+ ]
+}

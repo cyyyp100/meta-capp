@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import logging
 
+from config.settings import (
+    LANG_LEGACY_ARC_TEMPLATE,
+    LANG_LEGACY_LESSON_SIZE,
+    LANG_LEGACY_REVISION_EVERY,
+    LANG_LEGACY_WEAK_POINTS,
+)
 from db.lang_db import (
     SESSION_TYPE_LABEL,
     SESSION_TYPE_RENDER_KIND,
@@ -31,7 +37,7 @@ from services.llm_bridge import run_llm_sync
 logger = logging.getLogger("services.lang_sequencer")
 
 # Une session de révision est imposée toutes les N sessions, sans appeler le LLM.
-REVISION_EVERY = 7
+REVISION_EVERY = LANG_LEGACY_REVISION_EVERY
 
 # ── Planificateur de séance (arc Assimil à 4 temps sur 10 exercices) ───────────
 #
@@ -40,10 +46,9 @@ REVISION_EVERY = 7
 # est choisi parmi les types affinitaires disponibles pour la phase, en équilibrant
 # les compétences. Construction déterministe (robuste hors-ligne) ; le LLM n'ajoute
 # qu'un thème fédérateur.
-LESSON_SIZE = 10
-ARC_TEMPLATE: list[str] = (
-    ["ancrage"] + ["exposition"] * 3 + ["manipulation"] * 5 + ["cloture"]
-)  # 1 + 3 + 5 + 1 = 10
+# Source unique : config/settings.py (C14).
+LESSON_SIZE = LANG_LEGACY_LESSON_SIZE
+ARC_TEMPLATE: list[str] = list(LANG_LEGACY_ARC_TEMPLATE)  # 1 + 3 + 5 + 1 = 10
 
 # Types affinitaires par temps (intersection avec les types disponibles pour la
 # phase ; repli sur tous les types disponibles si l'intersection est vide). La
@@ -98,7 +103,7 @@ def build_sequencer_state(profile: dict) -> dict:
         "phase": profile.get("phase", "passive"),
         "last_session_type": get_last_session_type(profile_id),
         "skill_distribution_7": get_skill_distribution(profile_id, window=REVISION_EVERY),
-        "weak_points": get_lang_errors_for_revision(profile_id, limit=5),
+        "weak_points": get_lang_errors_for_revision(profile_id, limit=LANG_LEGACY_WEAK_POINTS),
         # Pont SR → séance : nombre de cartes dues (alimente l'ancrage/clôture même
         # sans erreur récente — 2e vague Assimil).
         "due_count": len(get_due_flashcards_for_language(profile_id, language, limit=8)),

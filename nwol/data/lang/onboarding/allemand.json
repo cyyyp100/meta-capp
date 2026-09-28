@@ -1,0 +1,125 @@
+{
+ "language": "allemand",
+ "version": 1,
+ "phrases": [
+  {
+   "target": "Hallo, wie geht's?",
+   "translation": "Salut, ça va ?",
+   "translation_en": "Hi, how are you?"
+  },
+  {
+   "target": "Ich heiße…",
+   "translation": "Je m'appelle…",
+   "translation_en": "My name is…"
+  },
+  {
+   "target": "Bitte. Danke.",
+   "translation": "S'il vous plaît. Merci.",
+   "translation_en": "Please. Thank you."
+  },
+  {
+   "target": "Entschuldigung, ich verstehe nicht.",
+   "translation": "Pardon, je ne comprends pas.",
+   "translation_en": "Sorry, I don't understand."
+  },
+  {
+   "target": "Können Sie das bitte wiederholen?",
+   "translation": "Pouvez-vous répéter, s'il vous plaît ?",
+   "translation_en": "Could you repeat that, please?"
+  },
+  {
+   "target": "Sprechen Sie Französisch?",
+   "translation": "Parlez-vous français ?",
+   "target_en": "Sprechen Sie Englisch?",
+   "translation_en": "Do you speak English?"
+  },
+  {
+   "target": "Wo ist die Toilette?",
+   "translation": "Où sont les toilettes ?",
+   "translation_en": "Where is the toilet?"
+  },
+  {
+   "target": "Was kostet das?",
+   "translation": "Combien ça coûte ?",
+   "translation_en": "How much is that?"
+  },
+  {
+   "target": "Einen Kaffee, bitte.",
+   "translation": "Un café, s'il vous plaît.",
+   "translation_en": "A coffee, please."
+  },
+  {
+   "target": "Bis später!",
+   "translation": "À plus tard !",
+   "translation_en": "See you later!"
+  }
+ ],
+ "default_bible": {
+  "characters": [
+   {
+    "name": "Greta",
+    "role": "gérante d'une boulangerie de quartier à Leipzig",
+    "trait": "très organisée, elle a un planning pour tout, même pour ses vacances"
+   },
+   {
+    "name": "Jonas",
+    "role": "étudiant en musique qui travaille à la boulangerie le samedi",
+    "trait": "rêveur, il invente des chansons sur les clients"
+   },
+   {
+    "name": "Frau Schulze",
+    "role": "voisine retraitée, cliente de tous les matins",
+    "trait": "connaît l'histoire de chaque maison de la rue"
+   },
+   {
+    "name": "Mehmet",
+    "role": "livreur de farine et ami de Greta",
+    "trait": "toujours de bonne humeur, toujours un peu en retard"
+   }
+  ],
+  "setting": "Une petite boulangerie dans une rue animée de Leipzig, près d'un parc et d'un arrêt de tram.",
+  "comic_springs": "Le planning de Greta que rien ne respecte ; les chansons de Jonas ; les histoires de Frau Schulze ; les retards de Mehmet.",
+  "register_notes": "Allemand standard d'aujourd'hui, conversations de tous les jours dans le quartier."
+ },
+ "default_bible_en": {
+  "characters": [
+   {
+    "name": "Greta",
+    "role": "manager of a neighbourhood bakery in Leipzig",
+    "trait": "very organised, she has a schedule for everything, even for her holidays"
+   },
+   {
+    "name": "Jonas",
+    "role": "music student who works at the bakery on Saturdays",
+    "trait": "a dreamer, he makes up songs about the customers"
+   },
+   {
+    "name": "Frau Schulze",
+    "role": "retired neighbour, a customer every morning",
+    "trait": "knows the story of every house in the street"
+   },
+   {
+    "name": "Mehmet",
+    "role": "flour delivery man and Greta's friend",
+    "trait": "always in a good mood, always a little late"
+   }
+  ],
+  "setting": "A small bakery in a lively street in Leipzig, near a park and a tram stop.",
+  "comic_springs": "Greta's schedule that nobody follows; Jonas's songs; Frau Schulze's stories; Mehmet's delays.",
+  "register_notes": "Present-day standard German, everyday conversations in the neighbourhood."
+ },
+ "prompt_params": {
+  "language_label": "allemand",
+  "register": "Registre : allemand standard d'Allemagne d'aujourd'hui, situations de la vie quotidienne.",
+  "script_rules": "Écris en allemand standard, avec les trémas (ä, ö, ü), le ß et une majuscule à tous les noms.",
+  "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en allemand\", \"translation\": \"traduction française\"}",
+  "form_rule": "Pour un nom, le lemme est au nominatif singulier SANS article et le genre (m, f ou n) est obligatoire."
+ },
+ "prompt_params_en": {
+  "language_label": "German",
+  "register": "Register: present-day standard German from Germany, everyday situations.",
+  "script_rules": "Write in standard German, with umlauts (ä, ö, ü), ß and a capital letter on every noun.",
+  "line_schema": "{\"speaker\": \"first name\", \"text\": \"line in German\", \"translation\": \"English translation\"}",
+  "form_rule": "For a noun, the lemma is the nominative singular WITHOUT article and the gender (m, f or n) is required."
+ }
+}

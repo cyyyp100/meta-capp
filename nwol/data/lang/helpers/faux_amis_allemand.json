@@ -1,0 +1,278 @@
+{
+ "language": "allemand",
+ "version": 1,
+ "reviewed": false,
+ "note": "Faux-amis fréquents pour un francophone. Une entrée dont le lemme correspond à une entrée du glossaire ajoute une note automatique (N2). Lemmes sans article ; la comparaison ignore la casse.",
+ "entries": [
+  {
+   "lemma": "also",
+   "looks_like": "aussi",
+   "means": "donc",
+   "note": "veut dire « donc, bon ». Aussi se dit auch."
+  },
+  {
+   "lemma": "bekommen",
+   "looks_like": "(devenir)",
+   "means": "recevoir",
+   "note": "veut dire « recevoir, obtenir ». Devenir se dit werden."
+  },
+  {
+   "lemma": "Gymnasium",
+   "looks_like": "gymnase",
+   "means": "lycée",
+   "note": "désigne le lycée (enseignement général). Un gymnase se dit die Turnhalle."
+  },
+  {
+   "lemma": "Chef",
+   "looks_like": "chef",
+   "means": "patron",
+   "note": "désigne le supérieur hiérarchique, le patron. Un chef cuisinier se dit der Koch ou der Küchenchef."
+  },
+  {
+   "lemma": "Kaution",
+   "looks_like": "caution",
+   "means": "dépôt de garantie",
+   "note": "désigne la somme versée (dépôt de garantie, caution judiciaire). La personne qui se porte garant : der Bürge."
+  },
+  {
+   "lemma": "eventuell",
+   "looks_like": "éventuellement",
+   "means": "peut-être",
+   "note": "veut dire « peut-être, le cas échéant ». Jamais « finalement »."
+  },
+  {
+   "lemma": "Menü",
+   "looks_like": "menu",
+   "means": "menu à prix fixe",
+   "note": "désigne un menu à prix fixe. La carte du restaurant se dit die Speisekarte."
+  },
+  {
+   "lemma": "Blamage",
+   "looks_like": "blâme",
+   "means": "honte, humiliation",
+   "note": "veut dire « honte, humiliation publique ». Un blâme se dit ein Tadel."
+  },
+  {
+   "lemma": "Rente",
+   "looks_like": "rente",
+   "means": "retraite",
+   "note": "désigne la pension de retraite. Une rente (revenu) se dit das Einkommen ou die Zinsen."
+  },
+  {
+   "lemma": "sensibel",
+   "looks_like": "sensible",
+   "means": "émotif, délicat",
+   "note": "veut dire « sensible, émotif, délicat ». Sensé se dit vernünftig."
+  },
+  {
+   "lemma": "Promotion",
+   "looks_like": "promotion",
+   "means": "doctorat",
+   "note": "désigne l'obtention du doctorat. Une promotion (au travail) se dit die Beförderung ; en magasin, das Angebot."
+  },
+  {
+   "lemma": "Tablette",
+   "looks_like": "tablette",
+   "means": "comprimé",
+   "note": "veut dire « comprimé ». Une tablette (numérique) se dit das Tablet ; de chocolat, eine Tafel Schokolade."
+  },
+  {
+   "lemma": "Note",
+   "looks_like": "note",
+   "means": "note scolaire, billet",
+   "note": "désigne une note scolaire (1 = très bien, 6 = très mauvais !) ou un billet. Une note écrite se dit die Notiz."
+  },
+  {
+   "lemma": "Kurs",
+   "looks_like": "cours",
+   "means": "cours, stage, cours de bourse",
+   "note": "désigne un cours au sens de stage (Deutschkurs). Une heure de cours à l'école se dit die Stunde."
+  },
+  {
+   "lemma": "Schal",
+   "looks_like": "châle",
+   "means": "écharpe",
+   "note": "désigne une écharpe. Un châle se dit das Tuch."
+  },
+  {
+   "lemma": "Termin",
+   "looks_like": "terme",
+   "means": "rendez-vous",
+   "note": "veut dire « rendez-vous, date fixée ». Le terme (fin) se dit das Ende ; un mot, der Begriff."
+  },
+  {
+   "lemma": "konsequent",
+   "looks_like": "conséquent",
+   "means": "cohérent, déterminé",
+   "note": "veut dire « cohérent, qui va jusqu'au bout ». Important se dit bedeutend ou beträchtlich."
+  },
+  {
+   "lemma": "Pension",
+   "looks_like": "pension",
+   "means": "petit hôtel, retraite",
+   "note": "désigne un petit hôtel ou la retraite d'un fonctionnaire."
+  },
+  {
+   "lemma": "Engagement",
+   "looks_like": "engagement",
+   "means": "implication",
+   "note": "désigne l'implication personnelle. Une promesse se dit das Versprechen ; un recrutement, die Einstellung."
+  },
+  {
+   "lemma": "Mappe",
+   "looks_like": "mappemonde",
+   "means": "chemise, pochette",
+   "note": "désigne une chemise à documents. Une carte se dit die Karte ou der Stadtplan."
+  },
+  {
+   "lemma": "Lokal",
+   "looks_like": "local",
+   "means": "bar, restaurant",
+   "note": "désigne un bar, un restaurant. Un local (pièce) se dit der Raum."
+  },
+  {
+   "lemma": "Parole",
+   "looks_like": "parole",
+   "means": "slogan, mot d'ordre",
+   "note": "désigne un slogan, un mot d'ordre. La parole se dit das Wort."
+  },
+  {
+   "lemma": "Rock",
+   "looks_like": "rock",
+   "means": "jupe",
+   "note": "désigne une jupe. La musique rock se dit der Rock aussi, mais la jupe est le sens courant."
+  },
+  {
+   "lemma": "lustig",
+   "looks_like": "lustré",
+   "means": "drôle",
+   "note": "veut dire « drôle, amusant ». Brillant se dit glänzend."
+  },
+  {
+   "lemma": "Rat",
+   "looks_like": "rat",
+   "means": "conseil",
+   "note": "veut dire « conseil » ou « conseil municipal ». Un rat se dit die Ratte."
+  },
+  {
+   "lemma": "Stadium",
+   "looks_like": "stade",
+   "means": "étape, phase",
+   "note": "désigne une étape, une phase. Un stade (sportif) se dit das Stadion."
+  },
+  {
+   "lemma": "Brief",
+   "looks_like": "bref",
+   "means": "lettre",
+   "note": "désigne une lettre (courrier). Bref se dit kurz."
+  },
+  {
+   "lemma": "Fabrik",
+   "looks_like": "fabrique",
+   "means": "usine",
+   "note": "désigne une usine. Fabriquer se dit herstellen."
+  },
+  {
+   "lemma": "Kommode",
+   "looks_like": "commode",
+   "means": "commode (meuble)",
+   "note": "désigne seulement le meuble. Pratique se dit bequem ou praktisch."
+  },
+  {
+   "lemma": "Konkurs",
+   "looks_like": "concours",
+   "means": "faillite",
+   "note": "veut dire « faillite ». Un concours se dit der Wettbewerb ou die Aufnahmeprüfung."
+  },
+  {
+   "lemma": "irritiert",
+   "looks_like": "irrité",
+   "means": "déconcerté",
+   "note": "veut dire « déconcerté, troublé » plus qu'« irrité » (verärgert)."
+  },
+  {
+   "lemma": "famos",
+   "looks_like": "fameux",
+   "means": "formidable",
+   "note": "veut dire « formidable, excellent ». Célèbre se dit berühmt."
+  },
+  {
+   "lemma": "Artist",
+   "looks_like": "artiste",
+   "means": "artiste de cirque",
+   "note": "désigne un acrobate, un artiste de cirque. Un artiste en général se dit der Künstler."
+  },
+  {
+   "lemma": "dezent",
+   "looks_like": "décent",
+   "means": "discret",
+   "note": "veut dire « discret, sobre ». Décent se dit anständig."
+  },
+  {
+   "lemma": "ordinär",
+   "looks_like": "ordinaire",
+   "means": "vulgaire",
+   "note": "veut dire « vulgaire, grossier ». Ordinaire se dit gewöhnlich."
+  },
+  {
+   "lemma": "brav",
+   "looks_like": "brave",
+   "means": "sage, obéissant",
+   "note": "veut dire « sage, obéissant » (un enfant, un chien). Courageux se dit mutig."
+  },
+  {
+   "lemma": "Bank",
+   "looks_like": "banque",
+   "means": "banc ou banque",
+   "note": "désigne à la fois la banque (pluriel Banken) et le banc (pluriel Bänke)."
+  },
+  {
+   "lemma": "Marmelade",
+   "looks_like": "marmelade",
+   "means": "confiture",
+   "note": "désigne n'importe quelle confiture."
+  },
+  {
+   "lemma": "Plakat",
+   "looks_like": "placard",
+   "means": "affiche",
+   "note": "veut dire « affiche ». Un placard se dit der Schrank."
+  },
+  {
+   "lemma": "blank",
+   "looks_like": "blanc",
+   "means": "brillant, nu",
+   "note": "veut dire « brillant, propre » ou « nu » (blanke Nerven : nerfs à vif). Blanc se dit weiß."
+  },
+  {
+   "lemma": "taxieren",
+   "looks_like": "taxer",
+   "means": "estimer, évaluer",
+   "note": "veut dire « estimer du regard, évaluer ». Taxer (imposer) se dit besteuern."
+  },
+  {
+   "lemma": "spenden",
+   "looks_like": "dépenser",
+   "means": "faire un don",
+   "note": "veut dire « donner, faire un don ». Dépenser se dit ausgeben."
+  },
+  {
+   "lemma": "Datum",
+   "looks_like": "donnée",
+   "means": "date",
+   "note": "veut dire « date ». Le pluriel die Daten veut dire « les données »."
+  },
+  {
+   "lemma": "Rezept",
+   "looks_like": "recette",
+   "means": "recette ou ordonnance",
+   "note": "désigne la recette de cuisine ET l'ordonnance médicale. Les recettes (argent) se disent die Einnahmen."
+  },
+  {
+   "lemma": "Kasse",
+   "looks_like": "casse",
+   "means": "caisse",
+   "note": "désigne la caisse (magasin) ou la caisse d'assurance maladie (Krankenkasse). La casse se dit der Bruch."
+  }
+ ]
+}

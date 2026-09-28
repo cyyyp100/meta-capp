@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 34).
+-- (config.settings.DB_SCHEMA_VERSION = 36).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -143,6 +143,44 @@ CREATE TABLE lang_curriculum (
             UNIQUE(language, lesson_n)
         );
 CREATE INDEX idx_lang_curriculum_lang  ON lang_curriculum(language);
+CREATE TABLE lang_daily_activity (
+                   profile_id        INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   study_date        TEXT NOT NULL,
+                   effective_seconds INTEGER NOT NULL DEFAULT 0,
+                   runs_completed    INTEGER NOT NULL DEFAULT 0,
+                   rereads           INTEGER NOT NULL DEFAULT 0,
+                   cards_reviewed    INTEGER NOT NULL DEFAULT 0,
+                   reveals           INTEGER NOT NULL DEFAULT 0,
+                   items_answered    INTEGER NOT NULL DEFAULT 0,
+                   first_start_local TEXT,
+                   counted           INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (profile_id, study_date)
+               );
+CREATE TABLE lang_episodes (
+                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id       INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   episode_n        INTEGER NOT NULL,
+                   kind             TEXT NOT NULL DEFAULT 'normal',
+                   program_point_id TEXT,
+                   format           TEXT NOT NULL DEFAULT 'dialogue',
+                   ladder_step      INTEGER NOT NULL DEFAULT 0,
+                   params_json      TEXT,
+                   title            TEXT NOT NULL DEFAULT '',
+                   summary          TEXT NOT NULL DEFAULT '',
+                   teaser           TEXT NOT NULL DEFAULT '',
+                   lines_json       TEXT,
+                   glossary_json    TEXT,
+                   notes_json       TEXT,
+                   point_json       TEXT,
+                   aids_json        TEXT,
+                   status           TEXT NOT NULL DEFAULT 'queued',
+                   generation_json  TEXT,
+                   created_at       DATETIME DEFAULT (datetime('now')),
+                   ready_at         DATETIME,
+                   first_played_at  DATETIME,
+                   UNIQUE(profile_id, episode_n)
+               );
+CREATE INDEX idx_lang_episodes_status ON lang_episodes(profile_id, status);
 CREATE TABLE lang_errors (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id  INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
@@ -165,6 +203,20 @@ CREATE TABLE lang_exercises_cache (
             UNIQUE(profile_id, lesson_n, exercise_type)
         );
 CREATE INDEX idx_lang_exercises_profile ON lang_exercises_cache(profile_id);
+CREATE TABLE lang_item_attempts (
+                   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id        INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step          TEXT NOT NULL,
+                   game_kind     TEXT NOT NULL,
+                   item_ref      TEXT NOT NULL,
+                   expected_json TEXT,
+                   given_json    TEXT,
+                   correct       INTEGER,
+                   ms            INTEGER,
+                   at            DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(run_id, step, item_ref)
+               );
+CREATE INDEX idx_lang_item_attempts_run ON lang_item_attempts(run_id);
 CREATE TABLE lang_lesson_cache (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
@@ -191,6 +243,45 @@ CREATE TABLE lang_lessons (
             completed_at  DATETIME
         );
 CREATE INDEX idx_lang_lessons_profile ON lang_lessons(profile_id);
+CREATE TABLE lang_level_history (
+                   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id    INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   at            DATETIME DEFAULT (datetime('now')),
+                   cefr          TEXT NOT NULL,
+                   program_order INTEGER NOT NULL,
+                   source        TEXT NOT NULL
+               );
+CREATE TABLE lang_lexicon (
+                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id       INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   form             TEXT NOT NULL,
+                   lemma            TEXT NOT NULL,
+                   translation      TEXT NOT NULL DEFAULT '',
+                   pos              TEXT,
+                   gender           TEXT,
+                   pron             TEXT,
+                   vocalized        TEXT,
+                   transparent      INTEGER NOT NULL DEFAULT 0,
+                   first_episode_n  INTEGER,
+                   last_episode_n   INTEGER,
+                   episodes_seen    INTEGER NOT NULL DEFAULT 0,
+                   exposures        INTEGER NOT NULL DEFAULT 0,
+                   reveals          INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ok  INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ko  INTEGER NOT NULL DEFAULT 0,
+                   acquired_at      DATETIME,
+                   card_id          INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+                   UNIQUE(profile_id, lemma)
+               );
+CREATE INDEX idx_lang_lexicon_form ON lang_lexicon(profile_id, form);
+CREATE TABLE lang_placement_items (
+                   language       TEXT NOT NULL,
+                   item_id        TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (language, item_id)
+               );
 CREATE TABLE lang_profiles (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id        INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -198,10 +289,113 @@ CREATE TABLE lang_profiles (
             current_lesson INTEGER DEFAULT 1,
             phase          TEXT DEFAULT 'passive',
             created_at     DATETIME DEFAULT (datetime('now')),
-            last_session   DATETIME, level TEXT DEFAULT 'A1', placement_done INTEGER DEFAULT 0,
+            last_session   DATETIME, level TEXT DEFAULT 'A1', placement_done INTEGER DEFAULT 0, flow TEXT DEFAULT 'legacy', episode_n INTEGER DEFAULT 0, program_order INTEGER DEFAULT 0, ladder_step INTEGER DEFAULT 0, interests_json TEXT, onboarding_done INTEGER DEFAULT 0, second_wave_started INTEGER DEFAULT 0, last_bilan_episode_n INTEGER DEFAULT 0, force_respiration INTEGER DEFAULT 0, replay_queue_json TEXT, explain_lang TEXT DEFAULT 'fr',
             UNIQUE(user_id, language)
         );
 CREATE INDEX idx_lang_profiles_user    ON lang_profiles(user_id);
+CREATE TABLE lang_program_points (
+                   language       TEXT NOT NULL,
+                   point_id       TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   cefr           TEXT NOT NULL,
+                   kind           TEXT NOT NULL,
+                   title          TEXT NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (language, point_id)
+               );
+CREATE INDEX idx_lang_program_points_ord ON lang_program_points(language, ord);
+CREATE TABLE lang_program_progress (
+                   profile_id           INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   point_id             TEXT NOT NULL,
+                   status               TEXT NOT NULL,
+                   introduced_episode_n INTEGER,
+                   consolidated_at      DATETIME,
+                   PRIMARY KEY (profile_id, point_id)
+               );
+CREATE TABLE lang_reports (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   line_idx   INTEGER,
+                   token_idx  INTEGER,
+                   kind       TEXT NOT NULL,
+                   comment    TEXT NOT NULL DEFAULT '',
+                   status     TEXT NOT NULL DEFAULT 'ouvert',
+                   created_at DATETIME DEFAULT (datetime('now'))
+               );
+CREATE TABLE lang_reveal_events (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE CASCADE,
+                   line_idx   INTEGER NOT NULL,
+                   token_idx  INTEGER NOT NULL,
+                   lexeme_id  INTEGER REFERENCES lang_lexicon(id) ON DELETE SET NULL,
+                   pass       TEXT NOT NULL,
+                   at         DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(run_id, episode_id, line_idx, token_idx, pass)
+               );
+CREATE INDEX idx_lang_reveal_events_run ON lang_reveal_events(run_id);
+CREATE TABLE lang_run_steps (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step       TEXT NOT NULL,
+                   started_at DATETIME,
+                   ended_at   DATETIME,
+                   seconds    INTEGER NOT NULL DEFAULT 0,
+                   skipped    INTEGER NOT NULL DEFAULT 0,
+                   signal     TEXT,
+                   UNIQUE(run_id, step)
+               );
+CREATE TABLE lang_runs (
+                   id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id             INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   mode                   TEXT NOT NULL,
+                   episode_id             INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   second_wave_episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   plan_json              TEXT NOT NULL,
+                   absence_days           INTEGER,
+                   status                 TEXT NOT NULL DEFAULT 'in_progress',
+                   current_step           TEXT,
+                   started_at             DATETIME DEFAULT (datetime('now')),
+                   ended_at               DATETIME,
+                   effective_seconds      INTEGER NOT NULL DEFAULT 0,
+                   end_reason             TEXT,
+                   feeling                TEXT,
+                   study_date             TEXT
+               );
+CREATE INDEX idx_lang_runs_profile ON lang_runs(profile_id, started_at);
+CREATE TABLE lang_script_progress (
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   script          TEXT NOT NULL,
+                   unit_key        TEXT NOT NULL,
+                   exposures       INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ok INTEGER NOT NULL DEFAULT 0,
+                   recognitions_ko INTEGER NOT NULL DEFAULT 0,
+                   episodes_seen   INTEGER NOT NULL DEFAULT 0,
+                   last_episode_n  INTEGER,
+                   acquired_at     DATETIME,
+                   PRIMARY KEY (profile_id, script, unit_key)
+               );
+CREATE TABLE lang_script_units (
+                   script         TEXT NOT NULL,
+                   unit_id        TEXT NOT NULL,
+                   kind           TEXT NOT NULL,
+                   display        TEXT NOT NULL,
+                   payload_json   TEXT NOT NULL,
+                   ord            INTEGER NOT NULL,
+                   source_version TEXT NOT NULL,
+                   PRIMARY KEY (script, unit_id)
+               );
+CREATE TABLE lang_second_wave_ratings (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE CASCADE,
+                   line_idx   INTEGER NOT NULL,
+                   typed      TEXT,
+                   rating     TEXT NOT NULL,
+                   UNIQUE(run_id, episode_id, line_idx)
+               );
 CREATE TABLE lang_sequencer_log (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id  INTEGER REFERENCES lang_profiles(id) ON DELETE CASCADE,
@@ -228,6 +422,48 @@ CREATE TABLE lang_sessions (
             score       REAL
         , session_type TEXT DEFAULT 'dialogue_ecoute', lesson_id INTEGER REFERENCES lang_lessons(id) ON DELETE CASCADE, slot_index INTEGER, temps TEXT);
 CREATE INDEX idx_lang_sessions_profile ON lang_sessions(profile_id);
+CREATE TABLE lang_story_arcs (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   arc_n           INTEGER NOT NULL,
+                   start_episode_n INTEGER NOT NULL,
+                   beats_json      TEXT NOT NULL,
+                   source          TEXT NOT NULL DEFAULT 'gemma',
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(profile_id, arc_n)
+               );
+CREATE TABLE lang_story_bibles (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   version         INTEGER NOT NULL DEFAULT 1,
+                   characters_json TEXT NOT NULL,
+                   setting         TEXT NOT NULL DEFAULT '',
+                   comic_springs   TEXT NOT NULL DEFAULT '',
+                   interests_json  TEXT,
+                   register_notes  TEXT NOT NULL DEFAULT '',
+                   source          TEXT NOT NULL DEFAULT 'gemma',
+                   created_at      DATETIME DEFAULT (datetime('now'))
+               );
+CREATE INDEX idx_lang_story_bibles_profile ON lang_story_bibles(profile_id, version);
+CREATE TABLE lang_vocalized_forms (
+                   language         TEXT NOT NULL,
+                   bare             TEXT NOT NULL,
+                   stem_vocalized   TEXT NOT NULL,
+                   status           TEXT NOT NULL DEFAULT 'candidat',
+                   first_episode_id INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   occurrences      INTEGER NOT NULL DEFAULT 1,
+                   reports          INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (language, bare, stem_vocalized)
+               );
+CREATE TABLE lang_weekly_analysis (
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   week_start      TEXT NOT NULL,
+                   aggregates_json TEXT NOT NULL,
+                   analysis_json   TEXT,
+                   status          TEXT NOT NULL DEFAULT 'pending',
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   PRIMARY KEY (profile_id, week_start)
+               );
 CREATE TABLE library_folders (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id    INTEGER NOT NULL DEFAULT 1 REFERENCES user(id) ON DELETE CASCADE,

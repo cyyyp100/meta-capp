@@ -7,7 +7,21 @@ from __future__ import annotations
 import logging
 import threading
 
-from config.settings import LANGUAGE_SCRIPTS, LATIN_SCRIPT, SCRIPTS, TONAL_LANGUAGES
+from config.settings import (
+    LANG_LEGACY_CONTEXT_WORDS,
+    LANG_LEGACY_PASSIVE_TO_ACTIVE,
+    LANG_LEGACY_PLACEMENT_CEFR_THRESHOLDS,
+    LANG_LEGACY_REVISION_DUE_CARDS,
+    LANG_LEGACY_WEAK_POINTS,
+    LANG_LEGACY_WRITING_TO_PASSIVE,
+    LANG_LEGACY_WRITING_TO_PASSIVE_CONTINUOUS,
+    LANG_PILOT_LANGUAGES,
+    LANGUAGE_SCRIPTS,
+    LATIN_SCRIPT,
+    SCRIPTS,
+    TONAL_LANGUAGES,
+    task_wall_timeout_s,
+)
 from db.lang_db import (
     SESSION_TYPE_LABEL,
     SESSION_TYPE_RENDER_KIND,
@@ -46,15 +60,21 @@ from llm.ollama_client import (
     generate_session_content_async,
 )
 from services.flashcards import create_lang_vocab_flashcards, review_flashcard
+from services.lang_inflight import InflightRegistry
 from services.lang_sequencer import LESSON_SIZE, decide_session_type, plan_lesson
 from services.llm_bridge import run_llm_sync
 
 logger = logging.getLogger("services.lang")
 
-# Paliers de progression entre phases (en séances terminées, grain Assimil).
-WRITING_TO_PASSIVE = 6              # alphabet fini (cyrillique, grec…) : phase d'écriture courte
-WRITING_TO_PASSIVE_CONTINUOUS = 12  # script logographique (hanzi, kanji) : amorce plus longue
-PASSIVE_TO_ACTIVE = 20              # fin de la vague passive -> vague active
+# Paliers de progression entre phases (en séances terminées, grain Assimil) :
+# source unique dans config/settings.py (C14).
+WRITING_TO_PASSIVE = LANG_LEGACY_WRITING_TO_PASSIVE
+WRITING_TO_PASSIVE_CONTINUOUS = LANG_LEGACY_WRITING_TO_PASSIVE_CONTINUOUS
+PASSIVE_TO_ACTIVE = LANG_LEGACY_PASSIVE_TO_ACTIVE
+
+# Une génération à la fois par exercice (profil, séance, créneau) : l'apprenant
+# qui arrive avant la fin du préchargement attend CE résultat (K4).
+_EXERCISE_INFLIGHT = InflightRegistry()
 
 # Préchargement de l'exercice suivant en tâche de fond (occupe le temps de lecture).
 # Désactivable (tests déterministes : pas de thread concurrent sur la DB de test).
@@ -91,10 +111,13 @@ __all__ = [
 # Catalogue des langues (code = nom français minuscule). Le `script` est dérivé
 # de LANGUAGE_SCRIPTS ; `rtl` est exposé au frontend pour le rendu droite-à-gauche.
 def _lang_entry(code: str, label: str, flag: str) -> dict:
+    """`flow` dit au front quel parcours ouvrir : les langues du pilote jouent
+    le feuilleton, les autres gardent le flux hérité (K8)."""
     script = LANGUAGE_SCRIPTS.get(code, LATIN_SCRIPT)
     return {
         "code": code, "label": label, "flag": flag, "script": script,
         "rtl": bool(SCRIPTS.get(script, {}).get("rtl", False)),
+        "flow": "feuilleton" if code in LANG_PILOT_LANGUAGES else "legacy",
     }
 
 
@@ -116,7 +139,8 @@ LANGUAGES = [
     _lang_entry("coréen", "Coréen", "🇰🇷"),
     _lang_entry("mandarin", "Mandarin", "🇨🇳"),
     _lang_entry("japonais", "Japonais", "🇯🇵"),
-    _lang_entry("arabe", "Arabe", "🇸🇦"),
+    # A1 : le pilote enseigne l'arabe littéraire (fuṣḥā) ; le code reste `arabe`.
+    _lang_entry("arabe", "Arabe littéraire", "🇸🇦"),
     _lang_entry("hébreu", "Hébreu", "🇮🇱"),
     _lang_entry("hindi", "Hindi", "🇮🇳"),
     _lang_entry("thaï", "Thaï", "🇹🇭"),
@@ -253,7 +277,7 @@ def generate_session(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
     """
     profile = get_or_create_lang_profile(user_id, language)
     session_type, reason = decide_session_type(profile)
-    weak_points = get_lang_errors_for_revision(profile["id"], limit=5)
+    weak_points = get_lang_errors_for_revision(profile["id"], limit=LANG_LEGACY_WEAK_POINTS)
     try:
         content = run_llm_sync(
             lambda ok, err: generate_session_content_async(
@@ -400,9 +424,9 @@ def _build_lesson_context(profile_id: int, lesson_id: int, up_to_index: int) -> 
         ex = get_lesson_exercise_cache(profile_id, lesson_id, i)
         for it in _vocab_items_from_exercise(ex or {}):
             words.append(f"{it['word']} ({it['translation']})")
-        if len(words) >= 12:
+        if len(words) >= LANG_LEGACY_CONTEXT_WORDS:
             break
-    return ", ".join(words[:12])
+    return ", ".join(words[:LANG_LEGACY_CONTEXT_WORDS])
 
 
 def _deterministic_revision_from_cards(due_cards: list[dict], session_type: str) -> dict | None:
@@ -443,12 +467,14 @@ def _generate_exercise(language: str, profile: dict, lesson: dict, index: int) -
         "lesson_context": context,
         "difficulty_target": plan.get("difficulty_target"),
     }
-    weak_points = get_lang_errors_for_revision(profile["id"], limit=5)
+    weak_points = get_lang_errors_for_revision(profile["id"], limit=LANG_LEGACY_WEAK_POINTS)
     # Pont SR → séance : sur un slot de révision, on repêche les cartes dues pour
     # enrichir le quiz (et servir de repli déterministe si Ollama est éteint).
     due_cards: list[dict] = []
     if slot["render_kind"] == "revision":
-        due_cards = get_due_flashcards_for_language(profile["id"], language, limit=8)
+        due_cards = get_due_flashcards_for_language(
+            profile["id"], language, limit=LANG_LEGACY_REVISION_DUE_CARDS
+        )
     try:
         content = run_llm_sync(
             lambda ok, err: generate_session_content_async(
@@ -487,6 +513,9 @@ def _prefetch_exercise(language: str, profile: dict, lesson: dict, index: int) -
         return
     if get_lesson_exercise_cache(profile["id"], lesson["id"], index) is not None:
         return
+    key = (profile["id"], lesson["id"], index)
+    if _EXERCISE_INFLIGHT.claim(key) is not None:
+        return  # déjà en cours : rien à refaire
 
     def _job() -> None:
         try:
@@ -498,8 +527,46 @@ def _prefetch_exercise(language: str, profile: dict, lesson: dict, index: int) -
                 _harvest_vocab(language, content, profile.get("user_id", DEFAULT_USER_ID))
         except Exception:
             logger.debug("Prefetch exercice %d ignoré", index, exc_info=True)
+        finally:
+            _EXERCISE_INFLIGHT.release(key)
 
     threading.Thread(target=_job, daemon=True).start()
+
+
+def _exercise_task_label(lesson: dict, index: int) -> str:
+    """Label LLM du créneau : son budget borne l'attente d'un préchargement."""
+    from llm.ollama_client import _RENDER_KIND_TASK_LABEL
+
+    slots = (lesson.get("plan") or {}).get("slots") or []
+    kind = slots[index]["render_kind"] if 0 <= index < len(slots) else "dialogue"
+    if kind == "revision":
+        return "lang_revision_quiz"
+    return _RENDER_KIND_TASK_LABEL.get(kind, "lang_content_dialogue")
+
+
+def _generate_or_join(language: str, profile: dict, lesson: dict, index: int, user_id: int) -> dict:
+    """Génère l'exercice, ou attend celui que le préchargement est en train
+    d'écrire (une seule génération par créneau, K4)."""
+    key = (profile["id"], lesson["id"], index)
+    waiter = _EXERCISE_INFLIGHT.claim(key)
+    if waiter is not None:
+        waiter.wait(task_wall_timeout_s(_exercise_task_label(lesson, index)))
+        cached = get_lesson_exercise_cache(profile["id"], lesson["id"], index)
+        if cached is not None:
+            return cached
+        waiter = _EXERCISE_INFLIGHT.claim(key)
+        if waiter is not None:  # un autre appelant a repris la main entre-temps
+            waiter.wait(task_wall_timeout_s(_exercise_task_label(lesson, index)))
+            cached = get_lesson_exercise_cache(profile["id"], lesson["id"], index)
+            return cached if cached is not None else {"error": "Génération indisponible (Ollama ?)."}
+    try:
+        content = _generate_exercise(language, profile, lesson, index)
+        if not content.get("error"):
+            save_lesson_exercise_cache(profile["id"], lesson["id"], index, content)
+            _harvest_vocab(language, content, user_id)
+        return content
+    finally:
+        _EXERCISE_INFLIGHT.release(key)
 
 
 def _public_plan(plan: dict) -> list[dict]:
@@ -567,10 +634,7 @@ def get_lesson_exercise(lesson_id: int, index: int, user_id: int = DEFAULT_USER_
     if cached is not None:
         content = cached
     else:
-        content = _generate_exercise(language, profile, lesson, index)
-        if not content.get("error"):
-            save_lesson_exercise_cache(profile["id"], lesson_id, index, content)
-            _harvest_vocab(language, content, user_id)
+        content = _generate_or_join(language, profile, lesson, index, user_id)
 
     _prefetch_exercise(language, profile, lesson, index + 1)
     return {
@@ -605,7 +669,12 @@ def complete_lesson(
     duration_s: int,
     user_id: int = DEFAULT_USER_ID,
 ) -> dict:
-    """Clôture une séance : score, traçage par exercice (compétences), erreurs, progression."""
+    """Clôture une séance : score, traçage par exercice (compétences), progression.
+
+    Un exercice sans aucun item noté (lecture d'un dialogue, exercice passé sans
+    répondre) vaut `None`, jamais 1.0 (K1) : sinon la difficulté montait d'un
+    point par séance chez un apprenant qui ne répondait à rien. Les moyennes
+    ignorent ces `None` ; une séance sans aucune note a un score `NULL`."""
     lesson = get_lang_lesson(lesson_id)
     if not lesson:
         return {"error": "Séance introuvable."}
@@ -613,27 +682,23 @@ def complete_lesson(
     if not profile:
         return {"error": "Profil introuvable."}
     slots = (lesson.get("plan") or {}).get("slots") or []
-    scores = [float(s) for s in (exercise_scores or []) if isinstance(s, (int, float))]
-    avg01 = (sum(scores) / len(scores)) if scores else 0.0
+    scores = [
+        float(s) for s in (exercise_scores or [])
+        if isinstance(s, (int, float)) and not isinstance(s, bool)
+    ]
+    avg01 = (sum(scores) / len(scores)) if scores else None
 
     for i, slot in enumerate(slots):
-        sc = exercise_scores[i] if exercise_scores and i < len(exercise_scores) else 0.0
+        sc = exercise_scores[i] if exercise_scores and i < len(exercise_scores) else None
         save_lang_exercise(
             profile["id"], lesson_id, lesson["lesson_n"], i,
-            slot["temps"], slot["exercise_type"], float(sc or 0.0),
+            slot["temps"], slot["exercise_type"],
+            float(sc) if isinstance(sc, (int, float)) and not isinstance(sc, bool) else None,
         )
-        # Boucle d'erreurs : si un exercice a auto-identifié une faiblesse (clôture).
-        ex = get_lesson_exercise_cache(profile["id"], lesson_id, i)
-        cloture = (ex or {}).get("cloture") if isinstance(ex, dict) else None
-        log_err = cloture.get("log_error") if isinstance(cloture, dict) else None
-        if isinstance(log_err, dict) and log_err.get("word"):
-            save_lang_error(
-                profile["id"], lesson["lesson_n"],
-                log_err.get("error_type") or "vocabulaire",
-                log_err["word"], log_err.get("context", ""),
-            )
 
-    complete_lang_lesson(lesson_id, score=round(avg01 * 100, 1), duration_s=duration_s)
+    complete_lang_lesson(
+        lesson_id, score=round(avg01 * 100, 1) if avg01 is not None else None, duration_s=duration_s,
+    )
     _advance_after_lesson(profile, profile["language"])
     return {"ok": True, "total_lessons": get_lang_lesson_count(profile["id"])}
 
@@ -719,14 +784,15 @@ def finalize_lang_lesson(
     if not profile:
         return {"error": "Profil introuvable."}
     owner = int(profile.get("user_id") or user_id)
-    score = float(lesson.get("score") or 0.0)  # 0–100 (séance déjà clôturée)
+    # 0–100 (séance déjà clôturée) ; NULL si rien n'a été noté (K1).
+    score = float(lesson["score"]) if lesson.get("score") is not None else None
     slots = (lesson.get("plan") or {}).get("slots") or []
     metrics = {
         "duration_s": int(lesson.get("duration_s") or 0),
         "pages_read": 0,
-        "questions_answered": len(slots),
+        "questions_answered": len(slots) if score is not None else 0,
         "correct": 0,
-        "success_rate": round(score),
+        "success_rate": round(score) if score is not None else 0,
         "language": profile["language"],
         "theme": lesson.get("theme"),
     }
@@ -734,8 +800,10 @@ def finalize_lang_lesson(
         from services.session import nudge_metacog_profile
 
         nudge_metacog_profile(
-            owner, score, list(responses or []), metrics,
+            owner, score if score is not None else 0.0, list(responses or []), metrics,
             session_id=None, questions=list(questions or []),
+            # Rien de noté : la séance compte, mais ne déplace pas le profil.
+            measures=0 if score is None else None,
         )
     except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
         logger.debug("Nudge métacognitif (langue) ignoré", exc_info=True)
@@ -777,7 +845,7 @@ def _heuristic_cefr(test: dict, answers: dict) -> tuple[str, bool]:
             script_ok += 1 if good else 0
     ratio = (correct / total) if total else 0.0
     cefr = "A1"
-    for threshold, level in ((0.85, "C1"), (0.7, "B2"), (0.55, "B1"), (0.35, "A2")):
+    for threshold, level in LANG_LEGACY_PLACEMENT_CEFR_THRESHOLDS:
         if ratio >= threshold:
             cefr = level
             break

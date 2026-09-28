@@ -1,0 +1,727 @@
+{
+ "source": "tools/lang_bench.py, gemma4:e4b, 2026-09-24 (espagnol)",
+ "bible_characters": [
+  "Manolo",
+  "Carmen",
+  "Javier",
+  "Sofía"
+ ],
+ "episodes": [
+  {
+   "episode_n": 1,
+   "program_point_id": "es.a1.saludos",
+   "format": "dialogue",
+   "params": {
+    "step": 0,
+    "tier_index": 0,
+    "tier": "A1",
+    "lines": [
+     6,
+     8
+    ],
+    "words_per_line": [
+     3,
+     6
+    ],
+    "new_words": [
+     5,
+     7
+    ],
+    "translation": "toujours",
+    "formats": [
+     "dialogue"
+    ],
+    "recycle": [],
+    "verdict": "ok",
+    "signals": {},
+    "easy_streak": 0,
+    "forced": false
+   },
+   "text": {
+    "title": "Rencontres à la Plaza",
+    "summary": "Manolo et Sofía se rencontrent et échangent leurs noms sur la place centrale, tandis que Carmen et Javier observent la scène avec leurs réactions habituelles.",
+    "teaser": "Quand Manolo essaiera de 'booster' l'ambiance, que se passera-t-il avec le timing de Javier ?",
+    "lines": [
+     {
+      "speaker": "Manolo",
+      "text": "¡Hola! ¿Cómo te llamas?",
+      "translation": "Salut ! Comment t'appelles-tu ?"
+     },
+     {
+      "speaker": "Sofía",
+      "text": "Hola. Me llamo Sofía.",
+      "translation": "Salut. Je m'appelle Sofía."
+     },
+     {
+      "speaker": "Manolo",
+      "text": "¡Mucho gusto! ¿Y tú?",
+      "translation": "Enchanté ! Et toi ?"
+     },
+     {
+      "speaker": "Sofía",
+      "text": "Yo me llamo Sofía.",
+      "translation": "Je m'appelle Sofía."
+     },
+     {
+      "speaker": "Carmen",
+      "text": "¿Quién eres tú, joven?",
+      "translation": "Qui es-tu, jeune homme ?"
+     },
+     {
+      "speaker": "Manolo",
+      "text": "Soy Manolo. ¡Qué placer!",
+      "translation": "Je suis Manolo. Quel plaisir !"
+     },
+     {
+      "speaker": "Javier",
+      "text": "Disculpe. ¿Quién es usted?",
+      "translation": "Excusez-moi. Qui êtes-vous ?"
+     }
+    ]
+   },
+   "glossary": [
+    {
+     "form": "Hola",
+     "lemma": "hola",
+     "translation": "Salut",
+     "pos": "interjection",
+     "gender": null
+    },
+    {
+     "form": "Cómo",
+     "lemma": "cómo",
+     "translation": "Comment",
+     "pos": "adverbe",
+     "gender": null
+    },
+    {
+     "form": "te",
+     "lemma": "te",
+     "translation": "te",
+     "pos": "pronom",
+     "gender": null
+    },
+    {
+     "form": "llamas",
+     "lemma": "llamar",
+     "translation": "s'appeler",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "Me",
+     "lemma": "me",
+     "translation": "me",
+     "pos": "pronom",
+     "gender": null
+    },
+    {
+     "form": "llamo",
+     "lemma": "llamar",
+     "translation": "m'appelle",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "Mucho",
+     "lemma": "mucho",
+     "translation": "beaucoup",
+     "pos": "adverbe",
+     "gender": null
+    },
+    {
+     "form": "gusto",
+     "lemma": "gusto",
+     "translation": "plaisir",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Y",
+     "lemma": "y",
+     "translation": "et",
+     "pos": "conjonction",
+     "gender": null
+    },
+    {
+     "form": "tú",
+     "lemma": "tú",
+     "translation": "toi",
+     "pos": "pronom",
+     "gender": null
+    },
+    {
+     "form": "Yo",
+     "lemma": "yo",
+     "translation": "Je",
+     "pos": "pronom",
+     "gender": null
+    },
+    {
+     "form": "Quién",
+     "lemma": "quién",
+     "translation": "Qui",
+     "pos": "pronom",
+     "gender": null
+    },
+    {
+     "form": "eres",
+     "lemma": "ser",
+     "translation": "être",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "joven",
+     "lemma": "joven",
+     "translation": "jeune homme",
+     "pos": "adjectif",
+     "gender": "m"
+    },
+    {
+     "form": "Soy",
+     "lemma": "ser",
+     "translation": "être",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "Qué",
+     "lemma": "qué",
+     "translation": "Quel",
+     "pos": "interjection",
+     "gender": null
+    },
+    {
+     "form": "placer",
+     "lemma": "placer",
+     "translation": "plaisir",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Disculpe",
+     "lemma": "disculpar",
+     "translation": "Excusez",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "es",
+     "lemma": "ser",
+     "translation": "être",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "usted",
+     "lemma": "usted",
+     "translation": "vous",
+     "pos": "pronom",
+     "gender": null
+    }
+   ],
+   "notes_point": {
+    "notes": [
+     {
+      "line": 1,
+      "anchor": "¡Hola!",
+      "kind": "usage",
+      "text": "« ¡Hola! » est la salutation la plus courante et informelle, équivalente à « Salut ! ». Attention aux points d'exclamation qui marquent l'enthousiasme."
+     },
+     {
+      "line": 2,
+      "anchor": "Me llamo Sofía",
+      "kind": "grammaire",
+      "text": "La structure « Me llamo... » est la manière standard de dire « Je m'appelle... ». Le verbe « llamar » est ici conjugué à la première personne du singulier."
+     },
+     {
+      "line": 3,
+      "anchor": "¡Mucho gusto!",
+      "kind": "culture",
+      "text": "« ¡Mucho gusto! » signifie littéralement « Beaucoup de plaisir » et est la réponse polie après avoir appris le nom de quelqu'un. C'est un incontournable des premières rencontres."
+     },
+     {
+      "line": 5,
+      "anchor": "¿Quién eres tú, joven?",
+      "kind": "grammaire",
+      "text": "Le tutoiement est marqué par « eres tú » (tu es). Le « tú » est utilisé avec des personnes que l'on connaît peu ou qui sont de même âge."
+     }
+    ],
+    "point": {
+     "observation": "Comment le registre de langue (formel ou informel) change-t-il dans les questions posées pour savoir qui est l'interlocuteur ?",
+     "explanation": "L'espagnol utilise des pronoms et des formes verbales différentes selon le niveau de familiarité. Le tutoiement (informel) utilise « tú » et « eres », tandis que le vouvoiement (formel) utilise « usted » et « es ».",
+     "examples": [
+      "¿Quién eres tú, joven?",
+      "¿Quién es usted?",
+      "¿Y tú?"
+     ],
+     "variants": [
+      {
+       "example": "¿Quién eres tú, joven?",
+       "distractors": [
+        "¿Quién es tú, joven?",
+        "¿Quién eres usted, joven?"
+       ]
+      },
+      {
+       "example": "¿Quién es usted?",
+       "distractors": [
+        "¿Quién eres usted?",
+        "¿Quién es tú?"
+       ]
+      },
+      {
+       "example": "¿Y tú?",
+       "distractors": [
+        "¿Y usted?"
+       ]
+      }
+     ]
+    }
+   },
+   "expected_text_errors": []
+  },
+  {
+   "episode_n": 2,
+   "program_point_id": "es.a2.cuantificadores",
+   "format": "dialogue",
+   "params": {
+    "step": 8,
+    "tier_index": 1,
+    "tier": "A1-A2",
+    "lines": [
+     11,
+     13
+    ],
+    "words_per_line": [
+     6,
+     10
+    ],
+    "new_words": [
+     7,
+     9
+    ],
+    "translation": "masquable",
+    "formats": [
+     "dialogue"
+    ],
+    "recycle": [],
+    "verdict": "ok",
+    "signals": {},
+    "easy_streak": 0,
+    "forced": false
+   },
+   "text": {
+    "title": "Présenter son identité sur la place",
+    "summary": "Les personnages continuent d'échanger des présentations, Manolo utilisant son jargon, tandis que Carmen et Javier réagissent à ce chaos apparent.",
+    "teaser": "Mais qu'adviendra-t-il quand les ingrédients de la boulangerie manqueront complètement ?",
+    "lines": [
+     {
+      "speaker": "Manolo",
+      "text": "¿Quién eres? ¡Mi branding necesita un *elevator pitch*!",
+      "translation": "Qui es-tu ? Mon branding a besoin d'un pitch d'ascenseur !"
+     },
+     {
+      "speaker": "Sofía",
+      "text": "Soy un eco de color, una acuarela sin nombre.",
+      "translation": "Je suis un écho de couleur, une aquarelle sans nom."
+     },
+     {
+      "speaker": "Carmen",
+      "text": "¡Qué drama! No hay suficiente mantequilla para esto.",
+      "translation": "Quel drame ! Il n'y a pas assez de beurre pour ça."
+     },
+     {
+      "speaker": "Javier",
+      "text": "Tenemos poco tiempo. ¿Podemos ser rápidos, por favor?",
+      "translation": "Nous avons peu de temps. Pouvons-nous être rapides, s'il vous plaît ?"
+     },
+     {
+      "speaker": "Manolo",
+      "text": "¡No te preocupes! ¡Mi *networking* es mi superpoder!",
+      "translation": "Ne t'inquiète pas ! Mon réseautage est mon superpouvoir !"
+     },
+     {
+      "speaker": "Sofía",
+      "text": "Tu esencia es un lienzo, un poco de luz.",
+      "translation": "Ton essence est une toile, un peu de lumière."
+     },
+     {
+      "speaker": "Carmen",
+      "text": "¡Ay, qué exageración! Necesito más azúcar, por favor.",
+      "translation": "Oh, quelle exagération ! J'ai besoin de plus de sucre, s'il vous plaît."
+     },
+     {
+      "speaker": "Javier",
+      "text": "Solo necesitamos saber quién es cada uno. ¡Es un dato!",
+      "translation": "Nous avons juste besoin de savoir qui est chacun. C'est une donnée !"
+     },
+     {
+      "speaker": "Manolo",
+      "text": "Yo soy la solución, mi *value proposition* es grande.",
+      "translation": "Je suis la solution, ma proposition de valeur est grande."
+     },
+     {
+      "speaker": "Sofía",
+      "text": "Mi nombre es el color que no pudiste ver.",
+      "translation": "Mon nom est la couleur que tu n'as pas pu voir."
+     }
+    ]
+   },
+   "glossary": [
+    {
+     "form": "Quién",
+     "lemma": "quién",
+     "translation": "Qui",
+     "pos": "pronom",
+     "gender": "n"
+    },
+    {
+     "form": "eres",
+     "lemma": "ser",
+     "translation": "es",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "Mi",
+     "lemma": "mi",
+     "translation": "mon/ma",
+     "pos": "déterminant",
+     "gender": null
+    },
+    {
+     "form": "branding",
+     "lemma": "branding",
+     "translation": "branding",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "necesita",
+     "lemma": "necesitar",
+     "translation": "a besoin de",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "un",
+     "lemma": "un",
+     "translation": "un",
+     "pos": "déterminant",
+     "gender": null
+    },
+    {
+     "form": "elevator",
+     "lemma": "elevator",
+     "translation": "ascenseur",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "pitch",
+     "lemma": "pitch",
+     "translation": "pitch",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Soy",
+     "lemma": "ser",
+     "translation": "Je suis",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "eco",
+     "lemma": "eco",
+     "translation": "écho",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "de",
+     "lemma": "de",
+     "translation": "de",
+     "pos": "préposition",
+     "gender": null
+    },
+    {
+     "form": "color",
+     "lemma": "color",
+     "translation": "couleur",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "una",
+     "lemma": "un/une",
+     "translation": "une",
+     "pos": "déterminant",
+     "gender": null
+    },
+    {
+     "form": "acuarela",
+     "lemma": "acuarela",
+     "translation": "aquarelle",
+     "pos": "nom",
+     "gender": "f"
+    },
+    {
+     "form": "sin",
+     "lemma": "sin",
+     "translation": "sans",
+     "pos": "préposition",
+     "gender": null
+    },
+    {
+     "form": "nombre",
+     "lemma": "nombre",
+     "translation": "nom",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Qué",
+     "lemma": "qué",
+     "translation": "quel/quelle",
+     "pos": "interjection",
+     "gender": "n"
+    },
+    {
+     "form": "drama",
+     "lemma": "drama",
+     "translation": "drame",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "No",
+     "lemma": "no",
+     "translation": "ne...pas",
+     "pos": "adverbe",
+     "gender": null
+    },
+    {
+     "form": "hay",
+     "lemma": "haber",
+     "translation": "il y a",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "suficiente",
+     "lemma": "suficiente",
+     "translation": "suffisant",
+     "pos": "adjectif",
+     "gender": null
+    },
+    {
+     "form": "mantequilla",
+     "lemma": "mantequilla",
+     "translation": "beurre",
+     "pos": "nom",
+     "gender": "f"
+    },
+    {
+     "form": "para",
+     "lemma": "para",
+     "translation": "pour",
+     "pos": "préposition",
+     "gender": null
+    },
+    {
+     "form": "esto",
+     "lemma": "esto",
+     "translation": "ça",
+     "pos": "pronom",
+     "gender": "n"
+    },
+    {
+     "form": "Tenemos",
+     "lemma": "tener",
+     "translation": "Nous avons",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "poco",
+     "lemma": "poco",
+     "translation": "peu",
+     "pos": "adjectif",
+     "gender": null
+    },
+    {
+     "form": "tiempo",
+     "lemma": "tiempo",
+     "translation": "temps",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Podemos",
+     "lemma": "poder",
+     "translation": "Pouvons-nous",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "ser",
+     "lemma": "ser",
+     "translation": "être",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "rápidos",
+     "lemma": "rápido",
+     "translation": "rapides",
+     "pos": "adjectif",
+     "gender": "m"
+    },
+    {
+     "form": "por",
+     "lemma": "por",
+     "translation": "par/pour",
+     "pos": "préposition",
+     "gender": null
+    },
+    {
+     "form": "favor",
+     "lemma": "favor",
+     "translation": "s'il vous plaît",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "te",
+     "lemma": "te",
+     "translation": "te",
+     "pos": "pronom",
+     "gender": "n"
+    },
+    {
+     "form": "preocupes",
+     "lemma": "preocupar",
+     "translation": "t'inquiéter",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "networking",
+     "lemma": "networking",
+     "translation": "réseautage",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "es",
+     "lemma": "ser",
+     "translation": "est",
+     "pos": "verbe",
+     "gender": null
+    },
+    {
+     "form": "superpoder",
+     "lemma": "superpoder",
+     "translation": "superpouvoir",
+     "pos": "nom",
+     "gender": "m"
+    },
+    {
+     "form": "Tu",
+     "lemma": "tu",
+     "translation": "Ton/Ta",
+     "pos": "déterminant",
+     "gender": null
+    },
+    {
+     "form": "esencia",
+     "lemma": "esencia",
+     "translation": "essence",
+     "pos": "nom",
+     "gender": "f"
+    },
+    {
+     "form": "lienzo",
+     "lemma": "lienzo",
+     "translation": "toile",
+     "pos": "nom",
+     "gender": "m"
+    }
+   ],
+   "notes_point": {
+    "notes": [
+     {
+      "line": 1,
+      "anchor": "¡Mi branding necesita un *elevator pitch*!",
+      "kind": "usage",
+      "text": "Le mélange d'anglicismes (*branding*, *elevator pitch*) est très courant dans le langage professionnel moderne en Espagne, même en espagnol."
+     },
+     {
+      "line": 2,
+      "anchor": "Soy un eco de color, una acuarela sin nombre.",
+      "kind": "grammaire",
+      "text": "L'utilisation de métaphores abstraites comme 'écho de couleur' est typique du langage poétique ou de présentation de marque."
+     },
+     {
+      "line": 3,
+      "anchor": "No hay suficiente mantequilla para esto.",
+      "kind": "usage",
+      "text": "L'expression 'No hay suficiente...' est une manière simple mais efficace d'exprimer une quantité insuffisante."
+     },
+     {
+      "line": 5,
+      "anchor": "¡Mi *networking* es mi superpoder!",
+      "kind": "usage",
+      "text": "Le terme *networking* est un anglicisme très intégré, montrant l'influence du monde des affaires globalisé."
+     },
+     {
+      "line": 8,
+      "anchor": "¡Es un dato!",
+      "kind": "grammaire",
+      "text": "L'interjection '¡Es un dato!' est une manière emphatique de souligner l'importance d'une information simple."
+     }
+    ],
+    "point": {
+     "observation": "Comment le point de langue du jour ('assez', 'trop', 'peu') est-il illustré par des adverbes ou des déterminants dans le texte ?",
+     "explanation": "Le point de langue du jour porte sur la notion de quantité. On observe l'utilisation de 'poco' (peu) et 'suficiente' (assez) pour quantifier des choses (temps, beurre) ou des concepts. Il faut noter que 'poco' est un adverbe ou un déterminant qui varie en accord.",
+     "examples": [
+      "Tenemos poco tiempo.",
+      "No hay suficiente mantequilla para esto.",
+      "Necesito más azúcar, por favor."
+     ],
+     "variants": [
+      {
+       "example": "Tenemos poco tiempo.",
+       "distractors": [
+        "Tenemos pocos tiempo.",
+        "Tenemos poco de tiempo."
+       ]
+      },
+      {
+       "example": "No hay suficiente mantequilla para esto.",
+       "distractors": [
+        "No hay suficientes mantequilla para esto.",
+        "No hay suficiente de mantequilla para esto."
+       ]
+      },
+      {
+       "example": "Necesito más azúcar, por favor.",
+       "distractors": [
+        "Necesito poco azúcar, por favor.",
+        "Necesito más de azúcar, por favor."
+       ]
+      }
+     ]
+    }
+   },
+   "expected_text_errors": [
+    "astérisques",
+    "mots anglais"
+   ],
+   "why": "Accepté au premier banc, refusé depuis : anglicismes entre astérisques markdown (« *networking* »)."
+  }
+ ]
+}

@@ -1,0 +1,524 @@
+{
+ "language": "anglais",
+ "version": 1,
+ "reviewed": false,
+ "note": "Faux-amis fréquents pour un francophone. Une entrée dont le lemme correspond à une entrée du glossaire ajoute une note automatique (N2). Les verbes sont indexés sans « to », comme le lemme que renvoie le glossaire.",
+ "entries": [
+  {
+   "lemma": "actually",
+   "looks_like": "actuellement",
+   "means": "en fait",
+   "note": "veut dire « en fait », pas « actuellement » (currently, at the moment)."
+  },
+  {
+   "lemma": "eventually",
+   "looks_like": "éventuellement",
+   "means": "finalement",
+   "note": "veut dire « finalement, à la longue », pas « éventuellement » (possibly)."
+  },
+  {
+   "lemma": "sensible",
+   "looks_like": "sensible",
+   "means": "raisonnable",
+   "note": "veut dire « raisonnable, sensé ». « Sensible » se dit sensitive."
+  },
+  {
+   "lemma": "sensitive",
+   "looks_like": "sensitif",
+   "means": "sensible",
+   "note": "veut dire « sensible » (à la douleur, aux critiques)."
+  },
+  {
+   "lemma": "library",
+   "looks_like": "librairie",
+   "means": "bibliothèque",
+   "note": "veut dire « bibliothèque ». Une librairie est a bookshop (GB) ou a bookstore (US)."
+  },
+  {
+   "lemma": "deception",
+   "looks_like": "déception",
+   "means": "tromperie",
+   "note": "veut dire « tromperie ». La déception se dit disappointment."
+  },
+  {
+   "lemma": "disappointed",
+   "looks_like": "désappointé",
+   "means": "déçu",
+   "note": "veut dire simplement « déçu », sans le ton vieilli de « désappointé »."
+  },
+  {
+   "lemma": "attend",
+   "looks_like": "attendre",
+   "means": "assister à",
+   "note": "veut dire « assister à » (attend a meeting). Attendre se dit wait (for)."
+  },
+  {
+   "lemma": "assist",
+   "looks_like": "assister",
+   "means": "aider",
+   "note": "veut dire « aider ». Assister à une réunion se dit attend."
+  },
+  {
+   "lemma": "pretend",
+   "looks_like": "prétendre",
+   "means": "faire semblant",
+   "note": "veut dire « faire semblant ». Prétendre (affirmer) se dit claim."
+  },
+  {
+   "lemma": "rest",
+   "looks_like": "rester",
+   "means": "se reposer",
+   "note": "veut dire « se reposer ». Rester se dit stay."
+  },
+  {
+   "lemma": "demand",
+   "looks_like": "demander",
+   "means": "exiger",
+   "note": "veut dire « exiger ». Demander se dit ask (for)."
+  },
+  {
+   "lemma": "resume",
+   "looks_like": "résumer",
+   "means": "reprendre",
+   "note": "le verbe veut dire « reprendre » (après une pause) ; le nom résumé veut dire « CV » (US). Résumer se dit sum up, un résumé a summary."
+  },
+  {
+   "lemma": "achieve",
+   "looks_like": "achever",
+   "means": "réussir, accomplir",
+   "note": "veut dire « accomplir, atteindre un objectif ». Achever se dit finish ou complete."
+  },
+  {
+   "lemma": "realise",
+   "looks_like": "réaliser",
+   "means": "se rendre compte",
+   "note": "veut dire « se rendre compte ». Réaliser un projet se dit carry out ou achieve."
+  },
+  {
+   "lemma": "support",
+   "looks_like": "supporter",
+   "means": "soutenir",
+   "note": "veut dire « soutenir » (une équipe, une idée). Supporter (tolérer) se dit stand ou bear."
+  },
+  {
+   "lemma": "control",
+   "looks_like": "contrôler",
+   "means": "maîtriser, diriger",
+   "note": "veut dire surtout « maîtriser, diriger ». Contrôler (vérifier) se dit check."
+  },
+  {
+   "lemma": "introduce",
+   "looks_like": "introduire",
+   "means": "présenter",
+   "note": "veut dire aussi « présenter quelqu'un » (Let me introduce my wife). Insérer se dit insert."
+  },
+  {
+   "lemma": "prevent",
+   "looks_like": "prévenir",
+   "means": "empêcher",
+   "note": "veut dire « empêcher ». Prévenir (avertir) se dit warn."
+  },
+  {
+   "lemma": "rent",
+   "looks_like": "rentrer",
+   "means": "louer",
+   "note": "veut dire « louer ». Rentrer se dit go home ou come back."
+  },
+  {
+   "lemma": "injure",
+   "looks_like": "injurier",
+   "means": "blesser",
+   "note": "veut dire « blesser » physiquement. Injurier se dit insult."
+  },
+  {
+   "lemma": "confront",
+   "looks_like": "confronter",
+   "means": "affronter",
+   "note": "veut dire « affronter, faire face à » ; souvent plus agressif qu'en français."
+  },
+  {
+   "lemma": "college",
+   "looks_like": "collège",
+   "means": "établissement d'enseignement supérieur",
+   "note": "désigne l'enseignement après 16 ans ou l'université (US). Le collège français est secondary school."
+  },
+  {
+   "lemma": "lecture",
+   "looks_like": "lecture",
+   "means": "cours magistral, conférence",
+   "note": "veut dire « conférence, cours magistral ». La lecture se dit reading."
+  },
+  {
+   "lemma": "journey",
+   "looks_like": "journée",
+   "means": "trajet, voyage",
+   "note": "veut dire « trajet, voyage ». Une journée se dit a day."
+  },
+  {
+   "lemma": "travel",
+   "looks_like": "travail",
+   "means": "voyage",
+   "note": "veut dire « voyager, le voyage ». Le travail se dit work ou job."
+  },
+  {
+   "lemma": "coin",
+   "looks_like": "coin",
+   "means": "pièce de monnaie",
+   "note": "veut dire « pièce de monnaie ». Le coin (d'une rue) se dit corner."
+  },
+  {
+   "lemma": "chance",
+   "looks_like": "chance",
+   "means": "occasion, probabilité",
+   "note": "veut dire « occasion » ou « probabilité ». La chance (fortune) se dit luck."
+  },
+  {
+   "lemma": "occasion",
+   "looks_like": "occasion",
+   "means": "événement, circonstance",
+   "note": "veut dire « événement, circonstance ». Une bonne occasion se dit an opportunity ou a bargain."
+  },
+  {
+   "lemma": "location",
+   "looks_like": "location",
+   "means": "emplacement",
+   "note": "veut dire « emplacement, lieu ». La location (d'un bien) se dit rental."
+  },
+  {
+   "lemma": "affair",
+   "looks_like": "affaire",
+   "means": "liaison, affaire (politique)",
+   "note": "veut souvent dire « liaison amoureuse » ou « scandale ». Une affaire (commerce) se dit business ou deal."
+  },
+  {
+   "lemma": "argument",
+   "looks_like": "argument",
+   "means": "dispute",
+   "note": "veut souvent dire « dispute ». Il garde aussi le sens d'argument logique."
+  },
+  {
+   "lemma": "delay",
+   "looks_like": "délai",
+   "means": "retard",
+   "note": "veut dire « retard ». Un délai (échéance) se dit deadline."
+  },
+  {
+   "lemma": "fabric",
+   "looks_like": "fabrique",
+   "means": "tissu",
+   "note": "veut dire « tissu ». Une usine se dit factory."
+  },
+  {
+   "lemma": "figure",
+   "looks_like": "figure",
+   "means": "chiffre, silhouette",
+   "note": "veut dire « chiffre » ou « silhouette ». Le visage se dit face."
+  },
+  {
+   "lemma": "grape",
+   "looks_like": "grappe",
+   "means": "raisin",
+   "note": "veut dire « grain de raisin ». Une grappe se dit a bunch."
+  },
+  {
+   "lemma": "raisin",
+   "looks_like": "raisin",
+   "means": "raisin sec",
+   "note": "veut dire « raisin sec ». Le raisin frais se dit grapes."
+  },
+  {
+   "lemma": "preservative",
+   "looks_like": "préservatif",
+   "means": "conservateur",
+   "note": "veut dire « conservateur » (alimentaire). Le préservatif se dit condom."
+  },
+  {
+   "lemma": "crayon",
+   "looks_like": "crayon",
+   "means": "crayon de cire",
+   "note": "veut dire « crayon de couleur à la cire ». Un crayon à papier se dit a pencil."
+  },
+  {
+   "lemma": "cave",
+   "looks_like": "cave",
+   "means": "grotte",
+   "note": "veut dire « grotte ». Une cave se dit a cellar."
+  },
+  {
+   "lemma": "stage",
+   "looks_like": "stage",
+   "means": "étape, scène",
+   "note": "veut dire « étape » ou « scène de théâtre ». Un stage se dit an internship ou a work placement."
+  },
+  {
+   "lemma": "medicine",
+   "looks_like": "médecin",
+   "means": "médicament, médecine",
+   "note": "veut dire « médicament » ou « médecine ». Un médecin se dit a doctor."
+  },
+  {
+   "lemma": "petrol",
+   "looks_like": "pétrole",
+   "means": "essence",
+   "note": "veut dire « essence » (GB). Le pétrole brut se dit oil ou crude oil."
+  },
+  {
+   "lemma": "phrase",
+   "looks_like": "phrase",
+   "means": "expression, locution",
+   "note": "veut dire « expression, groupe de mots ». Une phrase complète se dit a sentence."
+  },
+  {
+   "lemma": "sympathetic",
+   "looks_like": "sympathique",
+   "means": "compatissant",
+   "note": "veut dire « compatissant, compréhensif ». Sympathique se dit nice ou friendly."
+  },
+  {
+   "lemma": "agenda",
+   "looks_like": "agenda",
+   "means": "ordre du jour",
+   "note": "veut dire « ordre du jour ». Un agenda se dit a diary ou a planner."
+  },
+  {
+   "lemma": "novel",
+   "looks_like": "nouvelle",
+   "means": "roman",
+   "note": "veut dire « roman ». Une nouvelle (récit court) se dit a short story ; une nouvelle (information), news."
+  },
+  {
+   "lemma": "notice",
+   "looks_like": "notice",
+   "means": "avis, préavis",
+   "note": "veut dire « avis, affiche » ou « préavis » ; to notice : remarquer. Une notice se dit instructions."
+  },
+  {
+   "lemma": "comprehensive",
+   "looks_like": "compréhensif",
+   "means": "complet",
+   "note": "veut dire « complet, exhaustif ». Compréhensif se dit understanding."
+  },
+  {
+   "lemma": "sale",
+   "looks_like": "sale",
+   "means": "vente, soldes",
+   "note": "veut dire « vente » ou « soldes ». Sale (malpropre) se dit dirty."
+  },
+  {
+   "lemma": "costume",
+   "looks_like": "costume",
+   "means": "déguisement",
+   "note": "veut dire « déguisement, costume de scène ». Un costume (d'homme) se dit a suit."
+  },
+  {
+   "lemma": "large",
+   "looks_like": "large",
+   "means": "grand",
+   "note": "veut dire « grand » (taille). Large (en largeur) se dit wide."
+  },
+  {
+   "lemma": "habit",
+   "looks_like": "habit",
+   "means": "habitude",
+   "note": "veut dire « habitude ». Un habit se dit clothes ou an outfit."
+  },
+  {
+   "lemma": "envy",
+   "looks_like": "envie",
+   "means": "jalousie",
+   "note": "veut dire « jalousie, envie de ce qu'a l'autre ». Avoir envie de se dit feel like ou want."
+  },
+  {
+   "lemma": "misery",
+   "looks_like": "misère",
+   "means": "souffrance, détresse",
+   "note": "veut dire « souffrance, grande tristesse ». La misère (pauvreté) se dit poverty."
+  },
+  {
+   "lemma": "gentle",
+   "looks_like": "gentil",
+   "means": "doux",
+   "note": "veut dire « doux, délicat ». Gentil se dit kind ou nice."
+  },
+  {
+   "lemma": "mechanic",
+   "looks_like": "mécanique",
+   "means": "mécanicien",
+   "note": "veut dire « mécanicien ». La mécanique se dit mechanics."
+  },
+  {
+   "lemma": "chair",
+   "looks_like": "chair",
+   "means": "chaise",
+   "note": "veut dire « chaise ». La chair se dit flesh."
+  },
+  {
+   "lemma": "luxury",
+   "looks_like": "luxure",
+   "means": "luxe",
+   "note": "veut dire « luxe ». La luxure se dit lust."
+  },
+  {
+   "lemma": "excited",
+   "looks_like": "excité",
+   "means": "impatient, enthousiaste",
+   "note": "veut dire « enthousiaste, impatient ». Évite « excité », qui a un sens sexuel en français familier."
+  },
+  {
+   "lemma": "deceive",
+   "looks_like": "décevoir",
+   "means": "tromper",
+   "note": "veut dire « tromper ». Décevoir se dit disappoint."
+  },
+  {
+   "lemma": "candid",
+   "looks_like": "candide",
+   "means": "franc",
+   "note": "veut dire « franc, sincère ». Candide (naïf) se dit naive."
+  },
+  {
+   "lemma": "ignore",
+   "looks_like": "ignorer",
+   "means": "ne pas tenir compte",
+   "note": "veut dire « ne pas tenir compte, faire semblant de ne pas voir ». Ignorer (ne pas savoir) se dit not know."
+  },
+  {
+   "lemma": "inhabited",
+   "looks_like": "inhabité",
+   "means": "habité",
+   "note": "veut dire « habité » ! Inhabité se dit uninhabited."
+  },
+  {
+   "lemma": "genial",
+   "looks_like": "génial",
+   "means": "affable",
+   "note": "veut dire « aimable, cordial ». Génial se dit brilliant ou great."
+  },
+  {
+   "lemma": "hazard",
+   "looks_like": "hasard",
+   "means": "danger",
+   "note": "veut dire « danger, risque ». Le hasard se dit chance."
+  },
+  {
+   "lemma": "marmalade",
+   "looks_like": "marmelade",
+   "means": "confiture d'agrumes",
+   "note": "désigne uniquement la confiture d'orange ou d'agrumes. Les autres se disent jam."
+  },
+  {
+   "lemma": "prune",
+   "looks_like": "prune",
+   "means": "pruneau",
+   "note": "veut dire « pruneau ». Une prune se dit a plum."
+  },
+  {
+   "lemma": "route",
+   "looks_like": "route",
+   "means": "itinéraire",
+   "note": "veut dire « itinéraire, ligne ». Une route se dit a road."
+  },
+  {
+   "lemma": "tentative",
+   "looks_like": "tentative",
+   "means": "hésitant, provisoire",
+   "note": "adjectif : « hésitant, provisoire ». Une tentative se dit an attempt."
+  },
+  {
+   "lemma": "vacancy",
+   "looks_like": "vacances",
+   "means": "poste vacant, chambre libre",
+   "note": "veut dire « poste vacant » ou « chambre libre ». Les vacances se disent holiday (GB) ou vacation (US)."
+  },
+  {
+   "lemma": "versatile",
+   "looks_like": "versatile",
+   "means": "polyvalent",
+   "note": "veut dire « polyvalent » (qualité). Versatile (changeant) se dit fickle."
+  },
+  {
+   "lemma": "abuse",
+   "looks_like": "abuser",
+   "means": "maltraiter",
+   "note": "veut dire « maltraiter, insulter » ; bien plus grave que « abuser » au sens d'exagérer."
+  },
+  {
+   "lemma": "bless",
+   "looks_like": "blesser",
+   "means": "bénir",
+   "note": "veut dire « bénir ». Blesser se dit hurt ou injure."
+  },
+  {
+   "lemma": "cry",
+   "looks_like": "crier",
+   "means": "pleurer",
+   "note": "veut surtout dire « pleurer ». Crier se dit shout ou scream."
+  },
+  {
+   "lemma": "deliver",
+   "looks_like": "délivrer",
+   "means": "livrer",
+   "note": "veut dire « livrer » (un colis). Délivrer (libérer) se dit free ou release."
+  },
+  {
+   "lemma": "save",
+   "looks_like": "savoir",
+   "means": "sauver, économiser",
+   "note": "veut dire « sauver » ou « économiser, enregistrer ». Savoir se dit know."
+  },
+  {
+   "lemma": "wander",
+   "looks_like": "vendre",
+   "means": "flâner",
+   "note": "veut dire « errer, flâner ». Vendre se dit sell."
+  },
+  {
+   "lemma": "eventual",
+   "looks_like": "éventuel",
+   "means": "final",
+   "note": "veut dire « final, qui arrive à la fin ». Éventuel se dit possible."
+  },
+  {
+   "lemma": "actual",
+   "looks_like": "actuel",
+   "means": "réel",
+   "note": "veut dire « réel, véritable ». Actuel se dit current ou present."
+  },
+  {
+   "lemma": "sympathy",
+   "looks_like": "sympathie",
+   "means": "compassion, condoléances",
+   "note": "veut dire « compassion » ou « condoléances ». La sympathie se dit liking ou friendliness."
+  },
+  {
+   "lemma": "assume",
+   "looks_like": "assumer",
+   "means": "supposer",
+   "note": "veut dire surtout « supposer ». Assumer (une responsabilité) se dit take on ou accept."
+  },
+  {
+   "lemma": "engage",
+   "looks_like": "engager",
+   "means": "captiver, s'impliquer",
+   "note": "veut souvent dire « captiver » ou « s'impliquer ». Engager (embaucher) se dit hire."
+  },
+  {
+   "lemma": "engaged",
+   "looks_like": "engagé",
+   "means": "fiancé, occupé",
+   "note": "veut dire « fiancé » ou « occupé » (téléphone, GB)."
+  },
+  {
+   "lemma": "quiet",
+   "looks_like": "quiet",
+   "means": "calme, silencieux",
+   "note": "veut dire « calme, silencieux ». Ne pas confondre avec quite (assez)."
+  },
+  {
+   "lemma": "quite",
+   "looks_like": "quitte",
+   "means": "assez, tout à fait",
+   "note": "veut dire « assez » ou « tout à fait » selon le ton. Rien à voir avec quitter (leave)."
+  }
+ ]
+}
