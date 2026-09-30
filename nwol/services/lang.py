@@ -148,7 +148,14 @@ LANGUAGES = [
 
 
 def list_languages() -> list[dict]:
-    return LANGUAGES
+    """Langues proposées sur la page Langues : seulement celles qui ont un
+    programme, c'est-à-dire celles du pilote (`LANG_PILOT_LANGUAGES`, C1).
+
+    Les autres restent au catalogue : leur libellé et leur drapeau servent encore
+    au profil d'un apprenant qui les a déjà jouées. Une langue réapparaît d'elle-même
+    quand son programme entre dans le pilote (architecture/18-pipeline-lang.md § 15.2).
+    """
+    return [lang for lang in LANGUAGES if lang["code"] in LANG_PILOT_LANGUAGES]
 
 
 def get_language_script(language: str) -> str:

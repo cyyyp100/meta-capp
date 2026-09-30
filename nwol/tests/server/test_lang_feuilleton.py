@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 import lang_fakes
+from config.settings import LANG_PILOT_LANGUAGES
 
 LANG = "espagnol"
 
@@ -87,7 +88,9 @@ def _episode(n):
 
 def test_pilot_language_opens_the_feuilleton_and_others_stay_legacy(client):
     languages = {lang["code"]: lang for lang in client.get("/api/lang/languages").json()}
-    assert languages["espagnol"]["flow"] == "feuilleton" and languages["italien"]["flow"] == "legacy"
+    # La page ne propose que les langues qui ont un programme : celles du pilote.
+    assert set(languages) == set(LANG_PILOT_LANGUAGES)
+    assert {lang["flow"] for lang in languages.values()} == {"feuilleton"}
     assert languages["arabe"]["label"] == "Arabe littéraire"
     status = client.get(f"/api/lang/{LANG}/status").json()
     assert status["flow"] == "feuilleton" and status["onboarding_done"] is False

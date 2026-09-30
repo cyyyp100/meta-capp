@@ -4,6 +4,7 @@
 # un fake. Voir le rapport system/rapport_apprentissage_langues.md.
 
 from services.lang import (
+    LANGUAGES,
     get_script_meta,
     script_is_continuous,
     script_is_rtl,
@@ -18,20 +19,21 @@ def _fake_plan(state, level, language, phase, ok, err, model=None):
 
 # ── Catalogue des langues ─────────────────────────────────────────────────────
 
-def test_catalogue_includes_new_languages(client):
-    langs = client.get("/api/lang/languages").json()
-    codes = {lang["code"] for lang in langs}
+def test_catalogue_includes_new_languages():
+    # Le catalogue garde les langues sans programme, que la page ne liste pas :
+    # le profil d'un apprenant qui les a jouées lit encore leur libellé.
+    by_code = {lang["code"]: lang for lang in LANGUAGES}
     # Échantillon couvrant toutes les familles d'écriture ajoutées.
     for code in ("mandarin", "japonais", "coréen", "arabe", "hébreu", "hindi",
                  "thaï", "grec", "portugais", "vietnamien"):
-        assert code in codes, code
-    assert len(langs) >= 21
+        assert code in by_code, code
+    assert len(LANGUAGES) >= 21
+    assert by_code["hébreu"]["rtl"] is True
 
 
 def test_languages_expose_rtl_flag(client):
     by_code = {lang["code"]: lang for lang in client.get("/api/lang/languages").json()}
     assert by_code["arabe"]["rtl"] is True
-    assert by_code["hébreu"]["rtl"] is True
     assert by_code["mandarin"]["rtl"] is False
     assert by_code["anglais"]["rtl"] is False
     assert by_code["mandarin"]["script"] == "hanzi"
