@@ -64,13 +64,17 @@ class _SpaStaticFiles(StaticFiles):
     Les routes du client (`/reader/12`, `/stats`…) n'existent pas sur disque :
     sans repli, un rechargement de page ou un deep-link renvoie 404. On sert
     `index.html` et react-router prend le relais. Les routes `/api` sont
-    déclarées avant ce mount : elles gardent la priorité."""
+    déclarées avant ce mount : elles gardent la priorité, et une adresse `/api`
+    INCONNUE reste un 404. Repliée elle aussi, elle répondait 200 avec la page
+    HTML : un appel d'API erroné passait pour réussi, et une traversée
+    (`/api/…/../../etc/passwd`) semblait aboutir."""
 
     async def get_response(self, path: str, scope):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            if exc.status_code == 404:
+            # `path` porte le séparateur de l'OS (StaticFiles.get_path).
+            if exc.status_code == 404 and path.split(os.sep, 1)[0] != "api":
                 return await super().get_response("index.html", scope)
             raise
 

@@ -81,5 +81,8 @@ def test_spa_deep_links_serve_index(client):
         assert res.status_code == 200, path
         assert res.headers["content-type"].startswith("text/html"), path
 
-    # Les routes API gardent la priorité sur le repli SPA.
+    # Les routes API gardent la priorité sur le repli SPA, et une adresse API
+    # inconnue reste un 404 : pas la page HTML avec un 200.
     assert client.get("/api/health").headers["content-type"].startswith("application/json")
+    for path in ("/api/nexiste-pas", "/api/library/doc/1/../../etc/passwd"):
+        assert client.get(path).status_code == 404, path
