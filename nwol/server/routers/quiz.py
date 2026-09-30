@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 from config.settings import (
     QUIZ_DEFAULT_QUESTIONS,
-    QUIZ_LENGTH_CHOICES,
     QUIZ_MAX_QUESTIONS,
     QUIZ_MIN_QUESTIONS,
 )
@@ -68,9 +67,9 @@ def subjects() -> list[dict]:
 
 @router.get("/options")
 def options() -> dict:
-    """Longueurs de session proposées. Le serveur borne, l'UI ne devine pas."""
+    """Bornes de la longueur de session. Le champ de l'UI les applique, le
+    service re-borne ce qui arrive (`clamp_quiz_length`) : l'UI ne devine pas."""
     return {
-        "lengths": list(QUIZ_LENGTH_CHOICES),
         "default_length": QUIZ_DEFAULT_QUESTIONS,
         "min_length": QUIZ_MIN_QUESTIONS,
         "max_length": QUIZ_MAX_QUESTIONS,
@@ -86,10 +85,12 @@ def questions(
 ) -> list[dict]:
     """Construit une session de QCM (un seul appel LLM batch pour les distracteurs).
 
-    `topic` : sujet libre tapé par l'apprenant, qui cible aussi le cours d'origine
-    des questions. `n` : longueur de session, bornée par le service.
-    `interleaved` : pratique entrelacée — tirage alterné dans tous les domaines,
-    qui rend `subject` et `topic` sans objet (le service les ignore)."""
+    `topic` : précision libre tapée par l'apprenant, qui affine DANS `subject`
+    (ou dans toute la base sans matière) et cible aussi le cours d'origine des
+    questions. `n` : longueur de session, bornée par le service.
+    `interleaved` : le mode « multi-apprentissage » de l'UI (pratique entrelacée)
+    — tirage alterné dans tous les domaines, qui rend `subject` et `topic` sans
+    objet (le service les ignore)."""
     return build_quiz(subject, n, topic=topic, interleaved=interleaved)
 
 

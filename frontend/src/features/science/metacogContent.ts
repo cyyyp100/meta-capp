@@ -642,13 +642,13 @@ export const whyContent: Record<Lang, Record<WhyKey, WhyContent>> = {
       sources: ["Dewar et al. (2012)"],
     },
     interleaving: {
-      title: "Pourquoi mélanger les domaines ?",
+      title: "Pourquoi le multi-apprentissage ?",
       principle:
-        "Rohrer et Taylor ont comparé deux entraînements de même volume : l'un groupé par type de problème, l'autre mélangé. Birnbaum et al. expliquent le mécanisme — alterner oblige à distinguer les catégories entre elles et à retrouver la bonne stratégie à chaque question, au lieu de la réappliquer par inertie.",
+        "Le multi-apprentissage repose sur ce que la recherche appelle la pratique entrelacée (interleaving). Rohrer et Taylor ont comparé deux entraînements de même volume : l'un groupé par type de problème, l'autre mélangé. Birnbaum et al. expliquent le mécanisme — alterner oblige à distinguer les catégories entre elles et à retrouver la bonne stratégie à chaque question, au lieu de la réappliquer par inertie.",
       conclusion:
         "L'entraînement mélangé donne de moins bons résultats sur le moment, et de bien meilleurs au test différé : chez Rohrer, Dedrick & Stershic, le score final a plus que doublé. La difficulté ressentie est le signe que la mémoire travaille, pas qu'elle échoue.",
       inApp:
-        "Meta-Capp tire alors les questions au hasard dans toute ta base et sert un domaine différent à chaque question. Matière et sujet sont désactivés — s'y tenir est précisément ce que l'alternance évite ; seule la longueur de la session reste réglable.",
+        "En multi-apprentissage, Meta-Capp tire les questions au hasard dans toute ta base et sert un domaine différent à chaque question. Ce mode ne propose ni matière ni précision — s'y tenir est précisément ce que l'alternance évite ; seul le nombre de questions se règle.",
       sources: [
         "Rohrer, Dedrick & Stershic (2015)",
         "Taylor & Rohrer (2010)",
@@ -697,13 +697,13 @@ export const whyContent: Record<Lang, Record<WhyKey, WhyContent>> = {
       sources: ["Dewar et al. (2012)"],
     },
     interleaving: {
-      title: "Why mix the subjects up?",
+      title: "Why mixed practice?",
       principle:
-        "Rohrer and Taylor compared two practice sets of equal size: one blocked by problem type, one shuffled. Birnbaum et al. explain the mechanism — alternating forces you to tell categories apart and to retrieve the right strategy for every question, instead of reapplying it out of inertia.",
+        "Mixed practice relies on what research calls interleaved practice. Rohrer and Taylor compared two practice sets of equal size: one blocked by problem type, one shuffled. Birnbaum et al. explain the mechanism — alternating forces you to tell categories apart and to retrieve the right strategy for every question, instead of reapplying it out of inertia.",
       conclusion:
         "Interleaved practice looks worse at the time and turns out far better on the delayed test: in Rohrer, Dedrick & Stershic the final score more than doubled. The extra effort is the sign that memory is working, not failing.",
       inApp:
-        "Meta-Capp then draws questions at random from your whole database and serves a different domain with each question. Subject and topic are disabled — sticking to one is exactly what interleaving avoids; only the session length stays adjustable.",
+        "In mixed practice, Meta-Capp draws questions at random from your whole database and serves a different domain with each question. This mode offers no subject or refinement — sticking to one is exactly what interleaving avoids; only the number of questions can be set.",
       sources: [
         "Rohrer, Dedrick & Stershic (2015)",
         "Taylor & Rohrer (2010)",

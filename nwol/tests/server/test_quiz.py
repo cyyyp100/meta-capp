@@ -460,7 +460,11 @@ def test_quiz_length_is_clamped_to_the_server_bounds(client, monkeypatch):
 
     quiz = client.get("/api/quiz/questions", params={"n": 999}).json()
     assert len(quiz) == options["max_length"]
-    assert options["default_length"] in options["lengths"]
+    assert options["min_length"] <= options["default_length"] <= options["max_length"]
+
+    # Le nombre est libre entre les bornes : l'UI le saisit au nombre près.
+    quiz = client.get("/api/quiz/questions", params={"n": options["min_length"] + 4}).json()
+    assert len(quiz) == options["min_length"] + 4
 
 
 def test_topic_filters_the_static_catalogue(client, monkeypatch):
@@ -489,6 +493,35 @@ def test_topic_finds_questions_through_the_course_they_came_from(client, monkeyp
     assert {q["source"] for q in quiz} == {"reading"}
     # Aucun énoncé ne contient le mot : c'est bien la fiche du document qui a servi.
     assert all("thermodynamique" not in q["question"].lower() for q in quiz)
+
+
+def test_topic_narrows_within_the_chosen_subject(client, monkeypatch):
+    """La précision affine DANS la matière, elle ne la contourne pas.
+
+    C'est la hiérarchie de l'écran de lancement : on choisit une matière, puis un
+    mot plus précis qu'elle. Le mot ne doit donc jamais ramener une question
+    d'une autre matière."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    from db.documents import update_document_digest
+
+    doc_id, _ = _seed_subject_questions("physique")
+    update_document_digest(
+        doc_id, "physique",
+        "Cours d'introduction à la thermodynamique et aux transferts de chaleur.",
+        ["thermodynamique", "entropie"],
+    )
+    _seed_subject_questions("histoire")
+
+    inside = client.get(
+        "/api/quiz/questions", params={"subject": "physique", "topic": "thermodynamique"},
+    ).json()
+    assert len(inside) == 2
+    assert {q["category"] for q in inside} == {"physique"}
+
+    elsewhere = client.get(
+        "/api/quiz/questions", params={"subject": "histoire", "topic": "thermodynamique"},
+    ).json()
+    assert elsewhere == []
 
 
 def test_topic_without_any_match_returns_nothing(client, monkeypatch):

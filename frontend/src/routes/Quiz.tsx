@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { QuizAnswerRecord, QuizEvaluation, QuizQuestion, QuizVerdict } from "../api/types";
-import { ArrowRight, Check, Eye, Lightbulb, Search, Shuffle, X } from "lucide-react";
+import { ArrowRight, Check, Eye, Lightbulb, Minus, Plus, Search, Shuffle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -67,45 +67,70 @@ function formatScore(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/**
+ * Deux façons de lancer une session, qui ne se mélangent pas :
+ * - « subject » : une matière (ou toutes), puis une précision libre DANS celle-ci ;
+ * - « multi » : le multi-apprentissage (pratique entrelacée), tiré dans toute la
+ *   base en changeant de domaine — il n'a ni matière ni précision.
+ * Seul le nombre de questions est commun aux deux.
+ */
+type QuizMode = "subject" | "multi";
+
+/**
+ * Réglages d'une session, figés au clic sur « Lancer ». La requête, la clôture et
+ * le message d'absence de résultat lisent CECI et jamais le formulaire : ils
+ * parlent de la session jouée, pas de ce que l'on est en train de retaper.
+ * `run` distingue deux lancements aux réglages identiques (sinon React Query
+ * resservirait la session précédente depuis son cache).
+ */
+type QuizRequest = {
+  mode: QuizMode;
+  subject: string;
+  topic: string;
+  length: number | undefined;
+  run: number;
+};
+
 export function Quiz() {
   const t = useT();
   const navigate = useNavigate();
   const reduce = useReducedMotion();
+  const [mode, setMode] = useState<QuizMode>("subject");
+  // Matière et précision survivent à un passage en multi-apprentissage : elles y
+  // sont simplement ignorées, et on les retrouve en revenant « par matière ».
   const [subject, setSubject] = useState("");
-  // Sujet libre : `topic` suit la frappe, `askedTopic` est celui de la session
-  // en cours (figé au lancement, pour que le message d'absence de résultat parle
-  // du sujet réellement joué et non de ce que l'on est en train de retaper).
   const [topic, setTopic] = useState("");
-  const [askedTopic, setAskedTopic] = useState("");
   const [length, setLength] = useState<number | null>(null);
-  // Pratique entrelacée : exclusive des deux autres réglages, qu'elle vide en
-  // s'activant. Seule la longueur de session reste réglable.
-  const [interleaved, setInterleaved] = useState(false);
-  const [runId, setRunId] = useState(0);
-  const [started, setStarted] = useState(false);
+  const [asked, setAsked] = useState<QuizRequest | null>(null);
+  const runs = useRef(0);
 
   const subjectsQuery = useQuery({
     queryKey: ["quiz", "subjects"],
     queryFn: () => api.quizSubjects(),
   });
 
-  // Longueurs proposées : c'est le serveur qui les déclare (config/settings.py),
-  // l'UI ne fait que les afficher — et se tait tant qu'elle ne les a pas.
+  // Bornes et valeur par défaut du nombre de questions : c'est le serveur qui les
+  // déclare (config/settings.py), l'UI ne fait que les appliquer.
   const optionsQuery = useQuery({
     queryKey: ["quiz", "options"],
     queryFn: () => api.quizOptions(),
     staleTime: Infinity,
   });
-  const lengths = optionsQuery.data?.lengths ?? [];
-  const askedLength = length ?? optionsQuery.data?.default_length;
+  const options = optionsQuery.data;
+  const chosenLength = length ?? options?.default_length;
 
   // La génération LLM (un seul appel batch) n'est déclenchée qu'après un clic
   // explicite sur « Lancer le quiz » : on laisse le temps de régler la session.
   const { data, isFetching, isError } = useQuery({
-    queryKey: ["quiz", "questions", subject, askedTopic, askedLength, interleaved, runId],
+    queryKey: ["quiz", "questions", asked],
     queryFn: () =>
-      api.quizQuestions(askedLength, subject || undefined, askedTopic || undefined, interleaved),
-    enabled: started,
+      api.quizQuestions(
+        asked?.length,
+        asked?.subject || undefined,
+        asked?.topic || undefined,
+        asked?.mode === "multi",
+      ),
+    enabled: asked !== null,
   });
 
   const [index, setIndex] = useState(0);
@@ -120,10 +145,16 @@ export function Quiz() {
   const finalized = useRef(false);
 
   const analysisQuery = useQuery({
-    queryKey: ["quiz", "analysis", subject, askedTopic, runId],
+    queryKey: ["quiz", "analysis", asked],
     queryFn: () => api.quizAnalysis(history),
     enabled: done && history.length > 0,
   });
+
+  /** Libellé affiché d'une matière (code stocké en base → nom traduit). */
+  function subjectName(code: string): string {
+    const key = SUBJ_LABEL_KEY[code];
+    return key ? t(key) : code;
+  }
 
   const subjectOptions = useMemo(() => {
     const avail = subjectsQuery.data ?? [];
@@ -185,8 +216,8 @@ export function Quiz() {
         questions_answered: total,
         correct: Math.round(score),
         duration_s: elapsed,
-        subject: subject || null,
-        topic: askedTopic || null,
+        subject: asked?.subject || null,
+        topic: asked?.topic || null,
       })
       .catch(() => {
         /* la clôture ne doit jamais abîmer l'affichage du bilan */
@@ -202,41 +233,29 @@ export function Quiz() {
     } else setIndex((i) => i + 1);
   }
 
-  function changeSubject(code: string) {
-    setSubject(code);
-    resetState();
-    setStarted(false);
-  }
-
   /**
-   * Bascule de la pratique entrelacée. En s'activant, elle VIDE la matière et le
-   * sujet plutôt que de seulement les griser : rien de périmé ne part au serveur,
-   * et `finalize()` enregistre la session sans matière ni sujet — ce qu'elle est.
+   * Fige les réglages de la session et la lance. En multi-apprentissage, matière
+   * et précision ne partent pas : `finalize()` enregistre alors la session sans
+   * elles — ce qu'elle est. `n` : longueur que le champ numérique vient d'arrêter
+   * (Entrée pressée avant que son état ne soit relu).
    */
-  function toggleInterleaved() {
-    setInterleaved((on) => {
-      if (!on) {
-        setSubject("");
-        setTopic("");
-        setAskedTopic("");
-      }
-      return !on;
+  function startQuiz(n?: number) {
+    const multi = mode === "multi";
+    resetState();
+    runs.current += 1;
+    setAsked({
+      mode,
+      subject: multi ? "" : subject,
+      topic: multi ? "" : topic.trim(),
+      length: n ?? chosenLength,
+      run: runs.current,
     });
-    resetState();
-    setStarted(false);
-  }
-
-  function startQuiz() {
-    resetState();
-    setAskedTopic(topic.trim());
-    setRunId((r) => r + 1);
     startedAt.current = Date.now();
-    setStarted(true);
   }
 
   function restart() {
     resetState();
-    setStarted(false);
+    setAsked(null);
   }
 
   return (
@@ -244,84 +263,113 @@ export function Quiz() {
       <h1 style={{ fontFamily: "var(--font-title)", fontSize: "var(--text-h1)", margin: "0 0 4px" }}>{t("quiz.title")}</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>{t("quiz.subtitle")}</p>
 
-      {!started && !done && (
+      {asked === null && (
         <div className="mt-6 rounded-lg border border-border bg-surface p-5 shadow-e1">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Button
-              variant={interleaved ? "default" : "secondary"}
-              aria-pressed={interleaved}
-              onClick={toggleInterleaved}
-            >
-              <Shuffle className="size-4" aria-hidden />
-              {t("quiz.interleaved_label")}
-            </Button>
-            <WhyButton whyKey="interleaving" />
+          <div role="group" aria-label={t("quiz.mode_label")} className="mb-5 flex flex-wrap gap-2">
+            {(["subject", "multi"] as const).map((value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={mode === value ? "default" : "secondary"}
+                aria-pressed={mode === value}
+                onClick={() => setMode(value)}
+              >
+                {value === "multi" && <Shuffle aria-hidden />}
+                {t(value === "multi" ? "quiz.mode_multi" : "quiz.mode_subject")}
+              </Button>
+            ))}
           </div>
 
-          <label className="text-[13px] font-semibold" htmlFor="quiz-topic">
-            {t("quiz.topic_label")}
-          </label>
-          <TopicInput
-            value={topic}
-            onChange={setTopic}
-            onSubmit={startQuiz}
-            disabled={interleaved}
-          />
-
-          <div className="mt-4 flex flex-wrap items-end gap-4">
-            <Field label={t("quiz.subject_label")}>
-              <Select value={subject} onValueChange={changeSubject} disabled={interleaved}>
-                <SelectTrigger className="w-[240px]" aria-label={t("quiz.subject_label")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {subjectOptions.map((option) => (
-                    <SelectItem key={option.code} value={option.code}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {lengths.length > 0 && askedLength != null && (
-              <Field label={t("quiz.length_label")}>
-                <Select value={String(askedLength)} onValueChange={(v) => setLength(Number(v))}>
-                  <SelectTrigger className="w-[160px]" aria-label={t("quiz.length_label")}>
+          {mode === "subject" ? (
+            <div className="grid gap-4">
+              <Field label={t("quiz.subject_label")}>
+                <Select value={subject} onValueChange={setSubject}>
+                  <SelectTrigger className="w-full sm:w-[280px]" aria-label={t("quiz.subject_label")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {lengths.map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {t("quiz.length_option", { n })}
+                    {subjectOptions.map((option) => (
+                      <SelectItem key={option.code} value={option.code}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
+
+              {/* La précision vient APRÈS la matière : elle affine dedans (ou dans
+                  toute la base si aucune matière n'est choisie), elle ne la
+                  concurrence pas. */}
+              <Field label={t("quiz.topic_label")} htmlFor="quiz-topic">
+                <TopicInput
+                  value={topic}
+                  onChange={setTopic}
+                  onSubmit={() => startQuiz()}
+                  placeholder={
+                    subject
+                      ? t("quiz.topic_placeholder_in", { subject: subjectName(subject) })
+                      : t("quiz.topic_placeholder")
+                  }
+                />
+              </Field>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 rounded-md bg-surface-soft py-1.5 pr-1.5 pl-3.5">
+              <p className="m-0 flex-1 text-sm text-text-soft">{t("quiz.multi_hint")}</p>
+              <WhyButton whyKey="interleaving" variant="icon" label={t("quiz.multi_why")} />
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-4">
+            <label htmlFor="quiz-length" className="text-[13px] font-semibold">
+              {t("quiz.length_label")}
+            </label>
+            {options && chosenLength != null && (
+              <>
+                <QuestionCountInput
+                  value={chosenLength}
+                  min={options.min_length}
+                  max={options.max_length}
+                  onChange={setLength}
+                  onSubmit={startQuiz}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {t("quiz.length_range", { min: options.min_length, max: options.max_length })}
+                </span>
+              </>
             )}
           </div>
 
-          <p style={{ color: "var(--muted)", margin: "16px 0 12px" }}>
-            {t(interleaved ? "quiz.interleaved_hint" : "quiz.pickThemeHint")}
-          </p>
-          <Button size="lg" onClick={startQuiz}>
+          <Button size="lg" onClick={() => startQuiz()} className="mt-5">
             {t("quiz.start")}
           </Button>
         </div>
       )}
 
       {isFetching && <p style={{ color: "var(--muted)" }}>{t("quiz.generating")}</p>}
-      {isError && !isFetching && <p style={{ color: "var(--danger)" }}>{t("quiz.error")}</p>}
+      {isError && !isFetching && (
+        // Même impasse que ci-dessous : le panneau est masqué, il faut un retour.
+        <div style={{ marginTop: 32 }}>
+          <p style={{ color: "var(--danger)" }}>{t("quiz.error")}</p>
+          <Button variant="secondary" onClick={restart}>
+            {t("quiz.restart")}
+          </Button>
+        </div>
+      )}
       {!isFetching && data && data.length === 0 && (
         // Le panneau de réglages est masqué pendant une session : sans ce retour,
         // un sujet sans résultat laissait l'écran dans une impasse.
         <div style={{ marginTop: 32 }}>
           <p style={{ color: "var(--muted)", fontStyle: "italic" }}>
-            {interleaved
-              ? t("quiz.interleaved_none")
-              : askedTopic
-                ? t("quiz.noneForTopic", { topic: askedTopic })
+            {asked?.mode === "multi"
+              ? t("quiz.multi_none")
+              : asked?.topic
+                ? asked.subject
+                  ? t("quiz.noneForTopicInSubject", {
+                      topic: asked.topic,
+                      subject: subjectName(asked.subject),
+                    })
+                  : t("quiz.noneForTopic", { topic: asked.topic })
                 : t("quiz.none")}
           </p>
           <Button variant="secondary" onClick={restart}>
@@ -433,36 +481,34 @@ function Metric({
   );
 }
 
-/** Champ « sujet de la session » : un mot ou quelques mots, Entrée pour lancer. */
+/** Champ « préciser » : un mot ou quelques mots dans la matière, Entrée pour lancer. */
 function TopicInput({
   value,
   onChange,
   onSubmit,
-  disabled = false,
+  placeholder,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
-  disabled?: boolean;
+  placeholder: string;
 }) {
   const t = useT();
   return (
     // Même coque que la recherche de bibliothèque : le champ n'a pas de focus
     // propre, `focus-within` reporte l'anneau sur le conteneur.
     <div
-      className="mt-1.5 flex items-center gap-1.5 rounded-sm border border-border bg-background px-2.5 py-2
+      className="flex items-center gap-1.5 rounded-sm border border-border bg-background px-2.5 py-2
                  transition-[border-color,box-shadow] duration-fast ease-brand
                  focus-within:border-brand focus-within:ring-[3px] focus-within:ring-ring/50
-                 hover:border-border-strong
-                 has-disabled:pointer-events-none has-disabled:opacity-50"
+                 hover:border-border-strong"
     >
       <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <input
         id="quiz-topic"
         type="text"
         value={value}
-        disabled={disabled}
-        placeholder={t("quiz.topic_placeholder")}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") onSubmit();
@@ -488,10 +534,118 @@ function TopicInput({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Nombre de questions exact : `−` / saisie / `+`, borné par le serveur.
+ *
+ * La frappe passe par un brouillon : borner à chaque touche rendrait « 25 »
+ * impossible à taper (« 2 » serait aussitôt remonté au minimum). Une valeur
+ * valide est transmise dès qu'elle l'est ; le reste est borné en quittant le
+ * champ, ou avec Entrée, qui lance aussitôt la session avec la valeur arrêtée.
+ */
+function QuestionCountInput({
+  value,
+  min,
+  max,
+  onChange,
+  onSubmit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  onSubmit: (value: number) => void;
+}) {
+  const t = useT();
+  // `null` = pas de saisie en cours : le champ affiche la valeur arrêtée.
+  const [draft, setDraft] = useState<string | null>(null);
+  const clamp = (n: number) => Math.max(min, Math.min(max, n));
+
+  /** Arrête la saisie : brouillon borné (ou valeur précédente s'il est vide). */
+  function settle(): number {
+    const typed = draft === null || draft === "" ? value : clamp(Number(draft));
+    setDraft(null);
+    onChange(typed);
+    return typed;
+  }
+
+  function edit(raw: string) {
+    const digits = raw.replace(/\D/g, "");
+    setDraft(digits);
+    const n = Number(digits);
+    if (digits !== "" && n >= min && n <= max) onChange(n);
+  }
+
+  function step(delta: number) {
+    setDraft(null);
+    onChange(clamp(value + delta));
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="secondary"
+        size="icon-sm"
+        aria-label={t("quiz.length_less")}
+        title={t("quiz.length_less")}
+        disabled={value <= min}
+        onClick={() => step(-1)}
+      >
+        <Minus aria-hidden />
+      </Button>
+      <input
+        id="quiz-length"
+        type="text"
+        inputMode="numeric"
+        value={draft ?? String(value)}
+        onChange={(e) => edit(e.target.value)}
+        onBlur={settle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit(settle());
+          else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            step(1);
+          } else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            step(-1);
+          }
+        }}
+        className="h-8 w-14 rounded-sm border border-border bg-background text-center text-sm font-semibold tabular-nums
+                   text-foreground outline-none transition-[border-color,box-shadow] duration-fast ease-brand
+                   hover:border-border-strong focus:border-brand focus:ring-[3px] focus:ring-ring/50"
+      />
+      <Button
+        variant="secondary"
+        size="icon-sm"
+        aria-label={t("quiz.length_more")}
+        title={t("quiz.length_more")}
+        disabled={value >= max}
+        onClick={() => step(1)}
+      >
+        <Plus aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  /** Champ natif à relier au libellé ; un Select Radix porte son `aria-label`. */
+  htmlFor?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[13px] font-semibold">{label}</span>
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="text-[13px] font-semibold">
+          {label}
+        </label>
+      ) : (
+        <span className="text-[13px] font-semibold">{label}</span>
+      )}
       {children}
     </div>
   );

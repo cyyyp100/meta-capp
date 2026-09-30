@@ -140,11 +140,13 @@ export const api = {
   importPdf: (path: string) => postJSON<DocumentDetail>("/api/library/import", { path }),
   quizSubjects: () => getJSON<QuizSubject[]>("/api/quiz/subjects"),
   quizOptions: () => getJSON<QuizOptions>("/api/quiz/options"),
-  // `topic` : sujet libre de la session (« capitales », « révolution française »).
+  // `topic` : précision libre DANS la matière (« révolution française »), ou dans
+  // toute la base si aucune matière n'est choisie.
   // `n` omis = longueur par défaut du serveur (cf. /api/quiz/options) : l'UI ne
   // recopie pas une valeur que `config/settings.py` déclare déjà.
-  // `interleaved` : pratique entrelacée. Le serveur ignore alors `subject` et
-  // `topic` — l'UI les vide de son côté, mais l'exclusivité est sa règle à lui.
+  // `interleaved` : le mode « multi-apprentissage » (pratique entrelacée). Le
+  // serveur ignore alors `subject` et `topic` — l'UI ne les envoie pas, mais
+  // l'exclusivité est sa règle à lui.
   quizQuestions: (n?: number, subject?: string, topic?: string, interleaved?: boolean) => {
     const params = new URLSearchParams();
     if (n) params.set("n", String(n));

@@ -151,9 +151,9 @@ export interface QuizSubject {
   count: number;
 }
 
-// Longueurs de session proposées par le serveur (il les borne aussi côté API).
+// Bornes de la longueur de session : le champ numérique les applique, le
+// serveur re-borne ce qui arrive (`clamp_quiz_length`).
 export interface QuizOptions {
-  lengths: number[];
   default_length: number;
   min_length: number;
   max_length: number;
