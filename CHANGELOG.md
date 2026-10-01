@@ -11,6 +11,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MIT license, contribution guide, code of conduct, security policy, issue and pull
   request templates.
+- **Runs on every desktop OS, with or without a GPU.** Release archives for Apple
+  Silicon macOS, Intel macOS, Windows and Linux x86_64, each smoke-tested.
+- **Browser mode**: when no native web engine is usable (Linux without GTK or Qt,
+  Windows without WebView2, no display) the app opens in the default browser,
+  behind the same guards. `--browser` (or `METACAPP_BROWSER=1`) forces it.
+  Importing a document in that mode uploads a copy into the data folder
+  (`POST /api/library/upload`); deleting the document deletes the copy.
+- Launching the app while it already runs — or is still starting, after an impatient
+  double-click — reopens the running instance.
+- Browser mode can be quit without a terminal: **Quit Meta-Capp** in the profile menu,
+  or close the tab — the app stops by itself three minutes after the last tab closes,
+  once Gemma has finished what it was doing.
+
+### Changed
+
+- **Generation time budgets follow Gemma's measured speed.** A short calibration
+  call at startup and every answer feed an estimate of the machine's throughput;
+  a machine slower than the reference (CPU-only laptop, Intel Mac) gets
+  proportionally longer budgets, up to 8×, instead of timing out on every long
+  answer. A faster machine keeps the reference budgets.
+- When Ollama cannot load the model for lack of memory, the reader says so in
+  plain words instead of answering with a generic fallback, and the call is no
+  longer retried.
+
+### Fixed
+
+- Windows from source: the frontend auto-build failed (`npm` is `npm.cmd`), and
+  the conda re-exec looked for `bin/python`.
+- Behind an HTTP proxy (system setting or `http_proxy`, common on school and company
+  networks) the app could fail to start and Gemma looked offline: local calls to the
+  app's own server and to Ollama no longer go through the proxy.
+- Windows: every call to Ollama waited about 2 s (`localhost` tried IPv6 first, which
+  Ollama does not listen on).
+
+### Security
+
+- The local API refuses requests that the browser itself marks as coming from another
+  site or another local port (`Sec-Fetch-Site`). In browser mode, every port of
+  127.0.0.1 counts as the same site and received the launch cookie.
+- Release builds pin PyInstaller and its community hooks (`requirements-build.txt`,
+  audited by `pip-audit`): a release no longer depends on whatever version PyPI
+  serves that day.
 
 ## [0.1.0] — Initial public release
 

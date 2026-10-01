@@ -250,7 +250,9 @@ def delete_document(doc_id: int) -> dict:
     profil métacognitif (`metacog_history` se détache de la session).
 
     Le fichier source de l'utilisateur n'est jamais touché : on ne l'a jamais
-    copié, on n'a pas à l'effacer. ValueError si le document n'existe pas."""
+    copié, on n'a pas à l'effacer. Seule exception, la copie d'un document
+    ENVOYÉ depuis le navigateur (services/uploads) : elle nous appartient, et
+    elle part avec lui. ValueError si le document n'existe pas."""
     doc = _get_document(doc_id)
     if doc is None:
         raise ValueError(t("folders.document_missing"))
@@ -262,6 +264,9 @@ def delete_document(doc_id: int) -> dict:
         except OSError:  # pragma: no cover - le cache disque est jetable
             pass
     _delete_document(doc_id)
+    from services import uploads
+
+    uploads.discard(doc.get("path"))
     return {"deleted": True, "id": int(doc_id)}
 
 

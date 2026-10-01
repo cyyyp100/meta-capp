@@ -232,11 +232,39 @@ During reading they are invisible. They still drive everything: question difficu
 
 ## Installation
 
+Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
+
 ### Requirements
 
-- **Python 3.11**
-- **Node 20+** (to build the web UI)
-- **[Ollama](https://ollama.com)** running locally
+| | App alone | With Gemma (the assistant) |
+|---|---|---|
+| **OS** | macOS (Apple Silicon or Intel), Windows 10/11 x64, Linux x86_64 (glibc 2.35+) | same |
+| **RAM** | any recent machine | **16 GB recommended** — the model takes ~10 GB once loaded; 8 GB is not enough |
+| **Disk** | ~400 MB | **+10 GB** (`gemma4:e4b` 9.6 GB, optional `embeddinggemma` 0.6 GB) |
+| **GPU** | none | optional — Apple Silicon (Metal), NVIDIA (CUDA), some AMD (ROCm); CPU-only works, slowly |
+
+Gemma is optional: without [Ollama](https://ollama.com) the reader, flashcards and
+stats still work, and the assistant visibly falls asleep.
+
+**Slow machines are handled, not just tolerated.** Generation time budgets are
+derived from Gemma's *measured* speed on your machine (a short calibration call at
+startup, then every answer): a CPU-only laptop gets slow answers instead of
+timeouts. Below ~2 tokens/s (8× slower than the reference Apple Silicon machine),
+budgets stop stretching and long answers give up rather than leave the screen waiting
+indefinitely.
+If the model does not fit in memory, the reader says so plainly.
+
+### Ready-to-run builds
+
+Each [release](https://github.com/cyyyp100/meta-capp/releases/latest) ships one
+archive per platform, with a `SHA256SUMS.txt`:
+
+| Platform | Archive | Notes |
+|---|---|---|
+| Apple Silicon Mac | `macos-arm64.zip` | unsigned builds: `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` once |
+| Intel Mac | `macos-x86_64.zip` | built on GitHub's last Intel runner, available until August 2027 |
+| Windows 10/11 x64 | `windows.zip` | keep the unzipped folder whole; uses WebView2 (built into Windows 11 and up-to-date Windows 10) |
+| Linux x86_64 | `linux-x86_64.tar.gz` | run `./Meta-Capp/Meta-Capp` from a terminal and keep it open; opens in your browser |
 
 ### Pull the model
 
@@ -245,10 +273,11 @@ ollama pull gemma4:e4b
 ollama pull embeddinggemma   # optional (~600 MB): semantic search inside the document you read
 ```
 
-> Without Ollama the app still runs: reader, flashcards and stats work, and the assistant visibly falls asleep.
 > Without `embeddinggemma`, Gemma's search inside the current document stays lexical (BM25).
 
-### Setup
+### From source
+
+Requires **Python 3.11** and **Node 20+** (to build the web UI).
 
 ```bash
 git clone https://github.com/cyyyp100/meta-capp.git
@@ -266,8 +295,68 @@ cd frontend && npm install && cd ..
 ```bash
 python main.py                       # native app window (builds the frontend if needed)
 python main.py path/to/document.pdf  # import and open a document directly
+python main.py --browser             # open in the default browser instead of a window
 python main.py --debug               # DEBUG logging
 ```
+
+**No native window? It opens in your browser.** The window needs a native web
+engine: WebKit (macOS), WebView2 (Windows), GTK or Qt (Linux). When none is
+usable — or with `--browser` — Meta-Capp serves the same app, behind the same
+guards, in your default browser. To quit, pick **Quit Meta-Capp** in the profile
+menu, or just close the tab: the app stops by itself three minutes after the last
+tab closes. Importing a document then uploads a copy into the data folder,
+deleted along with the document. Launching again while it runs reopens it.
+
+<details>
+<summary><b>Linux: getting a native window</b></summary>
+
+Pick **one**, inside Meta-Capp's Python environment.
+
+**GTK** (GNOME, Xfce…) needs system libraries first:
+
+```bash
+# Debian / Ubuntu
+sudo apt install libgirepository1.0-dev libcairo2-dev pkg-config python3-dev gir1.2-webkit2-4.1
+# Fedora
+sudo dnf install gobject-introspection-devel cairo-gobject-devel pkgconf python3-devel webkit2gtk4.1
+# Arch
+sudo pacman -S gobject-introspection cairo pkgconf webkit2gtk-4.1
+
+pip install "pywebview[gtk]"
+```
+
+**Qt** (KDE) installs with pip alone (~200 MB):
+
+```bash
+pip install "pywebview[qt]"
+sudo apt install libxcb-cursor0   # Debian/Ubuntu, if Qt cannot load the "xcb" plugin
+```
+
+Package names vary across distributions: the reference is
+[pywebview's installation guide](https://pywebview.flowrl.com/guide/installation.html).
+If the window still cannot open, Meta-Capp falls back to the browser and logs why
+(`Fenêtre native indisponible : …`).
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+- **Gemma stays asleep** — Ollama is not running or the model is missing: `ollama list`
+  must show `gemma4:e4b`.
+- **Gemma is very slow** — `ollama ps` shows where the model runs (`PROCESSOR`: GPU,
+  CPU or a split). On CPU this is expected; the log prints the measured speed at
+  startup (`Débit de Gemma sur cette machine`). Closing memory-hungry apps helps.
+- **"Gemma does not fit in this computer's memory"** — free some RAM; with 8 GB in
+  total the model cannot load, the rest of the app keeps working.
+- **"Le port 8756 est occupé…"** — another program, or an instance that cannot be
+  reopened (an older version), holds the port: close it or reboot.
+- **Behind a proxy** (school or company network) — nothing to configure: Meta-Capp
+  never sends its local traffic (the app, Ollama) through the system proxy.
+- **Logs** — Settings → Help → *Report a problem* exports them; they live in
+  `logs/` inside the data folder (see [Your Data](#your-data)).
+
+</details>
 
 For iteration, backend and frontend can run standalone:
 
@@ -280,12 +369,16 @@ cd frontend && npm run dev           # Vite on :5173, proxies /api
 <summary><b>Packaging a desktop binary</b></summary>
 
 ```bash
+pip install -r requirements-build.txt            # pinned PyInstaller
 cd frontend && npm run build && cd ..            # build the UI first
 pyinstaller desktop/metacapp.spec --noconfirm    # output in dist_app/
 ```
 
-On macOS, `./scripts/build_app.sh` does both, smoke-tests the frozen binary and
-installs it (`--desktop` puts it on the Desktop, `--no-install` just builds).
+PyInstaller builds for the architecture of the machine it runs on: the release
+workflow builds on Apple Silicon, Intel macOS, Windows and Ubuntu 22.04 runners,
+and smoke-tests each binary. On macOS, `./scripts/build_app.sh` does both steps,
+smoke-tests the frozen binary and installs it (`--desktop` puts it on the
+Desktop, `--no-install` just builds).
 
 </details>
 
@@ -366,7 +459,8 @@ Contributions to this repository stay in this repository, under MIT. Anything th
 
 Everything Meta-Capp knows about you sits in one SQLite file on your own disk —
 `data/nwol.db` when running from source, the OS application-data directory when packaged
-(`~/Library/Application Support/Meta-Capp/` on macOS).
+(`~/Library/Application Support/Meta-Capp/` on macOS, `%APPDATA%\Meta-Capp\` on Windows,
+`~/.local/share/Meta-Capp/` on Linux).
 
 - **No telemetry, no tracking, no automatic crash reports.**
 - **No account, no activation, no key to enter.**

@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { api } from "../api/client";
-import { pickFilePath } from "../api/platform";
+import { pickDocument } from "../api/platform";
 import type { DocumentSummary, FolderNode } from "../api/types";
 import { DocumentGrid } from "../features/library/DocumentGrid";
 import { FolderRail } from "../features/library/FolderRail";
@@ -105,11 +105,11 @@ export function Home() {
 
   async function handleImport() {
     if (importing) return;
-    const path = await pickFilePath();
-    if (!path) return;
+    const picked = await pickDocument();
+    if (!picked) return;
     setImporting(true);
     try {
-      const doc = await api.importPdf(path);
+      const doc = await api.importDocument(picked);
       await refreshLibrary();
       navigate(`/reader/${doc.id}`);
     } catch (e) {

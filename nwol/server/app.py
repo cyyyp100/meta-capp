@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -28,6 +29,7 @@ from server.routers import (
     quiz,
     reading,
     session,
+    shell,
     stats,
     updates,
 )
@@ -54,6 +56,12 @@ async def _lifespan(_app: FastAPI):
     from services.lang_runs import on_startup as lang_on_startup
 
     lang_on_startup()
+    # Débit réel de Gemma sur cette machine : dimensionne les budgets temps de
+    # toutes les générations (llm/throughput). En thread : deux requêtes HTTP
+    # vers Ollama, qui peut être éteint, n'ont rien à faire dans le démarrage.
+    from llm.ollama_client import calibrate_throughput
+
+    threading.Thread(target=calibrate_throughput, daemon=True, name="llm-calibration").start()
     logger.info("Serveur Meta-Capp prêt (v%s).", APP_VERSION)
     yield
 
@@ -132,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(data.router, prefix="/api")
     app.include_router(updates.router, prefix="/api")
     app.include_router(onboarding.router, prefix="/api")
+    app.include_router(shell.router, prefix="/api")
 
     # En production, sert le frontend compilé depuis la même origine.
     _pin_bundle_mime_types()

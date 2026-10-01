@@ -2,10 +2,21 @@
 #
 # Déclenchement : tag `v*` (ex. v1.4.0-beta.1 -> canal beta ; v1.4.0 -> stable).
 # Gate : tests backend+frontend ET scans sécurité verts, puis build PyInstaller
-# sur macOS ET Windows, SMOKE TEST du binaire réel (--server-only + /api/health),
-# signature si les secrets sont configurés, puis publication GitHub Release UNIQUE
-# (job `publish`) regroupant les deux archives — les builds ne publient pas
-# eux-mêmes pour éviter toute course sur la création de la Release.
+# sur macOS (Apple Silicon ET Intel), Windows et Linux, SMOKE TEST du binaire
+# réel (--server-only + /api/health), signature si les secrets sont configurés,
+# puis publication GitHub Release UNIQUE (job `publish`) regroupant toutes les
+# archives — les builds ne publient pas eux-mêmes pour éviter toute course sur
+# la création de la Release.
+#
+# Une archive par plateforme (architecture/19-plateformes-et-materiel.md) :
+#   macos-arm64   macos-14        — Mac Apple Silicon (M1 et suivants)
+#   macos-x86_64  macos-15-intel  — Mac Intel ; DERNIER runner Intel de GitHub,
+#                                   retiré en août 2027 : au-delà, Mac Intel =
+#                                   installation depuis les sources
+#   windows       windows-latest  — Windows 10/11 x64 (WebView2)
+#   linux-x86_64  ubuntu-22.04    — glibc 2.35 : la plus ancienne image dispo,
+#                                   donc la compatibilité la plus large ; s'ouvre
+#                                   dans le navigateur (aucun moteur GTK/Qt gelé)
 #
 # Secrets optionnels (sans eux le binaire est publié NON signé, canal beta only) :
 #   macOS   : MACOS_CERT_P12 (base64), MACOS_CERT_PASSWORD, APPLE_ID,
@@ -79,7 +90,19 @@ jobs:
 
   build-macos:
     needs: [checks, scans]
-    runs-on: macos-14
+    # PyInstaller produit un binaire de l'architecture de la machine qui le
+    # construit : un .app « universal2 » exigerait des roues universal2 pour
+    # TOUTES les dépendances natives (pypdfium2, Pillow…), qui n'existent pas.
+    # Deux builds, deux archives.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     env:
       NWOL_DISABLE_CONDA_REEXEC: "1"
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
@@ -94,7 +117,7 @@ jobs:
           node-version: "22"
       - name: Dépendances + frontend
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt -r requirements-build.txt
           cd frontend && npm ci && npm run build
       - name: Build PyInstaller (reproductible sans conda)
         run: pyinstaller desktop/metacapp.spec --noconfirm --distpath dist_app
@@ -136,12 +159,15 @@ jobs:
           xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple dist_app/Meta-Capp.app
+      - name: Le binaire a l'architecture annoncée
+        run: |
+          file dist_app/Meta-Capp.app/Contents/MacOS/Meta-Capp | tee /dev/stderr | grep -q "${{ matrix.arch }}"
       - name: Archive de distribution
-        run: ditto -c -k --keepParent dist_app/Meta-Capp.app "Meta-Capp-${GITHUB_REF_NAME}-macos.zip"
+        run: ditto -c -k --keepParent dist_app/Meta-Capp.app "Meta-Capp-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: Meta-Capp-macos
-          path: Meta-Capp-*-macos.zip
+          name: Meta-Capp-macos-${{ matrix.arch }}
+          path: Meta-Capp-*-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   build-windows:
@@ -160,7 +186,7 @@ jobs:
           node-version: "22"
       - name: Dépendances + frontend
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt -r requirements-build.txt
           cd frontend
           npm ci
           npm run build
@@ -202,10 +228,55 @@ jobs:
           path: Meta-Capp-*-windows.zip
           if-no-files-found: error
 
+  build-linux:
+    needs: [checks, scans]
+    runs-on: ubuntu-22.04
+    env:
+      NWOL_DISABLE_CONDA_REEXEC: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11.9"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Dépendances + frontend
+        run: |
+          pip install -r requirements.txt -r requirements-build.txt
+          cd frontend && npm ci && npm run build
+      # La spec exclut les plateformes GTK et Qt de pywebview : geler GTK
+      # embarquerait des bibliothèques système liées à CETTE distribution. Le
+      # binaire Linux s'ouvre donc toujours dans le navigateur par défaut
+      # (desktop/pywebview_main.py:_run_in_browser) ; la fenêtre native reste
+      # disponible en installation depuis les sources (README, « Linux: getting
+      # a native window »).
+      - name: Build PyInstaller
+        run: pyinstaller desktop/metacapp.spec --noconfirm --distpath dist_app
+      - name: Smoke test du binaire réel (serveur + /api/health)
+        run: |
+          ./dist_app/Meta-Capp/Meta-Capp --server-only &
+          SMOKE_PID=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8756/api/health > /dev/null 2>&1; then
+              echo "Smoke test OK"; kill $SMOKE_PID; exit 0
+            fi
+            sleep 2
+          done
+          echo "Smoke test FAILED : /api/health injoignable"; kill $SMOKE_PID || true; exit 1
+      # tar et non zip : le bit d'exécution doit survivre au téléchargement.
+      - name: Archive de distribution
+        run: tar -C dist_app -czf "Meta-Capp-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" Meta-Capp
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Meta-Capp-linux-x86_64
+          path: Meta-Capp-*-linux-x86_64.tar.gz
+          if-no-files-found: error
+
   publish:
-    # Publication UNIQUE une fois les DEUX builds verts : un seul job crée la
+    # Publication UNIQUE une fois TOUS les builds verts : un seul job crée la
     # Release, donc pas de course. Un build rouge bloque la publication entière.
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -218,12 +289,13 @@ jobs:
       # vérifier un binaire qui circule, et de prouver qu'un binaire n'est pas le
       # nôtre (architecture/13 § 4).
       - name: Empreintes SHA-256
-        run: sha256sum Meta-Capp-*.zip | tee SHA256SUMS.txt
+        run: sha256sum Meta-Capp-*.zip Meta-Capp-*.tar.gz | tee SHA256SUMS.txt
       - name: Publication (canal beta si tag pré-release, sinon stable)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             Meta-Capp-*.zip
+            Meta-Capp-*.tar.gz
             SHA256SUMS.txt
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true

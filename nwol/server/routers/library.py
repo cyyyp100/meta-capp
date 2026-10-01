@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-from config.settings import LIBRARY_MAX_DOCUMENTS, LIBRARY_SEARCH_LIMIT
+from config.settings import LIBRARY_MAX_DOCUMENTS, LIBRARY_SEARCH_LIMIT, UPLOAD_MAX_BYTES
 from server.security import import_path_allowed
 from services.library import (
     delete_document as delete_document_service,
@@ -146,6 +148,55 @@ def import_document(body: ImportBody) -> dict:
         return import_code(real)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/upload")
+async def upload_document(request: Request, filename: str = Query(..., min_length=1, max_length=255)) -> dict:
+    """Import d'un document ENVOYÉ (corps brut) — le pendant de `/import` quand
+    l'interface tourne dans un navigateur, qui ne donne jamais de chemin.
+
+    Mêmes gardes que tout `/api` (Host, Origin, nonce). Le fichier est copié dans
+    le dossier de données (services/uploads), puis importé par le même chemin
+    que `/import`."""
+    from services import code_reader, uploads
+
+    name = uploads.safe_filename(filename)
+    is_pdf = name.lower().endswith(".pdf")
+    if not is_pdf and not code_reader.is_code_file(name):
+        raise HTTPException(status_code=400, detail="Format non pris en charge (PDF ou fichier de code)")
+
+    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    try:
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > UPLOAD_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="Fichier trop volumineux")
+            spool.write(chunk)
+        spool.seek(0)
+        try:
+            path, is_new = await run_in_threadpool(uploads.store, name, spool)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        spool.close()
+
+    def _import() -> dict:
+        if is_pdf:
+            from services.orchestrator import import_pdf
+
+            return import_pdf(path)
+        from services.orchestrator import import_code
+
+        return import_code(path)
+
+    try:
+        return await run_in_threadpool(_import)
+    except Exception as exc:
+        if is_new:
+            uploads.discard(path)
+        detail = str(exc) if isinstance(exc, ValueError) else "Document illisible"
+        raise HTTPException(status_code=400, detail=detail)
 
 
 @router.get("/doc/{doc_id}")

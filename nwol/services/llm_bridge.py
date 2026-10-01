@@ -64,10 +64,18 @@ def run_llm_sync(call: Callable[[Callable, Callable], None], timeout: float | No
         logger.warning("LLM : tâche restée %.0f s en file sans partir — abandonnée", queue_wait_s)
         raise TimeoutError("LLM : file d'attente")
     wait_s = slot.timeout_s or timeout or DEFAULT_WAIT_S
-    if not done.wait(wait_s):
-        slot.abandon.set()
-        logger.warning("LLM timeout après %.0f s — tâche abandonnée", wait_s)
-        raise TimeoutError("LLM timeout")
+    waited = 0.0
+    while not done.wait(wait_s - waited):
+        waited = wait_s
+        # La tâche republie son budget en sortant de la file
+        # (`ollama_client._start_task_clock`) : la machine a pu se révéler plus
+        # lente depuis la mise en file (llm/throughput). On attend ce qu'elle
+        # s'accorde, jamais moins.
+        wait_s = max(wait_s, slot.timeout_s or 0.0)
+        if wait_s <= waited:
+            slot.abandon.set()
+            logger.warning("LLM timeout après %.0f s — tâche abandonnée", wait_s)
+            raise TimeoutError("LLM timeout")
     if "error" in box:
         raise RuntimeError(box["error"])
     return box.get("result")

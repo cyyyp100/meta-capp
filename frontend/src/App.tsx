@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
 import { RouteFallback } from "./components/RouteFallback";
+import { BrowserShellHost } from "./features/shell/BrowserShellHost";
 import { TourHost } from "./features/tour/TourHost";
 import { Home } from "./routes/Home";
 
@@ -37,6 +38,9 @@ export function App() {
           plein écran, donc hors du layout. Tant qu'elle y vivait, ses étapes de
           lecture devenaient actives sans que rien ne les peigne. */}
       <TourHost />
+      {/* Mode navigateur : présence de l'onglet et écran « arrêté ». Au-dessus
+          des routes pour la même raison : le lecteur est hors du layout. */}
+      <BrowserShellHost />
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Home />} />

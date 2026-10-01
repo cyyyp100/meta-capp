@@ -1,0 +1,14 @@
+# Meta-Capp — packaging dependencies (desktop binary only, not needed to run).
+#   pip install -r requirements.txt -r requirements-build.txt
+#   pyinstaller desktop/metacapp.spec --noconfirm
+#
+# Pinned like everything else: PyInstaller assembles the binary we distribute,
+# so a floating version meant a release could change — or ship whatever PyPI
+# served that day — without a single commit. These are the versions of the
+# working conda env `nwol`, the ones local builds are made with. The release
+# workflow installs this file on every runner; security.yml audits it;
+# Dependabot proposes the bumps.
+pyinstaller==6.21.0
+# PyInstaller's community hooks (pywebview, pypinyin's data…): versioned
+# separately, and a new release can change what gets collected.
+pyinstaller-hooks-contrib==2026.6

@@ -6,10 +6,10 @@
 //
 // Ce bloc dit d'abord QUI est là et depuis combien de jours ; les réglages
 // passent derrière le menu, où on va les chercher.
-import { HelpCircle, Info, Moon, Settings, Sun } from "lucide-react";
+import { HelpCircle, Info, Moon, Power, Settings, Sun } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import type { StudyStreak } from "@/api/client";
+import { api, type StudyStreak } from "@/api/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,7 @@ import {
 import { useThemeStore } from "@/theme/useTheme";
 
 import { useT } from "../../i18n";
+import { useBrowserMode } from "./BrowserShellHost";
 
 /** Initiales affichées dans la pastille — deux au plus, sinon ça n'est plus lisible. */
 function initials(name: string): string {
@@ -35,6 +36,7 @@ export function UserMenu({ name, streak }: { name: string; streak?: StudyStreak 
   const navigate = useNavigate();
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
+  const browserMode = useBrowserMode();
 
   const days = streak?.streak ?? 0;
 
@@ -90,6 +92,20 @@ export function UserMenu({ name, streak }: { name: string; streak?: StudyStreak 
           <Info aria-hidden />
           {t("user.about")}
         </DropdownMenuItem>
+        {/* Dans un navigateur, fermer l'onglet n'arrête pas Meta-Capp (il
+            s'arrête seul quelques minutes plus tard) : c'est l'arrêt immédiat.
+            En fenêtre native, on ferme la fenêtre — l'entrée n'existe pas.
+            L'écran « arrêté » vient de BrowserShellHost, quand la présence
+            se coupe. */}
+        {browserMode && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void api.quitApp().catch(() => undefined)}>
+              <Power aria-hidden />
+              {t("user.quit")}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

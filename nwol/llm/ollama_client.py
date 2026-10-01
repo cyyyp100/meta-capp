@@ -30,6 +30,7 @@ from config.settings import (
     task_wall_timeout_s,
 )
 from i18n import current_lang, t
+from llm import throughput
 from llm.prompts import (
     build_system_prompt,
     build_assistant_answer_prompt,
@@ -138,6 +139,9 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_episode_notes_point": 6,
     # Analyse hebdomadaire : usage interne, rien ne l'attend.
     "lang_weekly_analysis":     8,
+    # Mesure du débit au démarrage (`calibrate_throughput`) : quelques secondes,
+    # et elle doit passer AVANT les tâches de fond qu'elle sert à dimensionner.
+    "calibration":              0,
 }
 
 
@@ -148,6 +152,8 @@ def _task_domain(label: str) -> str:
     return "lang" if (label or "").startswith("lang_") else "default"
 _LLM_QUEUE: queue.PriorityQueue = queue.PriorityQueue()
 _QUEUE_COUNTER = itertools.count()
+# Fin de la dernière tâche du worker (horloge monotone) : `llm_idle_for`.
+_LAST_TASK_DONE = time.monotonic()
 _RAW_LATEX_OUTSIDE_MATH_RE = re.compile(
     r"\\[A-Za-z]+|(?<![\w$])[A-Za-z][A-Za-z0-9]*\s*[_^]\s*(?:\{[^}\n]{1,80}\}|[A-Za-z0-9]+)"
 )
@@ -173,6 +179,41 @@ class GenerationCancelled(RuntimeError):
 
     Distincte d'une panne : `_generate_json` ne la rejoue pas (rejouer
     relancerait chez Ollama exactement le travail qu'on vient d'interrompre)."""
+
+
+class ModelOutOfMemory(RuntimeError):
+    """Ollama refuse de charger le modèle : pas assez de mémoire (RAM ou VRAM).
+
+    Message déjà traduit et lisible par l'étudiant — le lecteur l'affiche tel
+    quel. `_generate_json` ne la rejoue pas : la mémoire ne se libère pas en
+    une seconde, et chaque tentative refait charger 10 Go pour rien."""
+
+
+# Ce qu'Ollama écrit quand le modèle ne tient pas : « model requires more
+# system memory (10.2 GiB) than is available (6.1 GiB) », ou l'erreur CUDA /
+# Metal remontée par le runner (« out of memory »).
+_OOM_RE = re.compile(r"requires more system memory|out of memory|insufficient memory", re.IGNORECASE)
+_OOM_SIZES_RE = re.compile(r"\(([\d.]+\s*[GM]iB)\)\D+\(([\d.]+\s*[GM]iB)\)")
+
+
+# Tâches où l'étudiant a posé une question à Gemma et attend SA réponse. Le
+# repli local y fabrique une réponse générique : sur une panne de mémoire, elle
+# cacherait la seule information utile — cet ordinateur ne peut pas faire
+# tourner le modèle. Ailleurs (fiche, intervention), le repli silencieux reste
+# le bon comportement, comme quand Ollama est éteint.
+_OOM_EXPLAINED_TASKS = frozenset({"assistant_answer", "follow_up", "rephrasing"})
+
+
+def _raise_if_out_of_memory(detail: str) -> None:
+    if not _OOM_RE.search(detail or ""):
+        return
+    sizes = _OOM_SIZES_RE.search(detail)
+    if sizes:
+        message = t("llm.error.memory", required=sizes.group(1), available=sizes.group(2))
+    else:
+        message = t("llm.error.memory_generic")
+    logger.error("Ollama : mémoire insuffisante pour le modèle (%s)", detail[:200])
+    raise ModelOutOfMemory(message)
 
 
 # Message passé à `on_error` quand une tâche est annulée. Les callbacks ne
@@ -344,7 +385,31 @@ def _task_system_lang() -> str | None:
     return getattr(_SYSTEM_LANG, "value", None)
 
 
+# Échéance (horloge monotone) de la tâche en cours sur le worker : celle que son
+# appelant attend. `_call_ollama_http` borne chaque tentative au temps restant —
+# sans quoi une réparation lancée tard, ou une tentative dont le budget vient
+# d'être étiré (llm/throughput), travaillait encore pour un appelant parti et
+# bloquait le worker unique.
+_TASK_DEADLINE = threading.local()
+
+
+def _start_task_clock(label: str, slot: "CallerSlot | None") -> None:
+    """La tâche sort de la file : son budget part de maintenant.
+
+    Calculé ici et non à la mise en file : le débit mesuré a pu changer
+    entre-temps (calibrage du démarrage, expiration d'une tâche précédente —
+    llm/throughput). L'appelant synchrone relit ce budget
+    (`llm_bridge.run_llm_sync`) et le worker ne le dépasse pas
+    (`_TASK_DEADLINE`) : un seul nombre pour les deux."""
+    wall_s = task_wall_timeout_s(label)
+    _TASK_DEADLINE.value = time.monotonic() + wall_s
+    if slot is not None:
+        slot.timeout_s = wall_s  # avant `started` : un appelant de fond le lit dès ce signal
+        slot.started.set()
+
+
 def _queue_worker() -> None:
+    global _LAST_TASK_DONE
     while True:
         _priority, _seq, fn = _LLM_QUEUE.get()
         try:
@@ -352,21 +417,107 @@ def _queue_worker() -> None:
         except Exception as exc:
             logger.error("LLM queue worker erreur inattendue: %s", exc)
         finally:
+            # L'échéance d'une tâche ne doit jamais borner la suivante.
+            _TASK_DEADLINE.value = None
+            _LAST_TASK_DONE = time.monotonic()
             _LLM_QUEUE.task_done()
+
+
+def llm_idle_for() -> float | None:
+    """Secondes écoulées depuis la fin de la dernière tâche LLM, ou None si une
+    tâche est en file ou en cours.
+
+    Lu par l'arrêt automatique du mode navigateur (services/lifecycle) : on
+    n'arrête pas le serveur pendant que Gemma travaille. `unfinished_tasks`
+    compte les tâches mises en file et pas encore terminées (`task_done`)."""
+    with _LLM_QUEUE.mutex:
+        busy = _LLM_QUEUE.unfinished_tasks > 0
+    return None if busy else time.monotonic() - _LAST_TASK_DONE
 
 
 _worker_thread = threading.Thread(target=_queue_worker, daemon=True, name="llm-queue-worker")
 _worker_thread.start()
 
 
+# Ollama est LOCAL : jamais par un proxy. `urlopen` applique celui du système
+# (réglages réseau macOS/Windows, variables `http_proxy`) même à 127.0.0.1, que
+# les exceptions par défaut n'excluent pas : derrière le proxy d'un réseau
+# d'école, Gemma passait pour éteinte. (`_call_ollama_http` passe par
+# `http.client`, qui ignore les proxys.)
+_LOCAL_HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def is_ollama_available() -> bool:
     try:
         url = OLLAMA_URL.replace("/api/generate", "/api/tags")
         req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=3):
+        with _LOCAL_HTTP.open(req, timeout=3):
             return True
     except Exception:
         return False
+
+
+def _model_installed(model: str) -> bool:
+    """Vrai si Ollama liste `model` (`gemma4:e4b`, ou `x` pour `x:latest`)."""
+    try:
+        url = OLLAMA_URL.replace("/api/generate", "/api/tags")
+        with _LOCAL_HTTP.open(urllib.request.Request(url, method="GET"), timeout=3) as resp:
+            names = {str(m.get("name") or "") for m in json.loads(resp.read()).get("models") or []}
+    except Exception:
+        return False
+    return model in names or f"{model}:latest" in names
+
+
+# Texte neutre, assez long pour que la lecture du prompt soit mesurable
+# (`throughput._MIN_PROMPT_TOKENS`) ; la sortie est jetée.
+_CALIBRATION_PROMPT = (
+    "Voici un paragraphe extrait d'un manuel de méthodologie.\n\n"
+    "Apprendre ne consiste pas à relire un cours jusqu'à ce qu'il paraisse familier. "
+    "La familiarité donne l'illusion de la maîtrise : on reconnaît les phrases, on croit "
+    "les comprendre, et l'on découvre le jour de l'examen qu'on ne sait pas les reconstruire. "
+    "Les recherches en psychologie cognitive montrent que la récupération active — se poser "
+    "des questions, expliquer une notion sans regarder ses notes, refaire un exercice de "
+    "mémoire — consolide bien davantage les connaissances que la relecture passive. "
+    "L'espacement des révisions renforce encore cet effet : revoir une notion le lendemain, "
+    "puis une semaine plus tard, puis un mois après, coûte moins de temps au total qu'une "
+    "longue séance unique, et laisse une trace bien plus durable. Enfin, mélanger les types "
+    "de problèmes oblige à choisir la bonne méthode à chaque fois, ce qui est précisément "
+    "la compétence évaluée le jour de l'épreuve.\n\n"
+    "Résume ce paragraphe en quatre phrases simples."
+)
+
+
+def calibrate_throughput() -> None:
+    """Mesure le débit de Gemma sur CETTE machine, une fois par lancement.
+
+    Sans elle, une machine lente découvrait sa lenteur en perdant sa première
+    vraie génération (une génération expirée ne renvoie aucune durée). Un appel
+    court, en tête de file, alimente `llm/throughput` avant toute tâche réelle —
+    et charge le modèle en mémoire, ce que la première question aurait payé de
+    toute façon. Best-effort : Ollama éteint ou modèle absent, rien ne se passe.
+    Bloque le temps de deux requêtes HTTP locales : à lancer hors du chemin de
+    démarrage (thread)."""
+    if not is_ollama_available() or not _model_installed(OLLAMA_MODEL):
+        return
+
+    def _run() -> None:
+        # Un début propre à ce lancement : relancé avant la fin du `keep_alive`,
+        # le même prompt serait servi par le cache de préfixe d'Ollama, et la
+        # lecture paraîtrait huit fois plus rapide qu'elle ne l'est (llm/throughput).
+        prompt = f"[{time.time_ns()}]\n{_CALIBRATION_PROMPT}"
+        try:
+            _call_ollama(
+                prompt, OLLAMA_MODEL,
+                options=OLLAMA_TASK_OPTIONS["calibration"], format_json=False, task="calibration",
+            )
+        except GenerationCancelled:
+            return
+        except Exception as exc:
+            logger.info("Calibrage du débit de Gemma impossible : %s", exc)
+            return
+        logger.info("Débit de Gemma sur cette machine : %s", throughput.snapshot())
+
+    _LLM_QUEUE.put((_TASK_PRIORITY["calibration"], next(_QUEUE_COUNTER), _run))
 
 
 def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[float]]:
@@ -390,7 +541,7 @@ def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=OLLAMA_EMBED_TIMEOUT) as resp:
+        with _LOCAL_HTTP.open(req, timeout=OLLAMA_EMBED_TIMEOUT) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:300]
@@ -1104,8 +1255,7 @@ def _run_json_async(
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
-        if slot is not None:
-            slot.started.set()
+        _start_task_clock(label, slot)
         _CALL_METRICS.value = [] if on_metrics is not None else None
         _SYSTEM_LANG.value = system_lang
         try:
@@ -1165,14 +1315,13 @@ def _run_text_async(
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
-        if slot is not None:
-            slot.started.set()
+        _start_task_clock(label, slot)
         try:
             logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model)
             images = _load_ollama_images(image_paths or [])
             try:
                 raw = _call_ollama(prompt, model, images=images, options=task_options, format_json=False, task=label)
-            except GenerationCancelled:
+            except (GenerationCancelled, ModelOutOfMemory):
                 raise
             except Exception as exc:
                 if images:
@@ -1209,7 +1358,9 @@ def _generate_json(
     # Échéance de la tâche ENTIÈRE : on ne rejoue pas au-delà du budget que
     # l'appelant synchrone attend (config.settings.task_wall_timeout_s), sinon
     # les tentatives suivantes travaillent pour un destinataire déjà parti.
-    deadline = time.monotonic() + task_wall_timeout_s(label)
+    # Sur le worker, c'est l'échéance posée au départ de la tâche (la même que
+    # celle publiée à l'appelant) ; appelée directement, on la calcule.
+    deadline = getattr(_TASK_DEADLINE, "value", None) or time.monotonic() + task_wall_timeout_s(label)
     last_raw = ""
     last_error: Exception | None = None
     images = _load_ollama_images(image_paths or [])
@@ -1219,12 +1370,18 @@ def _generate_json(
             raw = _call_ollama(current_prompt, model, images=images, options=options, task=label)
         except GenerationCancelled:
             raise  # ni repli texte, ni nouvelle tentative : plus personne n'attend
+        except ModelOutOfMemory as exc:
+            last_error = exc  # ni repli texte (le modèle est le même), ni nouvelle tentative
+            break
         except Exception as exc:
             if images:
                 logger.warning("Ollama a refusé les images jointes, repli texte seul: %s", exc)
                 images = []
                 try:
                     raw = _call_ollama(current_prompt, model, images=[], options=options, task=label)
+                except ModelOutOfMemory as text_exc:
+                    last_error = text_exc
+                    break
                 except Exception as text_exc:
                     last_error = text_exc
                     logger.debug(
@@ -1263,11 +1420,15 @@ def _generate_json(
             current_prompt = _build_json_repair_prompt(label, prompt, raw)
 
     logger.debug("Dernière réponse JSON invalide %s: %s", parser, last_raw[:500])
+    if isinstance(last_error, ModelOutOfMemory) and label in _OOM_EXPLAINED_TASKS:
+        raise last_error
     fallback = _fallback_json_result(label, prompt, parser, last_raw)
     if fallback is not None:
         reason = f"erreur appel: {last_error}" if last_error else "JSON invalide"
         logger.warning("LLM %s non exploitable après %s tentative(s), repli local (%s).", label, attempts, reason)
         return fallback
+    if isinstance(last_error, ModelOutOfMemory):
+        raise last_error  # message déjà destiné à l'étudiant : pas d'enveloppe technique
     if last_error is not None:
         raise RuntimeError(f"Échec LLM {label} après {attempts} tentative(s): {last_error}") from last_error
     raise ValueError(f"Réponse LLM JSON invalide après {attempts} tentative(s).")
@@ -2350,9 +2511,15 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     # main pour que `cancel_pending_generations()` puisse la couper depuis un
     # autre thread (cf. `_abort_inflight_generation`).
     url = urllib.parse.urlsplit(OLLAMA_URL)
-    conn = http.client.HTTPConnection(
-        url.hostname or "localhost", url.port or 80, timeout=task_timeout_s(task),
-    )
+    timeout_s = task_timeout_s(task)
+    # Jamais au-delà de l'échéance de la tâche (`_TASK_DEADLINE`). Une tentative
+    # coupée par CETTE borne ne dit rien de la vitesse de la machine : elle
+    # n'étire pas les budgets.
+    deadline = getattr(_TASK_DEADLINE, "value", None)
+    capped = deadline is not None and deadline - time.monotonic() < timeout_s
+    if capped:
+        timeout_s = max(1.0, deadline - time.monotonic())
+    conn = http.client.HTTPConnection(url.hostname or "127.0.0.1", url.port or 80, timeout=timeout_s)
     with _INFLIGHT_LOCK:
         _inflight["conn"] = conn
         _inflight["cancelled"] = False
@@ -2372,12 +2539,15 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         body = resp.read()
         if resp.status >= 400:
             detail = body.decode(errors="replace")[:500]
+            _raise_if_out_of_memory(detail)
             raise RuntimeError(f"Ollama HTTP {resp.status}: {detail}")
         data = json.loads(body)
         if "error" in data:
+            _raise_if_out_of_memory(str(data["error"]))
             raise RuntimeError(f"Ollama error: {data['error']}")
         response = data.get("response", "")
         _record_call_metrics(task, data, time.monotonic() - started)
+        throughput.record_call(data)
         _warn_if_context_overflow(task, data, payload_data["options"], bool(images))
     except GenerationCancelled:
         raise
@@ -2385,6 +2555,14 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         # Socket coupée par l'annulation : ce n'est pas une panne d'Ollama.
         if _inflight_was_cancelled(conn):
             raise GenerationCancelled(f"Génération {task or '?'} interrompue") from exc
+        if isinstance(exc, TimeoutError) and not capped:
+            # Le modèle travaillait, mais plus lentement que le budget ne le
+            # supposait : les tentatives suivantes obtiendront plus de temps.
+            throughput.record_timeout()
+            logger.warning(
+                "Génération %s expirée après %.0f s — machine plus lente que prévu, budgets étirés (%s)",
+                task or "?", time.monotonic() - started, throughput.snapshot(),
+            )
         raise RuntimeError(f"Ollama indisponible: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Réponse Ollama invalide: {exc}") from exc
@@ -2413,6 +2591,8 @@ def _warn_if_context_overflow(task: str, data: dict, options: dict, with_images:
     consommés par le prompt. S'il ne laisse pas la place de `num_predict`, soit
     le prompt a été tronqué, soit la réponse le sera. Le remède est dans
     config.settings.OLLAMA_TASK_OPTIONS (num_ctx de la tâche), pas ici."""
+    if task == "calibration":
+        return  # coupée à dessein : on mesure un débit, la réponse est jetée
     try:
         prompt_tokens = int(data.get("prompt_eval_count") or 0)
         num_ctx = int(options.get("num_ctx") or 0)

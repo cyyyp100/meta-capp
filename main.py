@@ -31,7 +31,11 @@ def _reexec_inside_nwol_conda_env() -> None:
     if not conda_prefix:
         return
 
-    target = Path(conda_prefix) / "bin" / "python"
+    # Sous Windows, l'interpréteur d'un env conda est à la racine du préfixe.
+    if os.name == "nt":
+        target = Path(conda_prefix) / "python.exe"
+    else:
+        target = Path(conda_prefix) / "bin" / "python"
     if not target.exists():
         return
 
@@ -45,6 +49,13 @@ def _reexec_inside_nwol_conda_env() -> None:
         return
 
     os.environ["NWOL_CONDA_REEXECED"] = "1"
+    if os.name == "nt":
+        # `os.execv` n'existe pas vraiment sous Windows : il lance un second
+        # processus et rend la main au shell aussitôt, qui reprend la console
+        # sous l'application. On attend l'enfant et on rend son code de sortie.
+        import subprocess
+
+        sys.exit(subprocess.call([str(expected), *sys.argv]))
     os.execv(str(expected), [str(expected), *sys.argv])
 
 
@@ -61,6 +72,13 @@ def main():
     parser = argparse.ArgumentParser(description="Meta-Capp — Compagnon d'apprentissage adaptatif")
     parser.add_argument("--debug", action="store_true", help="Activer les logs DEBUG")
     parser.add_argument("pdf", nargs="?", help="Ouvrir directement un PDF ou un fichier de code")
+    # Lu par desktop/pywebview_main.py (qui relit argv) ; déclaré ici pour que
+    # ce parseur ne le refuse pas. Automatique quand aucune fenêtre native n'est possible.
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Ouvrir l'interface dans le navigateur par défaut plutôt que dans une fenêtre native",
+    )
     # Conservé pour ne pas casser les scripts existants : le mode web est le seul.
     parser.add_argument("--web", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()

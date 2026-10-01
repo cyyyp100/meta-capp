@@ -18,7 +18,10 @@ def _app_data_dir() -> Path:
     return base / "Meta-Capp"
 
 # LLM
-OLLAMA_URL = "http://localhost:11434/api/generate"
+# `127.0.0.1` et non `localhost` : Ollama n'écoute que sur l'IPv4 de bouclage.
+# `localhost` essaie d'abord `::1`, et Windows met ~2 s à accepter ce refus (il
+# retente le SYN) — à chaque génération, à chaque lot d'embeddings.
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 OLLAMA_MODEL = "gemma4:e4b"
 # Plancher du budget socket d'une génération (voir `task_timeout_s` plus bas :
 # le budget réel est DÉRIVÉ du num_predict de la tâche, jamais saisi à la main).
@@ -35,7 +38,7 @@ OLLAMA_KEEP_ALIVE = "30m"
 # EmbeddingGemma, 300 M de paramètres, multilingue — il relie « taux
 # d'apprentissage » à « learning rate » là où la recherche lexicale ne peut pas.
 # Optionnel : sans lui (`ollama pull embeddinggemma`), la recherche reste lexicale.
-OLLAMA_EMBED_URL = "http://localhost:11434/api/embed"
+OLLAMA_EMBED_URL = "http://127.0.0.1:11434/api/embed"
 OLLAMA_EMBED_MODEL = "embeddinggemma"
 OLLAMA_EMBED_TIMEOUT = 60          # par lot de chunks (le premier appel charge le modèle)
 
@@ -150,6 +153,9 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "brainstorm_answer":        {"num_ctx": 4096, "num_predict": 760, "temperature": 0.35},
     # Résumé glissant d'une discussion (mémoire longue compactée).
     "brainstorm_summary":       {"num_ctx": 4096, "num_predict": 360, "temperature": 0.15},
+    # Mesure du débit au démarrage (llm/ollama_client.calibrate_throughput) :
+    # ~300 tokens lus, 64 écrits — assez pour mesurer, trop peu pour attendre.
+    "calibration":              {"num_ctx": 2048, "num_predict": 64, "temperature": 0.1},
 }
 
 # ── Budget temps d'une génération ─────────────────────────────────────────────
@@ -159,14 +165,25 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
 # divergent — et un timeout applicatif plus long que le timeout socket est une
 # échéance que personne n'atteindra jamais.
 #
-# Débit mesuré sur gemma4:e4b (machine de dev, sans GPU dédié). Volontairement
-# pessimiste : un budget trop court fait échouer une génération correcte, un
-# budget trop long ne coûte que dans le cas déjà anormal.
+# Débit de RÉFÉRENCE de gemma4:e4b, mesuré sur la machine de dev (Apple
+# Silicon, GPU intégré via Metal : ~29 tokens/s écrits, ~265 tokens/s lus).
+# Volontairement pessimiste : un budget trop court fait échouer une génération
+# correcte, un budget trop long ne coûte que dans le cas déjà anormal.
+#
+# Ce n'est qu'un point de départ. Une machine plus LENTE (PC sans GPU, Mac
+# Intel) est mesurée en cours de route (`llm/throughput.py`) et ses budgets
+# sont étirés d'autant ; une machine plus rapide garde ceux-ci.
 OLLAMA_TOKENS_PER_S = 18.0
+# Lecture du prompt (« prompt eval ») sur la même machine, même marge.
+OLLAMA_PROMPT_TOKENS_PER_S = 200.0
 # Chargement du modèle à froid + évaluation du prompt, avant le premier token.
 OLLAMA_TIMEOUT_OVERHEAD_S = 25.0
 # Plafond dur : au-delà, l'utilisateur a déjà renoncé.
 OLLAMA_TIMEOUT_MAX = 240.0
+# Étirement maximal des budgets sur une machine lente (soit ~2 tokens/s écrits).
+# Au-delà, une réponse prendrait plus de dix minutes : on échoue plutôt que de
+# laisser l'écran attendre indéfiniment.
+OLLAMA_MAX_SLOWDOWN = 8.0
 
 
 # Une génération JSON peut être rejouée (sortie non conforme -> prompt de
@@ -182,15 +199,28 @@ OLLAMA_WALL_TIMEOUT_MAX = 300.0
 OLLAMA_BACKGROUND_QUEUE_WAIT_S = 1800.0
 
 
+def _slowdown() -> tuple[float, float]:
+    """(écriture, lecture) : lenteur MESURÉE de cette machine face à la
+    référence, ≥ 1. Import tardif : `llm.throughput` lit les constantes de ce
+    module."""
+    from llm.throughput import slowdown
+
+    return slowdown()
+
+
 def task_timeout_s(task: str) -> float:
     """Budget d'UNE tentative, dérivé du `num_predict` de la tâche.
 
     C'est le timeout socket appliqué par `urlopen` (llm/ollama_client). Une
-    tâche inconnue retombe sur les options par défaut."""
+    tâche inconnue retombe sur les options par défaut. Sur une machine mesurée
+    plus lente que la référence, le temps de lecture du prompt, celui
+    d'écriture ET le plafond sont étirés du facteur mesuré."""
     options = OLLAMA_TASK_OPTIONS.get(task) or OLLAMA_OPTIONS
     tokens = float(options.get("num_predict") or OLLAMA_OPTIONS["num_predict"])
-    budget = OLLAMA_TIMEOUT_OVERHEAD_S + tokens / OLLAMA_TOKENS_PER_S
-    return min(OLLAMA_TIMEOUT_MAX, max(float(OLLAMA_TIMEOUT), budget))
+    gen_slow, prompt_slow = _slowdown()
+    budget = OLLAMA_TIMEOUT_OVERHEAD_S * prompt_slow + tokens * gen_slow / OLLAMA_TOKENS_PER_S
+    ceiling = OLLAMA_TIMEOUT_MAX * max(gen_slow, prompt_slow)
+    return min(ceiling, max(float(OLLAMA_TIMEOUT), budget))
 
 
 def task_wall_timeout_s(task: str) -> float:
@@ -199,7 +229,8 @@ def task_wall_timeout_s(task: str) -> float:
     Source unique de DEUX échéances qui doivent rester d'accord : la boucle de
     retry de `_generate_json` cesse de rejouer au-delà, et `run_llm_sync`
     attend exactement ça avant d'abandonner."""
-    return min(OLLAMA_WALL_TIMEOUT_MAX, task_timeout_s(task) * OLLAMA_RETRY_BUDGET_FACTOR)
+    ceiling = OLLAMA_WALL_TIMEOUT_MAX * max(_slowdown())
+    return min(ceiling, task_timeout_s(task) * OLLAMA_RETRY_BUDGET_FACTOR)
 
 # ── Systèmes d'écriture (module Langues) ──────────────────────────────────────
 # Taxonomie des scripts : chaque entrée porte les propriétés qui PILOTENT le
@@ -631,6 +662,21 @@ LIBRARY_MAX_DOCUMENTS = 1000
 # services/brainstorm_search.
 LIBRARY_SEARCH_POOL = 500
 LIBRARY_SEARCH_LIMIT = 60
+# Document ENVOYÉ par le navigateur (mode sans fenêtre native, services/uploads) :
+# copié dans le dossier de données. Plafond large — un manuel scanné dépasse
+# vite 100 Mo — mais borné : le corps de la requête arrive en mémoire disque.
+UPLOAD_MAX_BYTES = 512 * 1024 * 1024
+
+# Mode navigateur (services/lifecycle) : fermer l'onglet ne dit rien au
+# serveur, et sans terminal personne ne peut faire Ctrl+C. Il s'arrête quand
+# AUCUN onglet n'est ouvert depuis ce délai — assez long pour un rechargement,
+# une navigation ou un navigateur lent à s'ouvrir au premier lancement…
+BROWSER_AUTO_STOP_S = 180.0
+# …et que Gemma ne travaille plus depuis celui-ci : une génération de fond
+# (épisode de langue) enchaîne plusieurs appels, la file est vide un instant
+# entre deux. On ne coupe pas au milieu.
+BROWSER_LLM_QUIET_S = 60.0
+BROWSER_WATCH_INTERVAL_S = 10.0
 # Poids de pertinence. Le nom de fichier est le signal le plus fort (ce que
 # l'utilisateur tape quand il SAIT), les mots-clés viennent juste après (ce
 # qu'il tape quand il ne sait pas), le résumé et la matière départagent.

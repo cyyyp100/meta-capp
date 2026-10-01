@@ -12,7 +12,7 @@ import { Suspense, useCallback } from "react";
 import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 
 import { api } from "@/api/client";
-import { pickFilePath } from "@/api/platform";
+import { pickDocument } from "@/api/platform";
 import { RouteFallback } from "@/components/RouteFallback";
 import { cn } from "@/lib/utils";
 
@@ -56,10 +56,10 @@ export function AppLayout() {
 
   // ⌘O : le même chemin que « Fichier ▸ Ouvrir un document… » du menu natif.
   const openDocument = useCallback(async () => {
-    const path = await pickFilePath();
-    if (!path) return;
+    const picked = await pickDocument();
+    if (!picked) return;
     try {
-      const doc = await api.importPdf(path);
+      const doc = await api.importDocument(picked);
       navigate(`/reader/${doc.id}`);
     } catch {
       // L'accueil porte déjà le message d'erreur d'import détaillé ; ici on ne

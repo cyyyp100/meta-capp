@@ -8,7 +8,9 @@
 #   3. nonce de lancement : la coque desktop (pywebview) génère un jeton
 #      aléatoire, le passe au frontend via l'URL d'ouverture ; toute requête
 #      /api doit le présenter (header, cookie ou query). Sans coque (dev),
-#      aucun jeton n'est configuré et seule la garde Host/Origin s'applique.
+#      aucun jeton n'est configuré et seule la garde Host/Origin s'applique ;
+#   4. rejet sur /api de toute requête que le navigateur déclare venue d'un
+#      autre site — ou d'un autre port de 127.0.0.1 (`FOREIGN_FETCH_SITES`).
 #
 # S2 — confinement de l'import PDF : POST /api/library/import acceptait tout
 # chemin absolu ; combiné à S1 c'était une primitive de lecture de fichier.
@@ -47,6 +49,16 @@ TOKEN_EXEMPT_PATHS = {"/api/health"}
 TOKEN_HEADER = "x-launch-token"
 TOKEN_COOKIE = "nwol_lt"
 TOKEN_QUERY = "lt"
+
+# Fetch Metadata (`Sec-Fetch-Site`), posé par le navigateur et qu'aucun script ne
+# peut forger. Les cookies ne sont pas isolés par port, et `SameSite` tient tous
+# les ports de 127.0.0.1 pour un même site : en mode navigateur, une page servie
+# par un AUTRE programme local (`http://127.0.0.1:3000`…) joint notre cookie de
+# nonce à ses requêtes sans Origin (`<img>`, navigation). Seules notre propre
+# page (`same-origin`) et l'utilisateur lui-même (`none` : adresse tapée,
+# `webbrowser.open`) passent. Absent (outil local, moteur ancien) : les autres
+# gardes restent seules juges.
+FOREIGN_FETCH_SITES = {"same-site", "cross-site"}
 
 _launch_token: str | None = None
 
@@ -132,6 +144,10 @@ class LocalOnlyGuard:
             await self._reject(scope, receive, send, "forbidden origin")
             return
 
+        if self._guarded_api(scope) and _header(scope, b"sec-fetch-site") in FOREIGN_FETCH_SITES:
+            await self._reject(scope, receive, send, "cross-site request")
+            return
+
         if self._token_required(scope) and not self._token_ok(scope):
             await self._reject(scope, receive, send, "missing or invalid launch token")
             return
@@ -139,11 +155,15 @@ class LocalOnlyGuard:
         await self.app(scope, receive, send)
 
     @staticmethod
-    def _token_required(scope: dict) -> bool:
-        if _launch_token is None:
-            return False  # dev sans coque : pas de nonce configuré
+    def _guarded_api(scope: dict) -> bool:
         path = scope.get("path") or ""
         return path.startswith("/api") and path not in TOKEN_EXEMPT_PATHS
+
+    @classmethod
+    def _token_required(cls, scope: dict) -> bool:
+        if _launch_token is None:
+            return False  # dev sans coque : pas de nonce configuré
+        return cls._guarded_api(scope)
 
     @staticmethod
     def _token_ok(scope: dict) -> bool:

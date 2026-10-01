@@ -48,6 +48,30 @@ def no_real_generation(monkeypatch):
     monkeypatch.setattr(orchestrator, "is_ollama_available", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def reference_throughput():
+    """Les budgets temps dépendent du débit MESURÉ (llm/throughput) : un test
+    qui simule un appel lent ou expiré ne doit pas étirer ceux des suivants —
+    ni leur laisser l'échéance d'une tâche (`_TASK_DEADLINE`, par thread)."""
+    from llm import ollama_client, throughput
+
+    throughput.reset()
+    yield
+    throughput.reset()
+    ollama_client._TASK_DEADLINE.value = None
+
+
+@pytest.fixture(autouse=True)
+def not_in_browser_mode():
+    """Un test qui active le mode navigateur (services/lifecycle) ne le laisse
+    pas aux suivants : « Quitter » y appellerait sa fausse fonction d'arrêt."""
+    from services import lifecycle
+
+    lifecycle.reset()
+    yield
+    lifecycle.reset()
+
+
 @pytest.fixture
 def make_pdf():
     """Fabrique un PDF de test : une page par entrée de ``pages``.

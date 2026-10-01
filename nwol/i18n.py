@@ -38,6 +38,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "menu.library": "Bibliothèque",
         "menu.settings": "Réglages…",
         "menu.quit": "Quitter",
+        # Coque de secours : interface dans le navigateur (desktop/pywebview_main.py).
+        # Écrit dans le terminal, jamais dans les logs (l'adresse porte le nonce).
+        "desktop.browser_mode": "Meta-Capp est ouvert dans votre navigateur : {url}",
+        "desktop.browser_not_opened": "Le navigateur ne s'est pas ouvert tout seul : copiez l'adresse ci-dessus dans votre navigateur.",
+        "desktop.browser_quit": "Pour quitter : « Quitter Meta-Capp » dans le menu du profil, ou fermez l'onglet (arrêt automatique {minutes} min plus tard), ou Ctrl+C ici.",
         "menu.view": "Affichage",
         "menu.zoom_in": "Agrandir",
         "menu.zoom_out": "Réduire",
@@ -612,6 +617,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.gender.m": "masculin",
         "lang.feuilleton.gender.f": "féminin",
         "lang.feuilleton.gender.n": "neutre",
+        # ── Erreurs du modèle local (llm/ollama_client) ───────────────────
+        "llm.error.memory": "Gemma ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Gemma a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
+        "llm.error.memory_generic": "Gemma ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Gemma a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
     },
     "en": {
         # ── Home ──────────────────────────────────────────────────────────
@@ -643,6 +651,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "menu.library": "Library",
         "menu.settings": "Settings…",
         "menu.quit": "Quit",
+        "desktop.browser_mode": "Meta-Capp is open in your browser: {url}",
+        "desktop.browser_not_opened": "The browser did not open by itself: copy the address above into your browser.",
+        "desktop.browser_quit": "To quit: \"Quit Meta-Capp\" in the profile menu, or close the tab (automatic stop {minutes} min later), or Ctrl+C here.",
         "menu.view": "View",
         "menu.zoom_in": "Zoom in",
         "menu.zoom_out": "Zoom out",
@@ -1210,6 +1221,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.gender.m": "masculine",
         "lang.feuilleton.gender.f": "feminine",
         "lang.feuilleton.gender.n": "neuter",
+        "llm.error.memory": "Gemma does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. Gemma needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
+        "llm.error.memory_generic": "Gemma does not fit in this computer's memory. Close memory-hungry applications and try again. Gemma needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
     },
 }
 

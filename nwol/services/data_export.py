@@ -111,6 +111,12 @@ def purge_all_data() -> dict:
     conn.execute("VACUUM")
 
     shutil.rmtree(ASSETS_DIR, ignore_errors=True)
+    # Copies des documents envoyés depuis le navigateur : des données de
+    # l'étudiant comme les autres (les fichiers ouverts par chemin ne sont
+    # jamais à nous, on n'y touche pas).
+    from services import uploads
+
+    uploads.discard_all()
     log_dir = Path(LOG_FILE).parent
     if log_dir.is_dir():
         for f in log_dir.glob(Path(LOG_FILE).name + "*"):

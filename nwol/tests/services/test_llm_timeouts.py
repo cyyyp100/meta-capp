@@ -82,6 +82,27 @@ def test_async_task_publishes_its_own_budget_to_the_caller():
     assert seen["budget"] == task_wall_timeout_s("lang_curriculum")
 
 
+def test_caller_waits_for_the_budget_republished_when_the_task_starts():
+    """Le budget publié à la mise en file précède le calibrage du démarrage,
+    passé en tête de file : sur une machine lente, la tâche s'accorde davantage
+    en partant. L'appelant l'attend, au lieu de renoncer pendant qu'elle
+    travaille encore pour lui."""
+
+    def slow_machine(on_success, on_error):
+        slot = ollama_client._current_caller_slot()
+        slot.timeout_s = 0.2  # à la mise en file
+
+        def worker():
+            slot.timeout_s = 2.0  # republié au départ (`_start_task_clock`)
+            slot.started.set()
+            time.sleep(0.5)  # au-delà du premier budget, en deçà du second
+            on_success("réponse")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    assert run_llm_sync(slow_machine) == "réponse"
+
+
 def test_timeout_raises_and_flags_the_task_as_abandoned():
     """Sur timeout, le drapeau d'abandon est levé : le worker jettera la tâche
     au lieu de bloquer la file pour tout le monde."""

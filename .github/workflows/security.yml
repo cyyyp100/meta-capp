@@ -28,7 +28,7 @@ jobs:
           python-version: "3.11.9"
       - run: pip install pip-audit
       - name: Audit des dépendances Python
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt -r requirements-build.txt
 
   npm-audit:
     runs-on: ubuntu-latest

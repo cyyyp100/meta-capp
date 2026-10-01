@@ -15,6 +15,7 @@ import type {
   RunPlan,
 } from "./feuilleton";
 import { extraTokenParam } from "./security";
+import type { PickedDocument } from "./platform";
 import type {
   DocumentDetail,
   DocumentSummary,
@@ -54,6 +55,20 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     throw new Error(await errorMessage(res));
   }
   return (await res.json()) as T;
+}
+
+/** Mode navigateur : le CONTENU du fichier, copié côté serveur (services/uploads)
+ *  — un navigateur ne donne jamais de chemin. Corps brut, comme `importDb`. */
+async function uploadDocument(file: File): Promise<DocumentDetail> {
+  const res = await fetch(`/api/library/upload?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res));
+  }
+  return (await res.json()) as DocumentDetail;
 }
 
 /** Message d'erreur lisible : le `detail` de FastAPI est déjà traduit côté
@@ -138,6 +153,12 @@ export const api = {
       return r.json();
     }),
   importPdf: (path: string) => postJSON<DocumentDetail>("/api/library/import", { path }),
+  /** Le choix de `pickDocument()`, quelle que soit la coque : un chemin lu sur
+   *  place (fenêtre native) ou un fichier envoyé (navigateur). */
+  importDocument: (picked: PickedDocument) =>
+    "path" in picked
+      ? postJSON<DocumentDetail>("/api/library/import", { path: picked.path })
+      : uploadDocument(picked.file),
   quizSubjects: () => getJSON<QuizSubject[]>("/api/quiz/subjects"),
   quizOptions: () => getJSON<QuizOptions>("/api/quiz/options"),
   // `topic` : précision libre DANS la matière (« révolution française »), ou dans
@@ -380,6 +401,12 @@ export const api = {
   // Opt-in strict : tant que `updates_check` est faux, cet appel ne déclenche
   // AUCUNE requête sortante côté serveur (cf. nwol/services/updates.py).
   checkUpdates: () => getJSON<UpdateStatus>("/api/updates/check"),
+
+  // ── Coque : mode navigateur ──────────────────────────────────────────────
+  // `browser_mode` est faux en fenêtre native et en dev : ni « Quitter », ni
+  // présence (cf. nwol/services/lifecycle.py, features/shell/BrowserShellHost).
+  shell: () => getJSON<{ browser_mode: boolean }>("/api/shell"),
+  quitApp: () => postJSON<{ stopping: boolean }>("/api/shell/quit", {}),
 
   // ── Visite guidée : le document emprunté ─────────────────────────────────
   // Aucun paramètre, ni ici ni côté serveur : ces deux routes n'agissent que

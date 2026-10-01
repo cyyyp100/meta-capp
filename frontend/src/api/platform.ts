@@ -1,22 +1,45 @@
 // platform.ts — Seule abstraction qui touche l'OS (sélecteur de fichier).
 // En coque pywebview : bridge natif window.pywebview.api.pick_pdf() -> chemin
-// (accepte PDF ET fichiers de code). En dev (navigateur) : pas de chemin
-// disponible -> on retombe sur un prompt.
+// (accepte PDF ET fichiers de code) ; le backend lit le fichier sur place.
+// Dans un navigateur (mode sans fenêtre native : Linux sans GTK ni Qt, Windows
+// sans WebView2, `--browser`, ou `npm run dev`) : aucun chemin n'est jamais
+// disponible -> <input type="file">, et le CONTENU est envoyé au backend, qui
+// le copie dans son dossier de données (`POST /api/library/upload`).
 
 export function isDesktopShell(): boolean {
   return Boolean((window as any).pywebview || (window as any).__TAURI__);
 }
 
-// Renvoie le CHEMIN absolu d'un fichier (PDF ou code) — le backend lit et
-// valide le fichier côté serveur.
-export async function pickFilePath(): Promise<string | null> {
+/** Ce que l'utilisateur a choisi : un chemin (coque native) ou un fichier (navigateur). */
+export type PickedDocument = { path: string } | { file: File };
+
+export async function pickDocument(): Promise<PickedDocument | null> {
   const api = (window as any).pywebview?.api;
   if (api?.pick_pdf) {
     const path = await api.pick_pdf();
-    return path ?? null;
+    return path ? { path } : null;
   }
-  // Dev navigateur : on ne peut pas obtenir un chemin serveur depuis <input file>.
-  // Pour itérer, on demande le chemin manuellement.
-  const typed = window.prompt("Chemin absolu du fichier (PDF ou code) à importer :");
-  return typed && typed.trim() ? typed.trim() : null;
+  const file = await pickBrowserFile();
+  return file ? { file } : null;
+}
+
+// Pas de filtre `accept` : la liste des extensions de code vit côté serveur
+// (services/code_reader), qui refuse de toute façon ce qu'il ne sait pas lire.
+function pickBrowserFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.style.display = "none";
+    const done = (file: File | null) => {
+      input.remove();
+      resolve(file);
+    };
+    input.addEventListener("change", () => done(input.files?.[0] ?? null), { once: true });
+    // `cancel` : Chrome 113+, Firefox 91+, Safari 16.4+. Sans lui, une
+    // annulation laisse simplement la promesse en suspens — rien n'est bloqué,
+    // l'appelant ne passe en « import en cours » qu'après un choix.
+    input.addEventListener("cancel", () => done(null), { once: true });
+    document.body.appendChild(input);
+    input.click();
+  });
 }

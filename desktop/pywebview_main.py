@@ -6,19 +6,30 @@
 # aucun navigateur, aucune URL visible pour l'utilisateur. Le frontend compilé
 # (frontend/dist) est servi par FastAPI lui-même (même origine).
 #
+# Sans fenêtre native possible (Linux sans GTK ni Qt, session sans affichage,
+# Windows sans WebView2…), la MÊME application s'ouvre dans le navigateur par
+# défaut : seule la coque change, le serveur et ses gardes sont identiques.
+#
 # Usage :  python desktop/pywebview_main.py
+#          python desktop/pywebview_main.py --browser       # navigateur par défaut
 #          python desktop/pywebview_main.py --server-only   # smoke test headless
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
+import re
+import shutil
+import socket
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = ROOT / "nwol"
@@ -33,6 +44,8 @@ from i18n import t  # noqa: E402
 from server import security  # noqa: E402
 from server.app import create_app  # noqa: E402
 from server.config import FRONTEND_DIST, HOST, PORT  # noqa: E402
+from config.settings import BROWSER_AUTO_STOP_S, DB_PATH  # noqa: E402
+from services import lifecycle  # noqa: E402
 from services.secrets_store import register_secret  # noqa: E402
 from services.updates import RELEASES_PAGE  # noqa: E402
 
@@ -284,18 +297,57 @@ def _guard_external_links() -> None:
     webbrowser.open = guarded_open
 
 
-def _serve(holder: dict) -> None:
-    config = uvicorn.Config(create_app(), host=HOST, port=PORT, log_level="warning")
+# Appels à NOTRE serveur local : jamais par un proxy. `urlopen` applique celui du
+# système (réglages réseau macOS/Windows, variables `http_proxy`) même à
+# 127.0.0.1, que les exceptions par défaut n'excluent pas : derrière le proxy
+# d'un réseau d'école, la sonde de démarrage échouait (« le serveur local n'a
+# pas démarré ») et le nonce partait au proxy avec les sondes d'instance.
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _claim_port() -> socket.socket | None:
+    """Réserve le port du serveur, ou None s'il est déjà tenu.
+
+    Le bind EST le test. Sonder le port puis laisser uvicorn le prendre
+    laissait réussir deux lancements simultanés (double-clic impatient) : le
+    perdant voyait répondre le serveur du gagnant et ouvrait une fenêtre munie
+    d'un nonce que ce serveur ignorait — 403 partout. Le socket réservé est
+    confié tel quel à uvicorn (`_serve`)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if os.name != "nt":
+        # Comme uvicorn : se relancer aussitôt après une fermeture (TIME_WAIT).
+        # Jamais sous Windows, où l'option permet de prendre un port déjà écouté.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((HOST, PORT))
+        # Écouter tout de suite : sous Linux, deux sockets SO_REUSEADDR peuvent
+        # partager un port tant qu'AUCUN n'écoute — et uvicorn n'écoute
+        # qu'après son lifespan (migrations…), soit plusieurs secondes.
+        sock.listen()
+    except OSError:
+        sock.close()
+        return None
+    return sock
+
+
+def _serve(holder: dict, sock: socket.socket) -> None:
+    # `timeout_graceful_shutdown` : à l'arrêt, uvicorn attend que chaque
+    # requête en cours ait répondu, sans limite par défaut — or une requête qui
+    # attend Gemma peut durer des minutes. Quitter en mode navigateur coupe ces
+    # générations (services/lifecycle.quit_app) ; ceci borne le reste.
+    config = uvicorn.Config(
+        create_app(), host=HOST, port=PORT, log_level="warning", timeout_graceful_shutdown=5
+    )
     server = uvicorn.Server(config)
     holder["server"] = server
-    server.run()
+    server.run(sockets=[sock])
 
 
 def _wait_until_ready(timeout: float = 15.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            urllib.request.urlopen(f"http://{HOST}:{PORT}/api/health", timeout=0.5)
+            _LOCAL.open(f"http://{HOST}:{PORT}/api/health", timeout=0.5)
             return True
         except Exception:
             time.sleep(0.2)
@@ -371,7 +423,12 @@ def _build_frontend_if_needed() -> None:
     import subprocess
 
     try:
-        subprocess.run(["npm", "run", "build"], cwd=str(frontend), check=True)
+        # Chemin COMPLET de npm : sous Windows c'est `npm.cmd`, qu'un nom nu
+        # passé à CreateProcess ne trouve pas (FileNotFoundError).
+        npm = shutil.which("npm")
+        if npm is None:
+            raise FileNotFoundError("npm introuvable dans le PATH (Node.js est-il installé ?)")
+        subprocess.run([npm, "run", "build"], cwd=str(frontend), check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         logger.error(
             "Build du frontend impossible (%s). Lance manuellement :\n"
@@ -382,6 +439,224 @@ def _build_frontend_if_needed() -> None:
         # bundle périmé, l'ancien vaut mieux que rien.
         if not has_dist:
             sys.exit(1)
+
+
+# ── Instance déjà lancée ─────────────────────────────────────────────────────
+#
+# Le port est fixe (8756). Un second lancement ne pouvait pas l'obtenir, mais
+# `_wait_until_ready` voyait répondre le PREMIER serveur et ouvrait une fenêtre
+# munie d'un nonce que ce serveur ne connaît pas : 403 partout, application
+# morte. En mode navigateur le serveur survit à l'onglet fermé, ce cas devient
+# courant. Chaque instance publie donc son nonce dans le dossier de données
+# (fichier 0600 : un processus local de l'utilisateur lit de toute façon la base
+# directement ; le nonce protège des PAGES WEB, qui n'atteignent pas ce
+# fichier, et des AUTRES comptes de la machine, avec qui 127.0.0.1 est
+# partagé), et un second lancement rouvre simplement l'instance existante.
+
+# Forme d'un nonce (`security.new_launch_token`) : un fichier abîmé ne doit
+# pas finir dans l'adresse d'ouverture.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+# Après la première réponse d'une instance, le temps qu'elle écrive son fichier
+# (elle le fait aussitôt, cf. `main`).
+_INSTANCE_FILE_GRACE_S = 3.0
+
+
+def _instance_file() -> Path:
+    return Path(DB_PATH).parent / "instance.json"
+
+
+def _instance_token() -> str | None:
+    try:
+        token = json.loads(_instance_file().read_text(encoding="utf-8")).get("token")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return token if isinstance(token, str) and _TOKEN_RE.fullmatch(token) else None
+
+
+def _write_instance(token: str) -> None:
+    """Écrit puis renomme : un second lancement ne lit jamais un fichier à moitié écrit."""
+    path = _instance_file()
+    tmp = path.with_name(f".instance-{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"pid": os.getpid(), "port": PORT, "token": token}, handle)
+        os.replace(tmp, path)
+    except OSError:
+        logger.debug("Fichier d'instance non écrit", exc_info=True)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _clear_instance(token: str) -> None:
+    path = _instance_file()
+    try:
+        if json.loads(path.read_text(encoding="utf-8")).get("token") == token:
+            path.unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def _api_status(path: str, token: str | None) -> int | None:
+    request = urllib.request.Request(f"http://{HOST}:{PORT}{path}")
+    if token:
+        request.add_header(security.TOKEN_HEADER, token)
+    try:
+        with _LOCAL.open(request, timeout=2) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return None
+
+
+def _claim_or_reopen(timeout: float = 15.0) -> tuple[socket.socket | None, str | None]:
+    """Le port, ou l'instance qui le tient.
+
+    (socket, None) : le port est à nous, on lance le serveur. (None, nonce) :
+    une instance tourne, on rouvre SES pages avec SON nonce (None : serveur de
+    dev sans nonce). Une instance qui démarre (double-clic impatient) a le
+    temps de répondre puis d'écrire son fichier ; une instance qui se ferme
+    (relance juste après avoir quitté — elle efface son fichier d'abord), celui
+    de libérer le port. RuntimeError si le port reste tenu par un programme
+    qu'on ne sait pas rouvrir."""
+    deadline = time.monotonic() + timeout
+    answered = False
+    while True:
+        sock = _claim_port()
+        if sock is not None:
+            return sock, None
+        if _api_status("/api/health", None) == 200:
+            if not answered:
+                answered = True
+                deadline = min(deadline, time.monotonic() + _INSTANCE_FILE_GRACE_S)
+            token = _instance_token()
+            for candidate in ((token, None) if token else (None,)):
+                if _api_status("/api/preferences", candidate) == 200:
+                    return None, candidate
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.3)
+    if answered:
+        raise RuntimeError(
+            f"Le port {PORT} est occupé par une autre instance de Meta-Capp qu'on ne peut pas "
+            "rouvrir. Ferme-la (ou redémarre l'ordinateur) puis relance."
+        )
+    raise RuntimeError(
+        f"Le port {PORT} est occupé par un autre programme. Ferme-le (ou redémarre "
+        "l'ordinateur) puis relance."
+    )
+
+
+def _import_into_running_instance(path: str, token: str | None) -> int | None:
+    """Importe par l'API de l'instance existante : elle reste le SEUL écrivain
+    de la base SQLite (cf. CLAUDE.md, mono-process)."""
+    body = json.dumps({"path": path}).encode()
+    request = urllib.request.Request(
+        f"http://{HOST}:{PORT}/api/library/import", data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    if token:
+        request.add_header(security.TOKEN_HEADER, token)
+    try:
+        with _LOCAL.open(request, timeout=120) as response:
+            return int(json.loads(response.read()).get("id"))
+    except Exception:
+        logger.exception("Import impossible : %s", path)
+        return None
+
+
+# ── Fenêtre native ou navigateur ────────────────────────────────────────────
+
+# Moteurs que pywebview accepte encore mais qui n'exécutent pas le bundle
+# (React 18, ES2020) : la fenêtre s'ouvrirait, blanche.
+#   mshtml   : Internet Explorer 11, repli de pywebview sous Windows SANS WebView2
+#   qtwebkit : QtWebKit, abandonné depuis 2016
+_LEGACY_RENDERERS = {"mshtml", "qtwebkit"}
+
+
+def _native_window_unavailable() -> str | None:
+    """Pourquoi aucune fenêtre native ne peut s'ouvrir — ou None si elle le peut.
+
+    C'est `guilib.initialize()` que `webview.start()` appelle de toute façon :
+    on le fait AVANT, pour choisir la coque au lieu d'échouer après."""
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return "aucun affichage graphique (session sans DISPLAY ni WAYLAND_DISPLAY)"
+    try:
+        # `from webview import guilib` rendrait l'ATTRIBUT `webview.guilib`
+        # (None tant que `start()` n'a pas tourné), pas le sous-module.
+        from webview.guilib import initialize
+
+        lib = initialize()
+    except Exception as exc:
+        return f"aucun moteur web natif utilisable ({exc})"
+    renderer = getattr(lib, "renderer", "") or ""
+    if renderer in _LEGACY_RENDERERS:
+        return f"moteur web natif trop ancien ({renderer})"
+    if renderer == "gtkwebkit2":
+        # `initialize()` vient de créer l'application GTK SANS menu : le menu
+        # n'est connu qu'à `webview.start(menu=…)`, dont le `setup_app()` ne
+        # refait rien une fois `_app` posé (webview/platforms/gtk.py) — la barre
+        # de menu disparaissait sous Linux. Jamais enregistrée ni lancée, elle
+        # est simplement oubliée : `start()` la recrée, avec le menu.
+        lib._app = None
+    return None
+
+
+def _run_native(start_url: str) -> None:
+    _guard_external_links()
+    api = NativeApi()
+    _create_window(start_url, api)
+    # La langue du menu est celle qu'a restaurée le lifespan du serveur : le
+    # menu est construit APRÈS `_wait_until_ready()`, donc après cette
+    # restauration. Sans cet ordre, le menu serait toujours en français.
+    webview.start(menu=_build_menu(api))  # bloque sur le thread principal (macOS)
+
+
+def _run_in_browser(
+    start_url: str,
+    reason: str,
+    server_thread: threading.Thread | None,
+    stop: Callable[[], None] | None = None,
+) -> None:
+    """Ouvre l'interface dans le navigateur par défaut, puis garde le serveur
+    en vie jusqu'à ce qu'il s'arrête : « Quitter Meta-Capp », plus aucun onglet
+    ouvert depuis quelques minutes (`services/lifecycle`, via `stop`), ou
+    Ctrl+C. Les gardes du serveur (Host, Origin, nonce en cookie
+    SameSite=Strict) sont exactement celles de la fenêtre native ; seul manque
+    le dialogue de fichier natif, remplacé par un envoi de fichier
+    (`POST /api/library/upload`, `frontend/src/api/platform.ts`)."""
+    import webbrowser
+
+    logger.warning("Fenêtre native indisponible : %s — ouverture dans le navigateur.", reason)
+    _guard_external_links()
+    if server_thread is not None and stop is not None:
+        # AVANT d'ouvrir l'onglet : sa connexion de présence doit trouver le
+        # mode navigateur actif, et le compte à rebours couvre déjà le cas où
+        # aucun navigateur ne s'ouvre.
+        lifecycle.enable_browser_mode(stop)
+    opened = False
+    try:
+        opened = bool(webbrowser.open(start_url))
+    except Exception:
+        logger.debug("webbrowser.open a échoué", exc_info=True)
+    # `print` et non `logger` : l'adresse porte le nonce, que le filtre des logs
+    # caviarde — et c'est précisément ce qu'il faut pouvoir copier ici.
+    print(t("desktop.browser_mode", url=start_url), flush=True)
+    if not opened:
+        print(t("desktop.browser_not_opened"), flush=True)
+    if server_thread is None:
+        return  # instance déjà lancée ailleurs : c'est elle qui sert la page
+    print(t("desktop.browser_quit", minutes=round(BROWSER_AUTO_STOP_S / 60)), flush=True)
+    try:
+        while server_thread.is_alive():
+            server_thread.join(0.5)
+    except KeyboardInterrupt:
+        pass
 
 
 def main(pdf_path: str | None = None, debug: bool = False) -> None:
@@ -396,9 +671,15 @@ def main(pdf_path: str | None = None, debug: bool = False) -> None:
         action="store_true",
         help="Serveur seul, sans fenêtre native (smoke test CI / usage headless)",
     )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Ouvrir l'interface dans le navigateur par défaut plutôt que dans une fenêtre native",
+    )
     # parse_known_args : lancé directement, argv peut contenir les options de
     # main.py (--debug, pdf) — elles sont déjà traitées par l'appelant.
     args, _ = parser.parse_known_args()
+    browser_requested = args.browser or os.environ.get("METACAPP_BROWSER") == "1"
 
     if args.server_only:
         # Mode smoke test : uvicorn au premier plan, pas de webview (pas d'écran
@@ -410,37 +691,65 @@ def main(pdf_path: str | None = None, debug: bool = False) -> None:
 
     _build_frontend_if_needed()
 
-    # S1 : nonce de lancement — généré ici, exigé par l'API/WS, transmis au
-    # frontend via l'URL d'ouverture (il le pose en cookie SameSite=Strict).
-    launch_token = security.new_launch_token()
-    security.set_launch_token(launch_token)
-    # L'URL d'ouverture le porte en clair et pywebview la journalise en --debug :
-    # les logs sont exportables (« Exporter les logs »), le nonce n'y va pas.
-    register_secret(launch_token)
-
-    holder: dict = {}
-    threading.Thread(target=_serve, args=(holder,), daemon=True).start()
-
-    if not _wait_until_ready():
-        logger.error("Le serveur local n'a pas démarré à temps.")
+    try:
+        listener, existing_token = _claim_or_reopen()
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        print(str(exc), file=sys.stderr, flush=True)
         sys.exit(1)
 
-    # Document passé en argument : importé côté serveur, puis ouvert directement
-    # dans le lecteur (deep-link) plutôt que sur l'accueil.
-    start_url = f"http://{HOST}:{PORT}/?lt={launch_token}"
-    if pdf_path:
-        doc_id = _open_document(pdf_path)
-        if doc_id:
-            start_url = f"http://{HOST}:{PORT}/reader/{doc_id}?lt={launch_token}"
+    holder: dict = {}
+    server_thread: threading.Thread | None = None
+    if listener is None:
+        # Une instance tient déjà le port : on rouvre SES pages, avec SON nonce.
+        launch_token = existing_token
+        register_secret(launch_token)
+        logger.info("Meta-Capp tourne déjà : réouverture de l'instance existante.")
+        doc_id = _import_into_running_instance(pdf_path, launch_token) if pdf_path else None
+    else:
+        # S1 : nonce de lancement — généré ici, exigé par l'API/WS, transmis au
+        # frontend via l'URL d'ouverture (il le pose en cookie SameSite=Strict).
+        launch_token = security.new_launch_token()
+        security.set_launch_token(launch_token)
+        # L'URL d'ouverture le porte en clair et pywebview la journalise en --debug :
+        # les logs sont exportables (« Exporter les logs »), le nonce n'y va pas.
+        register_secret(launch_token)
 
-    _guard_external_links()
-    api = NativeApi()
-    _create_window(start_url, api)
-    # La langue du menu est celle qu'a restaurée le lifespan du serveur : le
-    # menu est construit APRÈS `_wait_until_ready()`, donc après cette
-    # restauration. Sans cet ordre, le menu serait toujours en français.
-    webview.start(menu=_build_menu(api))  # bloque sur le thread principal (macOS)
+        server_thread = threading.Thread(target=_serve, args=(holder, listener), daemon=True)
+        server_thread.start()
 
+        if not _wait_until_ready():
+            logger.error("Le serveur local n'a pas démarré à temps.")
+            sys.exit(1)
+        _write_instance(launch_token)
+        # Document passé en argument : importé côté serveur, puis ouvert
+        # directement dans le lecteur (deep-link) plutôt que sur l'accueil.
+        doc_id = _open_document(pdf_path) if pdf_path else None
+
+    route = f"/reader/{doc_id}" if doc_id else "/"
+    start_url = f"http://{HOST}:{PORT}{route}" + (f"?lt={launch_token}" if launch_token else "")
+
+    try:
+        reason = "demandé (--browser)" if browser_requested else _native_window_unavailable()
+        if reason is None:
+            try:
+                _run_native(start_url)
+            except Exception as exc:
+                # Moteur présent mais fenêtre impossible (pilote graphique,
+                # bibliothèque système manquante) : l'application reste utilisable.
+                logger.exception("La fenêtre native n'a pas pu s'ouvrir")
+                reason = f"la fenêtre native n'a pas pu s'ouvrir ({exc})"
+        if reason is not None:
+            _run_in_browser(start_url, reason, server_thread, lambda: _stop_server(holder))
+    finally:
+        if server_thread is not None:
+            _clear_instance(launch_token)
+            _stop_server(holder)
+
+
+def _stop_server(holder: dict) -> None:
+    """Demande l'arrêt d'uvicorn ; sûr depuis n'importe quel thread (uvicorn
+    lit le drapeau à chaque tour de sa boucle)."""
     server = holder.get("server")
     if server is not None:
         server.should_exit = True

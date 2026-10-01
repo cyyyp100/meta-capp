@@ -129,6 +129,44 @@ def test_static_frontend_not_token_gated(client, launch_token):
     assert res.status_code in (200, 404)  # 404 si frontend/dist absent (CI)
 
 
+# ── S1 : Fetch Metadata (mode navigateur) ───────────────────────────────────
+
+@pytest.mark.parametrize("site", ["same-site", "cross-site"])
+def test_requests_from_another_site_or_local_port_rejected(client, launch_token, site):
+    """Mode navigateur : une page servie par un autre port de 127.0.0.1 est du
+    même SITE — notre cookie de nonce part avec son `<img>`, qui n'a pas
+    d'Origin. Le navigateur, lui, dit d'où vient la requête."""
+    headers = {"cookie": f"nwol_lt={launch_token}", "sec-fetch-site": site}
+    assert client.get("/api/library/recent", headers=headers).status_code == 403
+    assert client.get(f"/api/library/recent?lt={launch_token}", headers={"sec-fetch-site": site}).status_code == 403
+
+
+@pytest.mark.parametrize("site", ["same-origin", "none"])
+def test_own_page_and_user_navigation_accepted(client, launch_token, site):
+    """`same-origin` : notre propre page ; `none` : adresse tapée, favori,
+    `webbrowser.open` de la coque."""
+    headers = {"cookie": f"nwol_lt={launch_token}", "sec-fetch-site": site}
+    assert client.get("/api/library/recent", headers=headers).status_code == 200
+
+
+def test_fetch_metadata_rejected_on_websocket(client, launch_token):
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            f"/api/reader/1/stream?lt={launch_token}", headers={"sec-fetch-site": "same-site"},
+        ):
+            pass
+
+
+def test_fetch_metadata_also_guards_dev_mode(client):
+    """Sans coque (dev, pas de nonce), l'API n'a que ses gardes d'en-têtes : une
+    page d'un autre port local ne doit pas pouvoir y lire à l'aveugle non plus."""
+    assert client.get("/api/library/recent", headers={"sec-fetch-site": "same-site"}).status_code == 403
+    assert client.get("/api/library/recent", headers={"sec-fetch-site": "same-origin"}).status_code == 200
+    assert client.get("/api/health", headers={"sec-fetch-site": "cross-site"}).status_code == 200
+
+
 # ── S2 : confinement de l'import PDF ────────────────────────────────────────
 
 @pytest.fixture
