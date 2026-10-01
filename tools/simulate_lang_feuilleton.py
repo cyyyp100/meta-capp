@@ -88,7 +88,6 @@ def _synthetic_episode(profile_id: int, episode_n: int) -> bool:
 def _play(client_run, run: dict, learner: dict, rng: random.Random) -> dict:
     from services import lang_runs
 
-    ep = run["episodes"].get(str(run.get("episode_id"))) if run.get("episode_id") else None
     stats = {"cards": 0}
     for step in run["steps"]:
         events = [{"type": "step", "step": step["key"], "started": True}]
