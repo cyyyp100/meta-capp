@@ -11,7 +11,7 @@
 // La visite fut d'abord OPPORTUNISTE : cinq bulles qui attendaient que leur
 // contexte apparaisse de lui-même, sur le premier document de l'utilisateur.
 // L'idée était jolie et le résultat vide : qui n'importait rien ne voyait ni
-// Gemma, ni les sas, ni le profil. Elle est maintenant SCRIPTÉE — elle emprunte
+// Clikoda, ni les sas, ni le profil. Elle est maintenant SCRIPTÉE — elle emprunte
 // un document de démonstration, navigue elle-même d'écran en écran et joue une
 // fausse séance de lecture. L'utilisateur n'a qu'à lire et cliquer « Suivant ».
 //
@@ -31,7 +31,7 @@ import { DEMO_ROUTE, TOUR_STEPS, type TourStepDef } from "./steps";
 export interface DemoControls {
   /** Franchit le sas d'entrée : il recouvre la page qu'on veut ensuite montrer. */
   enterReading: () => void;
-  /** Cale la vue sur le passage que Gemma va citer, avant de la figer. */
+  /** Cale la vue sur le passage que Clikoda va citer, avant de la figer. */
   pinPassage: () => void;
   openPanel: () => void;
   play: (beat: "answer" | "intervention" | "question") => void;

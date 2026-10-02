@@ -131,7 +131,7 @@ def get_session_progress(session_id: int, user_id: int = DEFAULT_USER_ID) -> dic
             for r in _safe(lambda: get_session_reflections(int(session_id)), [])
         ],
         "page_dwell": _safe(lambda: get_page_dwell(int(session_id)), []),
-        # Les pauses prises, chacune avec ce qui l'a précédée (conseil de Gemma
+        # Les pauses prises, chacune avec ce qui l'a précédée (conseil de Clikoda
         # accepté, recommandation récente, ou rien) — cf. services/pause.
         "pauses": _safe(lambda: get_session_pauses(int(session_id)), []),
     }
@@ -218,7 +218,7 @@ def get_weekly_recap(user_id: int = DEFAULT_USER_ID) -> dict:
     """Bilan des sept derniers jours.
 
     Quatre éléments, dans cet ordre, parce que c'est l'ordre dans lequel on veut
-    les lire : ce que j'ai lu, ce qui a bougé, ce que Gemma a remarqué, ce qu'il
+    les lire : ce que j'ai lu, ce qui a bougé, ce que Clikoda a remarqué, ce qu'il
     me reste à revoir.
 
     Rien n'est calculé ici qui ne le soit déjà ailleurs : les métriques viennent
@@ -248,7 +248,7 @@ def get_weekly_recap(user_id: int = DEFAULT_USER_ID) -> dict:
         "pages_read": sum(row["pages_read"] for row in recent),
         "documents": documents,
         "movers": _top_movers(user_id, since),
-        # Ce que Gemma a remarqué — le texte qu'elle réécrit à chaque
+        # Ce que Clikoda a remarqué — le texte qu'elle réécrit à chaque
         # finalisation, jamais régénéré pour ce bilan.
         "analysis": str(profile.get("general_analysis") or ""),
         "analysis_updated_at": str(profile.get("general_analysis_updated_at") or ""),

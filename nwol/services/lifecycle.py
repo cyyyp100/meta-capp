@@ -10,7 +10,7 @@
 # Deux sorties, une seule fonction d'arrêt (celle que la coque fournit) :
 #   * « Quitter Meta-Capp » (`quit_app`) : coupe aussi les générations en cours ;
 #   * l'arrêt automatique (`_watch`) : aucun onglet ouvert depuis
-#     BROWSER_AUTO_STOP_S, et Gemma au repos depuis BROWSER_LLM_QUIET_S.
+#     BROWSER_AUTO_STOP_S, et Clikoda au repos depuis BROWSER_LLM_QUIET_S.
 #
 # Un onglet ouvert, pas un utilisateur actif : un élève peut lire vingt minutes
 # sans rien toucher. Chaque onglet tient un WebSocket de présence
@@ -75,7 +75,7 @@ def quit_app() -> bool:
     ferme elle-même, et arrêter son serveur la laisserait vide.
 
     Les générations en file et en vol sont coupées d'abord : chaque requête qui
-    attend Gemma reçoit aussitôt une erreur (`ollama_client._run`) au lieu de
+    attend Clikoda reçoit aussitôt une erreur (`ollama_client._run`) au lieu de
     retenir l'arrêt jusqu'à son timeout. Un épisode de langue interrompu est
     remis en file au lancement suivant (`lang_runs.on_startup`)."""
     with _LOCK:

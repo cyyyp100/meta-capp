@@ -4,7 +4,7 @@
 # il est indépendant du jour d'étude commun que `nudge_metacog_profile`
 # enregistre, et sert à deux choses — choisir le mode de la séance après une
 # absence (T5-T7) et nourrir l'analyse hebdomadaire (T8-T11), qui ne décide de
-# rien : Gemma y formule seulement des observations, dont le ton colore les
+# rien : Clikoda y formule seulement des observations, dont le ton colore les
 # messages de rappel et de reprise.
 from __future__ import annotations
 

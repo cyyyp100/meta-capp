@@ -2,7 +2,7 @@
 #
 # Deux questions seulement : combien de temps, et est-ce que la pause suivait
 # une recommandation du LLM. Plus le crédit d'attention, réservé à la pause
-# conseillée par Gemma.
+# conseillée par Clikoda.
 from config.settings import PAUSE_ATTENTION_RECOVERY, PAUSE_RECOMMENDATION_WINDOW_S
 from services.pause import PauseTracker, attention_credit, summarize
 
@@ -18,7 +18,7 @@ def test_a_manual_pause_measures_its_duration():
     assert record.attention_at_start == 51.2
     assert record.source == "manual"
     assert record.ended_by == "resume"
-    # Une durée conseillée n'a de sens que pour la carte de Gemma.
+    # Une durée conseillée n'a de sens que pour la carte de Clikoda.
     assert record.planned_s is None
 
 
@@ -61,7 +61,7 @@ def test_a_recommendation_outside_the_window_is_kept_but_does_not_count():
     assert record.recommendation_delay_s == PAUSE_RECOMMENDATION_WINDOW_S + 1.0
 
 
-def test_accepting_gemmas_card_is_following_the_recommendation():
+def test_accepting_clikodas_card_is_following_the_recommendation():
     tracker = PauseTracker()
     tracker.start(0.0, source="suggested", planned_s=300.0)
     record = tracker.stop(150.0)

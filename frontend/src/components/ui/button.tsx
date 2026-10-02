@@ -44,12 +44,12 @@ const buttonVariants = cva(
           "border border-border bg-surface-soft text-text-soft hover:border-border-strong hover:bg-accent hover:text-accent-foreground",
         outline:
           "border border-border bg-background hover:bg-accent hover:text-accent-foreground",
-        // Bouton-icône nu — l'ancien `iconBtn` de GemmaPanel.
+        // Bouton-icône nu — l'ancien `iconBtn` de ClikodaPanel.
         ghost: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
         // Action destructrice (supprimer un dossier, purger les données).
         destructive:
           "bg-destructive text-primary-foreground shadow-e1 hover:brightness-110 focus-visible:ring-destructive/40",
-        // Raccourcis de Gemma (Reformuler / Récap / Curiosité) — l'ancien `chip`.
+        // Raccourcis de Clikoda (Reformuler / Récap / Curiosité) — l'ancien `chip`.
         chip: "rounded-full border border-border bg-surface-soft px-3 text-xs font-medium text-text-soft hover:border-brand hover:bg-brand-soft hover:text-accent-foreground",
         link: "text-brand-ink underline-offset-4 hover:underline",
       },

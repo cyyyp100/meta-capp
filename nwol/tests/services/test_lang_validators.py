@@ -146,7 +146,7 @@ def test_arabic_vocalization_and_pausal_form():
     bare = copy.deepcopy(good)
     bare["lines"][0]["text"] = "مرحبا يا ليلى، كيف حالك؟"
     assert any("vocalisation incomplète" in e for e in ep.validate_text("arabe", bare, ctx)[1])
-    # A3 : la forme pausale est calculée, pas redemandée (au banc, Gemma laissait
+    # A3 : la forme pausale est calculée, pas redemandée (au banc, Clikoda laissait
     # la voyelle finale dans deux textes sur trois).
     not_pausal = copy.deepcopy(good)
     not_pausal["lines"][1]["text"] = "أَنَا بِخَيْرٍ، وَالْحَمْدُ لِلّٰهِ."
@@ -293,7 +293,7 @@ def test_one_secondary_speaker_is_tolerated(clean):
 
 
 def test_glossary_is_cumulative_across_attempts(clean, monkeypatch):
-    """Mesuré au banc : Gemma rend parfois UNE entrée sur vingt. La tentative
+    """Mesuré au banc : Clikoda rend parfois UNE entrée sur vingt. La tentative
     suivante ne redemande que les mots manquants, et les entrées s'additionnent."""
     from llm import ollama_client
 

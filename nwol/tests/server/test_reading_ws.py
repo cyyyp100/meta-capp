@@ -576,7 +576,7 @@ def test_reader_ws_gated_question_from_intervention(client, monkeypatch):
 
 
 def test_reader_ws_warmup_silences_start_of_reading(client, monkeypatch):
-    # Début de lecture : même dwell/cooldown à zéro, le warm-up tient Gemma silencieuse.
+    # Début de lecture : même dwell/cooldown à zéro, le warm-up tient Clikoda silencieuse.
     import time
 
     from server.routers import reading
@@ -878,7 +878,7 @@ def test_reader_ws_question_without_locatable_passage_has_no_zone(client, monkey
         assert ws.receive_json()["zone"] is None
 
 
-def test_leaving_the_entry_sas_cuts_gemma_right_away(client, monkeypatch):
+def test_leaving_the_entry_sas_cuts_clikoda_right_away(client, monkeypatch):
     """« ← Bibliothèque » depuis le sas d'entrée : une génération est peut-être
     en vol et Ollama occupe la machine. La fermeture du WebSocket coupe déjà,
     mais après la navigation ; le clic doit couper tout de suite, par le même

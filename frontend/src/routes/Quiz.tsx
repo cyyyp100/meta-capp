@@ -807,7 +807,7 @@ function QuestionCard({
   );
 }
 
-/** Correction affichée sous la question : verdict, retour de Gemma, réponse attendue. */
+/** Correction affichée sous la question : verdict, retour de Clikoda, réponse attendue. */
 function Correction({ result }: { result: QuizEvaluation }) {
   const t = useT();
   return (

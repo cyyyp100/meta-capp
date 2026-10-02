@@ -56,7 +56,7 @@ async def _lifespan(_app: FastAPI):
     from services.lang_runs import on_startup as lang_on_startup
 
     lang_on_startup()
-    # Débit réel de Gemma sur cette machine : dimensionne les budgets temps de
+    # Débit réel de Clikoda sur cette machine : dimensionne les budgets temps de
     # toutes les générations (llm/throughput). En thread : deux requêtes HTTP
     # vers Ollama, qui peut être éteint, n'ont rien à faire dans le démarrage.
     from llm.ollama_client import calibrate_throughput

@@ -9,7 +9,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { api, pageImageUrl } from "../api/client";
 import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
-import { GemmaPanel, type QaMask } from "../features/reader/GemmaPanel";
+import { ClikodaPanel, type QaMask } from "../features/reader/ClikodaPanel";
 import { DEMO_METRICS, DEMO_REFLECTION_KEYS, type DemoBeat } from "../features/reader/demoScript";
 import { BlockPages } from "../features/reader/BlockPages";
 import { PageTextLayer } from "../features/reader/PageTextLayer";
@@ -93,7 +93,7 @@ function boundsOf(rects: number[][]): number[] {
  *
  * Sert d'ancre à l'étape de la visite qui explique « elle surligne le passage
  * dont elle parle » : le voile éclaire ce rectangle en même temps que la
- * réponse de Gemma. Sans lui, l'étape désignait le panneau et laissait le
+ * réponse de Clikoda. Sans lui, l'étape désignait le panneau et laissait le
  * passage cité dans le noir — exactement ce qu'elle demande de regarder.
  */
 function highlightBounds(groups: { rect: number[] }[], scale: number) {
@@ -148,7 +148,7 @@ export function Reader() {
   // 0 = pas encore monté ; la vraie valeur est posée par l'effet de démarrage de session.
   const startTimeRef = useRef(0);
   const maxPageRef = useRef(1);
-  // Pause en cours (bouton « Pause » ou carte de Gemma acceptée) : le PDF est
+  // Pause en cours (bouton « Pause » ou carte de Clikoda acceptée) : le PDF est
   // masqué, la vue figée, et le serveur ne mesure plus rien jusqu'à la reprise.
   // Le temps cumulé des pauses est retiré de la durée de la séance.
   const [pause, setPause] = useState<ReadingPause | null>(null);
@@ -156,8 +156,8 @@ export function Reader() {
 
   const [zoom, setZoom] = useState(1);
   // Décalage horizontal du PDF (px). Découplé du scroll natif (transform) -> reste
-  // utilisable même quand le scroll vertical est figé (question bloquante de Gemma),
-  // et permet de pousser le PDF à gauche pour loger Gemma à droite.
+  // utilisable même quand le scroll vertical est figé (question bloquante de Clikoda),
+  // et permet de pousser le PDF à gauche pour loger Clikoda à droite.
   const [panX, setPanX] = useState(0);
   const [panning, setPanning] = useState(false);
   const panDragRef = useRef<{ startX: number; startPan: number } | null>(null);
@@ -172,7 +172,7 @@ export function Reader() {
   // Calque de texte transparent (sélection native) + surlignages mémorisés.
   const [wordsByPage, setWordsByPage] = useState<Record<number, PageWord[]>>({});
   const [savedHighlights, setSavedHighlights] = useState<SavedHighlight[]>([]);
-  // Citations de Gemma sur pages reconstruites (marquées par recherche pliée).
+  // Citations de Clikoda sur pages reconstruites (marquées par recherche pliée).
   const [quoteMarksByPage, setQuoteMarksByPage] = useState<Record<number, TextMark[]>>({});
   const [selection, setSelection] = useState<
     {
@@ -184,7 +184,7 @@ export function Reader() {
       y: number;
     } | null
   >(null);
-  // Extraits ajoutés au contexte du LLM (consommés par GemmaPanel pour la prochaine question).
+  // Extraits ajoutés au contexte du LLM (consommés par ClikodaPanel pour la prochaine question).
   const [contextChips, setContextChips] = useState<{ id: number; page: number; text: string }[]>([]);
   // Question automatique bloquante : scroll figé sur la page-contexte.
   const [locked, setLocked] = useState(false);
@@ -423,7 +423,7 @@ export function Reader() {
   const frozen = (demo && tourRunning) || pause !== null;
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
-  const gemmaControls = useRef<{ openPanel: () => void; play: (beat: DemoBeat) => void } | null>(null);
+  const clikodaControls = useRef<{ openPanel: () => void; play: (beat: DemoBeat) => void } | null>(null);
   // Les métriques du sas de sortie sont inventées : elles décrivent une lecture
   // plausible, pas une mesure. Les intitulés de réflexion sont traduits ici,
   // `demoScript.ts` ne portant que leurs clés.
@@ -432,7 +432,7 @@ export function Reader() {
   // une NOUVELLE fonction à chaque rendu, donc un `useMemo` sur `[t]` produirait
   // un objet différent à chaque fois et rebrancherait les contrôles de la visite
   // en boucle — avec, entre le nettoyage et la repose, une fenêtre où ils sont
-  // nuls. Même idiome que les `onHighlightsRef` du panneau Gemma.
+  // nuls. Même idiome que les `onHighlightsRef` du panneau Clikoda.
   const demoMetricsRef = useRef(DEMO_METRICS);
   demoMetricsRef.current = {
     ...DEMO_METRICS,
@@ -441,12 +441,12 @@ export function Reader() {
 
   const handleDemoReady = useCallback(
     (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => {
-      gemmaControls.current = controls;
+      clikodaControls.current = controls;
     },
     [],
   );
 
-  // La visite pilote le lecteur d'ici : ouvrir Gemma, jouer une réplique, faire
+  // La visite pilote le lecteur d'ici : ouvrir Clikoda, jouer une réplique, faire
   // apparaître le sas de sortie. Elle ne peut le faire que tant qu'il est monté.
   useEffect(() => {
     if (!demo) return;
@@ -454,7 +454,7 @@ export function Reader() {
       // Le sas d'entrée recouvre la page : sans ce passage explicite, l'étape
       // suivante s'ancrerait sur une page cachée derrière son voile.
       enterReading: () => setEntered(true),
-      // Le bas de la première page : c'est là que vit la section que Gemma
+      // Le bas de la première page : c'est là que vit la section que Clikoda
       // cite, et donc ce que les sept étapes suivantes commentent. Aligné sur
       // le bas du cadre plutôt que centré — la page suivante n'a rien à faire
       // à l'écran pendant qu'on parle de celle-ci.
@@ -464,8 +464,8 @@ export function Reader() {
         if (!view || !page) return;
         view.scrollTop += page.getBoundingClientRect().bottom - view.getBoundingClientRect().bottom;
       },
-      openPanel: () => gemmaControls.current?.openPanel(),
-      play: (beat) => gemmaControls.current?.play(beat),
+      openPanel: () => clikodaControls.current?.openPanel(),
+      play: (beat) => clikodaControls.current?.play(beat),
       endSession: () => setExit({ sessionId: DEMO_METRICS.session_id, metrics: demoMetricsRef.current }),
       closeExitSas: () => {
         setExit(null);
@@ -671,7 +671,7 @@ export function Reader() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Suivi de la page dominante (la plus visible) pour donner le bon contexte à Gemma.
+  // Suivi de la page dominante (la plus visible) pour donner le bon contexte à Clikoda.
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || !data) return;
@@ -826,7 +826,7 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wordsByPage, isCode]);
 
-  // Marques des pages reconstruites : citations de Gemma + surlignages mémorisés.
+  // Marques des pages reconstruites : citations de Clikoda + surlignages mémorisés.
   const marksByPage = useMemo(() => {
     if (!isCode) return {};
     const out: Record<number, TextMark[]> = {};
@@ -855,7 +855,7 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, lockedPage, zone]);
 
-  /** Référence de page cliquée dans une réponse de Gemma : on y amène le lecteur.
+  /** Référence de page cliquée dans une réponse de Clikoda : on y amène le lecteur.
       Pas pendant une question verrouillée — la page-contexte doit rester en vue. */
   function goToPage(page: number) {
     if (locked) return;
@@ -882,7 +882,7 @@ export function Reader() {
   /**
    * « ← Bibliothèque » depuis le sas d'entrée : mauvais document. Rien n'a été
    * lu, donc la session est EFFACÉE, pas close — close, elle compterait (durée,
-   * frise de progression). Gemma est coupée TOUT DE SUITE : l'accroche de
+   * frise de progression). Clikoda est coupée TOUT DE SUITE : l'accroche de
    * curiosité et la fiche du document sont peut-être en vol, et tant qu'Ollama
    * génère, toute la machine rame. La fermeture du WebSocket coupe aussi, mais
    * seulement quand le serveur constate la déconnexion, après la navigation —
@@ -900,7 +900,7 @@ export function Reader() {
   }
 
   /**
-   * « Terminer » : le sas de sortie s'ouvre TOUT DE SUITE et Gemma passe en
+   * « Terminer » : le sas de sortie s'ouvre TOUT DE SUITE et Clikoda passe en
    * fond. Deux choses partent en parallèle sans qu'on les attende : le
    * WebSocket du lecteur se ferme (`ended` -> plus d'intervention, plus de
    * dérive d'attention pendant les réflexions) et la clôture côté serveur, qui
@@ -936,7 +936,7 @@ export function Reader() {
   }
 
   /** Pause : la lecture s'arrête, l'élève reviendra. `plannedMin` = durée
-   *  conseillée par Gemma quand c'est sa carte qui l'a déclenchée. */
+   *  conseillée par Clikoda quand c'est sa carte qui l'a déclenchée. */
   function startPause(source: ReadingPause["source"], plannedMin: number | null = null) {
     if (!entered || exit || pause) return;
     clearSelection();
@@ -960,7 +960,7 @@ export function Reader() {
 
   return (
     // `overflow: hidden` : le lecteur occupe l'écran, rien ne doit en sortir.
-    // La bulle de Gemma est un enfant ABSOLU de cette racine, à une position
+    // La bulle de Clikoda est un enfant ABSOLU de cette racine, à une position
     // mémorisée d'une séance à l'autre ; rouverte dans une fenêtre plus petite,
     // elle se retrouvait au-delà du bord droit, allongeait le document et
     // donnait au tout une barre de défilement horizontale. Un simple geste
@@ -990,7 +990,7 @@ export function Reader() {
         {data && (
           // Wrapper centré + min-content : le PDF reste centré quand il rentre.
           // Le décalage horizontal (translateX) est porté par la colonne -> on peut
-          // pousser le PDF sur le côté (Gemma à droite) même quand il rentre.
+          // pousser le PDF sur le côté (Clikoda à droite) même quand il rentre.
           <div style={{ display: "flex", justifyContent: "center", minWidth: "min-content", cursor: "grab" }}>
           <div
             style={{
@@ -1100,7 +1100,7 @@ export function Reader() {
                     </svg>
                   ) : null}
                   {/* Zone visée par la question en cours : un liseré à l'accent,
-                      pour qu'on voie de quoi Gemma parle — surtout quand la
+                      pour qu'on voie de quoi Clikoda parle — surtout quand la
                       lecture est bloquée dessus. */}
                   {zone && zone.page === n ? (
                     <svg
@@ -1281,7 +1281,7 @@ export function Reader() {
       {/* Barre flottante au-dessus d'une sélection de texte.
 
           `AnimatePresence` et non un simple montage : ces trois éléments (barre
-          de sélection, bandeau de blocage, panneau Gemma) apparaissaient et
+          de sélection, bandeau de blocage, panneau Clikoda) apparaissaient et
           disparaissaient d'un coup, en plein milieu d'un écran de lecture par
           ailleurs entièrement animé. `motion` est déjà une dépendance de l'app :
           le coût est de six lignes.
@@ -1354,8 +1354,8 @@ export function Reader() {
         )}
       </AnimatePresence>
 
-      {/* Assistant déplaçable connecté à Gemma */}
-      <GemmaPanel
+      {/* Assistant déplaçable connecté à Clikoda */}
+      <ClikodaPanel
         docId={id}
         currentPage={currentPage}
         sessionId={sessionId}

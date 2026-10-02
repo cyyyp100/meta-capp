@@ -1,4 +1,4 @@
-# tests/lang_fakes.py — Faux Gemma pour le module langues (méthode feuilleton).
+# tests/lang_fakes.py — Faux Clikoda pour le module langues (méthode feuilleton).
 #
 # Les fonctions `*_async` du feuilleton sont remplacées par des fakes à la même
 # signature (params, ok, err, on_metrics=None) qui renvoient une sortie VALIDE
@@ -184,7 +184,7 @@ def fake_notes(params, ok, err, on_metrics=None, model=None):
 
 
 def install(monkeypatch):
-    """Remplace les appels Gemma du feuilleton et joue la génération inline."""
+    """Remplace les appels Clikoda du feuilleton et joue la génération inline."""
     from llm import ollama_client
     from services import lang_activity, lang_episodes
 

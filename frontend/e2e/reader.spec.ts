@@ -126,8 +126,8 @@ test.describe("Lecture d'un document", () => {
     await expect(gate).toBeEnabled();
   });
 
-  // Les noms accessibles des commandes de Gemma (🎯 ⤢ ✕ -> boutons nommés) sont
-  // vérifiés en test de composant (src/features/reader/GemmaPanel.test.tsx) :
+  // Les noms accessibles des commandes de Clikoda (🎯 ⤢ ✕ -> boutons nommés) sont
+  // vérifiés en test de composant (src/features/reader/ClikodaPanel.test.tsx) :
   // les atteindre ici imposerait de traverser le SAS puis le warm-up, une
   // machine à états que l'horloge simulée ne franchit pas de façon fiable.
 });

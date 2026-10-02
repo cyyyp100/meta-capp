@@ -2,7 +2,7 @@
 #
 # Code maison sur les plages Unicode, sans dépendance (L3) : les vocaliseurs
 # existants (Mishkal et équivalents) sont sous GPL et écartés (L4). Ce module
-# ne VOCALISE rien — Gemma écrit un texte entièrement vocalisé, et d'ici on :
+# ne VOCALISE rien — Clikoda écrit un texte entièrement vocalisé, et d'ici on :
 #   * mesure que la vocalisation est complète (validateur G6) ;
 #   * retire tout ou partie des voyelles brèves (effacement des aides, § 13.2) ;
 #   * calcule la translittération depuis le texte vocalisé (A5), selon le schéma
@@ -123,7 +123,7 @@ def to_pausal(text: str) -> str:
     """Met le DERNIER mot de la réplique en forme pausale (A3) : la voyelle
     brève ou le tanwīn -un / -in de sa dernière lettre devient un sukūn (la
     šadda reste) ; -an, porté par un alif, ne change pas. Calculé ici plutôt que
-    demandé : au banc, Gemma laisse la voyelle finale dans deux textes sur trois."""
+    demandé : au banc, Clikoda laisse la voyelle finale dans deux textes sur trois."""
     tokens = segment(text)
     for tok in reversed(tokens):
         if not tok["w"]:

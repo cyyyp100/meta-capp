@@ -3140,7 +3140,7 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
 
 # ── Les mêmes prompts, langue d'explication anglaise (§ 14, n° 14) ───────────
 # Même structure, mêmes champs JSON, mêmes contraintes : seule la langue de ce
-# qu'écrit Gemma change. Les valeurs d'énumération anglaises (noun, grammar,
+# qu'écrit Clikoda change. Les valeurs d'énumération anglaises (noun, grammar,
 # encourage…) sont ramenées aux valeurs canoniques par llm/schema_json.
 
 def _build_lang_story_bible_prompt_en(p: dict) -> str:
@@ -3415,7 +3415,7 @@ def build_assistant_answer_prompt(
     page_label = f"{page_number}" if page_number else "?"
 
     if _i18n.current_lang() == "en":
-        return f"""You are Gemma, the reading assistant bubble of MetaC-App. The student reads a PDF freely and just asked you a question by clicking on your bubble.
+        return f"""You are Clikoda, the reading assistant bubble of MetaC-App. The student reads a PDF freely and just asked you a question by clicking on your bubble.
 
 Document: {doc_title or "?"} — chapter: {chapter_title or "?"} — visible page: {page_label}
 Metacognitive profile: {_json(metacog_profile or {})}
@@ -3470,7 +3470,7 @@ Constraints:
 - meta_cognition stays at 0.0.
 - Reminder: "answer" is in English."""
 
-    return f"""Tu es Gemma, la bulle assistante de lecture de MetaC-App. L'étudiant lit un PDF librement et vient de te poser une question en cliquant sur ta bulle.
+    return f"""Tu es Clikoda, la bulle assistante de lecture de MetaC-App. L'étudiant lit un PDF librement et vient de te poser une question en cliquant sur ta bulle.
 
 Document : {doc_title or "?"} — chapitre : {chapter_title or "?"} — page visible : {page_label}
 Profil métacognitif : {_json(metacog_profile or {})}
@@ -3568,7 +3568,7 @@ def build_intervention_prompt(context: dict) -> str:
 
     if _i18n.current_lang() == "en":
         reason = trigger_labels_en.get(trigger, trigger)
-        return f"""You are Gemma, the discreet reading assistant of MetaC-App. The application has ALREADY detected a pedagogical signal worth a brief nudge, so you are going to step in now — gently and warmly. Your job here is to FORMULATE that intervention, not to second-guess whether one is warranted.
+        return f"""You are Clikoda, the discreet reading assistant of MetaC-App. The application has ALREADY detected a pedagogical signal worth a brief nudge, so you are going to step in now — gently and warmly. Your job here is to FORMULATE that intervention, not to second-guess whether one is warranted.
 
 Observed signal: {reason} (page {page}).{due_line_en}{hl_line_en}
 Time on page: {context.get("dwell_s", "?")} s — visits: {context.get("visits", "?")} — questions asked on this page: {context.get("user_questions_on_page", 0)}.{len_en}
@@ -3601,7 +3601,7 @@ Constraints:
 - message: maximum 2 sentences, no emoji spam, never guilt-tripping."""
 
     reason = trigger_labels_fr.get(trigger, trigger)
-    return f"""Tu es Gemma, l'assistante de lecture discrète de MetaC-App. L'application a DÉJÀ détecté un signal pédagogique qui mérite un petit coup de pouce, donc tu vas intervenir maintenant — brièvement et chaleureusement. Ton rôle ici est de FORMULER cette intervention, pas de redécider s'il faut intervenir.
+    return f"""Tu es Clikoda, l'assistante de lecture discrète de MetaC-App. L'application a DÉJÀ détecté un signal pédagogique qui mérite un petit coup de pouce, donc tu vas intervenir maintenant — brièvement et chaleureusement. Ton rôle ici est de FORMULER cette intervention, pas de redécider s'il faut intervenir.
 
 Signal observé : {reason} (page {page}).{due_line_fr}{hl_line_fr}
 Temps sur la page : {context.get("dwell_s", "?")} s — visites : {context.get("visits", "?")} — questions posées sur cette page : {context.get("user_questions_on_page", 0)}.{len_fr}
@@ -3643,7 +3643,7 @@ def _brainstorm_history_block(history: list[dict] | None, max_turns: int = 8) ->
         content = str(item.get("content") or "").strip()
         if not content:
             continue
-        who = _t("Utilisateur", "User") if role == "user" else "Gemma"
+        who = _t("Utilisateur", "User") if role == "user" else "Clikoda"
         lines.append(f"{who} : {content[:600]}")
     return "\n".join(lines) if lines else _t("(début de la discussion)", "(start of discussion)")
 
@@ -3728,7 +3728,7 @@ def build_brainstorm_answer_prompt(
     summary_block = (summary or "").strip() or _t("(aucun, discussion récente)", "(none, recent discussion)")
     hist = _brainstorm_history_block(history)
     src = _brainstorm_sources_block(sources)
-    return f"""{_t("Tu es Gemma, partenaire de brainstorming de l'utilisateur dans MetaC-App. Tu discutes librement, comme un assistant conversationnel, mais tu as un atout : l'accès à la base personnelle de l'utilisateur.", "You are Gemma, the user's brainstorming partner in MetaC-App. You chat freely, like a conversational assistant, but with an edge: access to the user's personal database.")}
+    return f"""{_t("Tu es Clikoda, partenaire de brainstorming de l'utilisateur dans MetaC-App. Tu discutes librement, comme un assistant conversationnel, mais tu as un atout : l'accès à la base personnelle de l'utilisateur.", "You are Clikoda, the user's brainstorming partner in MetaC-App. You chat freely, like a conversational assistant, but with an edge: access to the user's personal database.")}
 {_brainstorm_scope_block(scope)}
 {_t("Mémoire de la discussion (résumé des échanges précédents)", "Discussion memory (summary of earlier exchanges)")} :
 {summary_block}
@@ -3763,7 +3763,7 @@ def build_brainstorm_summary_prompt(previous_summary: str, new_messages: list[di
         content = str(item.get("content") or "").strip()
         if not content:
             continue
-        who = _t("Utilisateur", "User") if role == "user" else "Gemma"
+        who = _t("Utilisateur", "User") if role == "user" else "Clikoda"
         lines.append(f"{who} : {content[:600]}")
     block = "\n".join(lines) if lines else _t("(aucun nouveau message)", "(no new messages)")
     return f"""{_t("Tu maintiens la mémoire d'une discussion de brainstorming. Mets à jour le résumé en intégrant les nouveaux messages.", "You maintain the memory of a brainstorming discussion. Update the summary by integrating the new messages.")}

@@ -7,7 +7,7 @@
 #                       masquée / app au second plan, ou (engaged) défilement /
 #                       souris / clavier -> alimentent la dérive passive d'attention
 #                     {"type":"pause","source":"manual"|"suggested","minutes":int|null}
-#                       # pause OUVERTE (bouton de l'élève, ou carte de Gemma
+#                       # pause OUVERTE (bouton de l'élève, ou carte de Clikoda
 #                       acceptée : minutes = durée conseillée) -> tout est figé :
 #                       ni observation, ni intervention, ni horloge (services/pause)
 #                     {"type":"resume"}  # fin de la pause -> enregistrée en base
@@ -16,7 +16,7 @@
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
 #                     {"type":"error","message"} | {"type":"intervention",...}
 #                     {"type":"system","message"}
-#                     {"type":"scanning","active":bool}  # Gemma inspecte la page (décide
+#                     {"type":"scanning","active":bool}  # Clikoda inspecte la page (décide
 #                       d'intervenir ou non) -> l'UI tourne la bulle vers le PDF
 #                     {"type":"qa_question"|"gated_question","question","choices",
 #                      "question_type","mask","zone","page","session_hint"}  # mask =
@@ -185,14 +185,14 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "recent_qtypes": [],  # types de questions Q&R récents (anti-répétition, 5 max)
         "gated": False,  # question automatique bloquante en cours (scroll verrouillé côté UI)
         "live_gauges": None,  # jauges métacognitives live (services.session.LiveGauges)
-        "generating": False,  # une génération LLM est en vol (Gemma est occupée)
+        "generating": False,  # une génération LLM est en vol (Clikoda est occupée)
         "away": False,  # fenêtre masquée / application au second plan
         "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
         "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
         "pages_seen": 0,  # pages distinctes vues au dernier tick (progression)
     }
-    # Pause en cours (bouton de l'élève ou carte de Gemma acceptée) et dernière
+    # Pause en cours (bouton de l'élève ou carte de Clikoda acceptée) et dernière
     # recommandation du LLM. Tant qu'elle dure, tout est figé (cf. end_pause).
     pause = PauseTracker()
     state["live_gauges"] = await loop.run_in_executor(None, session.LiveGauges)
@@ -226,7 +226,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         return min(page, page_count) if page_count else page
 
     def refresh_busy() -> None:
-        """La politique se tait tant que Gemma travaille OU qu'une réponse est due.
+        """La politique se tait tant que Clikoda travaille OU qu'une réponse est due.
 
         Deux raisons distinctes, un seul drapeau : une génération en vol (réponse,
         reformulation, question…) et une question bloquante en attente. Avant, seule
@@ -341,7 +341,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
 
         Appelé depuis un thread d'exécuteur (`policy.tick`) : les lectures DB et le
         texte de page sont synchrones, et la réponse revient par `push_threadsafe`."""
-        # Gemma inspecte la page : l'UI tourne la bulle vers le PDF.
+        # Clikoda inspecte la page : l'UI tourne la bulle vers le PDF.
         push_threadsafe(loop, out, {"type": "scanning", "active": True})
 
         def _finish(decision: dict | None) -> None:
@@ -396,7 +396,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             "question": payload.get("question", ""),
             "kind": kind,
             # Durée proposée par la carte de pause. Elle vient du serveur : la
-            # cadence de Gemma se règle dans config/settings.py, pas dans l'UI.
+            # cadence de Clikoda se règle dans config/settings.py, pas dans l'UI.
             "pause_minutes": PAUSE_DEFAULT_MIN if kind == "suggest_pause" else 0,
             "highlights": payload.get("highlights", []),
             # Carte à réviser (kind == "review_flashcard") : le client l'affiche
@@ -496,13 +496,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             elapsed, last_tick = now - last_tick, now
             # Pause en cours : ni observation, ni intervention. Sans cette porte,
             # la dérive passive punirait (fenêtre masquée, page qui ne bouge plus)
-            # un repos que l'élève a choisi ou que Gemma a elle-même conseillé.
+            # un repos que l'élève a choisi ou que Clikoda a elle-même conseillé.
             if pause.active:
                 continue
             # Écrit (au plus une fois par minute) dans session_gauges : executor.
             await loop.run_in_executor(None, passive_attention, elapsed, now)
             if state["gated"] or now < state["focus_until"]:
-                # Question bloquante en cours ou mode focus : Gemma se tait.
+                # Question bloquante en cours ou mode focus : Clikoda se tait.
                 continue
             # `tick` lit le texte de page et la DB : jamais dans la boucle asyncio.
             await loop.run_in_executor(None, policy.tick)
@@ -548,7 +548,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 continue
 
             if kind == "pause":
-                # Bouton « Pause » de l'élève, ou carte de Gemma acceptée (la
+                # Bouton « Pause » de l'élève, ou carte de Clikoda acceptée (la
                 # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
                 minutes = PAUSE_DEFAULT_MIN if msg.minutes is None else int(msg.minutes)
                 attention = (state["live_gauges"].snapshot() if state["live_gauges"] else {}).get("attention")

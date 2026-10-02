@@ -9,7 +9,7 @@
 #
 # La langue n'est PAS qu'une affaire de frontend : `nwol/i18n.py` pilote aussi la
 # langue des prompts LLM (`llm/prompts.py` branche sur `current_lang()`). Sans cet
-# endpoint, basculer l'UI en anglais donnait une interface anglaise et un Gemma qui
+# endpoint, basculer l'UI en anglais donnait une interface anglaise et un Clikoda qui
 # répond en français. On persiste donc le choix côté serveur et on l'applique au
 # process (rechargé au démarrage par le lifespan de `server/app.py`).
 from __future__ import annotations

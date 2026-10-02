@@ -81,7 +81,7 @@ The whole PDF, rendered progressively page by page, at full fidelity. You read a
 </td>
 <td width="50%" valign="top">
 
-### 👁️ An embodied assistant — Gemma
+### 👁️ An embodied assistant — Clikoda
 
 A small animated bubble floats over the PDF. It has eyes. It reads when you read, thinks when you ask, sleeps when the local model is offline. Click it, ask anything: the answer is grounded in the exact page visible at the moment you press *Send* — even if you scroll away while it thinks.
 
@@ -185,9 +185,9 @@ If Ollama is offline, nothing breaks: the reader stays fully usable and the assi
 1. **Import a PDF.** No chapter selection — the whole document is the session.
 2. **Concentration airlock.** A 30-second slowdown ritual with an AI-generated curiosity hook.
 3. **Flash review.** Up to 5 due flashcards from this document.
-4. **Read freely.** The full PDF, scrollable, with Gemma floating above it.
+4. **Read freely.** The full PDF, scrollable, with Clikoda floating above it.
 5. **Ask anything.** Click the bubble, type, press Enter. The answer cites the page you were on when you asked.
-6. **Get challenged.** Sometimes Gemma asks *you* a question. Answer it (it is evaluated, it feeds your profile, it may become a flashcard) — or close it.
+6. **Get challenged.** Sometimes Clikoda asks *you* a question. Answer it (it is evaluated, it feeds your profile, it may become a flashcard) — or close it.
 7. **End the session.** Synthesis, metacognitive questions, profile update.
 
 ---
@@ -236,18 +236,18 @@ Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
 
 ### Requirements
 
-| | App alone | With Gemma (the assistant) |
+| | App alone | With Clikoda (the assistant) |
 |---|---|---|
 | **OS** | macOS (Apple Silicon or Intel), Windows 10/11 x64, Linux x86_64 (glibc 2.35+) | same |
 | **RAM** | any recent machine | **16 GB recommended** — the model takes ~10 GB once loaded; 8 GB is not enough |
 | **Disk** | ~400 MB | **+10 GB** (`gemma4:e4b` 9.6 GB, optional `embeddinggemma` 0.6 GB) |
 | **GPU** | none | optional — Apple Silicon (Metal), NVIDIA (CUDA), some AMD (ROCm); CPU-only works, slowly |
 
-Gemma is optional: without [Ollama](https://ollama.com) the reader, flashcards and
+Clikoda is optional: without [Ollama](https://ollama.com) the reader, flashcards and
 stats still work, and the assistant visibly falls asleep.
 
 **Slow machines are handled, not just tolerated.** Generation time budgets are
-derived from Gemma's *measured* speed on your machine (a short calibration call at
+derived from Clikoda's *measured* speed on your machine (a short calibration call at
 startup, then every answer): a CPU-only laptop gets slow answers instead of
 timeouts. Below ~2 tokens/s (8× slower than the reference Apple Silicon machine),
 budgets stop stretching and long answers give up rather than leave the screen waiting
@@ -273,7 +273,7 @@ ollama pull gemma4:e4b
 ollama pull embeddinggemma   # optional (~600 MB): semantic search inside the document you read
 ```
 
-> Without `embeddinggemma`, Gemma's search inside the current document stays lexical (BM25).
+> Without `embeddinggemma`, Clikoda's search inside the current document stays lexical (BM25).
 
 ### From source
 
@@ -342,12 +342,12 @@ If the window still cannot open, Meta-Capp falls back to the browser and logs wh
 <details>
 <summary><b>Troubleshooting</b></summary>
 
-- **Gemma stays asleep** — Ollama is not running or the model is missing: `ollama list`
+- **Clikoda stays asleep** — Ollama is not running or the model is missing: `ollama list`
   must show `gemma4:e4b`.
-- **Gemma is very slow** — `ollama ps` shows where the model runs (`PROCESSOR`: GPU,
+- **Clikoda is very slow** — `ollama ps` shows where the model runs (`PROCESSOR`: GPU,
   CPU or a split). On CPU this is expected; the log prints the measured speed at
-  startup (`Débit de Gemma sur cette machine`). Closing memory-hungry apps helps.
-- **"Gemma does not fit in this computer's memory"** — free some RAM; with 8 GB in
+  startup (`Débit de Clikoda sur cette machine`). Closing memory-hungry apps helps.
+- **"Clikoda does not fit in this computer's memory"** — free some RAM; with 8 GB in
   total the model cannot load, the rest of the app keeps working.
 - **"Le port 8756 est occupé…"** — another program, or an instance that cannot be
   reopened (an older version), holds the port: close it or reboot.
@@ -442,7 +442,7 @@ Meta-Capp **Pro** is a separate, hosted edition for people who want the same ped
 | Renders any PDF as-is | ✅ | ✅ |
 | Scanned / handwritten PDFs | ❌ | ✅ **OCR reconstruction** |
 | Semantic re-layout of messy documents | ❌ | ✅ |
-| Voice — talk to Gemma, listen back | ❌ | ✅ **Speech** |
+| Voice — talk to Clikoda, listen back | ❌ | ✅ **Speech** |
 | Works with zero GPU / low-end laptop | Degraded | ✅ |
 | Cognitive engine, gauges, flashcards | ✅ | ✅ |
 | Your data stays local | ✅ Always | Processing is remote |

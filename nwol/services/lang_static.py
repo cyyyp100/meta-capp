@@ -241,7 +241,7 @@ def validate_onboarding(data, language: str) -> list[str]:
         errors.append("script_preview requis pour une écriture non latine")
     # Langue d'explication anglaise : une langue qui déclare ses paramètres de
     # prompt anglais doit fournir TOUT ce qu'un profil anglais voit ou envoie à
-    # Gemma, sinon il recevrait du français au milieu de l'anglais.
+    # Clikoda, sinon il recevrait du français au milieu de l'anglais.
     if "prompt_params_en" in data:
         params_en = data.get("prompt_params_en")
         if not isinstance(params_en, dict) or not all(_nonempty(params_en.get(k)) for k in ("language_label", "line_schema")):

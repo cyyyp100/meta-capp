@@ -1,9 +1,9 @@
-"""Simulation longue du feuilleton (plan V13), sans Gemma.
+"""Simulation longue du feuilleton (plan V13), sans Clikoda.
 
 Rejoue N jours d'apprentissage sur une base jetable avec deux profils
 d'apprenant — « aise » (peu de taps, bonnes réponses, assidu) et « difficulte »
 (beaucoup de taps, réponses à moitié justes, absences fréquentes) — et des
-épisodes synthétiques écrits directement en base à la place de Gemma. Ce qui
+épisodes synthétiques écrits directement en base à la place de Clikoda. Ce qui
 est vérifié, c'est l'assembleur et la progression, pas la langue :
 
   * couverture du programme et respect des bornes de difficulté (±1 cran,
@@ -141,7 +141,7 @@ def simulate(language: str, days: int, learner_kind: str, seed: int = 0, db_path
              lang_activity.RUN_IN_BACKGROUND, metacog.nudge_metacog_profile,
              ollama_client.generate_lang_weekly_analysis_async)
     lang_episodes.generate_episode = _synthetic_episode
-    # Aucun appel au vrai Gemma : l'analyse hebdomadaire répond un ton fixe.
+    # Aucun appel au vrai Clikoda : l'analyse hebdomadaire répond un ton fixe.
     ollama_client.generate_lang_weekly_analysis_async = lambda params, ok, err, on_metrics=None, model=None: ok(
         {"observations": ["Simulation."], "tone": "encourager", "suggestion": ""})
     lang_episodes.RUN_IN_BACKGROUND = False

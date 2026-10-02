@@ -9,7 +9,7 @@
 // Le voile est un calque SVG masqué : un rectangle noir à 55 % couvrant l'écran,
 // dans lequel un masque perce la (ou les) cible(s) de l'étape. C'était un
 // `box-shadow` de très grand rayon, qui ne sait éclairer QU'UNE zone — or une
-// étape peut avoir besoin d'en montrer deux (la réponse de Gemma et le passage
+// étape peut avoir besoin d'en montrer deux (la réponse de Clikoda et le passage
 // qu'elle surligne dans la page, qui sinon reste dans le noir).
 //
 // Il ne prend AUCUN événement : ni clic, ni molette, ni glissé. Neutraliser les

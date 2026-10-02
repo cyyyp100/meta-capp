@@ -180,7 +180,7 @@ def placement_skip_route(body: LessonBody) -> dict:
 
 
 # ── Méthode « feuilleton » (langues du pilote, plan § 15.1) ──────────────────
-# Aucun de ces endpoints n'attend Gemma : ils répondent immédiatement, la
+# Aucun de ces endpoints n'attend Clikoda : ils répondent immédiatement, la
 # génération des épisodes tourne en tâche de fond (services/lang_episodes.py).
 # La logique vit dans services/lang_runs.py ; ici, seulement la forme HTTP.
 

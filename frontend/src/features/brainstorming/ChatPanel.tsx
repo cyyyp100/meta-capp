@@ -118,7 +118,7 @@ export function ChatPanel({
         setScanning(Boolean(evt.active));
       } else if (evt.type === "title") {
         // 1er message : le serveur vient de nommer la discussion, la liste le
-        // montre tout de suite au lieu d'attendre la réponse de Gemma.
+        // montre tout de suite au lieu d'attendre la réponse de Clikoda.
         onActivity?.();
       } else if (evt.type === "answer") {
         setBusy(false);

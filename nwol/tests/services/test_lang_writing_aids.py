@@ -1,5 +1,5 @@
 # Aides déterministes des écritures (plan A4-A5, G5-G6, G11-G13, M6, M8, N1-N5 ;
-# tests V3-V4). Rien ici ne dépend de Gemma : c'est tout l'intérêt.
+# tests V3-V4). Rien ici ne dépend de Clikoda : c'est tout l'intérêt.
 import pytest
 
 from services import lang_arabic as arabic

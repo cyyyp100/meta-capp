@@ -96,14 +96,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "reading.formula_image_prompt": "Formule affichée dans l'image jointe. Transcris uniquement cette formule en LaTeX display.",
         # ── Lecteur scroll libre ──────────────────────────────────────────
         "reader.page_loading": "Page {page}",
-        "reader.qa_title": "Question de Gemma",
+        "reader.qa_title": "Question de Clikoda",
         "reader.qa_ignore": "✕ Ignorer",
         # ── Bulle assistante ──────────────────────────────────────────────
-        "assistant.title": "Gemma — assistante de lecture",
+        "assistant.title": "Clikoda — assistante de lecture",
         "assistant.mode_label": "Mode ",
         "assistant.hint": "Pose-moi une question sur ce que tu lis : je regarde d'abord la page visible au moment où tu envoies, puis le reste du document si besoin.",
         "assistant.send": "Envoyer",
-        "assistant.thinking": "Gemma réfléchit…",
+        "assistant.thinking": "Clikoda réfléchit…",
         "assistant.unavailable": "LLM indisponible — lecture libre, l'assistante dort.",
         "assistant.answer_failed": "Je n'ai pas réussi à répondre cette fois. Réessaie dans un instant.",
         "assistant.page_note": "Réponse basée sur la page {page} (tu as scrollé depuis).",
@@ -562,8 +562,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.missing": "Discussion introuvable.",
         "brainstorm.folder_missing": "Dossier introuvable.",
         "brainstorm.pin_limit": "{n} discussions épinglées au maximum : désépingles-en une d'abord.",
-        "brainstorm.busy": "Gemma répond déjà dans cette discussion : attends sa réponse.",
-        "brainstorm.failed": "Gemma n'a pas pu traiter ce message. Réessaie dans un instant.",
+        "brainstorm.busy": "Clikoda répond déjà dans cette discussion : attends sa réponse.",
+        "brainstorm.failed": "Clikoda n'a pas pu traiter ce message. Réessaie dans un instant.",
         "library.title_empty": "Le titre ne peut pas être vide.",
         # ── Visite guidée : le document emprunté ──────────────────────────
         # La fiche du document de démonstration est écrite ici plutôt que
@@ -574,7 +574,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "onboarding.doc_summary": (
             "Extrait de démonstration fourni avec Meta-Capp : le chapitre matériel "
             "d'un rapport d'informatique — processeur, mémoire vive, stockage. Il "
-            "sert à montrer la lecture, Gemma et les sas — il disparaît de la "
+            "sert à montrer la lecture, Clikoda et les sas — il disparaît de la "
             "bibliothèque à la fin de la visite."
         ),
         "onboarding.doc_keywords": "processeur, mémoire vive, stockage, démonstration",
@@ -618,8 +618,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.gender.f": "féminin",
         "lang.feuilleton.gender.n": "neutre",
         # ── Erreurs du modèle local (llm/ollama_client) ───────────────────
-        "llm.error.memory": "Gemma ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Gemma a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
-        "llm.error.memory_generic": "Gemma ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Gemma a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
+        "llm.error.memory": "Clikoda ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
+        "llm.error.memory_generic": "Clikoda ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
     },
     "en": {
         # ── Home ──────────────────────────────────────────────────────────
@@ -707,14 +707,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "reading.formula_image_prompt": "Displayed formula in the attached image. Transcribe only this formula as display LaTeX.",
         # ── Free-scroll reader ────────────────────────────────────────────
         "reader.page_loading": "Page {page}",
-        "reader.qa_title": "Gemma's question",
+        "reader.qa_title": "Clikoda's question",
         "reader.qa_ignore": "✕ Dismiss",
         # ── Assistant bubble ──────────────────────────────────────────────
-        "assistant.title": "Gemma — reading assistant",
+        "assistant.title": "Clikoda — reading assistant",
         "assistant.mode_label": "Mode ",
         "assistant.hint": "Ask me anything about what you're reading: I look at the page visible the moment you press Send first, then the rest of the document if needed.",
         "assistant.send": "Send",
-        "assistant.thinking": "Gemma is thinking…",
+        "assistant.thinking": "Clikoda is thinking…",
         "assistant.unavailable": "LLM unavailable — free reading, the assistant is asleep.",
         "assistant.answer_failed": "I couldn't answer this time. Try again in a moment.",
         "assistant.page_note": "Answer based on page {page} (you scrolled since).",
@@ -1173,8 +1173,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.missing": "Discussion not found.",
         "brainstorm.folder_missing": "Folder not found.",
         "brainstorm.pin_limit": "At most {n} pinned discussions: unpin one first.",
-        "brainstorm.busy": "Gemma is already answering in this discussion: wait for the reply.",
-        "brainstorm.failed": "Gemma could not process this message. Try again in a moment.",
+        "brainstorm.busy": "Clikoda is already answering in this discussion: wait for the reply.",
+        "brainstorm.failed": "Clikoda could not process this message. Try again in a moment.",
         "library.title_empty": "The title cannot be empty.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",
@@ -1182,7 +1182,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "onboarding.doc_summary": (
             "Demo excerpt shipped with Meta-Capp: the hardware chapter of a "
             "computer science report — processor, memory, storage. It exists to "
-            "show the reader, Gemma and the airlocks — it leaves the library when "
+            "show the reader, Clikoda and the airlocks — it leaves the library when "
             "the tour ends."
         ),
         "onboarding.doc_keywords": "processor, memory, storage, demo",
@@ -1221,8 +1221,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.gender.m": "masculine",
         "lang.feuilleton.gender.f": "feminine",
         "lang.feuilleton.gender.n": "neuter",
-        "llm.error.memory": "Gemma does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. Gemma needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
-        "llm.error.memory_generic": "Gemma does not fit in this computer's memory. Close memory-hungry applications and try again. Gemma needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
+        "llm.error.memory": "Clikoda does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
+        "llm.error.memory_generic": "Clikoda does not fit in this computer's memory. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
     },
 }
 

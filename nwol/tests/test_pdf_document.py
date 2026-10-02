@@ -80,7 +80,7 @@ def test_words_and_search_agree_on_the_same_word(tmp_path, make_pdf):
 
     Le calque de sélection (`words`) et le surlignage d'une citation
     (`search_text`) doivent placer le même mot au même endroit, sinon
-    surligner à la souris et surligner une citation de Gemma ne donnent pas
+    surligner à la souris et surligner une citation de Clikoda ne donnent pas
     le même rect.
     """
     path = make_pdf(tmp_path / "agree.pdf", ["Bonjour Meta Capp"])

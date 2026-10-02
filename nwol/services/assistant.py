@@ -1,4 +1,4 @@
-# services/assistant.py — Réponses de l'assistant (Gemma) à une question de lecture.
+# services/assistant.py — Réponses de l'assistant (Clikoda) à une question de lecture.
 #
 # Construit le contexte (texte de page, titre doc/chapitre) puis délègue au LLM.
 # `answerer` est injectable -> testable sans Ollama. Le pont vers le transport

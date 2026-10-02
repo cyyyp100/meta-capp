@@ -152,7 +152,7 @@ def _explain(profile: dict) -> str:
 
 
 def choose_explain_lang(language: str, ui_lang: str | None = None) -> str:
-    """§ 14, n° 14 : Gemma écrit dans la langue de l'interface quand la langue
+    """§ 14, n° 14 : Clikoda écrit dans la langue de l'interface quand la langue
     cible le permet (données anglaises présentes, et on n'explique pas
     l'anglais en anglais) ; en français sinon."""
     from i18n import current_lang
@@ -337,7 +337,7 @@ def _anchor_span(language: str, tokens: list[dict], needle: str) -> list[int]:
 
 
 def episode_notes(profile: dict, language: str, episode: dict) -> tuple[list[dict], list[str]]:
-    """Notes numérotées : celles de Gemma, plus les notes automatiques
+    """Notes numérotées : celles de Clikoda, plus les notes automatiques
     (faux-amis N2, sandhi M6 une fois le point enseigné, clés M8 pas encore
     vues). Renvoie aussi les clés à marquer comme vues."""
     notes = []
@@ -733,7 +733,7 @@ def _controle_step(profile, language, plan, add_episode, register_items, seed, c
 # ── Cycle de vie d'une séance (E3-E6) ─────────────────────────────────────────
 
 def start_run(language: str, mode: str | None = None) -> dict:
-    """E3 : plan complet de la séance, immédiatement (aucune attente de Gemma).
+    """E3 : plan complet de la séance, immédiatement (aucune attente de Clikoda).
     Une séance du jour restée ouverte est reprise à l'étape atteinte (R2) ;
     celles des jours précédents passent `abandoned`."""
     profile = ensure_feuilleton(language)
@@ -999,7 +999,7 @@ def _nudge(profile: dict, run: dict, plan: dict, feeling: str | None) -> None:
     jauges. La réponse, si elle correspond à la question posée, s'y ajoute.
 
     En tâche de fond : la finalisation commune réécrit l'analyse générale de
-    l'apprenant avec Gemma, et une séance n'attend jamais Gemma (P-1)."""
+    l'apprenant avec Clikoda, et une séance n'attend jamais Clikoda (P-1)."""
     au_revoir = next((s for s in plan.get("steps") or [] if s.get("kind") == "au_revoir"), {})
     question_key = (au_revoir.get("feeling") or {}).get("question")
     answered = bool(feeling and question_key and str(feeling).startswith(question_key + "."))

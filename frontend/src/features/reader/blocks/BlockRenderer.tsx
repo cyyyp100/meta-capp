@@ -11,7 +11,7 @@ import { CodeBlock } from "./CodeBlock";
  *
  * Sécurité : tout texte passe par `renderMarkedText` (échappement HTML strict,
  * seuls les segments $...$ deviennent du KaTeX ; les `marks` — citations de
- * Gemma, surlignages mémorisés — deviennent des <mark> inertes).
+ * Clikoda, surlignages mémorisés — deviennent des <mark> inertes).
  */
 
 const headingSizes: Record<number, string> = { 1: "1.5em", 2: "1.25em", 3: "1.1em" };

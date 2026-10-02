@@ -1,7 +1,7 @@
 // routes/LangEpisode.tsx — Séance plein écran de la méthode « feuilleton » (F2).
 //
 // Machine à étapes pilotée par le plan que renvoie le serveur : rien ne
-// s'improvise ici, et rien n'attend Gemma — l'épisode du jour existe déjà, le
+// s'improvise ici, et rien n'attend Clikoda — l'épisode du jour existe déjà, le
 // suivant s'écrit pendant qu'on lit celui-ci. La barre de progression compte
 // des étapes, jamais des secondes (pas de compte à rebours). Si le serveur
 // signale le plafond de durée, on saute directement à l'au revoir (R24).

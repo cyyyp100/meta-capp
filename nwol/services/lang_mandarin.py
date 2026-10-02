@@ -1,6 +1,6 @@
 # services/lang_mandarin.py — Mandarin : jetons, pinyin, caractères, sandhi.
 #
-# Ce qui est vérifiable ne vient pas de Gemma (plan § 1.2) : Gemma découpe le
+# Ce qui est vérifiable ne vient pas de Clikoda (plan § 1.2) : Clikoda découpe le
 # texte en mots (les jetons, unité du tap), et d'ici on
 #   * vérifie que les jetons recollent exactement la phrase et que le texte est
 #     en caractères simplifiés (G5) ;

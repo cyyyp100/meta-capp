@@ -128,7 +128,7 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_lesson":              7,
     "lang_exercises":           7,
     # ── Module langue, méthode feuilleton (G17) ──────────────────────────────
-    # Aucune tâche interactive : une séance n'attend jamais Gemma. La
+    # Aucune tâche interactive : une séance n'attend jamais Clikoda. La
     # génération d'un épisode passe après tout ce que le lecteur demande, mais
     # devant la fiche d'un document importé (7).
     "lang_story_bible":         6,
@@ -196,7 +196,7 @@ _OOM_RE = re.compile(r"requires more system memory|out of memory|insufficient me
 _OOM_SIZES_RE = re.compile(r"\(([\d.]+\s*[GM]iB)\)\D+\(([\d.]+\s*[GM]iB)\)")
 
 
-# Tâches où l'étudiant a posé une question à Gemma et attend SA réponse. Le
+# Tâches où l'étudiant a posé une question à Clikoda et attend SA réponse. Le
 # repli local y fabrique une réponse générique : sur une panne de mémoire, elle
 # cacherait la seule information utile — cet ordinateur ne peut pas faire
 # tourner le modèle. Ailleurs (fiche, intervention), le repli silencieux reste
@@ -428,7 +428,7 @@ def llm_idle_for() -> float | None:
     tâche est en file ou en cours.
 
     Lu par l'arrêt automatique du mode navigateur (services/lifecycle) : on
-    n'arrête pas le serveur pendant que Gemma travaille. `unfinished_tasks`
+    n'arrête pas le serveur pendant que Clikoda travaille. `unfinished_tasks`
     compte les tâches mises en file et pas encore terminées (`task_done`)."""
     with _LLM_QUEUE.mutex:
         busy = _LLM_QUEUE.unfinished_tasks > 0
@@ -442,7 +442,7 @@ _worker_thread.start()
 # Ollama est LOCAL : jamais par un proxy. `urlopen` applique celui du système
 # (réglages réseau macOS/Windows, variables `http_proxy`) même à 127.0.0.1, que
 # les exceptions par défaut n'excluent pas : derrière le proxy d'un réseau
-# d'école, Gemma passait pour éteinte. (`_call_ollama_http` passe par
+# d'école, Clikoda passait pour éteinte. (`_call_ollama_http` passe par
 # `http.client`, qui ignore les proxys.)
 _LOCAL_HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -488,7 +488,7 @@ _CALIBRATION_PROMPT = (
 
 
 def calibrate_throughput() -> None:
-    """Mesure le débit de Gemma sur CETTE machine, une fois par lancement.
+    """Mesure le débit de Clikoda sur CETTE machine, une fois par lancement.
 
     Sans elle, une machine lente découvrait sa lenteur en perdant sa première
     vraie génération (une génération expirée ne renvoie aucune durée). Un appel
@@ -513,9 +513,9 @@ def calibrate_throughput() -> None:
         except GenerationCancelled:
             return
         except Exception as exc:
-            logger.info("Calibrage du débit de Gemma impossible : %s", exc)
+            logger.info("Calibrage du débit de Clikoda impossible : %s", exc)
             return
-        logger.info("Débit de Gemma sur cette machine : %s", throughput.snapshot())
+        logger.info("Débit de Clikoda sur cette machine : %s", throughput.snapshot())
 
     _LLM_QUEUE.put((_TASK_PRIORITY["calibration"], next(_QUEUE_COUNTER), _run))
 
@@ -525,7 +525,7 @@ def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[
     l'ordre. Synchrone et HORS de la file `_LLM_QUEUE` : celle-ci sérialise les
     générations (longues, lourdes) ; un embedding est une passe avant de
     quelques dizaines de ms sur un petit modèle, et l'indexation de fond d'un
-    document ne doit pas attendre la fin d'une réponse de Gemma — ni l'inverse.
+    document ne doit pas attendre la fin d'une réponse de Clikoda — ni l'inverse.
     Lève RuntimeError si Ollama ou le modèle sont indisponibles : l'appelant
     (services/pdf_rag) dégrade vers la recherche lexicale."""
     if not texts:

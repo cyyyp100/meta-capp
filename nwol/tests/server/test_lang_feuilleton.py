@@ -1,6 +1,6 @@
 # Parcours complet de la méthode « feuilleton » (plan § 10, § 14, § 15 ; V5).
 #
-# Gemma est remplacé par tests/lang_fakes.py (sorties valides construites depuis
+# Clikoda est remplacé par tests/lang_fakes.py (sorties valides construites depuis
 # les prompts) et la génération est jouée inline : chaque test voit exactement
 # ce que verrait l'apprenant, sans Ollama et sans thread.
 from datetime import date, timedelta
@@ -142,7 +142,7 @@ def test_an_episode_run_is_assembled_without_any_llm_call(client, fake, clock):
     _onboard(client)
     calls = len(fake.CALLS)
     run = _start(client)
-    assert len(fake.CALLS) == calls, "une séance ne doit jamais attendre Gemma"
+    assert len(fake.CALLS) == calls, "une séance ne doit jamais attendre Clikoda"
     assert run["mode"] == "episode" and run["episode_n"] == 1
     kinds = [s["kind"] for s in run["steps"]]
     assert kinds == ["episode_p1", "episode_p2", "notes", "point", "jeux", "au_revoir"]
@@ -447,9 +447,9 @@ def english_ui(client):
 
 
 def test_an_english_interface_gets_an_english_feuilleton(client, fake, clock, english_ui):
-    """Gemma écrivait tout en français, même pour une interface anglaise : la
+    """Clikoda écrivait tout en français, même pour une interface anglaise : la
     langue d'explication est désormais celle de l'interface au début du
-    parcours, et TOUT ce qu'écrit Gemma la suit — prompts, consigne système,
+    parcours, et TOUT ce qu'écrit Clikoda la suit — prompts, consigne système,
     bible de secours, traductions, notes, point du jour."""
     _onboard(client)
     assert _profile()["explain_lang"] == "en"

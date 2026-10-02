@@ -1,7 +1,7 @@
 # services/lang_episodes.py — Génération des épisodes du feuilleton (plan § 8).
 #
 # L'épisode N+1 est écrit PENDANT la séance N, en tâche de fond : une séance
-# n'attend jamais Gemma (principe 1). Le flux :
+# n'attend jamais Clikoda (principe 1). Le flux :
 #
 #   bible (une fois par langue)   arc (au démarrage, puis à chaque bilan)
 #   épisode :  1. texte        -> validation (G4-G6, G9)
@@ -66,7 +66,7 @@ logger = logging.getLogger("services.lang_episodes")
 
 # Génération en thread démon ; les tests la passent à False pour la jouer inline.
 RUN_IN_BACKGROUND = True
-# Banc d'évaluation (tools/lang_bench.py) : garder chaque sortie brute de Gemma
+# Banc d'évaluation (tools/lang_bench.py) : garder chaque sortie brute de Clikoda
 # dans le journal, pour en faire des fixtures rejouées par les tests (V2).
 KEEP_RAW = False
 _GENERATIONS = InflightRegistry()
@@ -124,13 +124,13 @@ def prompt_params(language: str, explain_lang: str = "fr") -> dict:
 
 
 def explain_lang_of(profile: dict) -> str:
-    """Langue dans laquelle Gemma écrit pour ce profil (v36, défaut français)."""
+    """Langue dans laquelle Clikoda écrit pour ce profil (v36, défaut français)."""
     return "en" if (profile or {}).get("explain_lang") == "en" else "fr"
 
 
 def _tr(lang: str, fr: str, en: str) -> str:
     """Raison d'un refus dans la langue du prompt : elle est renvoyée telle
-    quelle à Gemma (`rejected`), qui ne doit pas changer de langue en route."""
+    quelle à Clikoda (`rejected`), qui ne doit pas changer de langue en route."""
     return en if lang == "en" else fr
 
 
@@ -154,7 +154,7 @@ def _written_in_other_language(explain_lang: str, text: str, language: str) -> b
     return len(_leak_markers(explain_lang, text, language)) >= 2
 
 
-# « 老李 (Lǎo Lǐ) », « Xiao Wang (小王) » : Gemma double souvent un prénom de sa
+# « 老李 (Lǎo Lǐ) », « Xiao Wang (小王) » : Clikoda double souvent un prénom de sa
 # transcription (mesuré au banc mandarin : 9 textes sur 9 refusés, les répliques
 # disant « 老李 » et la bible « 老李 (Lǎo Lǐ) »).
 _NAME_GLOSS = re.compile(r"^\s*(.*?)\s*[(（]\s*(.*?)\s*[)）]\s*$")
@@ -240,7 +240,7 @@ def _excerpt(result) -> str:
 def ensure_bible(profile: dict, language: str, log: list[dict] | None = None,
                  metrics: list[dict] | None = None) -> dict:
     """La bible du feuilleton : générée une fois (centres d'intérêt de
-    l'apprenant), bible par défaut de la langue si Gemma échoue. Ses appels
+    l'apprenant), bible par défaut de la langue si Clikoda échoue. Ses appels
     rejoignent le journal de l'épisode qui l'a déclenchée."""
     existing = store.get_latest_bible(profile["id"])
     if existing:
@@ -299,7 +299,7 @@ def arc_number(episode_n: int) -> int:
 def ensure_arc(profile: dict, language: str, arc_n: int, bible: dict, log: list[dict] | None = None,
                metrics: list[dict] | None = None) -> dict:
     """Arc narratif de LANG_ARC_LENGTH épisodes ; repli déterministe (un temps
-    fort par point à venir) si Gemma échoue."""
+    fort par point à venir) si Clikoda échoue."""
     existing = store.get_arc(profile["id"], arc_n)
     if existing:
         return existing
@@ -474,7 +474,7 @@ def validate_text(language: str, result: dict, ctx: dict) -> tuple[dict, list[st
     while lines and not lines[-1].get("translation"):
         lines.pop()
     if progress.family(language) == "arabe" and ctx.get("pausal", True):
-        # A3 : la forme pausale se calcule, on ne la redemande pas à Gemma.
+        # A3 : la forme pausale se calcule, on ne la redemande pas à Clikoda.
         lines = [{**ln, "text": arabic.to_pausal(ln["text"])} if isinstance(ln.get("text"), str) else ln
                  for ln in lines]
     result = {**result, "lines": lines}
@@ -589,7 +589,7 @@ def _match_key(language: str, text: str) -> str:
 
 
 def _loose_key(language: str, text: str) -> str:
-    """Clé TOLÉRANTE (sans accents) : ne sert qu'à rattraper une entrée de Gemma
+    """Clé TOLÉRANTE (sans accents) : ne sert qu'à rattraper une entrée de Clikoda
     dont l'accent manque, quand elle ne peut désigner qu'un seul mot demandé."""
     if progress.family(language) == "hanzi":
         return text.strip()
@@ -601,7 +601,7 @@ def _line_word_keys(language: str, line: dict) -> list[str]:
 
 
 def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[str], list[dict]]:
-    """Mots du texte à faire gloser par Gemma, et entrées déjà connues.
+    """Mots du texte à faire gloser par Clikoda, et entrées déjà connues.
 
     Un mot dont la forme est au lexique de l'apprenant est glosé depuis le
     lexique (même traduction d'un épisode à l'autre, et un appel plus court) ;
@@ -662,7 +662,7 @@ def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, re
     for e in result.get("entries") or []:
         key = _match_key(language, e["form"])
         if key not in wanted or key in seen:
-            # Accent oublié par Gemma : rattrapé seulement s'il ne reste qu'UN
+            # Accent oublié par Clikoda : rattrapé seulement s'il ne reste qu'UN
             # mot demandé qui puisse correspondre.
             candidates = [k for k in loose.get(_loose_key(language, e["form"]), []) if k not in seen]
             key = candidates[0] if len(candidates) == 1 else None

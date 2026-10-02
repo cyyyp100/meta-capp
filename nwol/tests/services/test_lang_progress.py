@@ -1,5 +1,5 @@
 # Difficulté, décision du prochain épisode et acquis (plan § 9 ; V7-V8).
-# Tout est déterministe : aucune de ces décisions ne passe par Gemma.
+# Tout est déterministe : aucune de ces décisions ne passe par Clikoda.
 import pytest
 
 from config.settings import (

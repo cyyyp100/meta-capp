@@ -1,7 +1,7 @@
 # services/lang_progress.py — Difficulté, progression et acquis (plan § 9).
 #
 # ENTIÈREMENT déterministe : aucun appel LLM (principe 6 du plan — les signaux
-# décident, Gemma ne fait que formuler). Quatre responsabilités :
+# décident, Clikoda ne fait que formuler). Quatre responsabilités :
 #
 #   1. l'échelle de difficulté (P1-P2) : un cran -> des paramètres concrets
 #      (répliques, mots par réplique, mots nouveaux, traduction, formes de texte),
@@ -518,7 +518,7 @@ def apply_run_acquisition(run_id: int) -> dict:
 
 def create_episode_flashcards(profile: dict, language: str, episode: dict, tapped_lemmas: set[str]) -> int:
     """P12 : cartes du feuilleton — recto en langue cible, verso traduction,
-    prononciation calculée (jamais de Gemma), dédoublonnées par lemme. Les mots
+    prononciation calculée (jamais de Clikoda), dédoublonnées par lemme. Les mots
     touchés au passage 2 d'abord, puis les mots nouveaux non transparents."""
     from services.flashcards import create_flashcard
 

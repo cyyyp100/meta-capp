@@ -1,6 +1,6 @@
 # services/pdf_rag.py — Récupération de passages pertinents dans le document lu.
 #
-# Quand l'étudiant pose une question à la bulle Gemma, le contexte LLM ne contient
+# Quand l'étudiant pose une question à la bulle Clikoda, le contexte LLM ne contient
 # que la page visible. Ce module fournit un RAG léger sur le MÊME document : on
 # indexe le texte PDFium de toutes les pages, puis on renvoie les quelques
 # passages (hors page courante) qui répondent le mieux aux mots-clés de la

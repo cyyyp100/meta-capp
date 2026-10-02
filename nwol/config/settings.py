@@ -407,7 +407,7 @@ LANG_SCRIPT_FAMILY: dict[str, str] = {
     "espagnol": "latin", "anglais": "latin", "allemand": "latin",
     "mandarin": "hanzi", "arabe": "arabe",
 }
-# Langue d'explication : celle dans laquelle Gemma écrit pour l'apprenant
+# Langue d'explication : celle dans laquelle Clikoda écrit pour l'apprenant
 # (traductions, glossaire, notes, point du jour, résumés) et dans laquelle
 # s'affichent les données écrites à la main qui ont une version traduite.
 # Choisie au début du parcours d'après la langue de l'interface, puis figée dans
@@ -532,11 +532,11 @@ LANG_MAX_UNITS_PER_EPISODE: dict[str, int] = {"latin": 450, "hanzi": 700, "arabe
 # amorcé — au premier épisode, tout est nouveau — et avec une marge.
 LANG_NEW_WORDS_CHECK_MIN_LEXICON = 60
 LANG_NEW_WORDS_TOLERANCE = 1.5
-# Glossaire : mots inconnus de l'apprenant demandés à Gemma par épisode, par
+# Glossaire : mots inconnus de l'apprenant demandés à Clikoda par épisode, par
 # palier d'ancrage (index 0-4). Les mots déjà au lexique sont glosés depuis
 # le lexique ; au-delà de la borne, le tap montre la traduction de la réplique.
 LANG_GLOSSARY_MAX_ENTRIES = (35, 40, 45, 45, 45)
-# Mesuré au banc : sur une longue liste, Gemma s'arrête parfois après UNE
+# Mesuré au banc : sur une longue liste, Clikoda s'arrête parfois après UNE
 # entrée. Les mots sont donc demandés par lots, et chaque tentative ne
 # redemande que ceux qui manquent encore (les entrées valides s'additionnent).
 LANG_GLOSSARY_CHUNK = 20
@@ -578,7 +578,7 @@ LANG_GEN_MAX_ATTEMPTS_PER_CALL = 3
 # épisodes, au-dessus de laquelle l'épisode est rejeté comme redite.
 LANG_REPEAT_WINDOW = 20
 LANG_REPEAT_MAX_JACCARD = 0.6
-# G8 : longueurs maximales des sorties Gemma (caractères).
+# G8 : longueurs maximales des sorties Clikoda (caractères).
 LANG_NOTE_MAX_CHARS = 260
 LANG_EXPLANATION_MAX_CHARS = 420
 LANG_TITLE_MAX_CHARS = 80
@@ -672,7 +672,7 @@ UPLOAD_MAX_BYTES = 512 * 1024 * 1024
 # AUCUN onglet n'est ouvert depuis ce délai — assez long pour un rechargement,
 # une navigation ou un navigateur lent à s'ouvrir au premier lancement…
 BROWSER_AUTO_STOP_S = 180.0
-# …et que Gemma ne travaille plus depuis celui-ci : une génération de fond
+# …et que Clikoda ne travaille plus depuis celui-ci : une génération de fond
 # (épisode de langue) enchaîne plusieurs appels, la file est vide un instant
 # entre deux. On ne coupe pas au milieu.
 BROWSER_LLM_QUIET_S = 60.0
@@ -723,7 +723,7 @@ DB_SCHEMA_VERSION = 36
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 5
 
-# ── Assistant (bulle Gemma) : SOURCE DE VÉRITÉ UNIQUE de la cadence ──────────
+# ── Assistant (bulle Clikoda) : SOURCE DE VÉRITÉ UNIQUE de la cadence ──────────
 # Ces constantes sont lues par `services/intervention.py`, l'unique moteur de
 # décision d'intervention. Ne jamais redéfinir ces valeurs ailleurs (routeur,
 # service) : c'est ce qui avait produit deux politiques divergentes entre l'UI
@@ -762,12 +762,12 @@ ASSISTANT_MATH_AHEAD_DWELL_S = 15.0
 
 # ── Pauses ───────────────────────────────────────────────────────────────────
 # Une pause n'est pas du décrochage : l'élève la prend (bouton « Pause ») ou
-# accepte celle que Gemma conseille, et tant qu'il n'a pas repris, TOUT est
+# accepte celle que Clikoda conseille, et tant qu'il n'a pas repris, TOUT est
 # figé — ni dérive passive d'attention, ni dwell, ni intervention, ni horloge de
 # cooldown (cf. services/pause.py). La pause est ouverte : elle dure jusqu'au
 # retour de l'élève. Seules sa durée et ce qui l'a précédée sont mesurés.
 #
-# PAUSE_DEFAULT_MIN / PAUSE_MAX_MIN : durée CONSEILLÉE par la carte de Gemma
+# PAUSE_DEFAULT_MIN / PAUSE_MAX_MIN : durée CONSEILLÉE par la carte de Clikoda
 # (bornée côté serveur), qui sert de référence au crédit ci-dessous.
 PAUSE_DEFAULT_MIN = 5
 PAUSE_MAX_MIN = 20
@@ -862,7 +862,7 @@ BRAINSTORM_RECENCY_FLOOR = 0.4
 # UPDATE conditionnel (`db/brainstorm.pin_discussion`), pas par l'interface.
 BRAINSTORM_MAX_PINNED = 5
 # Discussion liée à un dossier : titres de documents du sous-arbre nommés à
-# Gemma dans le prompt (le reste est résumé en « +N »).
+# Clikoda dans le prompt (le reste est résumé en « +N »).
 BRAINSTORM_SCOPE_TITLES_MAX = 12
 
 # Assistant lecteur : cartes liées proposées au prompt, tirées dans un vivier

@@ -1,7 +1,7 @@
 # Langue de l'interface -> langue des prompts LLM (§ A3).
 #
 # Avant l'unification, `i18n.set_lang` n'était appelé que par l'UI Tk : basculer
-# le frontend en anglais donnait une UI anglaise et un Gemma francophone. Ces
+# le frontend en anglais donnait une UI anglaise et un Clikoda francophone. Ces
 # tests verrouillent le fait que la bascule atteint bien le backend.
 import pytest
 

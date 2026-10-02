@@ -41,7 +41,7 @@ interface QaFeedback {
 }
 
 /**
- * Une question de Gemma, DANS le fil, à sa place chronologique. C'est le même
+ * Une question de Clikoda, DANS le fil, à sa place chronologique. C'est le même
  * encadré qui se répond (question en jeu), qui se corrige, et qui reste
  * ensuite comme trace : ce qui vient après — une autre question, une
  * conversation — s'écrit à la suite, jamais au-dessus. Un seul encadré est
@@ -59,7 +59,7 @@ interface QaRecord {
   page: number;
   /** Réponse envoyée à la correction — vide tant qu'on n'a pas répondu. */
   answer: string;
-  /** Verdict et correction ; null tant que Gemma n'a pas corrigé. */
+  /** Verdict et correction ; null tant que Clikoda n'a pas corrigé. */
   feedback: QaFeedback | null;
 }
 
@@ -82,7 +82,7 @@ export interface QaMask {
   placeholder?: string;
 }
 
-/** Pause proposée par Gemma (intervention `suggest_pause`), pas encore prise. */
+/** Pause proposée par Clikoda (intervention `suggest_pause`), pas encore prise. */
 interface Pause {
   message: string;
   minutes: number;
@@ -96,10 +96,10 @@ type Rect = { x: number; y: number; width: number; height: number };
 const DOCK_TOP = 56; // hauteur de la barre flottante du lecteur
 // Cadence max. du signal « engaged » (miroir de settings.ATTENTION_ENGAGED_REPORT_S).
 const ENGAGED_REPORT_MS = 10_000;
-const LS_RECT = "gemma:panelRect";
-const LS_LAYOUT = "gemma:layout";
-const LS_DOCKW = "gemma:dockWidth";
-const LS_BUBBLE = "gemma:bubblePos";
+const LS_RECT = "clikoda:panelRect";
+const LS_LAYOUT = "clikoda:layout";
+const LS_DOCKW = "clikoda:dockWidth";
+const LS_BUBBLE = "clikoda:bubblePos";
 
 /** Ramène une position mémorisée dans la fenêtre courante.
  *
@@ -136,7 +136,7 @@ function save(key: string, value: unknown) {
   }
 }
 
-export function GemmaPanel({
+export function ClikodaPanel({
   docId,
   currentPage,
   sessionId,
@@ -182,7 +182,7 @@ export function GemmaPanel({
   /**
    * Le sas d'entrée est franchi : la lecture commence. Le WebSocket, lui, est
    * ouvert dès l'arrivée sur le document ; c'est ce signal, pas l'ouverture,
-   * qui fait partir le warm-up avant la première question de Gemma.
+   * qui fait partir le warm-up avant la première question de Clikoda.
    */
   reading?: boolean;
   /**
@@ -199,13 +199,13 @@ export function GemmaPanel({
    * d'envoyer présence, gestes et page visible jusqu'à la reprise.
    */
   paused?: ReadingPause | null;
-  /** « Faire une pause » sur la carte de Gemma : le lecteur ouvre l'écran de pause. */
+  /** « Faire une pause » sur la carte de Clikoda : le lecteur ouvre l'écran de pause. */
   onPauseRequest?: (minutes: number) => void;
   /** Rend à la visite de quoi jouer les répliques, tant que le panneau vit. */
   onDemoReady?: (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => void;
 }) {
   const t = useT();
-  // Gemma démarre fermé : l'utilisateur (ou une intervention) l'ouvre au besoin.
+  // Clikoda démarre fermé : l'utilisateur (ou une intervention) l'ouvre au besoin.
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -224,7 +224,7 @@ export function GemmaPanel({
   const [flashcardState, setFlashcardState] = useState<Record<number, "pending" | "done">>({});
   // Question automatique bloquante : verrouille le scroll du lecteur (cf. onGatedChange).
   const [gated, setGated] = useState(false);
-  // Gemma inspecte la page (décide d'intervenir) -> la bulle se tourne vers le PDF.
+  // Clikoda inspecte la page (décide d'intervenir) -> la bulle se tourne vers le PDF.
   const [scanning, setScanning] = useState(false);
   // Pause recommandée : une carte qu'on peut prendre, pas une phrase de plus
   // dans le fil. La prendre ouvre l'écran de pause du lecteur (`onPauseRequest`).
@@ -232,7 +232,7 @@ export function GemmaPanel({
 
   // Disposition / taille de la zone de discussion (libre + presets), persistées.
   const floatDefault: Rect = { x: Math.max(20, window.innerWidth - 640), y: Math.max(20, window.innerHeight - 560), width: 360, height: 480 };
-  // Visite guidée : Gemma est ancrée à droite, point. Les sept étapes qui la
+  // Visite guidée : Clikoda est ancrée à droite, point. Les sept étapes qui la
   // commentent désignent tour à tour son corps, son sélecteur de mode, ses
   // raccourcis et sa carte de question ; un panneau flottant, à une position
   // héritée d'une séance précédente et déplaçable d'un glissé, ferait sauter
@@ -322,7 +322,7 @@ export function GemmaPanel({
   }
 
   /**
-   * Gemma a fini de réfléchir. Le lecteur avait été rendu le temps de la
+   * Clikoda a fini de réfléchir. Le lecteur avait été rendu le temps de la
    * réflexion : si une question bloquante est toujours en jeu, il revient se
    * caler sur sa zone ; s'il n'y a plus rien à répondre (la nouvelle question
    * n'est pas arrivée), le verrou n'a plus d'objet et tombe.
@@ -333,7 +333,7 @@ export function GemmaPanel({
     else setGatedState(false);
   }
 
-  /** Le lecteur est rendu le temps que Gemma réfléchit — on peut relire la
+  /** Le lecteur est rendu le temps que Clikoda réfléchit — on peut relire la
    *  page, défiler, zoomer. Le verrou, lui, reste armé (`gated`) : cf. restoreGate. */
   function releaseWhileThinking() {
     if (gatedRef.current) onGatedChangeRef.current?.(false);
@@ -346,7 +346,7 @@ export function GemmaPanel({
   }
 
   useEffect(() => {
-    setMessages([{ role: "assistant", text: t("gemma.welcome") }]);
+    setMessages([{ role: "assistant", text: t("clikoda.welcome") }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -359,7 +359,7 @@ export function GemmaPanel({
       return;
     }
     // Session close : le nettoyage de l'effet précédent a fermé le socket, on
-    // n'en rouvre pas — Gemma n'a plus rien à faire pour ce lecteur.
+    // n'en rouvre pas — Clikoda n'a plus rien à faire pour ce lecteur.
     if (ended) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/api/reader/${docId}/stream${wsTokenSuffix()}`);
@@ -438,7 +438,7 @@ export function GemmaPanel({
           onHighlightsRef.current?.(evt.highlights, pageRef.current);
         }
         if (evt.flashcard_created) {
-          setMessages((m) => [...m, { role: "system", text: t("gemma.fc_auto_created") }]);
+          setMessages((m) => [...m, { role: "system", text: t("clikoda.fc_auto_created") }]);
         }
         if (gatedRef.current) {
           // Idée principale présente -> fin du verrouillage. Sinon, le lecteur
@@ -513,7 +513,7 @@ export function GemmaPanel({
     } else if (!paused && pauseSentRef.current) {
       pauseSentRef.current = false;
       if (live) ws.send(JSON.stringify({ type: "resume" }));
-      setMessages((m) => [...m, { role: "system", text: t("gemma.pause_over") }]);
+      setMessages((m) => [...m, { role: "system", text: t("clikoda.pause_over") }]);
     }
   }, [paused, demo, t]);
 
@@ -616,12 +616,12 @@ export function GemmaPanel({
   function sendRaw(payload: object): boolean {
     // Séance de démonstration : rien ne part. Les commandes restent cliquables
     // — c'est la moitié de ce que la visite montre — mais elles n'atteignent
-    // aucun serveur, et surtout pas « Gemma est indisponible », qui serait faux
+    // aucun serveur, et surtout pas « Clikoda est indisponible », qui serait faux
     // et alarmant au premier lancement.
     if (demo) return false;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setMessages((m) => [...m, { role: "assistant", text: t("gemma.unavailable") }]);
+      setMessages((m) => [...m, { role: "assistant", text: t("clikoda.unavailable") }]);
       return false;
     }
     ws.send(JSON.stringify(payload));
@@ -635,7 +635,7 @@ export function GemmaPanel({
     setDraft("");
     setBusy(true);
     const snippets = (contextChipsRef.current ?? []).map((c) => c.text);
-    // Message non parti : on rend la main. Sans ça, l'indicateur « Gemma
+    // Message non parti : on rend la main. Sans ça, l'indicateur « Clikoda
     // réfléchit… » tournait indéfiniment sur une connexion fermée.
     if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: snippets })) {
       setBusy(false);
@@ -678,12 +678,12 @@ export function GemmaPanel({
       restoreGate();
       return;
     }
-    // Même après une réponse fausse : le temps que Gemma prépare la question
+    // Même après une réponse fausse : le temps que Clikoda prépare la question
     // suivante, on est libre de bouger dans le document.
     releaseWhileThinking();
   }
 
-  /** La carte de Gemma est acceptée : le lecteur ouvre SON écran de pause, le
+  /** La carte de Clikoda est acceptée : le lecteur ouvre SON écran de pause, le
    *  même que celui du bouton — une seule pause, un seul chemin vers le serveur. */
   function acceptPause() {
     if (!pause) return;
@@ -708,7 +708,7 @@ export function GemmaPanel({
       setBusy(false);
       return;
     }
-    // Le temps que Gemma corrige, le lecteur est rendu. Le verrou, lui, reste
+    // Le temps que Clikoda corrige, le lecteur est rendu. Le verrou, lui, reste
     // armé — si la réponse est fausse, le lecteur revient se caler sur la zone.
     releaseWhileThinking();
   }
@@ -719,7 +719,7 @@ export function GemmaPanel({
     // transformé, mais l'appel LLM serait parti pour rien.
     if (flashcardState[index]) return;
     setFlashcardState((s) => ({ ...s, [index]: "pending" }));
-    let front = t("gemma.note_front");
+    let front = t("clikoda.note_front");
     for (let i = index - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         front = messages[i].text;
@@ -730,19 +730,19 @@ export function GemmaPanel({
       // Flashcard intelligente : le LLM réécrit recto/verso en carte autoportante.
       const { created } = await api.createFlashcardFromExchange(front, messages[index].text, docId, pageRef.current);
       setFlashcardState((s) => ({ ...s, [index]: "done" }));
-      setMessages((m) => [...m, { role: "system", text: t(created ? "gemma.fc_created" : "gemma.fc_exists") }]);
+      setMessages((m) => [...m, { role: "system", text: t(created ? "clikoda.fc_created" : "clikoda.fc_exists") }]);
     } catch {
       setFlashcardState((s) => {
         const next = { ...s };
         delete next[index];
         return next;
       });
-      setMessages((m) => [...m, { role: "system", text: t("gemma.fc_failed") }]);
+      setMessages((m) => [...m, { role: "system", text: t("clikoda.fc_failed") }]);
     }
   }
 
   if (!open) {
-    return <GemmaBubble scanning={scanning} onOpen={() => setOpen(true)} title={t("gemma.open")} fixed={demo} />;
+    return <ClikodaBubble scanning={scanning} onOpen={() => setOpen(true)} title={t("clikoda.open")} fixed={demo} />;
   }
 
   return (
@@ -755,11 +755,11 @@ export function GemmaPanel({
       // Rien ne bouge pendant la visite : ni déplacement, ni redimensionnement.
       enableResizing={!demo}
       disableDragging={demo || layout === "dockRight"}
-      dragHandleClassName="gemma-drag"
+      dragHandleClassName="clikoda-drag"
       // Les contrôles vivent DANS la poignée de déplacement : sans ce `cancel`, cliquer
       // le sélecteur de mode arme un déplacement, et la liste native avale le mouseup
       // qui devait le terminer -> le panneau reste collé à la souris.
-      cancel=".gemma-nodrag"
+      cancel=".clikoda-nodrag"
       onDragStop={(_e, d) => {
         if (layout === "float") applyFloatRect({ ...floatRect, x: d.x, y: d.y });
       }}
@@ -772,10 +772,10 @@ export function GemmaPanel({
       style={{ zIndex: 50 }}
     >
       <div ref={panelRef} style={panelStyle}>
-        <div className="gemma-drag" style={{ ...headerStyle, cursor: layout === "dockRight" ? "default" : "move" }}>
+        <div className="clikoda-drag" style={{ ...headerStyle, cursor: layout === "dockRight" ? "default" : "move" }}>
           <strong className="flex items-center gap-1.5 text-sm text-accent-foreground">
             <Sparkles className="size-4" aria-hidden />
-            Gemma
+            Clikoda
             {/* Le voyant était 🟢/⚪️ : deux emoji dont le rendu change d'un OS à
                 l'autre, et dont personne ne devine le sens. Une pastille + une
                 infobulle disent la même chose, en toutes lettres au survol. */}
@@ -783,7 +783,7 @@ export function GemmaPanel({
               <TooltipTrigger asChild>
                 <span
                   role="status"
-                  aria-label={connected ? t("gemma.connected") : t("gemma.disconnected")}
+                  aria-label={connected ? t("clikoda.connected") : t("clikoda.disconnected")}
                   className={cn(
                     "size-2 rounded-full transition-colors duration-normal ease-brand",
                     connected ? "bg-success" : "bg-muted-light",
@@ -791,11 +791,11 @@ export function GemmaPanel({
                 />
               </TooltipTrigger>
               <TooltipContent>
-                {connected ? t("gemma.connected") : t("gemma.disconnected")}
+                {connected ? t("clikoda.connected") : t("clikoda.disconnected")}
               </TooltipContent>
             </Tooltip>
           </strong>
-          <div className="gemma-nodrag" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="clikoda-nodrag" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {/* Le <select> natif affichait « discret / normal / coach » bruts, non
                 traduits, et non stylables. Chaque mode explique maintenant ce
                 qu'il change — mais seulement pendant le choix : `SelectValue`
@@ -805,19 +805,19 @@ export function GemmaPanel({
             <Select value={mode} onValueChange={(v) => changeMode(v as (typeof MODES)[number])}>
               <SelectTrigger
                 size="sm"
-                data-tour="gemma-mode"
-                aria-label={t("gemma.mode_label")}
+                data-tour="clikoda-mode"
+                aria-label={t("clikoda.mode_label")}
                 className="h-7 w-auto gap-1 border-border bg-surface text-[11px]"
               >
-                <SelectValue>{t(`gemma.mode_${mode}`)}</SelectValue>
+                <SelectValue>{t(`clikoda.mode_${mode}`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {MODES.map((m) => (
                   <SelectItem key={m} value={m} className="text-xs">
                     <span className="flex flex-col">
-                      <span className="font-semibold">{t(`gemma.mode_${m}`)}</span>
+                      <span className="font-semibold">{t(`clikoda.mode_${m}`)}</span>
                       <span className="text-[11px] text-muted-foreground">
-                        {t(`gemma.mode_${m}_hint`)}
+                        {t(`clikoda.mode_${m}_hint`)}
                       </span>
                     </span>
                   </SelectItem>
@@ -829,20 +829,20 @@ export function GemmaPanel({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t("gemma.focus")}
+                  aria-label={t("clikoda.focus")}
                   onClick={() => sendRaw({ type: "focus" })}
                 >
                   <Target className="size-4" aria-hidden />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("gemma.focus")}</TooltipContent>
+              <TooltipContent>{t("clikoda.focus")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
+                  aria-label={layout === "dockRight" ? t("clikoda.float") : t("clikoda.dock_right")}
                   onClick={() => setLayout(layout === "dockRight" ? "float" : "dockRight")}
                   className={layout === "dockRight" ? "text-brand-ink" : undefined}
                 >
@@ -854,7 +854,7 @@ export function GemmaPanel({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {layout === "dockRight" ? t("gemma.float") : t("gemma.dock_right")}
+                {layout === "dockRight" ? t("clikoda.float") : t("clikoda.dock_right")}
               </TooltipContent>
             </Tooltip>
             {!gated && (
@@ -874,7 +874,7 @@ export function GemmaPanel({
             découverte du panneau, la réponse à une question, l'intervention
             autonome). Une seule ancre pour les trois — c'est bien le même
             endroit qu'on désigne à chaque fois. */}
-        <div ref={bodyRef} data-tour="gemma-body" data-testid="gemma-body" style={bodyStyle}>
+        <div ref={bodyRef} data-tour="clikoda-body" data-testid="clikoda-body" style={bodyStyle}>
           {messages.map((m, i) =>
             m.role === "system" ? (
               <div key={i} style={{ alignSelf: "center", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
@@ -883,7 +883,7 @@ export function GemmaPanel({
             ) : m.role === "qa" && m.qa ? (
               // L'encadré en jeu porte l'ancre de la visite ; les autres sont
               // des traces, à leur place dans le fil.
-              <div key={`qa-${m.qa.id}`} data-tour={m.qa.id === liveQaId ? "gemma-qa" : undefined} style={{ alignSelf: "stretch" }}>
+              <div key={`qa-${m.qa.id}`} data-tour={m.qa.id === liveQaId ? "clikoda-qa" : undefined} style={{ alignSelf: "stretch" }}>
                 <QaCard
                   record={m.qa}
                   live={m.qa.id === liveQaId}
@@ -910,7 +910,7 @@ export function GemmaPanel({
                     onClick={() => makeFlashcard(i)}
                     disabled={Boolean(flashcardState[i])}
                     aria-disabled={Boolean(flashcardState[i])}
-                    title={t("gemma.flashcard_hint")}
+                    title={t("clikoda.flashcard_hint")}
                     className="mt-1 rounded-[4px] border-none bg-transparent p-0 text-[11px] text-brand-ink
                                underline-offset-2 transition-colors duration-fast ease-brand
                                hover:text-accent-foreground hover:underline
@@ -918,10 +918,10 @@ export function GemmaPanel({
                                focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                   >
                     {flashcardState[i] === "pending"
-                      ? t("gemma.fc_pending")
+                      ? t("clikoda.fc_pending")
                       : flashcardState[i] === "done"
-                        ? t("gemma.fc_done")
-                        : t("gemma.flashcard")}
+                        ? t("clikoda.fc_done")
+                        : t("clikoda.flashcard")}
                   </button>
                 )}
               </div>
@@ -934,7 +934,7 @@ export function GemmaPanel({
               aria-live="polite"
               className="flex items-center gap-2 self-start text-xs text-muted-foreground"
             >
-              {/* Le texte italique « Gemma réfléchit… » était immobile : rien ne
+              {/* Le texte italique « Clikoda réfléchit… » était immobile : rien ne
                   distinguait une attente en cours d'une interface figée. */}
               <span className="flex gap-1" aria-hidden>
                 {[0, 1, 2].map((i) => (
@@ -945,20 +945,20 @@ export function GemmaPanel({
                   />
                 ))}
               </span>
-              {t("gemma.thinking")}
+              {t("clikoda.thinking")}
             </div>
           )}
         </div>
 
-        <div data-tour="gemma-chips" style={{ display: "flex", gap: 6, padding: "6px 10px", flexWrap: "wrap", borderTop: "1px solid var(--border)" }}>
-          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("rephrase", t("gemma.rephrase_cmd"))}>
-            {t("gemma.rephrase")}
+        <div data-tour="clikoda-chips" style={{ display: "flex", gap: 6, padding: "6px 10px", flexWrap: "wrap", borderTop: "1px solid var(--border)" }}>
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("rephrase", t("clikoda.rephrase_cmd"))}>
+            {t("clikoda.rephrase")}
           </Button>
-          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("recap", t("gemma.recap_cmd"))}>
-            {t("gemma.recap")}
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("recap", t("clikoda.recap_cmd"))}>
+            {t("clikoda.recap")}
           </Button>
-          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("hook", t("gemma.curiosity_cmd"))}>
-            {t("gemma.curiosity")}
+          <Button variant="chip" size="sm" disabled={busy} onClick={() => action("hook", t("clikoda.curiosity_cmd"))}>
+            {t("clikoda.curiosity")}
           </Button>
           <Button
             variant="chip"
@@ -967,7 +967,7 @@ export function GemmaPanel({
             onClick={startQa}
             className="border-brand text-accent-foreground"
           >
-            {t("gemma.quizme")}
+            {t("clikoda.quizme")}
           </Button>
         </div>
 
@@ -976,9 +976,9 @@ export function GemmaPanel({
             {contextChips.map((c) => (
               <span key={c.id} style={contextChipStyle} title={c.text}>
                 <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {t("gemma.context_chip", { n: c.page })} · {c.text}
+                  {t("clikoda.context_chip", { n: c.page })} · {c.text}
                 </span>
-                <button onClick={() => onRemoveContextChip?.(c.id)} style={chipClose} title={t("gemma.context_remove")}>
+                <button onClick={() => onRemoveContextChip?.(c.id)} style={chipClose} title={t("clikoda.context_remove")}>
                   ✕
                 </button>
               </span>
@@ -991,13 +991,13 @@ export function GemmaPanel({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onSubmit={ask}
-            placeholder={t("gemma.placeholder", { n: currentPage })}
+            placeholder={t("clikoda.placeholder", { n: currentPage })}
             style={inputStyle}
           />
           <Button
             onClick={ask}
             pending={busy}
-            aria-label={t("gemma.send")}
+            aria-label={t("clikoda.send")}
             size="icon"
             className="shrink-0"
           >
@@ -1054,10 +1054,10 @@ const chipClose: React.CSSProperties = {
   border: "none", background: "transparent", color: "var(--accent-ink)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
 };
 
-// ── Bulle Gemma : sphère 3D à deux yeux mobiles, déplaçable. ────────────────────
-// Au repos, les pupilles suivent le curseur. Pendant que Gemma inspecte la page
+// ── Bulle Clikoda : sphère 3D à deux yeux mobiles, déplaçable. ────────────────────
+// Au repos, les pupilles suivent le curseur. Pendant que Clikoda inspecte la page
 // (`scanning`), la bulle se tourne vers le PDF et fixe son regard de ce côté.
-function GemmaBubble({
+function ClikodaBubble({
   scanning,
   onOpen,
   title,
@@ -1111,10 +1111,10 @@ function GemmaBubble({
     >
       <style>{BUBBLE_KEYFRAMES}</style>
       <div
-        data-tour="gemma"
-        style={{ width: SIZE, height: SIZE, perspective: 320, animation: "gemmaFloat 4.2s ease-in-out infinite" }}
+        data-tour="clikoda"
+        style={{ width: SIZE, height: SIZE, perspective: 320, animation: "clikodaFloat 4.2s ease-in-out infinite" }}
       >
-        {/* C'était un <div onClick> : la seule façon d'ouvrir Gemma était un clic
+        {/* C'était un <div onClick> : la seule façon d'ouvrir Clikoda était un clic
             souris — pas de tabulation, pas d'Entrée, rien d'annoncé. Un vrai
             <button> rend l'assistant atteignable au clavier, et `movedRef`
             continue de distinguer un clic d'une fin de glissement. */}
@@ -1146,7 +1146,7 @@ function Eye({ look }: { look: { x: number; y: number } }) {
 }
 
 const BUBBLE_KEYFRAMES = `
-@keyframes gemmaFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes clikodaFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 `;
 const sphereStyle: React.CSSProperties = {
   width: "100%", height: "100%", borderRadius: "50%", position: "relative", cursor: "pointer",
@@ -1161,7 +1161,7 @@ const sphereStyle: React.CSSProperties = {
 };
 // Le blanc de l'œil reste un blanc littéral, et NON `var(--on-accent)` : c'est
 // un trait du personnage, pas du texte posé sur l'accent. En sombre `--on-accent`
-// vaut une encre presque noire — Gemma s'y retrouverait avec des yeux noirs.
+// vaut une encre presque noire — Clikoda s'y retrouverait avec des yeux noirs.
 const eyeWhiteStyle: React.CSSProperties = {
   width: 17, height: 17, borderRadius: "50%", background: "#fff",
   display: "grid", placeItems: "center", boxShadow: "inset 0 1px 2px rgba(0,0,0,0.25)",
@@ -1187,24 +1187,24 @@ function PauseCard({
 }) {
   const t = useT();
   return (
-    <div style={pauseCardStyle} role="group" aria-label={t("gemma.pause_title")}>
+    <div style={pauseCardStyle} role="group" aria-label={t("clikoda.pause_title")}>
       <div
         className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide uppercase"
         style={{ color: "var(--accent-ink)" }}
       >
         <Coffee className="size-3.5" aria-hidden />
-        {t("gemma.pause_title")}
+        {t("clikoda.pause_title")}
       </div>
 
       {pause.message && <div style={{ fontSize: 13, color: "var(--text)" }}>{pause.message}</div>}
 
-      <div className="text-xs text-muted-foreground">{t("gemma.pause_note")}</div>
+      <div className="text-xs text-muted-foreground">{t("clikoda.pause_note")}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={onStart} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
-          {t("gemma.pause_start", { n: pause.minutes })}
+          {t("clikoda.pause_start", { n: pause.minutes })}
         </button>
         <button onClick={onDismiss} style={chip}>
-          {t("gemma.pause_decline")}
+          {t("clikoda.pause_decline")}
         </button>
       </div>
     </div>
@@ -1262,7 +1262,7 @@ function QaCard({
         <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Coffee className="mt-px size-3.5 shrink-0 text-brand-ink" aria-hidden />
           <span>
-            <span className="sr-only">{t("gemma.hint_label")} : </span>
+            <span className="sr-only">{t("clikoda.hint_label")} : </span>
             {record.hint}
           </span>
         </div>
@@ -1285,7 +1285,7 @@ function QaCard({
 
       {record.answer && (feedback || !live) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("gemma.answer_given")}</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("clikoda.answer_given")}</span>
           <div
             style={{ ...bubble("user"), alignSelf: "flex-start", maxWidth: "100%" }}
             dangerouslySetInnerHTML={{ __html: renderMathToHtml(record.answer) }}
@@ -1313,11 +1313,11 @@ function QaCard({
           {live && (
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={onNext} disabled={busy} style={{ ...chip, borderColor: "var(--accent)", color: "var(--accent-ink)" }}>
-                {stayLocked ? t("gemma.retry_question") : t("gemma.new_question")}
+                {stayLocked ? t("clikoda.retry_question") : t("clikoda.new_question")}
               </button>
               {!stayLocked && (
                 <button onClick={onClose} style={chip}>
-                  {t("gemma.finish")}
+                  {t("clikoda.finish")}
                 </button>
               )}
             </div>

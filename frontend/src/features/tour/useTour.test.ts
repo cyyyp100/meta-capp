@@ -82,7 +82,7 @@ describe("le document emprunté est toujours rendu", () => {
 
   it("quand on abandonne la visite en son milieu", async () => {
     await useTour.getState().start();
-    advanceTo("gemma-panel");
+    advanceTo("clikoda-panel");
     useTour.getState().skip();
 
     expect(giveBack).toHaveBeenCalledOnce();

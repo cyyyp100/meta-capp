@@ -29,10 +29,10 @@ def test_session_lifecycle_and_metrics(client, tmp_path, make_pdf):
     assert len(m["reflection_questions"]) == 2
 
 
-def test_ending_a_session_cuts_gemma_before_anything_else(client, tmp_path, make_pdf, monkeypatch):
+def test_ending_a_session_cuts_clikoda_before_anything_else(client, tmp_path, make_pdf, monkeypatch):
     """« Terminer » arrive pendant qu'une correction ou une intervention est en
     vol : il n'y a qu'un worker LLM, et le bilan du sas de sortie attendait
-    derrière. La clôture coupe Gemma (file + en vol) AVANT d'écrire, pour que le
+    derrière. La clôture coupe Clikoda (file + en vol) AVANT d'écrire, pour que le
     bilan, enfilé après la réponse, parte sur un worker libre."""
     import services.session as session_service
 

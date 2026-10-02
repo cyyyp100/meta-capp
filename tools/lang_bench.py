@@ -170,7 +170,7 @@ def main() -> None:
     parser.add_argument("--interests", default="cuisine,voyages,cinéma")
     parser.add_argument("--db", type=Path, default=None, help="base jetable (défaut : fichier temporaire)")
     parser.add_argument("--explain", choices=("fr", "en"), default="fr",
-                        help="langue d'explication du profil (ce qu'écrit Gemma pour l'apprenant)")
+                        help="langue d'explication du profil (ce qu'écrit Clikoda pour l'apprenant)")
     args = parser.parse_args()
     db_path = args.db or Path(tempfile.mkdtemp(prefix="lang-bench-")) / "bench.db"
     _setup_db(db_path)

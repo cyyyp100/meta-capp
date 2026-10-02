@@ -29,7 +29,7 @@ interface Props {
   bookmarkPage: number | null;
   locked: boolean;
   lockedPage: number;
-  /** Marques par page : citations de Gemma + surlignages mémorisés. */
+  /** Marques par page : citations de Clikoda + surlignages mémorisés. */
   marksByPage?: Record<number, TextMark[]>;
   /** Clic sur un <mark data-hl> de surlignage mémorisé. */
   onDeleteHighlight?: (id: number) => void;

@@ -1,8 +1,8 @@
-# llm/throughput.py — Débit RÉEL de Gemma sur cette machine.
+# llm/throughput.py — Débit RÉEL de Clikoda sur cette machine.
 #
 # Les budgets temps des générations (`config/settings.task_timeout_s`) partent
 # d'un débit de référence mesuré sur la machine de dev (Apple Silicon). Sur un
-# PC sans GPU, Gemma écrit 3 à 6 fois moins vite et lit son prompt 5 à 10 fois
+# PC sans GPU, Clikoda écrit 3 à 6 fois moins vite et lit son prompt 5 à 10 fois
 # moins vite : avec des budgets fixes, chaque réponse longue expirait alors que
 # le modèle travaillait normalement, et l'assistant semblait en panne.
 #

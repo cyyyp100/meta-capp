@@ -719,7 +719,7 @@ def _migrate_to_v22(conn) -> None:
 
 
 def _migrate_to_v23(conn) -> None:
-    """Page « Brainstorming » : chat libre avec Gemma + mémoire par discussion.
+    """Page « Brainstorming » : chat libre avec Clikoda + mémoire par discussion.
 
     Chaque discussion garde l'historique complet de ses messages (réouvrable tel
     quel) PLUS un résumé glissant (`summary`) utilisé comme aperçu dans la liste
@@ -971,7 +971,7 @@ def _migrate_to_v29(conn) -> None:
     """Doublons de flashcards : une clé, un index UNIQUE, et le ménage.
 
     Rien n'empêchait d'enregistrer deux fois la même carte : « + Flashcard »
-    cliqué deux fois sous la même réponse de Gemma, une carte auto créée à la
+    cliqué deux fois sous la même réponse de Clikoda, une carte auto créée à la
     bonne réponse puis recréée à la main, la même question tapée deux fois.
     Chaque doublon revenait ensuite deux fois dans l'échauffement et faussait
     la répétition espacée (deux échéances pour un seul souvenir).
@@ -1063,7 +1063,7 @@ def _migrate_to_v32(conn) -> None:
 
     Pendant une pause, le lecteur fige tout (dérive d'attention, dwell,
     interventions) : il ne reste à mesurer que la pause elle-même — sa durée,
-    ce qui l'a déclenchée (bouton de l'élève ou conseil de Gemma accepté) et la
+    ce qui l'a déclenchée (bouton de l'élève ou conseil de Clikoda accepté) et la
     dernière recommandation du LLM qui la précédait, avec son délai. Le type et
     le délai sont gardés bruts pour pouvoir réinterpréter plus tard ce qui
     compte comme « après une recommandation » (cf. services/pause.py).
@@ -1498,7 +1498,7 @@ def _migrate_to_v35(conn) -> None:
 def _migrate_to_v36(conn) -> None:
     """Feuilleton : langue d'explication du profil (`explain_lang`).
 
-    Gemma écrivait tout en français, même pour une interface en anglais. La
+    Clikoda écrivait tout en français, même pour une interface en anglais. La
     langue est désormais choisie au début du parcours (services/lang_runs.
     onboarding) puis figée. Les profils existants ont été écrits en français :
     'fr' par défaut, leur contenu reste cohérent."""

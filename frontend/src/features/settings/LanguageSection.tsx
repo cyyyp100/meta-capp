@@ -1,7 +1,7 @@
 // LanguageSection.tsx — FR/EN.
 //
 // Ce réglage n'est pas cosmétique : `nwol/i18n.py` pilote aussi la langue des
-// prompts LLM. Le dire ici évite qu'on cherche ailleurs pourquoi Gemma a changé
+// prompts LLM. Le dire ici évite qu'on cherche ailleurs pourquoi Clikoda a changé
 // de langue.
 import type { PreferencesPayload } from "@/api/client";
 import { ChoiceRow, SettingsCard } from "./SettingsPrimitives";

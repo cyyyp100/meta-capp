@@ -57,10 +57,10 @@ Il n'y a **pas de `demo_en.pdf`** : le texte du rapport est déjà en anglais et
 `_bundled_pdf()` retombe sur `demo_fr.pdf` dans les deux langues. Ce sont les
 bulles de la visite qui sont traduites, pas le document.
 
-### Les citations mises en avant par Gemma
+### Les citations mises en avant par Clikoda
 
 Pendant le chapitre lecture, la fausse session fait « surligner » deux phrases
-par Gemma. Elles sont déclarées côté frontend, en un seul endroit :
+par Clikoda. Elles sont déclarées côté frontend, en un seul endroit :
 
     frontend/src/features/reader/demoScript.ts  →  DEMO_QUOTES
 

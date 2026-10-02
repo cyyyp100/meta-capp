@@ -226,14 +226,14 @@ export interface SessionMetrics {
   /** Pauses prises pendant la lecture (déjà retirées de `duration_s`). */
   pauses?: number;
   pause_s?: number;
-  /** Combien suivaient une recommandation de Gemma (services/pause.py). */
+  /** Combien suivaient une recommandation de Clikoda (services/pause.py). */
   pauses_after_recommendation?: number;
   /** Les questions FIXES du sas (deux) : affichées immédiatement. */
   reflection_questions: string[];
 }
 
 export interface SessionAnalysis {
-  /** Bilan qualitatif de Gemma ("" si le LLM est indisponible). */
+  /** Bilan qualitatif de Clikoda ("" si le LLM est indisponible). */
   analysis: string;
   /** 3e question de réflexion, générée pour cette session. Jamais vide. */
   question: string;

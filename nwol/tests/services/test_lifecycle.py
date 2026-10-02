@@ -10,7 +10,7 @@ from config.settings import BROWSER_AUTO_STOP_S, BROWSER_LLM_QUIET_S
 from llm import ollama_client
 from services import lifecycle
 
-IDLE = BROWSER_LLM_QUIET_S  # Gemma au repos depuis juste assez longtemps
+IDLE = BROWSER_LLM_QUIET_S  # Clikoda au repos depuis juste assez longtemps
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_a_browser_that_never_opens_still_lets_the_server_stop(stops):
 
 
 @pytest.mark.parametrize("llm_idle_for", [None, BROWSER_LLM_QUIET_S - 1])
-def test_never_while_gemma_works(stops, llm_idle_for):
+def test_never_while_clikoda_works(stops, llm_idle_for):
     """None : une tâche en file ou en cours. Juste terminée : une génération de
     fond enchaîne plusieurs appels, la file est vide un instant entre deux."""
     assert not lifecycle.should_stop(_later(BROWSER_AUTO_STOP_S + 1), llm_idle_for)
@@ -84,7 +84,7 @@ def test_the_watcher_stops_the_server_by_itself(monkeypatch):
     monkeypatch.setattr(lifecycle, "BROWSER_WATCH_INTERVAL_S", 0.01)
     stopped = threading.Event()
     lifecycle.enable_browser_mode(stopped.set)
-    assert stopped.wait(5), "aucun onglet, Gemma au repos : le serveur doit s'arrêter seul"
+    assert stopped.wait(5), "aucun onglet, Clikoda au repos : le serveur doit s'arrêter seul"
 
 
 def test_llm_idle_for_sees_queued_and_running_tasks():

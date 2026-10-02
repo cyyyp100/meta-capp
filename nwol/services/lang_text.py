@@ -3,7 +3,7 @@
 # Un épisode est affiché jeton par jeton (c'est l'unité du tap, § 10.2) : chaque
 # réplique est stockée comme une liste de jetons dont la concaténation redonne
 # EXACTEMENT le texte. Pour les écritures à espaces (latin, arabe), le découpage
-# est calculé ici ; pour le mandarin, Gemma fournit les jetons et G5 vérifie
+# est calculé ici ; pour le mandarin, Clikoda fournit les jetons et G5 vérifie
 # qu'ils recollent (services/lang_mandarin.py).
 from __future__ import annotations
 

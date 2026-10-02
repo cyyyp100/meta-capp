@@ -1,6 +1,6 @@
 # services/brainstorm.py — Cœur UI-agnostique de la page Brainstorming.
 #
-# Chat libre avec Gemma, avec mémoire par discussion ET accès à la base de
+# Chat libre avec Clikoda, avec mémoire par discussion ET accès à la base de
 # l'utilisateur. Le flux d'un message (non bloquant, à callbacks, comme
 # services/assistant.py) :
 #   1. décision LLM : faut-il chercher dans la base + mots-clés ?

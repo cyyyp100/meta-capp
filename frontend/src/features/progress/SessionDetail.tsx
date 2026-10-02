@@ -193,7 +193,7 @@ function DwellBars({ dwell }: { dwell: { page: number; dwell_s: number; visits: 
 }
 
 /** Les pauses de la séance : où, combien de temps, et ce qui les a précédées —
- *  la carte de Gemma acceptée, une recommandation juste avant, ou rien. */
+ *  la carte de Clikoda acceptée, une recommandation juste avant, ou rien. */
 function PauseList({ pauses }: { pauses: SessionPause[] }) {
   const t = useT();
   return (

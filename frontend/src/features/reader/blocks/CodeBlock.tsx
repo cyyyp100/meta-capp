@@ -5,7 +5,7 @@ import { escapeAttr, findFolded, type TextMark } from "../anchorText";
  * numéros de ligne dans une gouttière NON sélectionnable (le texte copié /
  * ajouté au contexte reste le code pur), coloration syntaxique légère et
  * indépendante du langage, plus les `marks` du lecteur (surlignages mémorisés,
- * citations de Gemma).
+ * citations de Clikoda).
  *
  * Sécurité : tout le code passe par `escape()` avant injection ; les seules
  * balises émises sont des <span class="tok-*"> et des <mark> inertes.

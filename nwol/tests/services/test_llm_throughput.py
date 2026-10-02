@@ -1,7 +1,7 @@
 """Budgets temps adaptés au débit RÉEL de la machine (llm/throughput).
 
 Les budgets partaient d'un débit mesuré sur un Mac Apple Silicon. Sur un PC
-sans GPU, Gemma va plusieurs fois moins vite : chaque réponse longue expirait
+sans GPU, Clikoda va plusieurs fois moins vite : chaque réponse longue expirait
 alors que le modèle travaillait normalement. Ces tests figent le contrat :
 une machine lente obtient plus de temps, une machine rapide jamais moins, et
 une expiration suffit à apprendre que la machine est lente.
@@ -211,7 +211,7 @@ def test_the_budget_is_set_when_the_task_leaves_the_queue():
 
 def test_ollama_is_reached_without_the_system_proxy(fake_ollama, monkeypatch):
     """`urlopen` applique le proxy du système même à 127.0.0.1 : derrière celui
-    d'un réseau d'école, Gemma passait pour éteinte."""
+    d'un réseau d'école, Clikoda passait pour éteinte."""
     fake_ollama["tags"] = {"models": [{"name": "gemma4:e4b"}]}
     for name in ("http_proxy", "HTTP_PROXY"):
         monkeypatch.setenv(name, "http://127.0.0.1:9")  # proxy injoignable
@@ -240,7 +240,7 @@ def _out_of_memory(state: dict) -> None:
 
 
 def test_out_of_memory_is_explained_and_not_retried(fake_ollama, real_provider):
-    """Une question de l'étudiant : il lit POURQUOI Gemma ne répond pas, pas
+    """Une question de l'étudiant : il lit POURQUOI Clikoda ne répond pas, pas
     une réponse générique de repli qui cacherait que la machine est trop juste."""
     _out_of_memory(fake_ollama)
     with pytest.raises(ollama_client.ModelOutOfMemory) as excinfo:

@@ -16,7 +16,7 @@ import { SasCard, SasOverlay } from "./SasOverlay";
 // Bilan de fin de session : analyse LLM + métriques + questions de réflexion métacognitive.
 //
 // Deux questions FIXES s'affichent tout de suite : l'étudiant écrit pendant que
-// Gemma travaille. La TROISIÈME est générée pour cette session et arrive avec
+// Clikoda travaille. La TROISIÈME est générée pour cette session et arrive avec
 // l'analyse — c'est le même appel qui porte les deux. Attendre le LLM pour poser
 // les trois faisait patienter devant un écran vide ; les figer toutes les trois
 // jetait une question personnalisée déjà payée.
@@ -24,7 +24,7 @@ import { SasCard, SasOverlay } from "./SasOverlay";
 // Le sas s'affiche AU CLIC sur « Terminer », avant la réponse du serveur :
 // `metrics` vaut `null` le temps de la clôture (`endSession`), et les chiffres
 // comme les deux questions fixes arrivent avec elle. En attendant, on montre la
-// structure du bilan plutôt qu'un lecteur figé — Gemma travaille en fond.
+// structure du bilan plutôt qu'un lecteur figé — Clikoda travaille en fond.
 export function ExitSas({
   sessionId,
   metrics,
@@ -108,7 +108,7 @@ export function ExitSas({
   // évalue les réponses par le LLM (`nudge_metacog_profile`), enfilé derrière
   // l'analyse de session déjà en cours — l'étudiant restait devant un bouton
   // qui tourne le temps de deux appels Ollama. Le repos post-session n'a besoin
-  // de rien de tout cela : Gemma finit en fond, les caches sont invalidés à
+  // de rien de tout cela : Clikoda finit en fond, les caches sont invalidés à
   // l'arrivée du résultat.
   //
   // « Passer » finalise AUSSI : la session a été mesurée (jauges, réponses

@@ -249,7 +249,7 @@ export const api = {
       "/api/lang/languages",
     ),
   // ── Méthode « feuilleton » (langues du pilote) ─────────────────────────────
-  // Aucun de ces appels n'attend Gemma : le serveur répond tout de suite, la
+  // Aucun de ces appels n'attend Clikoda : le serveur répond tout de suite, la
   // génération des épisodes tourne en tâche de fond.
   feuilletonStatus: (language: string) =>
     getJSON<FeuilletonStatus>(`/api/lang/${encodeURIComponent(language)}/status`),
@@ -491,7 +491,7 @@ export interface WeeklyRecap {
   pages_read: number;
   documents: string[];
   movers: { criterion: string; delta: number }[];
-  /** Le texte que Gemma réécrit à chaque finalisation — jamais régénéré ici. */
+  /** Le texte que Clikoda réécrit à chaque finalisation — jamais régénéré ici. */
   analysis: string;
   analysis_updated_at: string;
   cards: { id: number; front: string; back: string }[];
@@ -537,7 +537,7 @@ export interface SessionPause {
   started_at: string;
   page: number | null;
   duration_s: number;
-  /** Durée conseillée par Gemma (secondes), null pour une pause manuelle. */
+  /** Durée conseillée par Clikoda (secondes), null pour une pause manuelle. */
   planned_s: number | null;
   source: "manual" | "suggested";
   /** Une recommandation du LLM était arrivée juste avant (ou la carte a été acceptée). */
@@ -572,7 +572,7 @@ export interface BrainstormDiscussion {
   updated_at: string;
   /** Non null = épinglée (en tête de liste, dans l'ordre d'épinglage). */
   pinned_at: string | null;
-  /** Dossier lié : Gemma ne puise que dans ses documents (sous-dossiers compris). */
+  /** Dossier lié : Clikoda ne puise que dans ses documents (sous-dossiers compris). */
   folder_id: number | null;
   folder_name: string | null;
 }

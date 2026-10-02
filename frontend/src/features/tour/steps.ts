@@ -3,7 +3,7 @@
 // La visite était une poignée de bulles opportunistes : chaque écran signalait
 // « mon contexte vient d'apparaître » et le store décidait s'il y avait une
 // bulle à jouer. C'était élégant et ça ne montrait presque rien — quelqu'un qui
-// n'importait aucun document ne voyait jamais ni Gemma, ni les sas, ni le
+// n'importait aucun document ne voyait jamais ni Clikoda, ni les sas, ni le
 // profil, c'est-à-dire ni le produit ni ce qui le distingue.
 //
 // La visite est donc maintenant un PARCOURS : elle emprunte un document de
@@ -32,7 +32,7 @@ export interface TourStepDef {
    * Autres `data-tour` à garder en clair, en plus de la cible.
    *
    * Une étape peut avoir besoin de montrer deux choses à la fois : la réponse
-   * de Gemma ET le passage qu'elle vient de surligner dans la page. Sans ça, on
+   * de Clikoda ET le passage qu'elle vient de surligner dans la page. Sans ça, on
    * lit « elle surligne le passage dont elle parle » en regardant un passage
    * noyé dans le voile.
    */
@@ -97,28 +97,28 @@ export const TOUR_STEPS: TourStepDef[] = [
   },
   { id: "toolbar", target: "toolbar", side: "bottom", chapter: "reading", needsDemo: true },
   // À partir d'ici et jusqu'au sas de sortie, la vue ne bouge plus : on se cale
-  // une fois sur le passage que Gemma va citer, et le lecteur est figé (cf.
+  // une fois sur le passage que Clikoda va citer, et le lecteur est figé (cf.
   // `Reader`). Une découpe qui se déplace pendant qu'on lit la bulle qui la
   // commente est le seul défaut qu'une coach mark ne pardonne pas.
   {
-    id: "gemma-bubble",
-    target: "gemma",
+    id: "clikoda-bubble",
+    target: "clikoda",
     side: "left",
     chapter: "reading",
     needsDemo: true,
     enter: (ctx) => ctx.demo?.pinPassage(),
   },
   {
-    id: "gemma-panel",
-    target: "gemma-body",
+    id: "clikoda-panel",
+    target: "clikoda-body",
     side: "left",
     chapter: "reading",
     needsDemo: true,
     enter: (ctx) => ctx.demo?.openPanel(),
   },
   {
-    id: "gemma-answer",
-    target: "gemma-body",
+    id: "clikoda-answer",
+    target: "clikoda-body",
     side: "left",
     chapter: "reading",
     needsDemo: true,
@@ -127,19 +127,19 @@ export const TOUR_STEPS: TourStepDef[] = [
     reveal: ["quote"],
     enter: (ctx) => ctx.demo?.play("answer"),
   },
-  { id: "gemma-mode", target: "gemma-mode", side: "bottom", chapter: "reading", needsDemo: true },
-  { id: "gemma-chips", target: "gemma-chips", side: "top", chapter: "reading", needsDemo: true },
+  { id: "clikoda-mode", target: "clikoda-mode", side: "bottom", chapter: "reading", needsDemo: true },
+  { id: "clikoda-chips", target: "clikoda-chips", side: "top", chapter: "reading", needsDemo: true },
   {
     id: "intervention",
-    target: "gemma-body",
+    target: "clikoda-body",
     side: "left",
     chapter: "reading",
     needsDemo: true,
     enter: (ctx) => ctx.demo?.play("intervention"),
   },
   {
-    id: "gemma-qa",
-    target: "gemma-qa",
+    id: "clikoda-qa",
+    target: "clikoda-qa",
     side: "left",
     chapter: "reading",
     needsDemo: true,

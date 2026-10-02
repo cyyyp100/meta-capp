@@ -1,6 +1,6 @@
 # services/brainstorm_search.py — Recherche de contexte dans la base utilisateur.
 #
-# C'est le « tool » de Gemma pour le brainstorming : à partir d'une requête en
+# C'est le « tool » de Clikoda pour le brainstorming : à partir d'une requête en
 # langage naturel décidée par le LLM, on fouille les contenus de l'utilisateur
 # (PDFs importés, surlignages, flashcards, anciennes Q&R, réponses fausses ou
 # partielles) et on renvoie des extraits normalisés que le prompt et l'UI peuvent
@@ -18,7 +18,7 @@
 # `LIKE` SQL (qui ne sait pas matcher « photosynthèse » ↔ « photosynthese »).
 # (Seul services/pdf_rag.py, la recherche dans le document LU, ajoute une couche
 # d'embeddings au lexical : là, la question est en français et le document en
-# anglais, et la réponse fonde le contenu de Gemma, pas seulement sa couleur.)
+# anglais, et la réponse fonde le contenu de Clikoda, pas seulement sa couleur.)
 #
 # Le classement est un score de coordination : nombre de termes DISTINCTS trouvés
 # d'abord, occurrences ensuite (`services.selection.relevance`). Pas d'IDF, pas de

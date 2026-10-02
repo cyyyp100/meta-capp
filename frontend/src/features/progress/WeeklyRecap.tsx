@@ -5,7 +5,7 @@
 // quelque chose qu'on ne savait pas. C'est celui-là.
 //
 // Quatre éléments, dans l'ordre où on veut les lire : ce que j'ai lu, ce qui a
-// bougé, ce que Gemma a remarqué, ce qu'il me reste à revoir. Rien de plus —
+// bougé, ce que Clikoda a remarqué, ce qu'il me reste à revoir. Rien de plus —
 // un bilan qui déborde n'est plus lu.
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, CalendarDays } from "lucide-react";
@@ -71,7 +71,7 @@ export function WeeklyRecap() {
             </div>
           )}
 
-          {/* Ce que Gemma a remarqué. C'est l'observation personnelle qui
+          {/* Ce que Clikoda a remarqué. C'est l'observation personnelle qui
               accroche — l'étude qui la fonde se consulte APRÈS, sur /stats/science. */}
           {data.analysis && (
             <p className="mt-4 mb-0 border-l-2 border-brand pl-3.5 text-sm leading-relaxed text-text-soft">

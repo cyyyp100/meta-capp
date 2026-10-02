@@ -8,7 +8,7 @@
 #
 # UI-agnostique : tout entre et sort par callbacks, et TOUS les seuils viennent
 # de `config/settings.py` — c'est la source de vérité unique de la cadence de
-# Gemma. Ne jamais réintroduire de valeur en dur ici ou chez un appelant.
+# Clikoda. Ne jamais réintroduire de valeur en dur ici ou chez un appelant.
 from __future__ import annotations
 
 import logging
@@ -121,7 +121,7 @@ class AssistantInterventionPolicy:
     def skip(self, seconds: float) -> None:
         """Retire une pause des horloges : warm-up et cooldowns reprennent où ils
         en étaient. Sans ça, une pause de dix minutes consommait le cooldown, et
-        Gemma intervenait à la seconde où l'élève revenait."""
+        Clikoda intervenait à la seconde où l'élève revenait."""
         seconds = max(0.0, float(seconds))
         if self._opened_at is not None:
             self._opened_at += seconds

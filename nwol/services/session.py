@@ -198,7 +198,7 @@ def start_session(doc_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
 
 
 def end_session(session_id: int, pages_read: int | None = None, duration_s: int | None = None) -> dict:
-    """Clôt la session et coupe Gemma — en file ET en vol.
+    """Clôt la session et coupe Clikoda — en file ET en vol.
 
     « Terminer » arrive souvent pendant qu'une correction ou une intervention
     est en cours : leur résultat n'a plus de destinataire, et il n'y a qu'UN

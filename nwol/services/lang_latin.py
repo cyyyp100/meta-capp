@@ -3,7 +3,7 @@
 # Anglais, espagnol, allemand : ce que l'apprenant reconnaît déjà (mots
 # transparents, comparés à la traduction dans SA langue d'explication), ce qui
 # piège un francophone (faux-amis), ce qu'il doit apprendre avec chaque nom (le
-# genre). Rien ici n'appelle Gemma.
+# genre). Rien ici n'appelle Clikoda.
 from __future__ import annotations
 
 import re

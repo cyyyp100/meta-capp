@@ -22,11 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   double-click — reopens the running instance.
 - Browser mode can be quit without a terminal: **Quit Meta-Capp** in the profile menu,
   or close the tab — the app stops by itself three minutes after the last tab closes,
-  once Gemma has finished what it was doing.
+  once Clikoda has finished what it was doing.
 
 ### Changed
 
-- **Generation time budgets follow Gemma's measured speed.** A short calibration
+- **The assistant is now called Clikoda.** It still runs on Google's open-source
+  Gemma 4 model (`gemma4:e4b`) through Ollama; only its name changes. The floating
+  panel's saved position and layout reset once.
+- **Generation time budgets follow Clikoda's measured speed.** A short calibration
   call at startup and every answer feed an estimate of the machine's throughput;
   a machine slower than the reference (CPU-only laptop, Intel Mac) gets
   proportionally longer budgets, up to 8×, instead of timing out on every long
@@ -40,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows from source: the frontend auto-build failed (`npm` is `npm.cmd`), and
   the conda re-exec looked for `bin/python`.
 - Behind an HTTP proxy (system setting or `http_proxy`, common on school and company
-  networks) the app could fail to start and Gemma looked offline: local calls to the
+  networks) the app could fail to start and Clikoda looked offline: local calls to the
   app's own server and to Ollama no longer go through the proxy.
 - Windows: every call to Ollama waited about 2 s (`localhost` tried IPv6 first, which
   Ollama does not listen on).
@@ -60,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Free-scroll PDF reader**: the document is rendered page by page at full fidelity,
   with no reconstruction and no progression locks.
-- **Embodied assistant "Gemma"**: an animated bubble over the page with idle, reading,
+- **Embodied assistant "Clikoda"**: an animated bubble over the page with idle, reading,
   thinking, answering, intervention and sleeping states.
 - **Submit-time context capture**: every question is answered against a snapshot of the
   page visible at the moment Send was pressed.

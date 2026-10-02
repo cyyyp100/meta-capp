@@ -606,7 +606,7 @@ def test_migration_v34_keeps_a_single_blank_discussion(client):
 
 
 def test_one_question_at_a_time_per_discussion(client, monkeypatch):
-    """Tant que Gemma répond, une seconde question dans la MÊME discussion est
+    """Tant que Clikoda répond, une seconde question dans la MÊME discussion est
     refusée sans rien persister : deux questions croisées entrelaçaient leurs
     messages et chaque réponse ignorait l'autre."""
     import services.brainstorm as svc

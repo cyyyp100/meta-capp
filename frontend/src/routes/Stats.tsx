@@ -87,7 +87,7 @@ export function Stats() {
         </div>
       </Card>
 
-      {/* Analyse générale de l'apprenant (rédigée par Gemma en fin de session). */}
+      {/* Analyse générale de l'apprenant (rédigée par Clikoda en fin de session). */}
       {data.general_analysis ? (
         <Card style={{ marginBottom: "var(--space-lg)" }}>
           <SectionTitle>{t("stats.analysis_title")}</SectionTitle>

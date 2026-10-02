@@ -1,6 +1,6 @@
 # services/lang_games.py — Petits jeux et micro-items, construits depuis le texte (§ 10.3).
 #
-# Rien n'est demandé à Gemma : chaque jeu est tiré de l'épisode stocké (jetons,
+# Rien n'est demandé à Clikoda : chaque jeu est tiré de l'épisode stocké (jetons,
 # glossaire, point du jour, aides calculées), avec une graine dérivée de l'id de
 # séance — la variété est reproductible. Tout se joue au tap. Le front reçoit
 # les clés pour un retour immédiat, mais le résultat ENREGISTRÉ est recalculé

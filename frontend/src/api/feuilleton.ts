@@ -4,7 +4,7 @@
 // qui décide (mode de séance, aides visibles, corrigés, plafond) est calculé
 // côté serveur : le front rend un plan et renvoie des événements.
 
-/** Langue dans laquelle Gemma écrit pour ce profil (traductions, notes…). */
+/** Langue dans laquelle Clikoda écrit pour ce profil (traductions, notes…). */
 export type ExplainLang = "fr" | "en";
 
 export interface FeuilletonStatus {

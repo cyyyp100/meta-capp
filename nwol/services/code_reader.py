@@ -158,7 +158,7 @@ def page_block(path: str, page: int) -> dict:
 
 
 def page_text(path: str, page: int) -> str:
-    """Texte de page pour le LLM : code NUMÉROTÉ (Gemma peut citer des lignes).
+    """Texte de page pour le LLM : code NUMÉROTÉ (Clikoda peut citer des lignes).
 
     Diffère du bloc de rendu (numéros inclus ici) afin d'aider le compagnon à
     localiser et expliquer/déboguer une ligne précise.

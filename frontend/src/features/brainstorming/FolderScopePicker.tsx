@@ -1,6 +1,6 @@
 // FolderScopePicker.tsx — Dossier de la bibliothèque auquel une discussion est liée.
 //
-// Lié, Gemma ne puise plus que dans les documents de ce dossier et de ses
+// Lié, Clikoda ne puise plus que dans les documents de ce dossier et de ses
 // sous-dossiers (surlignages, flashcards, Q&R, erreurs) ; la politique vit dans
 // `services/brainstorm.py`, ce composant ne fait que choisir l'id. Le choix
 // reste modifiable : il vaut pour les messages suivants.

@@ -1,6 +1,6 @@
 // PauseSas — L'écran de pause de la lecture.
 //
-// L'élève s'arrête (bouton « Pause » du lecteur) ou prend la pause que Gemma
+// L'élève s'arrête (bouton « Pause » du lecteur) ou prend la pause que Clikoda
 // conseille : le PDF disparaît derrière un voile, et tant qu'il n'a pas repris,
 // plus rien n'est mesuré — le serveur fige attention, dwell, interventions et
 // horloges (services/pause.py). Seules la durée de la pause et ce qui l'a
@@ -22,9 +22,9 @@ import { SasCard, SasOverlay } from "./SasOverlay";
 
 /** Une pause en cours. */
 export interface ReadingPause {
-  /** `manual` : bouton du lecteur ; `suggested` : carte de Gemma acceptée. */
+  /** `manual` : bouton du lecteur ; `suggested` : carte de Clikoda acceptée. */
   source: "manual" | "suggested";
-  /** Durée conseillée par Gemma, en minutes ; null pour une pause manuelle. */
+  /** Durée conseillée par Clikoda, en minutes ; null pour une pause manuelle. */
   plannedMin: number | null;
   /** `Date.now()` au début de la pause. */
   startedAt: number;

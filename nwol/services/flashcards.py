@@ -69,7 +69,7 @@ def find_flashcard(
     """Id de la carte qui existe déjà pour ce recto/verso (au sens, pas à
     l'octet : casse, accents et blancs ne comptent pas), None sinon.
 
-    Pour une carte issue d'un échange avec Gemma, passer l'échange BRUT —
+    Pour une carte issue d'un échange avec Clikoda, passer l'échange BRUT —
     c'est lui qui sert de clé, cf. `create_flashcard(origin=...)`."""
     return find_flashcard_id(user_id, flashcard_key(front, back))
 
@@ -95,7 +95,7 @@ def create_flashcard(
 
     LA politique de doublon : une carte est identifiée par ce dont elle est
     issue. D'ordinaire son recto/verso ; pour une carte que le LLM a réécrite
-    depuis un échange avec Gemma, l'échange brut (`origin`) — la réécriture
+    depuis un échange avec Clikoda, l'échange brut (`origin`) — la réécriture
     change à chaque appel, deux clics sur « + Flashcard » donneraient sinon deux
     cartes différentes du même échange. L'index UNIQUE (v29) fait le reste :
     on ne crée jamais deux fois la même carte, quel que soit le chemin

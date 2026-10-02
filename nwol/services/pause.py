@@ -7,7 +7,7 @@
 #   * sa durée (de l'arrêt à la reprise — la pause est ouverte, c'est l'élève
 #     qui revient, pas un décompte qui le ramène) ;
 #   * sa source : le bouton « Pause » de l'élève (`manual`) ou la carte de
-#     Gemma acceptée (`suggested`) ;
+#     Clikoda acceptée (`suggested`) ;
 #   * si elle SUIT une recommandation du LLM, laquelle et avec quel délai.
 #
 # UI-agnostique : le routeur du lecteur ne fait que relayer les événements
@@ -92,7 +92,7 @@ class PauseTracker:
             "mono": now,
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "page": page,
-            # Une durée conseillée n'a de sens que pour la carte de Gemma.
+            # Une durée conseillée n'a de sens que pour la carte de Clikoda.
             "planned_s": float(planned_s) if source == "suggested" and planned_s else None,
             "source": source,
             # Accepter la carte EST suivre la recommandation ; sinon, il faut

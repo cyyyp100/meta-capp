@@ -1,4 +1,4 @@
-# db/brainstorm.py — CRUD des discussions de brainstorming (chat libre avec Gemma).
+# db/brainstorm.py — CRUD des discussions de brainstorming (chat libre avec Clikoda).
 #
 # Deux tables (schéma v23) :
 #   brainstorm_discussions : 1 ligne par discussion (+ résumé glissant ;

@@ -1,4 +1,4 @@
-// GemmaPanel.test.tsx — Les commandes du panneau doivent avoir un NOM.
+// ClikodaPanel.test.tsx — Les commandes du panneau doivent avoir un NOM.
 //
 // Elles étaient six emoji nus (✦ 🟢 ⚪️ 🎯 ⤢ ▭ ✕ ↵) : rien ne les annonçait à un
 // lecteur d'écran, et leur rendu changeait d'un système à l'autre. Ce test fige
@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { api } from "../../api/client";
-import { GemmaPanel } from "./GemmaPanel";
+import { ClikodaPanel } from "./ClikodaPanel";
 
 /** WebSocket minimal : se déclare ouvert, avale ce qu'on lui envoie. */
 class FakeWebSocket {
@@ -48,21 +48,21 @@ class FakeWebSocket {
 }
 
 /**
- * Rend le panneau ET l'ouvre. Gemma démarre replié en bulle ; l'ouvrir passait
+ * Rend le panneau ET l'ouvre. Clikoda démarre replié en bulle ; l'ouvrir passait
  * par un `<div onClick>` — donc uniquement à la souris. C'est maintenant un
  * vrai bouton, ce que ce parcours vérifie au passage.
  */
-async function renderOpenPanel(props: Partial<React.ComponentProps<typeof GemmaPanel>> = {}) {
+async function renderOpenPanel(props: Partial<React.ComponentProps<typeof ClikodaPanel>> = {}) {
   const view = render(
     <TooltipProvider>
-      <GemmaPanel docId={1} currentPage={1} sessionId={null} {...props} />
+      <ClikodaPanel docId={1} currentPage={1} sessionId={null} {...props} />
     </TooltipProvider>,
   );
-  await userEvent.click(await screen.findByRole("button", { name: /gemma|ouvrir|open/i }));
+  await userEvent.click(await screen.findByRole("button", { name: /clikoda|ouvrir|open/i }));
   return view;
 }
 
-/** Le champ de conversation avec Gemma (sous le fil). */
+/** Le champ de conversation avec Clikoda (sous le fil). */
 function chatBox() {
   return screen.getByPlaceholderText(/question sur la page|question about page/i);
 }
@@ -87,7 +87,7 @@ async function playOneQuestion(verdict: string, extra: Record<string, unknown> =
   });
 }
 
-describe("GemmaPanel", () => {
+describe("ClikodaPanel", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     // Le panneau mémorise sa position et son état ouvert/fermé dans localStorage.
@@ -111,7 +111,7 @@ describe("GemmaPanel", () => {
 
     // C'était 🟢 / ⚪️ — deux emoji dont personne ne devine le sens.
     const light = await screen.findByRole("status");
-    expect(light).toHaveAttribute("aria-label", expect.stringMatching(/gemma/i));
+    expect(light).toHaveAttribute("aria-label", expect.stringMatching(/clikoda/i));
   });
 
   it("propose le mode d'accompagnement dans un sélecteur nommé et traduit", async () => {
@@ -122,7 +122,7 @@ describe("GemmaPanel", () => {
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveTextContent(/normal/i);
     // Le bouton fermé annonce le mode, pas son explication : celle-ci n'aide
-    // qu'au moment de choisir, et occupait un tiers de l'en-tête de Gemma.
+    // qu'au moment de choisir, et occupait un tiers de l'en-tête de Clikoda.
     expect(trigger).not.toHaveTextContent(/moments clés|key moments/i);
   });
 
@@ -182,9 +182,9 @@ describe("GemmaPanel", () => {
   // rien lui envoyer de la présence de l'élève, et signaler l'arrêt et la reprise.
   it("signale la pause et la reprise, et se tait entre les deux", async () => {
     const sent = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m));
-    const panel = (paused: React.ComponentProps<typeof GemmaPanel>["paused"]) => (
+    const panel = (paused: React.ComponentProps<typeof ClikodaPanel>["paused"]) => (
       <TooltipProvider>
-        <GemmaPanel docId={1} currentPage={1} sessionId={null} reading paused={paused} />
+        <ClikodaPanel docId={1} currentPage={1} sessionId={null} reading paused={paused} />
       </TooltipProvider>
     );
     const view = await renderOpenPanel({ reading: true });
@@ -265,7 +265,7 @@ describe("GemmaPanel", () => {
 
     // La conversation continue APRÈS l'encadré, pas au-dessus.
     await userEvent.type(chatBox(), "Et ensuite ?{Enter}");
-    const order = [...screen.getByTestId("gemma-body").querySelectorAll("[data-testid='qa-card'], [data-role='user']")];
+    const order = [...screen.getByTestId("clikoda-body").querySelectorAll("[data-testid='qa-card'], [data-role='user']")];
     expect(order.at(0)).toHaveAttribute("data-testid", "qa-card");
     expect(order.at(-1)).toHaveTextContent("Et ensuite ?");
   });
@@ -294,7 +294,7 @@ describe("GemmaPanel", () => {
     expect(cards[0]).toHaveTextContent(/c'est bien ça/i);
   });
 
-  // Pendant que Gemma corrige, on peut relire la page : le verrou du lecteur est
+  // Pendant que Clikoda corrige, on peut relire la page : le verrou du lecteur est
   // levé à l'envoi de la réponse, et reposé seulement si elle est fausse.
   it("libère le lecteur le temps de la correction d'une question bloquante", async () => {
     const onGatedChange = vi.fn();
@@ -322,9 +322,9 @@ describe("GemmaPanel", () => {
   });
 
   // Après une réponse fausse, « Réessayer » relance une génération : pendant
-  // que Gemma prépare la question suivante, on est libre de bouger dans le
+  // que Clikoda prépare la question suivante, on est libre de bouger dans le
   // document. Le verrou revient avec la question.
-  it("libère le lecteur pendant que Gemma prépare la question suivante après une réponse fausse", async () => {
+  it("libère le lecteur pendant que Clikoda prépare la question suivante après une réponse fausse", async () => {
     const onGatedChange = vi.fn();
     await renderOpenPanel({ onGatedChange });
     await act(async () => {
@@ -360,9 +360,9 @@ describe("GemmaPanel", () => {
     expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
   });
 
-  // Une question posée à Gemma pendant une question bloquante : le lecteur est
+  // Une question posée à Clikoda pendant une question bloquante : le lecteur est
   // rendu le temps de la réponse, et revient se caler sur la zone ensuite.
-  it("libère le lecteur pendant que Gemma répond, même sous une question bloquante", async () => {
+  it("libère le lecteur pendant que Clikoda répond, même sous une question bloquante", async () => {
     const onGatedChange = vi.fn();
     await renderOpenPanel({ onGatedChange });
     await act(async () => {
@@ -396,7 +396,7 @@ describe("GemmaPanel", () => {
     await renderOpenPanel();
     await userEvent.type(chatBox(), "Question{Enter}");
     await act(async () => {
-      FakeWebSocket.last?.emit({ type: "answer", answer: "Réponse de Gemma.", highlights: [] });
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Réponse de Clikoda.", highlights: [] });
     });
 
     const button = await screen.findByRole("button", { name: /flashcard/i });
@@ -411,7 +411,7 @@ describe("GemmaPanel", () => {
     await waitFor(() => expect(button).toHaveTextContent(/✓/));
     await userEvent.click(button);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(within(screen.getByTestId("gemma-body")).getByText(/flashcard créée|flashcard created/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId("clikoda-body")).getByText(/flashcard créée|flashcard created/i)).toBeInTheDocument();
   });
 
   it("déverrouille définitivement le lecteur sur une bonne réponse", async () => {
@@ -472,7 +472,7 @@ describe("GemmaPanel", () => {
 
     view.rerender(
       <TooltipProvider>
-        <GemmaPanel docId={1} currentPage={1} sessionId={null} reading />
+        <ClikodaPanel docId={1} currentPage={1} sessionId={null} reading />
       </TooltipProvider>,
     );
     await waitFor(() => expect(sentTypes()).toContain("start_reading"));

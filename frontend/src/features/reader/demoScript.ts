@@ -1,6 +1,6 @@
 // demoScript.ts — Le contenu de la fausse séance de lecture de la visite.
 //
-// La visite guidée doit montrer Gemma en train de travailler. Deux façons de le
+// La visite guidée doit montrer Clikoda en train de travailler. Deux façons de le
 // faire : lancer une VRAIE session, ou en jouer une écrite d'avance. C'est la
 // seconde qui est retenue, et pas par facilité :
 //
@@ -24,7 +24,7 @@ import type { SessionMetrics } from "../../api/types";
 export type DemoBeat = "answer" | "intervention" | "question";
 
 /**
- * Les phrases que Gemma « surligne » dans la page.
+ * Les phrases que Clikoda « surligne » dans la page.
  *
  * Elles doivent exister MOT POUR MOT dans la première page du PDF de
  * démonstration (`nwol/resources/`), sans quoi `api.searchPage` ne trouve rien
@@ -88,7 +88,7 @@ export const DEMO_QUESTION = {
   feedbackKey: "demo.qa_feedback",
 } as const;
 
-/** Temps de « réflexion » simulé (ms) avant qu'une réplique de Gemma n'arrive.
+/** Temps de « réflexion » simulé (ms) avant qu'une réplique de Clikoda n'arrive.
  *
  *  Il couvre le changement d'étape de la visite — sortie de la bulle quittée
  *  puis entrée de la suivante, cf. `tour/Coachmark.tsx` — avec de la marge : la
@@ -98,7 +98,7 @@ export const DEMO_THINKING_MS = 1400;
 
 /** Les répliques jouées, dans l'ordre où les étapes les déclenchent. */
 export const DEMO_BEATS: Record<DemoBeat, { userKey?: string; assistantKey?: string }> = {
-  // L'utilisateur pose une question, Gemma répond en citant la page.
+  // L'utilisateur pose une question, Clikoda répond en citant la page.
   answer: { userKey: "demo.ask", assistantKey: "demo.answer" },
   // Personne n'a rien demandé : c'est le moment où le produit se montre.
   intervention: { assistantKey: "demo.intervention" },

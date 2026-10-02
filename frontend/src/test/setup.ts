@@ -56,7 +56,7 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
-// Le fil de Gemma défile jusqu'en bas à chaque message (`scrollTo`), que jsdom
+// Le fil de Clikoda défile jusqu'en bas à chaque message (`scrollTo`), que jsdom
 // ne définit pas non plus sur les éléments.
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = () => {};

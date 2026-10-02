@@ -268,7 +268,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
     intro: [
       "Cette page transpose dans la version web la page explicative qui existait déjà dans l'application Tkinter. Elle liste les sources psychologiques utilisées pour justifier les sas, les questions, les flashcards, les jauges et le profil métacognitif.",
       "Les jauges ne sont pas des mesures médicales. Ce sont des indicateurs pédagogiques internes qui résument des signaux observables pour adapter le rythme, les questions et les révisions.",
-      "La version web garde le principe central : lire librement, interagir avec Gemma, produire des réponses, recevoir du feedback, consolider le profil, puis terminer par un sas de réflexion et une pause de repos.",
+      "La version web garde le principe central : lire librement, interagir avec Clikoda, produire des réponses, recevoir du feedback, consolider le profil, puis terminer par un sas de réflexion et une pause de repos.",
     ],
     definition: {
       title: "Définition simple",
@@ -281,7 +281,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
     flowSteps: [
       "Sas d'entrée : ralentir, poser l'attention, recevoir une accroche de curiosité.",
       "Warm-up : revoir les cartes dues avant d'ajouter de nouvelles informations.",
-      "Lecture libre : parcourir le PDF en scroll, avec Gemma connectée à la page visible.",
+      "Lecture libre : parcourir le PDF en scroll, avec Clikoda connectée à la page visible.",
       "Questions et feedback : questions libres, Q&R guidée, verdicts et surlignages.",
       "Profil : jauges live, historique, flashcards et courbes de progression.",
       "Sas de sortie : métriques, réflexion métacognitive, finalisation de session.",
@@ -294,13 +294,13 @@ export const scienceContent: Record<Lang, ScienceContent> = {
         cards: [
           {
             title: "Lecture scroll libre",
-            body: "Le document reste entier et scrollable. La page dominante visible donne le contexte envoyé à Gemma, au lieu d'un flux Tkinter bloqué paragraphe par paragraphe.",
+            body: "Le document reste entier et scrollable. La page dominante visible donne le contexte envoyé à Clikoda, au lieu d'un flux Tkinter bloqué paragraphe par paragraphe.",
             user: "L'utilisateur lit naturellement, zoome et scrolle sans progression verrouillée.",
             system: "Le système suit page visible, dwell time, visites, échanges récents et session active.",
           },
           {
-            title: "Assistant Gemma",
-            body: "Gemma répond aux questions, reformule, résume la page courante, génère des accroches et peut lancer une question guidée.",
+            title: "Assistant Clikoda",
+            body: "Clikoda répond aux questions, reformule, résume la page courante, génère des accroches et peut lancer une question guidée.",
             user: "Une bulle déplaçable accompagne la lecture.",
             system: "Les réponses libres peuvent mettre à jour les jauges live et les échanges sont persistés.",
           },
@@ -435,7 +435,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
     intro: [
       "This page ports to the web the explanatory page that already existed in the Tkinter application. It lists the psychological sources used to justify the airlocks, questions, flashcards, gauges and metacognitive profile.",
       "The gauges are not medical measures. They are internal pedagogical indicators that summarize observable signals to adapt pacing, questions and reviews.",
-      "The web version keeps the central idea: read freely, interact with Gemma, produce answers, receive feedback, consolidate the profile, then close with reflection and a short rest pause.",
+      "The web version keeps the central idea: read freely, interact with Clikoda, produce answers, receive feedback, consolidate the profile, then close with reflection and a short rest pause.",
     ],
     definition: {
       title: "Simple definition",
@@ -448,7 +448,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
     flowSteps: [
       "Entry airlock: slow down, settle attention, receive a curiosity hook.",
       "Warm-up: review due cards before adding new information.",
-      "Free reading: scroll through the PDF, with Gemma connected to the visible page.",
+      "Free reading: scroll through the PDF, with Clikoda connected to the visible page.",
       "Questions and feedback: free questions, guided Q&A, verdicts and highlights.",
       "Profile: live gauges, history, flashcards and progress curves.",
       "Exit airlock: metrics, metacognitive reflection, session finalization.",
@@ -461,13 +461,13 @@ export const scienceContent: Record<Lang, ScienceContent> = {
         cards: [
           {
             title: "Free-scroll reading",
-            body: "The document stays whole and scrollable. The dominant visible page gives Gemma its context instead of a Tkinter paragraph-by-paragraph gated flow.",
+            body: "The document stays whole and scrollable. The dominant visible page gives Clikoda its context instead of a Tkinter paragraph-by-paragraph gated flow.",
             user: "The user reads naturally, zooms and scrolls without a locked progression.",
             system: "The system tracks visible page, dwell time, visits, recent exchanges and the active session.",
           },
           {
-            title: "Gemma assistant",
-            body: "Gemma answers questions, rephrases, summarizes the current page, generates curiosity hooks and can start a guided question.",
+            title: "Clikoda assistant",
+            body: "Clikoda answers questions, rephrases, summarizes the current page, generates curiosity hooks and can start a guided question.",
             user: "A draggable bubble accompanies reading.",
             system: "Free answers can update live gauges and exchanges are persisted.",
           },
@@ -608,7 +608,7 @@ export const whyContent: Record<Lang, Record<WhyKey, WhyContent>> = {
       conclusion:
         "Entrer directement dans un PDF pousse souvent à lire en pilote automatique. Une intention courte et une accroche intrigante aident à passer d'une navigation passive à une session d'apprentissage.",
       inApp:
-        "Meta-Capp utilise donc un court ralentissement, un compte à rebours et une accroche générée par Gemma avant la lecture.",
+        "Meta-Capp utilise donc un court ralentissement, un compte à rebours et une accroche générée par Clikoda avant la lecture.",
       sources: ["Zimmerman (2002)", "Loewenstein (1994)", "Kang et al. (2009)"],
     },
     warmup: {
@@ -664,7 +664,7 @@ export const whyContent: Record<Lang, Record<WhyKey, WhyContent>> = {
         "Zimmerman describes self-regulated learning as a cycle that starts with preparation. Loewenstein and Kang et al. also show that a curiosity gap can increase engagement and support later recall.",
       conclusion:
         "Jumping straight into a PDF often encourages autopilot reading. A short intention and an intriguing hook help move from passive browsing to a learning session.",
-      inApp: "Meta-Capp therefore uses a short slowdown, countdown and Gemma-generated hook before reading.",
+      inApp: "Meta-Capp therefore uses a short slowdown, countdown and Clikoda-generated hook before reading.",
       sources: ["Zimmerman (2002)", "Loewenstein (1994)", "Kang et al. (2009)"],
     },
     warmup: {

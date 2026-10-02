@@ -121,4 +121,4 @@ def test_the_dead_tour_step_preference_is_gone(client):
     body = client.get("/api/preferences").json()
     assert "tour_step" not in body["preferences"]
     assert body["preferences"]["tour_done"] == "false"
-    assert client.post("/api/preferences", json={"tour_step": "gemma"}).status_code == 400
+    assert client.post("/api/preferences", json={"tour_step": "clikoda"}).status_code == 400

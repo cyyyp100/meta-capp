@@ -783,7 +783,7 @@ def finalize_lang_lesson(
 
     Comme la finalisation d'une session PDF, mais sans session de lecture
     (session_id=None) : les réponses de métacognition et le score de séance font
-    glisser les 6 jauges du profil et régénèrent l'analyse générale de Gemma."""
+    glisser les 6 jauges du profil et régénèrent l'analyse générale de Clikoda."""
     lesson = get_lang_lesson(lesson_id)
     if not lesson:
         return {"error": "Séance introuvable."}

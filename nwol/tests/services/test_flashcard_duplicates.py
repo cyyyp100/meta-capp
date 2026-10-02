@@ -1,7 +1,7 @@
 """Une flashcard n'existe qu'une fois — quel que soit le chemin qui la crée.
 
 Avant la v29, rien ne l'empêchait : « + Flashcard » cliqué deux fois sous la
-même réponse de Gemma, la même carte tapée deux fois, une carte auto créée à
+même réponse de Clikoda, la même carte tapée deux fois, une carte auto créée à
 la bonne réponse puis recréée à la main. Chaque doublon revenait deux fois en
 échauffement et faussait la répétition espacée.
 """

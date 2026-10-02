@@ -5,7 +5,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Référence de page telle que Gemma l'écrit (« p.29 », « p. 29 », « page 29 »,
+// Référence de page telle que Clikoda l'écrit (« p.29 », « p. 29 », « page 29 »,
 // « pages 12 et 13 », « pp. 4-6 ») : chaque numéro devient un lien cliquable
 // porteur de `data-page-ref`. Appliqué APRÈS l'échappement, sur du texte sûr —
 // le seul HTML injecté est le nôtre.
@@ -25,7 +25,7 @@ export function linkPageRefs(escaped: string, maxPage?: number): string {
 
 // Rend le texte en HTML : les segments $...$ deviennent des formules KaTeX,
 // le reste est échappé (sécurité) avec les retours à la ligne conservés.
-// `pageLinks` : rendre les références de page cliquables (réponses de Gemma).
+// `pageLinks` : rendre les références de page cliquables (réponses de Clikoda).
 export function renderMathToHtml(text: string, opts?: { pageLinks?: boolean; maxPage?: number }): string {
   const parts = text.split(/(\$[^$\n]+\$)/g);
   return parts

@@ -93,7 +93,7 @@ export function AnswerInput({
         onChange={(e) => setDraft?.(e.target.value)}
         onSubmit={() => onSubmit(draft ?? "")}
         placeholder={t(questionTypeMeta(key).hintKey)}
-        aria-label={t("gemma.your_answer")}
+        aria-label={t("clikoda.your_answer")}
         style={textareaStyle}
       />
       <Button onClick={() => onSubmit(draft ?? "")} pending={busy} className="shrink-0">

@@ -30,6 +30,6 @@ test.describe("Brainstorming", () => {
     expect(blanks).toHaveLength(1);
 
     // Le clic a un effet visible même quand la page blanche était déjà ouverte.
-    await expect(page.getByPlaceholder(/pose ta question|ask gemma/i)).toBeFocused();
+    await expect(page.getByPlaceholder(/pose ta question|ask clikoda/i)).toBeFocused();
   });
 });

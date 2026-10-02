@@ -313,7 +313,7 @@ def test_a_pause_is_skipped_by_dwell_and_stagnation() -> None:
 
 def test_a_pause_freezes_warmup_and_cooldowns(monkeypatch):
     """Une pause de dix minutes ne doit pas « consommer » le cooldown : sans ça,
-    Gemma intervenait à la seconde où l'élève revenait."""
+    Clikoda intervenait à la seconde où l'élève revenait."""
     clock = {"t": 1000.0}
     monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
     policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, cooldown=240.0, warmup=120.0)

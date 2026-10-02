@@ -1,6 +1,6 @@
 """Relecture des vocalisations arabes observées (plan A7, § 14 n° 7 du rapport 18).
 
-Chaque mot arabe écrit par Gemma laisse une trace dans `lang_vocalized_forms` :
+Chaque mot arabe écrit par Clikoda laisse une trace dans `lang_vocalized_forms` :
 son radical vocalisé (tout sauf les marques de la dernière lettre, qui portent
 les désinences), rangé sous sa forme nue. Tant qu'aucune forme d'un mot n'est
 `valide`, la vérification ne compare rien : chaque radical est enregistré comme

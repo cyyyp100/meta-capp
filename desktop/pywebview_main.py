@@ -333,7 +333,7 @@ def _claim_port() -> socket.socket | None:
 def _serve(holder: dict, sock: socket.socket) -> None:
     # `timeout_graceful_shutdown` : à l'arrêt, uvicorn attend que chaque
     # requête en cours ait répondu, sans limite par défaut — or une requête qui
-    # attend Gemma peut durer des minutes. Quitter en mode navigateur coupe ces
+    # attend Clikoda peut durer des minutes. Quitter en mode navigateur coupe ces
     # générations (services/lifecycle.quit_app) ; ceci borne le reste.
     config = uvicorn.Config(
         create_app(), host=HOST, port=PORT, log_level="warning", timeout_graceful_shutdown=5
