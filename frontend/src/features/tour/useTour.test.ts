@@ -123,6 +123,17 @@ describe("la bibliothèque suit le document emprunté", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["library"] }));
   });
 
+  it("retire la carte de la grille sans attendre le serveur", async () => {
+    // Abandonner la visite ramène à l'accueil tout de suite : la grille ne doit
+    // pas s'y peindre avec la liste en cache, qui contient encore la démo.
+    await useTour.getState().start();
+    queryClient.setQueryData(["library", "documents"], [{ id: 42 }, { id: 7 }]);
+    giveBack.mockReturnValue(new Promise(() => {})); // le DELETE n'aboutit jamais
+
+    useTour.getState().skip();
+    expect(queryClient.getQueryData(["library", "documents"])).toEqual([{ id: 7 }]);
+  });
+
   it("ne recharge rien quand il n'y a eu aucun emprunt", async () => {
     borrow.mockResolvedValue({ document: null });
     await useTour.getState().start();

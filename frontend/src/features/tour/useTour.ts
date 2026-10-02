@@ -24,6 +24,7 @@ import { create } from "zustand";
 
 import { api } from "@/api/client";
 import { queryClient } from "@/api/queryClient";
+import type { DocumentSummary } from "@/api/types";
 
 import { DEMO_ROUTE, TOUR_STEPS, type TourStepDef } from "./steps";
 
@@ -95,8 +96,18 @@ function refreshLibrary(): void {
  *
  *  L'invalidation attend la fin de la requête : lancée avant, la grille se
  *  rechargerait pendant que le serveur efface encore, et réafficherait le
- *  document qu'on vient de rendre. */
-function returnDemoDocument(): void {
+ *  document qu'on vient de rendre.
+ *
+ *  La carte, elle, quitte la grille TOUT DE SUITE. Abandonner la visite ramène
+ *  à l'accueil sans attendre le serveur, et l'accueil se peindrait d'abord avec
+ *  la liste en cache — celle qui contient encore le document qu'on vient de
+ *  rendre. */
+function returnDemoDocument(docId: number | null): void {
+  if (docId !== null) {
+    queryClient.setQueryData<DocumentSummary[]>(["library", "documents"], (docs) =>
+      docs?.filter((d) => d.id !== docId),
+    );
+  }
   void api
     .returnDemoDocument()
     .catch(() => undefined)
@@ -145,7 +156,7 @@ export const useTour = create<TourState>((set, get) => ({
     }
 
     if (target >= TOUR_STEPS.length) {
-      returnDemoDocument();
+      returnDemoDocument(demoDocId);
       set({ running: false, done: true, demoDocId: null, controls: null });
       void api.setPreferences({ tour_done: true }).catch(() => undefined);
       return;
@@ -160,7 +171,7 @@ export const useTour = create<TourState>((set, get) => ({
     // tout en ayant besoin de lui, et rendait donc le document six étapes trop
     // tôt — emportant avec elle tout le chapitre lecture, désormais injouable.
     if (TOUR_STEPS[index]?.chapter === "reading" && TOUR_STEPS[target].chapter !== "reading") {
-      returnDemoDocument();
+      returnDemoDocument(demoDocId);
       set({ demoDocId: null, controls: null });
     }
 
@@ -169,8 +180,10 @@ export const useTour = create<TourState>((set, get) => ({
     TOUR_STEPS[target].enter?.({ demo: controls });
   },
 
+  // Le retour à l'accueil n'est pas ici : le store n'a pas de routeur. C'est
+  // `TourHost` qui le fait, dès que `running` retombe.
   skip: () => {
-    returnDemoDocument();
+    returnDemoDocument(get().demoDocId);
     set({ running: false, done: true, demoDocId: null, controls: null });
     void api.setPreferences({ tour_done: true }).catch(() => undefined);
   },

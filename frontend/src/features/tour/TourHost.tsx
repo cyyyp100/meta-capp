@@ -10,7 +10,7 @@
 // appelé depuis un écouteur d'événement natif, hors de tout composant) ; le
 // `useNavigate` de react-router n'existe que dans l'arbre React. La table de
 // marche dit où chaque bulle se joue, cet hôte s'y rend.
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { usePreferences } from "../shell/usePreferences";
@@ -85,6 +85,20 @@ export function TourHost() {
   useEffect(() => {
     if (route && location.pathname !== route) navigate(route);
   }, [route, location.pathname, navigate]);
+
+  // La visite se termine TOUJOURS sur l'accueil, qu'on aille au bout (la
+  // dernière étape y est déjà) ou qu'on l'abandonne en route. Abandonnée dans le
+  // lecteur, elle laissait l'écran tel quel : le sas d'entrée de la démo restait
+  // affiché, et « Continuer » ouvrait un document que la visite venait de rendre.
+  //
+  // `replace` : l'entrée d'historique du lecteur de démo pointe sur un document
+  // qui n'existe plus, on ne doit pas pouvoir y revenir d'un « Précédent ».
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    const ended = wasRunning.current && !running;
+    wasRunning.current = running;
+    if (ended && location.pathname !== "/") navigate("/", { replace: true });
+  }, [running, location.pathname, navigate]);
 
   if (!step) return null;
   return <Coachmark step={step} index={index} />;
