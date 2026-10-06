@@ -283,8 +283,8 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
               {flipped ? t("flash.a") : t("flash.q")}
             </div>
             {flipped ? card.back : card.front}
-            {/* Carte de langue : la prononciation accompagne le mot au verso. */}
-            {flipped && card.pronunciation && (
+            {/* Carte de langue : la prononciation accompagne la face écrite dans la langue apprise. */}
+            {card.pronunciation && card.pronunciation_side === (flipped ? "back" : "front") && (
               <div title={t("lang.phonetic")} className="mt-2.5 text-lg italic text-muted-foreground">
                 [{card.pronunciation}]
               </div>
@@ -311,7 +311,12 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
       style={{ borderLeft: `4px solid ${diffColor}` }}
     >
       <div className="flex justify-between gap-3">
-        <div className="font-semibold">{card.front}</div>
+        <div className="font-semibold">
+          {card.front}
+          {card.pronunciation && card.pronunciation_side === "front" && (
+            <span title={t("lang.phonetic")} className="font-normal italic text-muted-foreground"> [{card.pronunciation}]</span>
+          )}
+        </div>
         {/* La corbeille n'apparaît qu'au survol de la carte ou au focus clavier :
             la liste reste lisible au repos sans devenir inatteignable. */}
         <button
@@ -329,7 +334,7 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
       </div>
       <div className="mt-1.5 text-text-soft">
         {card.back}
-        {card.pronunciation && (
+        {card.pronunciation && card.pronunciation_side === "back" && (
           <span title={t("lang.phonetic")} className="italic text-muted-foreground"> [{card.pronunciation}]</span>
         )}
       </div>

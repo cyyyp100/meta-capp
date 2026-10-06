@@ -65,6 +65,43 @@ export const SUBJECT_LABELS: Record<string, string> = {
   "culture": "Culture générale",
 };
 
+// Clé i18n du libellé d'une matière (code stocké en base). Le quiz et « Ma
+// progression » nomment les matières par elle ; `SUBJECT_LABELS` reste le
+// repli des écrans pas encore traduits.
+export const SUBJECT_I18N_KEYS: Record<string, string> = {
+  "mathématiques": "subj.math",
+  "physique": "subj.physics",
+  "chimie": "subj.chemistry",
+  "biologie": "subj.biology",
+  "sciences": "subj.science",
+  "informatique": "subj.cs",
+  "technologie": "subj.technology",
+  "histoire": "subj.history",
+  "géographie": "subj.geography",
+  "français": "subj.french",
+  "philosophie": "subj.philosophy",
+  "littérature": "subj.literature",
+  "langues": "subj.languages",
+  "économie": "subj.economics",
+  "sciences-sociales": "subj.social",
+  "droit": "subj.law",
+  "gestion": "subj.management",
+  "psychologie": "subj.psychology",
+  "sociologie": "subj.sociology",
+  "arts": "subj.arts",
+  "musique": "subj.music",
+  "médecine": "subj.medicine",
+  "sport": "subj.sport",
+  "religion": "subj.religion",
+  "culture": "subj.culture",
+};
+
+/** Libellé traduit d'une matière, ou son libellé français à défaut de clé. */
+export function subjectName(t: (key: string) => string, code: string): string {
+  const key = SUBJECT_I18N_KEYS[code];
+  return key ? t(key) : subjectLabel(code);
+}
+
 export function subjectLabel(subject: string): string {
   return SUBJECT_LABELS[subject] ?? subject.charAt(0).toUpperCase() + subject.slice(1);
 }

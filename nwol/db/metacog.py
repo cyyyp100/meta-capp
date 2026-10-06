@@ -83,7 +83,10 @@ def insert_history(
     value_after: float,
     session_score: float,
     alpha: float,
+    practice_session_id: int | None = None,
 ) -> int:
+    """Un mouvement du profil, rattaché à la séance qui l'a causé : une lecture
+    (`session_id`) ou une séance de pratique, quiz ou langue (`practice_session_id`)."""
     if criterion not in CRITERIA:
         raise ValueError(f"Critère inconnu: {criterion}")
 
@@ -92,12 +95,13 @@ def insert_history(
     with conn:
         cur = conn.execute(
             """INSERT INTO metacog_history
-               (user_id, session_id, criterion, value_before, value_after,
-                session_score, alpha)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, session_id, practice_session_id, criterion, value_before,
+                value_after, session_score, alpha)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id,
                 session_id,
+                practice_session_id,
                 criterion,
                 float(value_before),
                 float(value_after),

@@ -21,6 +21,7 @@ from config.settings import (
     LANG_BILAN_EVERY,
     LANG_DE_GENDER_COLORS,
     LANG_ESSENTIAL_STEPS,
+    LANG_GAME_TARGET_GAUGES,
     LANG_IDLE_CUTOFF_S,
     LANG_MILESTONES_EPISODE_1,
     LANG_PILOT_LANGUAGES,
@@ -37,18 +38,22 @@ from config.settings import (
     LANG_SECOND_WAVE_LINES,
     LANG_SECOND_WAVE_OFFSET,
     LANG_SECOND_WAVE_START,
+    LANG_SECOND_WAVE_TARGET_GAUGES,
     LANG_STEP_BUDGET_S,
     LANG_TRANSPARENT_FLAG_UNTIL_EPISODE,
+    LANG_UNDERSTOOD_TARGET_GAUGES,
     LANG_ZH_TONE_COLORS,
 )
 from db import lang_episode_db as store
 from db.lang_db import get_lang_profile_by_id, get_or_create_lang_profile, update_lang_profile
+from db.practice_sessions import update_practice_details
 from db.user import DEFAULT_USER_ID
 from i18n import t
 from services import lang_activity as activity
 from services import lang_episodes as episodes
 from services import lang_games as games
 from services import lang_progress as progress
+from services import practice
 from services.lang_scripts import (
     ARABIC_SCRIPT,
     COMPONENTS_SCRIPT,
@@ -66,6 +71,10 @@ logger = logging.getLogger("services.lang_runs")
 
 FEELING_QUESTIONS = ("q1", "q2", "q3", "q4", "q5", "q6")
 FEELING_OPTIONS = ("a", "b", "c")
+# Le « compris / à peu près / pas compris » d'un passage et l'auto-évaluation de
+# la deuxième vague, lus comme des verdicts par le moteur de jauges.
+_UNDERSTOOD_VERDICT = {"compris": "correct", "a_peu_pres": "partial", "pas_compris": "incorrect"}
+_RATING_VERDICT = {"su": "correct", "a_peu_pres": "partial", "pas_su": "incorrect"}
 EPISODE_MODES = ("episode", "court")
 MODES = ("zero", "episode", "bilan", "reprise", "relecture", "court", "jalon")
 
@@ -535,7 +544,10 @@ def _phrases_view(language: str, explain_lang: str = "fr") -> list[dict]:
 
 
 def _cards_view(profile: dict, language: str) -> list[dict]:
-    return [{"id": c["id"], "front": c["front"], "back": c["back"], "pronunciation": c.get("pronunciation")}
+    from services.flashcards import with_pronunciation_side
+
+    return [with_pronunciation_side({"id": c["id"], "front": c["front"], "back": c["back"],
+                                     "pronunciation": c.get("pronunciation"), "source": c.get("source")})
             for c in progress.due_cards(profile, language)]
 
 
@@ -976,10 +988,9 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         store.update_profile_fields(profile["id"], onboarding_done=1)
     day = run.get("study_date") or activity.study_date()
     activity.record(profile["id"], day, runs_completed=1, rereads=int(run["mode"] == "relecture"))
-    _nudge(profile, run, plan, feeling)
     rewind = _rewind_suggestion(run_id, plan)
     lexicon_after = store.lexicon_counts(profile["id"])
-    return {
+    gained = {
         "ok": True, "mode": run["mode"],
         "episode": {"n": episode["episode_n"], "title": episode["title"]} if episode else None,
         "point": _point_view(language, episode, _explain(profile))["title"] if episode else None,
@@ -989,14 +1000,121 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         "units_acquired_today": acquisition.get("units", 0),
         "suggest_rewind": rewind,
     }
+    practice_id, measured = _record_practice(run_id, plan, profile, gained)
+    _nudge(profile, run, plan, feeling, practice_id=practice_id, measures=measured)
+    return gained
 
 
-def _nudge(profile: dict, run: dict, plan: dict, feeling: str | None) -> None:
+def _run_measures(run_id: int, plan: dict) -> list[dict]:
+    """Les mesures d'une séance, dans l'ordre du plan, sur l'horloge du temps effectif.
+
+    Trois sources, toutes déjà enregistrées et recorrigées par le service (R23) :
+    les réponses aux jeux et micro-items (`lang_item_attempts`, avec leur temps
+    de réponse), l'auto-évaluation de la deuxième vague, et le « compris / à peu
+    près / pas compris » qui ferme un passage. Un item sans réponse n'est pas une
+    mesure (P-5) ; une lecture n'est jamais notée, seul ce que l'apprenant en dit
+    l'est. Chaque étape occupe sur l'axe le temps effectif qu'elle a duré : ses
+    réponses s'y répartissent, le « compris » en marque la fin."""
+    steps = plan.get("steps") or []
+    recorded = {s["step"]: s for s in store.get_steps(run_id)}
+    by_step: dict[str, list[dict]] = {}
+    for attempt in store.get_attempts(run_id):
+        if attempt.get("correct") is None:
+            continue
+        by_step.setdefault(attempt["step"], []).append({
+            "verdict": "correct" if attempt["correct"] else "incorrect",
+            "targets": LANG_GAME_TARGET_GAUGES.get(attempt.get("game_kind") or "", ()),
+            "response_time_ms": attempt.get("ms"),
+        })
+    # Une note de deuxième vague désigne son épisode, pas son étape : l'étape se
+    # retrouve par l'épisode qu'elle fait relire (deuxième vague ou contrôle).
+    rating_steps: dict[int, str] = {}
+    for step in steps:
+        refs = [step.get("episode_ref")] if step.get("kind") == "deuxieme_vague" else []
+        refs += [block.get("episode_ref") for block in step.get("blocks") or []]
+        for ref in refs:
+            if ref is not None:
+                rating_steps[int(ref)] = step["key"]
+    for rating in store.get_second_wave_ratings(run_id):
+        verdict = _RATING_VERDICT.get(rating.get("rating"))
+        if verdict is None:
+            continue
+        episode_id = rating.get("episode_id")
+        key = rating_steps.get(int(episode_id)) if episode_id is not None else None
+        by_step.setdefault(key or "deuxieme_vague", []).append(
+            {"verdict": verdict, "targets": LANG_SECOND_WAVE_TARGET_GAUGES},
+        )
+
+    keys = [s["key"] for s in steps]
+    keys += [k for k in by_step if k not in keys]
+    measures: list[dict] = []
+    clock = last = 0.0
+    for key in keys:
+        seconds = float((recorded.get(key) or {}).get("seconds") or 0)
+        timed = [
+            (clock + seconds * (i + 1) / (len(by_step.get(key, [])) + 1), m)
+            for i, m in enumerate(by_step.get(key, []))
+        ]
+        verdict = _UNDERSTOOD_VERDICT.get((recorded.get(key) or {}).get("signal"))
+        if verdict:
+            timed.append((clock + seconds, {"verdict": verdict, "targets": LANG_UNDERSTOOD_TARGET_GAUGES}))
+        for t_s, measure in timed:
+            # Une étape sans temps effectif (sautée, ou jouée sans un geste) ne
+            # doit pas empiler ses points au même instant : l'axe reste croissant.
+            last = max(round(t_s, 1), last + 1.0)
+            measures.append({**measure, "t": last})
+        clock += seconds
+    return measures
+
+
+def _record_practice(run_id: int, plan: dict, profile: dict, gained: dict) -> tuple[int | None, int]:
+    """La séance rejoint « Ma progression » : une séance de pratique, sa courbe.
+
+    Les jauges sont rejouées depuis ce que la séance a enregistré — rien n'est
+    demandé à Clikoda (P-1). Ce qui a été gagné l'accompagne tel que l'écran de
+    fin l'a montré, sans score (F11). Best-effort : une séance close le reste,
+    quoi qu'il arrive ici. Renvoie (séance de pratique, nombre de mesures)."""
+    try:
+        run = store.get_run(run_id) or {}
+        session_id = practice.start_for_lang(
+            int(profile.get("user_id") or DEFAULT_USER_ID),
+            lang_run_id=run_id,
+            started_at=run.get("started_at"),
+            settings={"language": plan.get("language"), "mode": run.get("mode"), "flow": "feuilleton"},
+        )
+        measured = practice.close(session_id, _run_measures(run_id, plan), int(run.get("effective_seconds") or 0))
+        update_practice_details(session_id, details={
+            **{key: gained.get(key) for key in (
+                "episode", "point", "new_words", "cards_created", "words_seen", "words_acquired",
+                "acquired_today", "units_acquired_today",
+            )},
+            "signals": plan.get("signals") or {},
+            "end_reason": run.get("end_reason"),
+        })
+        return session_id, measured
+    except Exception:  # pragma: no cover - la clôture ne casse jamais sur la progression
+        logger.debug("Séance de pratique (feuilleton) non enregistrée", exc_info=True)
+        return None, 0
+
+
+def _nudge(
+    profile: dict,
+    run: dict,
+    plan: dict,
+    feeling: str | None,
+    *,
+    practice_id: int | None = None,
+    measures: int = 0,
+) -> None:
     """R8 : la séance rejoint le profil métacognitif commun, AVEC ou SANS
-    réponse de ressenti. Rien n'est noté (lecture jamais notée) : la séance
-    compte — c'est ce passage qui enregistre le jour d'étude commun, la série
-    affichée ailleurs dans l'application (§ 14, n° 11) — sans déplacer les
-    jauges. La réponse, si elle correspond à la question posée, s'y ajoute.
+    réponse de ressenti — c'est ce passage qui enregistre le jour d'étude commun,
+    la série affichée ailleurs dans l'application (§ 14, n° 11).
+
+    Ses jauges, rejouées par `_record_practice` depuis les jeux, la deuxième vague
+    et le « compris », font glisser le profil à hauteur de ses mesures ; une
+    séance sans aucune mesure (relecture pure) compte sans rien déplacer. Le
+    ressenti est gardé sur la séance mais n'est pas noté : c'est un choix parmi
+    trois, pas une réflexion écrite (`measure_meta=False`).
 
     En tâche de fond : la finalisation commune réécrit l'analyse générale de
     l'apprenant avec Clikoda, et une séance n'attend jamais Clikoda (P-1)."""
@@ -1005,15 +1123,22 @@ def _nudge(profile: dict, run: dict, plan: dict, feeling: str | None) -> None:
     answered = bool(feeling and question_key and str(feeling).startswith(question_key + "."))
     responses = [t(feeling)] if answered else []
     questions = [t(question_key)] if answered else []
+    signals = plan.get("signals") or {}
+    success = progress.success_rate(signals)
     metrics = {"duration_s": int(run.get("effective_seconds") or 0), "language": plan.get("language"),
-               "questions_answered": 0, "pages_read": 0, "correct": 0, "success_rate": 0}
+               "questions_answered": int(signals.get("answered") or 0), "pages_read": 0, "correct": 0,
+               "success_rate": round(success * 100) if success is not None else 0}
     user_id = int(profile.get("user_id") or DEFAULT_USER_ID)
+    measured = int(measures) if practice_id is not None else 0
 
     def _job() -> None:
         try:
             from services.session import nudge_metacog_profile
 
-            nudge_metacog_profile(user_id, 0.0, responses, metrics, session_id=None, questions=questions, measures=0)
+            nudge_metacog_profile(
+                user_id, 0.0, responses, metrics, session_id=None, questions=questions,
+                measures=measured, practice_session_id=practice_id, measure_meta=False,
+            )
         except Exception:  # pragma: no cover - la clôture ne casse jamais sur le profil
             logger.debug("Nudge métacognitif (feuilleton) ignoré", exc_info=True)
 

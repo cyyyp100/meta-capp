@@ -340,6 +340,7 @@ SESSION_TYPES_SEED: list[tuple[str, str, str, str, str, str]] = [
 # côté services/LLM sans relire la base dans le worker.
 SESSION_TYPE_RENDER_KIND: dict[str, str] = {t[0]: t[5] for t in SESSION_TYPES_SEED}
 SESSION_TYPE_LABEL: dict[str, str] = {t[0]: t[3] for t in SESSION_TYPES_SEED}
+SESSION_TYPE_SKILL: dict[str, str] = {t[0]: t[2] for t in SESSION_TYPES_SEED}
 DEFAULT_SESSION_TYPE = "dialogue_ecoute"
 
 
@@ -580,7 +581,7 @@ def get_due_flashcards_for_language(
     """
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, front, back, pronunciation, interval_days, due_at
+        """SELECT id, front, back, pronunciation, source, interval_days, due_at
            FROM flashcards
            WHERE language=?
              AND user_id=(SELECT user_id FROM lang_profiles WHERE id=?)
@@ -599,7 +600,7 @@ def get_recent_flashcards_for_language(
     """Cartes les plus récentes de cette langue (complète le warm-up si peu sont dues)."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, front, back, pronunciation
+        """SELECT id, front, back, pronunciation, source
            FROM flashcards
            WHERE language=?
              AND user_id=(SELECT user_id FROM lang_profiles WHERE id=?)

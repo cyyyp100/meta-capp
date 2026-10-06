@@ -141,25 +141,30 @@ def test_full_lesson_flow_and_vocab_flashcards(client, monkeypatch):
     assert rows[0]["source"] == "lang_vocab"
     assert rows[0]["pronunciation"] == "suːn"
 
-    # Et elle arrive jusqu'au warm-up du sas d'entrée de la séance suivante.
+    # Et elle arrive jusqu'au warm-up du sas d'entrée de la séance suivante, au
+    # verso : c'est la face écrite dans la langue apprise.
     cards = client.get("/api/lang/warmup-cards", params={"language": "italien"}).json()
-    assert [c["pronunciation"] for c in cards] == ["suːn"]
+    assert [(c["pronunciation"], c["pronunciation_side"]) for c in cards] == [("suːn", "back")]
 
 
 def test_vocab_pronunciation_from_glossary_and_backfill(client):
-    # Un glossaire de lecture porte aussi la prononciation. Une carte déjà connue
-    # sans prononciation la reçoit au passage ; une prononciation posée reste.
+    # Un glossaire de lecture porte aussi la prononciation. Sans elle, pas de
+    # carte : le mot attend un exercice qui la donne. Une carte plus ancienne
+    # qui n'en avait pas la reçoit au passage ; une prononciation posée reste.
     from db import get_connection
+    from db.flashcards import save_flashcard
     from services.lang import _harvest_vocab
 
     reading = {"kind": "reading", "glossary": [{"word": "hola", "translation": "bonjour", "phonetic": ""}]}
-    assert _harvest_vocab("espagnol", reading, 1) == 1
+    assert _harvest_vocab("espagnol", reading, 1) == 0
+    save_flashcard(1, None, "au revoir en espagnol", "adiós", source="lang_vocab", language="espagnol")
 
     reading["glossary"] = [
+        {"word": "adiós", "translation": "au revoir", "phonetic": "aˈðjos"},
         {"word": "hola", "translation": "bonjour", "phonetic": "ˈola"},
         {"word": "gracias", "translation": "merci", "phonetic": "ˈɡɾa.θjas"},
     ]
-    assert _harvest_vocab("espagnol", reading, 1) == 1  # seule « merci » est neuve
+    assert _harvest_vocab("espagnol", reading, 1) == 2  # « au revoir » existait déjà
     reading["glossary"] = [{"word": "hola", "translation": "bonjour", "phonetic": "autre"}]
     _harvest_vocab("espagnol", reading, 1)
 
@@ -167,6 +172,7 @@ def test_vocab_pronunciation_from_glossary_and_backfill(client):
         "SELECT front, back, pronunciation FROM flashcards WHERE language='espagnol' ORDER BY id"
     ).fetchall()
     assert [(r["front"], r["back"], r["pronunciation"]) for r in rows] == [
+        ("au revoir en espagnol", "adiós", "aˈðjos"),
         ("bonjour en espagnol", "hola", "ˈola"),
         ("merci en espagnol", "gracias", "ˈɡɾa.θjas"),
     ]
@@ -301,3 +307,38 @@ def test_sr_review_endpoint_matches_by_word(client):
         "language": "anglais", "verdict": "correct", "word": prof_word,
     }).json()
     assert resp["matched"] is True and resp.get("card_id") == cid
+
+
+# ── Les jauges bougent, la séance rejoint « Ma progression » ──────────────────
+
+def test_a_lesson_draws_its_gauges_and_keeps_its_exit_reflections(client, monkeypatch):
+    """Flux hérité : chaque exercice noté est une mesure, visée par sa compétence ;
+    les réflexions du sas de sortie sont gardées avec la séance (elles ne
+    l'étaient pas : sans séance de lecture, rien ne les rattachait)."""
+    from db.metacog import get_history
+    from db.practice_sessions import find_practice_session
+
+    _patch_lesson_llm(monkeypatch)
+    client.post("/api/lang/placement/skip", json={"language": "italien"})
+    lesson_id = client.post("/api/lang/lesson/start", json={"language": "italien"}).json()["lesson_id"]
+    client.post(
+        f"/api/lang/lesson/{lesson_id}/complete",
+        json={"exercise_scores": [1.0] * 6 + [None] * 4, "duration_s": 600},
+    )
+    client.post(f"/api/lang/lesson/{lesson_id}/finalize", json={
+        "responses": ["J'ai retenu le vocabulaire du café."],
+        "questions": ["Qu'as-tu retenu ?"],
+    })
+
+    practice = find_practice_session(lang_lesson_id=lesson_id)
+    detail = client.get(f"/api/progress/practice/{practice['id']}").json()
+    assert detail["lang"]["flow"] == "lecons" and detail["lang"]["language"] == "italien"
+    assert detail["metrics"]["answered"] == 6
+    gauges = detail["gauges"]
+    assert gauges["axis"] == "exercise"
+    # Une note par exercice NOTÉ : l'amorce, puis les six premiers exercices.
+    some = next(iter(gauges["series"].values()))
+    assert [point["t"] for point in some] == [0, 1, 2, 3, 4, 5, 6]
+    assert gauges["measured"]
+    assert [r["answer"] for r in detail["reflections"]] == ["J'ai retenu le vocabulaire du café."]
+    assert [row for row in get_history() if row["practice_session_id"] == practice["id"]]

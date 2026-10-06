@@ -38,23 +38,36 @@ __all__ = [
     "fallback_tags",
     "due_flashcards",
     "session_start_cards",
+    "with_pronunciation_side",
 ]
+
+# Face d'une carte de langue écrite dans la langue apprise : c'est elle que la
+# prononciation accompagne. Vocabulaire hérité : recto « bientôt en anglais »,
+# verso « soon » ; feuilleton : recto = le mot, verso = sa traduction.
+_TARGET_SIDE = {"lang_vocab": "back", "lang_feuilleton": "front"}
+
+
+def with_pronunciation_side(card: dict) -> dict:
+    """La carte, avec `pronunciation_side` : "front" ou "back", la face où
+    afficher la prononciation ; None pour une carte qui n'en a pas."""
+    side = _TARGET_SIDE.get(card.get("source") or "", "back") if card.get("pronunciation") else None
+    return {**card, "pronunciation_side": side}
 
 
 def due_flashcards(doc_id: int | None = None, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:
     """Cartes dont l'échéance de révision est passée (warm-up du SAS d'entrée)."""
-    return get_due_flashcards(user_id, limit, doc_id)
+    return [with_pronunciation_side(c) for c in get_due_flashcards(user_id, limit, doc_id)]
 
 
 def session_start_cards(doc_id: int | None = None, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:
     """Cartes du warm-up de début de session (dues prioritaires + pondération
     récence × bonus de matière). Sélection pertinente pour le SAS d'entrée web."""
-    return get_session_start_cards(user_id, n=limit, doc_id=doc_id)
+    return [with_pronunciation_side(c) for c in get_session_start_cards(user_id, n=limit, doc_id=doc_id)]
 
 
 def list_flashcards(user_id: int = DEFAULT_USER_ID, **filters) -> list[dict]:
     """Liste filtrée des cartes (filtres : document_id, tags, difficulty...)."""
-    return get_flashcards(user_id, **filters)
+    return [with_pronunciation_side(c) for c in get_flashcards(user_id, **filters)]
 
 
 def existing_tags(user_id: int = DEFAULT_USER_ID, limit: int = 100) -> list[str]:
@@ -144,8 +157,10 @@ def create_lang_vocab_flashcards(
 
     La prononciation (`phonetic` de l'item : transcription, ou translittération
     tonée pour un script non latin) va dans sa propre colonne, jamais dans le
-    verso, qui reste la réponse attendue. Une carte déjà connue qui n'en avait
-    pas la reçoit au passage.
+    verso, qui reste la réponse attendue. Pas de carte de langue sans elle : un
+    item que Clikoda a laissé sans prononciation n'en crée pas (le mot reviendra
+    dans un autre exercice) ; une carte déjà connue qui n'en avait pas la reçoit
+    au passage.
     """
     created = 0
     for it in items or []:
@@ -161,6 +176,9 @@ def create_lang_vocab_flashcards(
         if lang_flashcard_exists(user_id, language, front):
             fill_lang_flashcard_pronunciation(user_id, language, front, pronunciation)
             continue
+        if not pronunciation:
+            logger.debug("Vocabulaire sans prononciation, pas de carte (%s -> %s)", front, back)
+            continue
         try:
             create_flashcard(
                 user_id,
@@ -169,7 +187,7 @@ def create_lang_vocab_flashcards(
                 tags=[language],
                 source="lang_vocab",
                 language=language,
-                pronunciation=pronunciation or None,
+                pronunciation=pronunciation,
             )
             created += 1
         except Exception:  # une carte ratée ne doit pas casser la génération d'exercice

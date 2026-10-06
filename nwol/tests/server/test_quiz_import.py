@@ -12,20 +12,27 @@ def test_quiz_answer_updates_subject(client):
     assert body["updated"] is True
     assert 0.0 <= body["level"] <= 100.0
 
-    # Sans catégorie : pas de matière mise à jour — mais la rétention bouge quand même.
+    # Sans catégorie : pas de matière mise à jour.
     body = client.post("/api/quiz/answer", json={"correct": True}).json()
     assert body["updated"] is False
     assert "level" not in body
-    assert 0.0 <= body["retention"] <= 100.0
 
 
-def test_quiz_answer_moves_permanent_retention(client):
-    # Un quiz de révision est une mesure directe de la mémorisation : il doit
-    # faire bouger le critère `retention` du profil long terme (comportement
-    # présent en Tk, absent du web avant l'unification).
-    good = client.post("/api/quiz/answer", json={"correct": True}).json()["retention"]
-    bad = client.post("/api/quiz/answer", json={"correct": False}).json()["retention"]
-    assert bad < good
+def test_quiz_session_moves_permanent_retention(client):
+    # Un quiz de révision est une mesure directe de la mémorisation : il fait
+    # bouger le critère `retention` du profil long terme — par la courbe de
+    # jauges de la séance, à sa clôture, et non plus réponse par réponse.
+    from db.metacog import ensure_profile
+
+    def _quiz(verdict: str) -> float:
+        answers = [{"question": f"Q{i} ?", "question_type": "qcm", "verdict": verdict} for i in range(5)]
+        sid = client.post("/api/quiz/session", json={"answers": answers}).json()["session_id"]
+        client.post("/api/quiz/finalize", json={"session_id": sid})
+        return float(ensure_profile()["retention"])
+
+    good = _quiz("correct")
+    assert good > 50.0
+    assert _quiz("incorrect") < good
 
 
 def test_import_pdf(client, tmp_path, make_pdf):

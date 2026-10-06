@@ -135,3 +135,76 @@ def test_sessions_are_named_after_their_document_and_reading_number(client, tmp_
     detail = client.get(f"/api/progress/session/{second}").json()
     assert detail["document"]["title"] == "progress.pdf"
     assert detail["reading_index"] == 2
+
+
+# ── Trois catégories : lecture, quiz, langue ─────────────────────────────────
+
+def _quiz(client, verdicts=("correct", "correct", "incorrect")) -> int:
+    answers = [
+        {"question": f"Q{i} ?", "question_type": "qcm", "category": "géographie", "source": "static",
+         "user_answer": "x", "verdict": verdict, "response_time_ms": 2000}
+        for i, verdict in enumerate(verdicts)
+    ]
+    sid = client.post("/api/quiz/session", json={"answers": answers, "duration_s": 60}).json()["session_id"]
+    client.post("/api/quiz/finalize", json={"session_id": sid})
+    return sid
+
+
+def test_quiz_sessions_join_the_timeline_under_their_own_category(client, tmp_path, make_pdf):
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    reading = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    client.post(f"/api/session/{reading}/end", json={"pages_read": 1, "duration_s": 60})
+    quiz = _quiz(client)
+
+    body = client.get("/api/progress/sessions").json()
+    assert {(row["kind"], row["session_id"]) for row in body["sessions"]} == {
+        ("reading", reading), ("quiz", quiz),
+    }
+    assert body["counts"] == {"reading": 1, "quiz": 1, "lang": 0}
+    row = next(r for r in body["sessions"] if r["kind"] == "quiz")
+    assert row["quiz"]["questions_answered"] == 3 and row["quiz"]["success_rate"] == 67
+    assert row["criteria_moved"] > 0
+
+    only_quiz = client.get("/api/progress/sessions", params={"kind": "quiz"}).json()["sessions"]
+    assert [r["kind"] for r in only_quiz] == ["quiz"]
+    only_reading = client.get("/api/progress/sessions", params={"kind": "reading"}).json()["sessions"]
+    assert [r["kind"] for r in only_reading] == ["reading"]
+
+
+def test_every_category_shares_the_gauge_curve_and_the_profile_moves(client):
+    """Le point commun des trois détails : la courbe des jauges pendant la séance
+    (avec son amorce et ce qui a été mesuré) et ce qu'elle a déplacé."""
+    sid = _quiz(client)
+    detail = client.get(f"/api/progress/practice/{sid}").json()
+    assert set(detail["gauges"]) == {"axis", "seed", "series", "measured"}
+    moved = {change["criterion"] for change in detail["profile_changes"] if change["delta"]}
+    assert moved and moved <= set(detail["gauges"]["measured"])
+
+    reading_gauges = client.get("/api/progress/sessions").json()
+    assert reading_gauges["sessions"][0]["kind"] == "quiz"
+
+
+def test_unknown_practice_session_is_a_404(client):
+    assert client.get("/api/progress/practice/424242").status_code == 404
+
+
+def test_criteria_moved_counts_only_the_criteria_that_moved(client):
+    """`update_profile` écrit une ligne pour les six critères, même ceux que la
+    séance n'a pas mesurés (avant = après) : la frise ne compte que les vrais
+    mouvements. Un QCM ne mesure que la rétention et l'attention."""
+    sid = _quiz(client)
+    row = client.get("/api/progress/sessions").json()["sessions"][0]
+    changes = client.get(f"/api/progress/practice/{sid}").json()["profile_changes"]
+    assert len(changes) == 6
+    assert row["criteria_moved"] == 2
+    assert {c["criterion"] for c in changes if abs(c["delta"]) >= 0.05} == {"retention", "attention"}
+
+
+def test_weekly_recap_counts_quizzes_too(client):
+    """Une semaine de quiz qui annonçait « rien à raconter » au-dessus de critères
+    déplacés se contredisait : toutes les catégories comptent."""
+    _quiz(client)
+    recap = client.get("/api/progress/weekly").json()
+    assert recap["sessions"] == 1
+    assert recap["by_kind"] == {"reading": 0, "quiz": 1, "lang": 0}
+    assert recap["duration_s"] == 60 and recap["pages_read"] == 0

@@ -15,10 +15,14 @@ def save_session_reflection(
     answer_text: str,
     user_id: int = DEFAULT_USER_ID,
     question_order: int = 0,
+    practice_session_id: int | None = None,
 ) -> int | None:
+    """Une réflexion, rattachée à une lecture (`session_id`) ou à une séance de
+    pratique (`practice_session_id`). Sans aucune des deux, rien n'est écrit :
+    une réflexion orpheline ne se relirait nulle part."""
     question = question_text.strip()
     answer = answer_text.strip()
-    if not session_id or not question or not answer:
+    if not (session_id or practice_session_id) or not question or not answer:
         return None
 
     ensure_default_user()
@@ -26,20 +30,28 @@ def save_session_reflection(
     with conn:
         cur = conn.execute(
             """INSERT INTO session_reflections
-               (session_id, user_id, question_text, answer_text, question_order)
-               VALUES (?, ?, ?, ?, ?)""",
-            (session_id, user_id or DEFAULT_USER_ID, question, answer, int(question_order)),
+               (session_id, practice_session_id, user_id, question_text, answer_text, question_order)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                session_id or None, practice_session_id or None, user_id or DEFAULT_USER_ID,
+                question, answer, int(question_order),
+            ),
         )
-    logger.info("Réponse métacognitive sauvegardée id=%s session=%s", cur.lastrowid, session_id)
+    logger.info(
+        "Réponse métacognitive sauvegardée id=%s session=%s pratique=%s",
+        cur.lastrowid, session_id, practice_session_id,
+    )
     return int(cur.lastrowid)
 
 
-def get_session_reflections(session_id: int) -> list[dict]:
+def get_session_reflections(session_id: int, *, practice: bool = False) -> list[dict]:
+    """Réflexions d'une lecture, ou d'une séance de pratique avec `practice=True`."""
+    column = "practice_session_id" if practice else "session_id"
     conn = get_connection()
     rows = conn.execute(
-        """SELECT * FROM session_reflections
-           WHERE session_id=?
-           ORDER BY question_order, id""",
+        f"""SELECT * FROM session_reflections
+            WHERE {column}=?
+            ORDER BY question_order, id""",
         (session_id,),
     ).fetchall()
     return [dict(row) for row in rows]

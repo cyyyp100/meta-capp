@@ -195,7 +195,7 @@ export function LangLesson() {
   // Fin de séance → SAS de sortie (métacognition + analyse) → SAS de repos (Édimbourg).
   if (done && lesson) {
     if (showRest) {
-      return <PostExitRestSas onDone={() => navigate("/lang")} />;
+      return <PostExitRestSas onDone={() => navigate("/lang")} skipKey="post_exit_rest.skip_lang" />;
     }
     return (
       <div style={{ position: "fixed", inset: 0, background: "var(--bg)" }}>

@@ -13,12 +13,17 @@ const UNLOCK_AFTER_SECONDS = 15;
 // une minute de repos est le bon geste après une vraie lecture, mais imposer une
 // minute d'immobilité au milieu d'un tutoriel ferait fermer la fenêtre. La visite
 // montre le sas et son intention, pas sa durée.
+//
+// `skipKey` : le bouton annonce où il mène, et ce n'est pas toujours la
+// bibliothèque — après une séance de langue, `onDone` ramène aux langues.
 export function PostExitRestSas({
   onDone,
+  skipKey = "post_exit_rest.skip",
   totalSeconds = REST_SECONDS,
   unlockAfterSeconds = UNLOCK_AFTER_SECONDS,
 }: {
   onDone: () => void;
+  skipKey?: string;
   totalSeconds?: number;
   unlockAfterSeconds?: number;
 }) {
@@ -111,7 +116,7 @@ export function PostExitRestSas({
             cursor: canSkip ? "pointer" : "not-allowed",
           }}
         >
-          {canSkip ? t("post_exit_rest.skip") : t("post_exit_rest.locked", { n: lockedLeft })}
+          {canSkip ? t(skipKey) : t("post_exit_rest.locked", { n: lockedLeft })}
         </button>
       </div>
     </SasOverlay>

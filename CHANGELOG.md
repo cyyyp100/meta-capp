@@ -36,6 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stop on one side lowers attention. The end-of-session debrief comments on it.
 - **The entry airlock's length is a setting** (Settings ▸ Reading): 30 s to 5 min,
   1 min by default.
+- **Quizzes and language sessions move your gauges.** Like a reading session, each
+  quiz and each language session now draws its own gauge curve: quiz answers (with
+  their response time), language games, second-wave self-ratings, "understood?"
+  answers and graded lesson exercises are its measures. Your profile then moves
+  toward that curve, by as much as was actually measured: a right or wrong answer
+  only informs attention, comprehension and retention, and a skill measured once
+  weighs less than one measured ten times.
+- **My progress has three categories: Reading, Quiz and Languages**, each session
+  with what is specific to it — the answers you gave in a quiz, with Clikoda's
+  debrief and the courses to reinforce; the episode, the point of the day and the
+  words you gained in a language (still no score); where you slowed down in a
+  reading — and all of them with the gauge curve and what it moved in your profile.
+  The weekly recap counts every kind of session.
 
 ### Changed
 
@@ -44,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when you are ready.
 - **The quick review can no longer be skipped.** The *Start now* button under the
   cards is gone; the review ends after its last card.
+- **Every language flashcard shows how its word is pronounced**, on the side written
+  in the language you are learning. Spanish, English and German now get one too:
+  Clikoda writes it in the International Phonetic Alphabet when it glosses an
+  episode (Mandarin pinyin and Arabic transliteration are still computed). A word
+  without a pronunciation waits for one before becoming a card.
 
 - **The assistant is now called Clikoda.** It still runs on Google's open-source
   Gemma 4 model (`gemma4:e4b`) through Ollama; only its name changes. The floating
@@ -59,6 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reflections written at the end of a language lesson, and the feeling picked at the
+  end of an episode, were silently dropped; they are now kept with their session.
+- A quiz no longer moves your retention twice (once per answer, then again at the
+  end): it moves your profile once, when the quiz ends — or when you leave it.
+- In My progress, "N criteria moved" only counts criteria that actually moved.
 - Windows from source: the frontend auto-build failed (`npm` is `npm.cmd`), and
   the conda re-exec looked for `bin/python`.
 - Behind an HTTP proxy (system setting or `http_proxy`, common on school and company

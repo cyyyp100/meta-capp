@@ -2189,23 +2189,28 @@ def parse_lang_episode_text(raw: str | dict) -> dict | None:
 
 def _glossary_entry(item) -> dict | None:
     if isinstance(item, (list, tuple)):
-        parts = [_str(x) for x in item] + [""] * 5
-        form, lemma, translation, pos, gender = parts[:5]
+        parts = [_str(x) for x in item] + [""] * 6
+        form, lemma, translation, pos, gender, pron = parts[:6]
     elif isinstance(item, dict):
         form = _str(item.get("form", item.get("word")))
         lemma = _str(item.get("lemma"))
         translation = _str(item.get("translation"))
         pos = _str(item.get("pos"))
         gender = _str(item.get("gender"))
+        pron = _str(item.get("pron", item.get("pronunciation")))
     else:
         return None
     if not form or not translation:
         return None
     pos = _lang_enum(pos.lower())
     gender = gender.lower()[:1] if gender.lower()[:1] in ("m", "f", "n") else ""
+    # Prononciation (langues latines) : les barres ou crochets de l'API sont
+    # retirés, l'affichage pose les siens.
+    pron = pron.strip().strip("/[]").strip()
     return {
         "form": form, "lemma": lemma or form, "translation": translation,
         "pos": pos if pos in _LANG_POS else (pos or "expression"), "gender": gender or None,
+        "pron": pron or None,
     }
 
 

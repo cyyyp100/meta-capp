@@ -133,6 +133,8 @@ export interface DueCard {
   front: string;
   back: string;
   pronunciation?: string | null;
+  /** Face écrite dans la langue apprise : recto pour une carte du feuilleton, verso pour une carte héritée. */
+  pronunciation_side?: "front" | "back" | null;
 }
 
 export interface RunStep {

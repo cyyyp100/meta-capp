@@ -136,6 +136,7 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_episode_text":        6,
     "lang_episode_text_hanzi":  6,
     "lang_episode_glossary":    6,
+    "lang_episode_glossary_pron": 6,
     "lang_episode_notes_point": 6,
     # Analyse hebdomadaire : usage interne, rien ne l'attend.
     "lang_weekly_analysis":     8,
@@ -2857,10 +2858,13 @@ def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metr
 
 
 def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    """`params["pron"]` (langues latines) : chaque entrée porte aussi sa
+    prononciation, d'où un budget de sortie plus large."""
     from llm.prompts import build_lang_episode_glossary_prompt
     from llm.schema_json import parse_lang_episode_glossary
+    label = "lang_episode_glossary_pron" if params.get("pron") else "lang_episode_glossary"
     return _run_json_async(
-        "lang_episode_glossary", build_lang_episode_glossary_prompt(params), parse_lang_episode_glossary,
+        label, build_lang_episode_glossary_prompt(params), parse_lang_episode_glossary,
         on_success, on_error, model, on_metrics=on_metrics,
         system_lang=params.get("explain_lang"),
     )

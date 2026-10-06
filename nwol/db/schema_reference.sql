@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 37).
+-- (config.settings.DB_SCHEMA_VERSION = 38).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -503,7 +503,8 @@ CREATE TABLE metacog_history (
     session_score  REAL NOT NULL,
     alpha          REAL NOT NULL,
     recorded_at    DATETIME DEFAULT (datetime('now'))
-);
+, practice_session_id INTEGER REFERENCES practice_sessions(id) ON DELETE SET NULL);
+CREATE INDEX idx_metacog_history_practice ON metacog_history(practice_session_id);
 CREATE INDEX idx_metacog_history_user ON metacog_history(user_id);
 CREATE TABLE metacog_profile (
     user_id             INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
@@ -549,6 +550,32 @@ CREATE TABLE pages_cache (
     UNIQUE(document_id, page_number, engine)
 );
 CREATE INDEX idx_pages_cache_doc ON pages_cache(document_id, page_number);
+CREATE TABLE practice_session_gauges (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id  INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,
+                   t           REAL NOT NULL,
+                   gauge_name  TEXT NOT NULL,
+                   value       REAL NOT NULL
+               );
+CREATE INDEX idx_practice_session_gauges_session ON practice_session_gauges(session_id);
+CREATE TABLE practice_sessions (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id         INTEGER NOT NULL DEFAULT 1 REFERENCES user(id) ON DELETE CASCADE,
+                   kind            TEXT NOT NULL,
+                   lang_run_id     INTEGER REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   lang_lesson_id  INTEGER REFERENCES lang_lessons(id) ON DELETE CASCADE,
+                   started_at      DATETIME DEFAULT (datetime('now')),
+                   ended_at        DATETIME,
+                   duration_s      INTEGER,
+                   seed_json       TEXT,
+                   settings_json   TEXT,
+                   analysis        TEXT,
+                   details_json    TEXT,
+                   finalized_at    DATETIME
+               );
+CREATE UNIQUE INDEX idx_practice_sessions_lang_lesson ON practice_sessions(lang_lesson_id) WHERE lang_lesson_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_practice_sessions_lang_run ON practice_sessions(lang_run_id) WHERE lang_run_id IS NOT NULL;
+CREATE INDEX idx_practice_sessions_user ON practice_sessions(user_id, started_at);
 CREATE TABLE questions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id   INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -579,6 +606,24 @@ CREATE TABLE quiz_exposures (
     PRIMARY KEY (user_id, question_id)
 );
 CREATE INDEX idx_quiz_exposures_user ON quiz_exposures(user_id, last_served_at);
+CREATE TABLE quiz_session_answers (
+                   id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id        INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,
+                   position          INTEGER NOT NULL,
+                   question_id       INTEGER,
+                   question          TEXT NOT NULL,
+                   question_type     TEXT,
+                   category          TEXT,
+                   source            TEXT,
+                   document_id       INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+                   chapter_title     TEXT,
+                   user_answer       TEXT NOT NULL DEFAULT '',
+                   verdict           TEXT NOT NULL,
+                   graded            INTEGER NOT NULL DEFAULT 1,
+                   response_time_ms  INTEGER,
+                   signals_json      TEXT,
+                   UNIQUE(session_id, position)
+               );
 CREATE TABLE quiz_static_questions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     question     TEXT NOT NULL,
@@ -652,7 +697,8 @@ CREATE TABLE session_reflections (
     answer_text     TEXT NOT NULL,
     question_order  INTEGER DEFAULT 0,
     created_at      DATETIME DEFAULT (datetime('now'))
-);
+, practice_session_id INTEGER REFERENCES practice_sessions(id) ON DELETE CASCADE);
+CREATE INDEX idx_session_reflections_practice ON session_reflections(practice_session_id);
 CREATE INDEX idx_session_reflections_session ON session_reflections(session_id);
 CREATE TABLE session_warmup_cards (
                    id          INTEGER PRIMARY KEY AUTOINCREMENT,

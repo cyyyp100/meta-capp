@@ -133,7 +133,8 @@ def fake_text(params, ok, err, on_metrics=None, model=None):
 
 
 def fake_glossary(params, ok, err, on_metrics=None, model=None):
-    """Une entrée par mot demandé (le service fournit la liste), plus une expression."""
+    """Une entrée par mot demandé (le service fournit la liste), plus une expression ;
+    une prononciation par entrée quand le prompt la demande (langues latines)."""
     CALLS.append("glossary")
     PROMPTS.append({**params, "task": "glossary"})
     entries = []
@@ -145,8 +146,12 @@ def fake_glossary(params, ok, err, on_metrics=None, model=None):
     text = " ".join(t for t, _ in params["lines"])
     please = "please" if _en(params) else "s'il te plaît"
     expressions = [["por favor", "por favor", please, "expression", ""]] if "por favor" in text else []
-    ok({"entries": [dict(zip(("form", "lemma", "translation", "pos", "gender"), e)) for e in entries],
-        "expressions": [dict(zip(("form", "lemma", "translation", "pos", "gender"), e)) for e in expressions]})
+    fields = ("form", "lemma", "translation", "pos", "gender", "pron")
+
+    def entry(e):
+        return dict(zip(fields, [*e, f"ˈ{e[1]}" if params.get("pron") else ""]))
+
+    ok({"entries": [entry(e) for e in entries], "expressions": [entry(e) for e in expressions]})
 
 
 def fake_notes(params, ok, err, on_metrics=None, model=None):

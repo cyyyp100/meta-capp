@@ -21,8 +21,9 @@ from db.metacog import (
     set_general_analysis,
     update_profile_values,
 )
+from db.practice_sessions import get_practice_session, mark_finalized
 from db.questions import count_assistant_questions
-from db.session_gauges import get_first_gauges, get_latest_gauges, record_gauges
+from db.session_gauges import PRACTICE, READING, get_first_gauges, get_latest_gauges, record_gauges
 from db.session_pauses import get_session_pauses
 from db.session_reflections import (
     get_recent_reflection_questions,
@@ -35,6 +36,7 @@ from db.sessions import start_session as _start_session
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
 from llm.ollama_client import cancel_pending_generations
 from metacog.gauges import (
+    VERDICT_CRITERIA,
     clamp_gauge,
     make_gauges,
     reading_attention_delta,
@@ -71,9 +73,10 @@ REFLECTION_QUESTIONS = [
 ]
 
 # Critères que le seul taux de réussite informe honnêtement, quand la séance n'a
-# pas de canal de jauges temps réel. Les trois autres (curiosité, créativité,
-# métacognition) ne sont pas déduisibles d'un score : on les laisse inchangés.
-_PROFILE_NUDGE_CRITERIA = ("attention", "context_comprehension", "retention")
+# pas de courbe de jauges. Les trois autres (curiosité, créativité, métacognition)
+# ne sont pas déduisibles d'un score : on les laisse inchangés. Même liste que
+# celle du modèle du verdict (`metacog.gauges.VERDICT_CRITERIA`), par définition.
+_PROFILE_NUDGE_CRITERIA = VERDICT_CRITERIA
 
 
 class LiveGauges:
@@ -453,7 +456,7 @@ def _update_general_analysis(
         logger.debug("Analyse de profil ignorée (analyse précédente conservée)", exc_info=True)
 
 
-def _measured_gauges(session_id: int) -> dict[str, float]:
+def _measured_gauges(session_id: int, scope: str = READING) -> dict[str, float]:
     """Jauges de fin de session, AMPUTÉES de celles qui n'ont jamais bougé.
 
     Une session démarre à profil × 0,8. Une jauge que la séance n'a pas exercée
@@ -461,9 +464,12 @@ def _measured_gauges(session_id: int) -> dict[str, float]:
     telle quelle tirait le profil vers le bas à chaque session, sans qu'aucune
     mesure ne le justifie. On ne remonte que ce qui a bougé ; le moteur de profil
     laisse les autres critères intacts (`update_profile_gauges_from_session`
-    retombe sur la valeur courante quand un critère est absent)."""
-    latest = get_latest_gauges(session_id)
-    seed = get_first_gauges(session_id)
+    retombe sur la valeur courante quand un critère est absent).
+
+    `scope` : une lecture (`session_gauges`) ou une séance de pratique, quiz ou
+    langue (`practice_session_gauges`) — la règle est la même."""
+    latest = get_latest_gauges(session_id, scope=scope)
+    seed = get_first_gauges(session_id, scope=scope)
     measured = {
         criterion: value
         for criterion, value in latest.items()
@@ -473,6 +479,13 @@ def _measured_gauges(session_id: int) -> dict[str, float]:
     if untouched:
         logger.info("Session %s : critères restés à l'amorce, non remontés : %s", session_id, untouched)
     return measured
+
+
+def _practice_measured_by(practice_session_id: int) -> dict[str, int]:
+    """Mesures par critère d'une séance de pratique (`services.practice.record`)."""
+    session = _safe(lambda: get_practice_session(practice_session_id), None) or {}
+    counts = (session.get("details") or {}).get("measured_by") or {}
+    return {str(criterion): int(n) for criterion, n in counts.items() if int(n) > 0}
 
 
 def _session_measures(session_id: int | None, metrics: dict) -> int | None:
@@ -501,24 +514,41 @@ def nudge_metacog_profile(
     session_gauges: dict | None = None,
     questions: list[str] | None = None,
     measures: int | None = None,
+    practice_session_id: int | None = None,
+    measure_meta: bool = True,
 ) -> dict:
-    """Finalisation métacognitive partagée (lecture PDF *et* séance de langue).
+    """Finalisation métacognitive partagée : lecture, quiz, séance de langue.
 
     Persiste les réflexions, note la métacognition à partir de ces réflexions,
-    fait glisser le profil long terme vers le score de la session (jauges live si
-    dispo, sinon EMA des 3 critères clés vers le taux de réussite), et régénère
-    l'analyse générale de l'apprenant. `session_id=None` pour une séance de langue
-    (colonnes FK nullables). Renvoie les nouvelles valeurs des critères.
+    fait glisser le profil long terme vers les jauges de la séance, et régénère
+    l'analyse générale de l'apprenant. Renvoie les nouvelles valeurs des critères.
+
+    La séance est une lecture (`session_id`, jauges live) ou une séance de
+    pratique, quiz ou langue (`practice_session_id`, jauges rejouées depuis ses
+    mesures — cf. `services.practice`). Sans aucune des deux (ancien client), le
+    repli fait glisser les 3 critères de performance vers le taux de réussite.
 
     **Le profil ne bouge qu'à hauteur de ce qui a été mesuré** : une séance sans
     aucune mesure n'y touche pas (elle compte quand même comme une session), une
     séance courte pèse au prorata (`compute_confidence`). Sans ce garde-fou, une
     session où l'étudiant n'a répondu à rien tirait trois critères vers 0 — vers
     exactement 0 à la première session, où alpha vaut 1.
+
+    Une séance de pratique ne se finalise qu'UNE fois (`finalized_at`) : un quiz
+    quitté puis clos, une clôture renvoyée, ne font pas glisser le profil deux fois.
+    `measure_meta=False` : les réponses sont gardées sans être notées (le ressenti
+    à choix du feuilleton n'est pas une réflexion écrite).
     """
+    if practice_session_id is not None and not mark_finalized(int(practice_session_id)):
+        logger.info("Séance de pratique %s déjà finalisée : profil inchangé", practice_session_id)
+        return {}
+
     pairs = _reflection_pairs(questions, responses)
     for order, pair in enumerate(pairs):
-        save_session_reflection(session_id, pair["question"], pair["answer"], user_id, order)
+        save_session_reflection(
+            session_id, pair["question"], pair["answer"], user_id, order,
+            practice_session_id=practice_session_id,
+        )
 
     # La série d'étude avance ICI, à l'unique point par lequel passent les trois
     # finalisations (lecture, séance de langue, quiz) — et pas dans un `GET`.
@@ -530,6 +560,13 @@ def nudge_metacog_profile(
     profile_gauges = {c: float(profile.get(c, 50.0)) for c in CRITERIA}
     if session_gauges is None and session_id is not None:
         session_gauges = _measured_gauges(session_id)
+    elif session_gauges is None and practice_session_id is not None:
+        session_gauges = _measured_gauges(int(practice_session_id), scope=PRACTICE)
+        if not session_gauges:
+            # Une séance de pratique a sa courbe : si rien n'y a bougé, rien n'a
+            # été mesuré. Surtout pas de repli vers le taux de réussite, qui
+            # tirerait trois critères vers un score que personne n'a obtenu.
+            measures = 0
     if measures is None:
         measures = _session_measures(session_id, metrics or {})
 
@@ -544,7 +581,7 @@ def nudge_metacog_profile(
     confidence = compute_confidence(measures)
     # La métacognition se mesure ici, et nulle part ailleurs : sur ce que
     # l'étudiant écrit dans le sas de sortie.
-    meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges)
+    meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges) if measure_meta else None
     if meta_score is not None and session_id is not None:
         # Une révision éclair cliquée sans lire a déjà coûté de la métacognition
         # à la jauge live ; la note du sas de sortie REMPLACE cette jauge, elle
@@ -553,13 +590,26 @@ def nudge_metacog_profile(
         meta_score = clamp_gauge(meta_score + warmup_meta)
 
     if session_gauges:
-        # Canal temps réel disponible : tout le profil (6 critères) glisse vers les
-        # jauges live via le moteur unique `metacog.profile.update_profile`
+        # Courbe de jauges disponible : tout le profil (6 critères) glisse vers les
+        # jauges de la séance via le moteur unique `metacog.profile.update_profile`
         # (historique par critère + incrément du compteur de sessions inclus).
         session_score = dict(session_gauges)
+        weights: float | dict[str, float] = confidence
+        if practice_session_id is not None:
+            # Séance de pratique : chaque critère pèse à hauteur des mesures qui
+            # l'ont informé — une curiosité relevée une fois ne pèse pas comme une
+            # rétention éprouvée dix fois.
+            measured_by = _practice_measured_by(int(practice_session_id))
+            if measured_by:
+                weights = {criterion: compute_confidence(n) for criterion, n in measured_by.items()}
         if meta_score is not None:
             session_score["meta_cognition"] = meta_score
-        updated = update_profile(user_id, session_score, session_id, confidence=confidence)
+            if isinstance(weights, dict):
+                weights["meta_cognition"] = confidence
+        updated = update_profile(
+            user_id, session_score, session_id,
+            confidence=weights, practice_session_id=practice_session_id,
+        )
         new_values: dict[str, float] = {c: float(updated.get(c, 50.0)) for c in CRITERIA}
     else:
         # Repli (séance sans canal temps réel) : le taux de réussite n'informe
@@ -575,7 +625,10 @@ def nudge_metacog_profile(
             before = float(profile.get(criterion, 50.0))
             after = clamp_gauge(before * (1 - alpha) + target * alpha)
             new_values[criterion] = after
-            insert_history(user_id, session_id, criterion, before, after, target, alpha)
+            insert_history(
+                user_id, session_id, criterion, before, after, target, alpha,
+                practice_session_id=practice_session_id,
+            )
         update_profile_values(user_id, new_values, increment_sessions=True)
 
     # Analyse générale de l'apprenant (best-effort, après le nudge profil).

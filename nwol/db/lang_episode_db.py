@@ -532,14 +532,18 @@ def get_lexeme(profile_id: int, lemma: str) -> dict | None:
 
 
 def insert_lexeme(profile_id: int, entry: dict, episode_n: int | None) -> int:
-    """Nouveau mot (INSERT OR IGNORE) ; renvoie l'id, existant ou neuf."""
+    """Nouveau mot ; renvoie l'id, existant ou neuf. Un mot déjà connu garde
+    tout, sauf la prononciation qui lui manquait (inscrit avant que Clikoda la
+    donne pour les langues latines) : il la reçoit."""
     conn = get_connection()
     with conn:
         conn.execute(
-            """INSERT OR IGNORE INTO lang_lexicon
+            """INSERT INTO lang_lexicon
                (profile_id, form, lemma, translation, pos, gender, pron, vocalized, transparent,
                 first_episode_n)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(profile_id, lemma) DO UPDATE SET pron = excluded.pron
+               WHERE COALESCE(lang_lexicon.pron, '') = '' AND COALESCE(excluded.pron, '') <> ''""",
             (
                 profile_id, entry.get("form") or entry["lemma"], entry["lemma"],
                 entry.get("translation") or "", entry.get("pos"), entry.get("gender"),

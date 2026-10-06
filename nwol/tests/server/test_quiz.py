@@ -886,3 +886,159 @@ def test_the_candidate_pool_is_sampled_not_a_recency_window(client, monkeypatch)
         seen.update(_ids(client, subject="physique", n=5))
     # Avant : au plus 20 questions distinctes, toujours les 20 plus récentes.
     assert len(seen) > 35, f"seulement {len(seen)} questions atteignables sur 60"
+
+
+# ── Séance de quiz : réponses gardées, jauges rejouées, profil ───────────────
+#
+# Un quiz n'avait aucune trace : la séance vivait dans le navigateur, la
+# rétention glissait à chaque réponse hors de toute séance, et « Ma progression »
+# ne le voyait pas. Il est désormais une séance de pratique, avec sa courbe de
+# jauges et ses mouvements de profil, comme une lecture.
+
+def _played(index: int, verdict: str = "correct", question_type: str = "qcm", **extra) -> dict:
+    """Une réponse telle que l'écran du quiz l'envoie en fin de séance."""
+    return {
+        "question_id": None,
+        "question": f"Question {index} ?",
+        "question_type": question_type,
+        "category": "géographie",
+        "source": "static",
+        "user_answer": "Canberra",
+        "verdict": verdict,
+        "graded": True,
+        "response_time_ms": 3000,
+        **extra,
+    }
+
+
+def _record(client, answers, **body) -> int:
+    resp = client.post("/api/quiz/session", json={"answers": answers, **body})
+    assert resp.status_code == 200
+    return resp.json()["session_id"]
+
+
+def test_an_answer_no_longer_moves_the_profile_on_its_own(client):
+    """La rétention glissait de 8 % à CHAQUE réponse, puis encore à la clôture :
+    deux modèles de l'apprenant pour une même mesure. Elle passe par la séance."""
+    from db.metacog import get_history
+
+    body = client.post("/api/quiz/answer", json={"category": "maths", "correct": True}).json()
+    assert body["verdict"] == "correct" and "retention" not in body
+    assert get_history() == []
+
+
+def test_a_recorded_quiz_keeps_its_answers_and_draws_its_gauges(client):
+    resp = client.post("/api/quiz/session", json={
+        "settings": {"mode": "subject", "subject": "géographie", "topic": "capitales"},
+        "answers": [_played(i) for i in range(4)] + [_played(4, "incorrect")],
+        "duration_s": 120,
+    }).json()
+    assert resp["metrics"]["questions_answered"] == 5 and resp["metrics"]["success_rate"] == 80
+
+    detail = client.get(f"/api/progress/practice/{resp['session_id']}").json()
+    assert detail["kind"] == "quiz" and detail["completed"] is True
+    assert detail["quiz"]["topic"] == "capitales"
+    assert [a["verdict"] for a in detail["quiz"]["answers"]] == ["correct"] * 4 + ["incorrect"]
+    gauges = detail["gauges"]
+    assert gauges["axis"] == "question"
+    assert [point["t"] for point in gauges["series"]["retention"]] == [0, 1, 2, 3, 4, 5]
+    # Un QCM vise rétention et attention : ce sont elles qui ont bougé. Être juste
+    # ne dit rien de la curiosité ni de la créativité.
+    assert {"retention", "attention"} <= set(gauges["measured"])
+    assert not {"curiosity", "creativity", "meta_cognition"} & set(gauges["measured"])
+
+
+def test_a_quiz_without_any_answer_is_not_recorded(client):
+    body = client.post("/api/quiz/session", json={"answers": [_played(0, verdict="")]}).json()
+    assert body["session_id"] is None
+    assert client.get("/api/progress/sessions").json()["sessions"] == []
+
+
+def test_finalizing_a_quiz_moves_the_profile_toward_its_gauges_once(client):
+    from db.metacog import ensure_profile, get_history
+
+    sid = _record(client, [_played(i) for i in range(6)], duration_s=90)
+    assert client.post("/api/quiz/finalize", json={"session_id": sid}).json()["session_id"] == sid
+
+    profile = ensure_profile()
+    assert float(profile["retention"]) > 50.0
+    # Ni la curiosité ni la créativité : six QCM ne les ont pas mesurées.
+    assert float(profile["curiosity"]) == 50.0 and float(profile["creativity"]) == 50.0
+    rows = [row for row in get_history() if row["practice_session_id"] == sid]
+    assert rows and all(row["session_id"] is None for row in rows)
+
+    # Quitter puis clore, ou une clôture renvoyée : le profil ne glisse qu'une fois.
+    client.post("/api/quiz/finalize", json={"session_id": sid})
+    again = ensure_profile()
+    assert float(again["retention"]) == float(profile["retention"])
+    assert int(again["sessions_count"]) == 1
+
+
+def test_wrong_answers_pull_the_session_gauges_below_their_seed(client):
+    sid = _record(client, [_played(i, "incorrect") for i in range(5)])
+    gauges = client.get(f"/api/progress/practice/{sid}").json()["gauges"]
+    assert gauges["series"]["retention"][-1]["value"] < gauges["seed"]["retention"]
+
+
+def test_finalizing_an_unknown_quiz_session_is_a_404(client):
+    assert client.post("/api/quiz/finalize", json={"session_id": 424242}).status_code == 404
+
+
+def test_a_written_answer_moves_the_gauges_with_its_llm_signals(client):
+    """Corrigée par le LLM, une réponse rédigée garde ses signaux : la curiosité
+    bouge comme dans le lecteur — ce qu'un verdict seul ne fait jamais."""
+    signals = {"metacog_signals": {"curiosity": 2.0}, "curiosity_signals": {}, "creativity_signals": {}}
+    sid = _record(client, [_played(
+        0, question_type="curiosity", user_answer="Et si la Lune n'existait pas ?", signals=signals,
+    )])
+    assert "curiosity" in client.get(f"/api/progress/practice/{sid}").json()["gauges"]["measured"]
+
+
+def test_evaluate_hands_back_only_the_signals_the_engine_can_read(client, monkeypatch):
+    evaluator, _seen = _evaluator(
+        "correct", metacog_signals={"curiosity": 1.5, "attention": 9, "inconnu": 1, "retention": "x"},
+    )
+    monkeypatch.setattr("services.quiz.evaluate_answer_async", evaluator)
+    qid = _seed_typed_question("teach_back", subject="chimie")
+
+    body = client.post("/api/quiz/evaluate", json={"question_id": qid, "user_answer": "Mon explication."}).json()
+    assert body["signals"]["metacog_signals"] == {"curiosity": 1.5, "attention": 2.0}
+
+    choices = ["La réponse attendue", "Faux A", "Faux B", "Faux C"]
+    qcm = _seed_typed_question("qcm", choices=choices, subject="physique")
+    body = client.post("/api/quiz/evaluate", json={"question_id": qcm, "user_answer": "Faux A"}).json()
+    assert body["signals"] is None  # verdict objectif : aucun signal à inventer
+
+
+def test_the_quiz_debrief_is_kept_with_its_session(client, monkeypatch):
+    def _analysis(context, on_success, on_error, model=None):
+        on_success({"analysis": "Tu maîtrises les capitales européennes."})
+
+    monkeypatch.setattr("services.quiz.generate_quiz_session_analysis_async", _analysis)
+    sid = _record(client, [_played(0)])
+    client.post("/api/quiz/analysis", json={
+        "answers": [{"question": "Question 0 ?", "verdict": "correct", "category": "géographie"}],
+        "session_id": sid,
+    })
+    assert client.get(f"/api/progress/practice/{sid}").json()["analysis"] == (
+        "Tu maîtrises les capitales européennes."
+    )
+
+
+def test_one_written_answer_among_qcm_does_not_drag_the_profile_down(client):
+    """Une réponse rédigée au milieu de QCM : le modèle du lecteur aurait poussé
+    la curiosité et la métacognition d'un cheveu au-dessus de leur amorce
+    (profil × 0,8)… et le profil serait descendu vers elles. Ce qu'une mesure
+    n'informe pas ne bouge pas ; ce qu'elle informe une fois pèse pour une fois."""
+    from db.metacog import ensure_profile
+
+    signals = {"metacog_signals": {"curiosity": 0.4}, "curiosity_signals": {}, "creativity_signals": {}}
+    sid = _record(client, [_played(i) for i in range(4)] + [
+        _played(4, question_type="comprehension", user_answer="Le texte décrit trois étapes.", signals=signals),
+    ])
+    client.post("/api/quiz/finalize", json={"session_id": sid})
+    profile = ensure_profile()
+    assert float(profile["meta_cognition"]) == 50.0
+    assert float(profile["creativity"]) == 50.0
+    # La curiosité, relevée une fois, ne pèse qu'un quart : elle bouge, peu.
+    assert abs(float(profile["curiosity"]) - 50.0) < abs(float(profile["retention"]) - 50.0)

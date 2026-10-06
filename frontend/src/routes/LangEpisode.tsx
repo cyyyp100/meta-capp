@@ -142,7 +142,7 @@ export function LangEpisode() {
     navigate("/lang");
   }
 
-  if (phase === "rest") return <PostExitRestSas onDone={() => navigate("/lang")} />;
+  if (phase === "rest") return <PostExitRestSas onDone={() => navigate("/lang")} skipKey="post_exit_rest.skip_lang" />;
 
   return (
     <div ref={scroller} style={{ position: "fixed", inset: 0, background: "var(--bg)", overflowY: "auto" }}>

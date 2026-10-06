@@ -20,6 +20,14 @@ from config.settings import (
     QUIZ_SEARCH_POOL,
 )
 from db.documents import get_document
+from db.metacog import CRITERIA
+from db.practice_sessions import (
+    end_practice_session,
+    get_practice_session,
+    get_quiz_answers,
+    save_quiz_answers,
+    update_practice_details,
+)
 from db.questions import get_question
 from db.quiz_exposures import get_exposures, record_exposures
 from db.quiz_questions import (
@@ -30,12 +38,14 @@ from db.quiz_questions import (
 )
 from db.subjects import get_all_subjects, update_subject_from_answer
 from db.user import DEFAULT_USER_ID
-from services import selection
+from services import practice, selection
 from llm.ollama_client import (
     evaluate_answer_async,
     generate_quiz_distractors_async,
     generate_quiz_session_analysis_async,
 )
+from metacog.gauges import QUESTION_TYPE_TARGET_GAUGES
+from metacog.reflection import augment_evaluation_with_response_signals
 from services.assistant import objective_verdict
 from services.llm_bridge import run_llm_sync
 from utils.text import fold
@@ -48,6 +58,8 @@ __all__ = [
     "list_subjects",
     "submit_answer",
     "evaluate_quiz_answer",
+    "record_quiz_session",
+    "quiz_metrics",
     "analyze_session",
     "finalize_quiz_session",
 ]
@@ -59,6 +71,11 @@ _CONTEXT_MAX_CHARS = 500
 # compter juste effacerait la moitié manquante.
 VERDICTS: tuple[str, ...] = ("correct", "partial", "incorrect")
 VERDICT_SCORES: dict[str, float] = {"correct": 1.0, "partial": 0.5, "incorrect": 0.0}
+
+# Bornes de ce qu'une séance enregistre de chaque réponse : un quiz se joue en
+# minutes, une réponse au-delà d'une heure dit une fenêtre oubliée, pas un temps.
+_MAX_RESPONSE_MS = 3_600_000
+_MAX_ANSWER_CHARS = 4000
 
 
 def clamp_quiz_length(n) -> int:
@@ -258,30 +275,22 @@ def submit_answer(
     category: str | None,
     correct: bool,
     user_id: int = DEFAULT_USER_ID,
-    session_id: int | None = None,
     verdict: str | None = None,
 ) -> dict:
-    """Met à jour la maîtrise de la matière ET la rétention permanente.
+    """Met à jour la maîtrise de la matière, réponse par réponse.
 
-    Un quiz de révision est une mesure directe de la mémorisation : il fait donc
-    bouger le critère `retention` du profil long terme, en plus du niveau de la
-    matière. Les deux mises à jour sont indépendantes — une question sans matière
-    nourrit quand même la rétention.
+    Le profil métacognitif, lui, ne bouge plus ici : la rétention glissait de 8 %
+    à CHAQUE réponse, hors de toute séance, puis une seconde fois à la clôture —
+    deux modèles de l'apprenant pour une même mesure. Les réponses font désormais
+    une courbe de jauges (`record_quiz_session`), que la finalisation commune
+    remonte au profil comme celle d'une lecture.
 
-    ``verdict`` transporte la nuance des réponses rédigées : la rétention connaît
-    une cible « partial » (`metacog.profile`), que le booléen à lui seul écrasait
-    en « incorrect ». Sans verdict, il est déduit du booléen."""
-    from metacog.profile import update_retention_from_quiz
-
+    ``verdict`` garde la nuance des réponses rédigées ; sans lui, il est déduit
+    du booléen."""
     graded = (verdict or "").strip().lower()
     if graded not in VERDICTS:
         graded = "correct" if correct else "incorrect"
-    retention = update_retention_from_quiz(user_id, graded, session_id=session_id)
-    result = {
-        "updated": bool(category),
-        "verdict": graded,
-        "retention": float(retention.get("retention", 50.0)),
-    }
+    result = {"updated": bool(category), "verdict": graded}
     if not category:
         return result
     result["category"] = category
@@ -365,7 +374,61 @@ def evaluate_quiz_answer(
         feedback=str(evaluation.get("feedback") or ""),
         hint=str(evaluation.get("hint") or "") if verdict == "incorrect" else "",
         completion=str(evaluation.get("completion") or "") if verdict == "partial" else "",
+        # Ce que le LLM a lu de la réponse au-delà du verdict : la séance les
+        # renvoie avec ses réponses, pour que la rédaction fasse bouger les
+        # jauges comme dans le lecteur (`record_quiz_session`).
+        signals=_clean_signals(evaluation),
     )
+
+
+def record_quiz_session(
+    settings: dict | None,
+    answers: list[dict],
+    duration_s: int = 0,
+    user_id: int = DEFAULT_USER_ID,
+) -> dict:
+    """Enregistre une séance de quiz jouée : ses réponses, sa courbe de jauges.
+
+    Le pendant de `POST /session/{id}/end` pour une lecture. Les réponses
+    arrivent d'un bloc, à la fin (ou quand l'apprenant quitte en cours de route) :
+    le quiz vit dans le navigateur et ses jauges ne s'affichent jamais pendant la
+    séance, il n'y a donc rien à tenir à jour avant. Chaque réponse devient une
+    mesure (`_quiz_measures`), rejouée par le moteur unique en une courbe dont
+    l'axe est le numéro de question. Rien n'est enregistré sans réponse.
+
+    Renvoie ``{session_id, metrics}`` — ``session_id`` sert ensuite à l'analyse
+    (gardée avec la séance) et à la finalisation (qui fait glisser le profil)."""
+    clean = [
+        cleaned for index, entry in enumerate(answers or [])
+        if isinstance(entry, dict) and (cleaned := _clean_answer(entry, index))
+    ]
+    if not clean:
+        return {"session_id": None, "metrics": quiz_metrics([], duration_s)}
+    scope = _session_scope(settings, len(clean))
+    session_id = practice.start(
+        "quiz", user_id,
+        settings={key: scope[key] for key in ("mode", "subject", "topic")},
+    )
+    save_quiz_answers(session_id, clean)
+    practice.record(session_id, _quiz_measures(clean))
+    end_practice_session(session_id, duration_s)
+    return {"session_id": session_id, "metrics": quiz_metrics(clean, duration_s)}
+
+
+def quiz_metrics(answers: list[dict], duration_s: int | None = 0) -> dict:
+    """Métriques d'une séance de quiz, tirées de ses réponses. Un « partiel »
+    compte un demi-point, comme dans le bilan affiché."""
+    total = len(answers)
+    points = sum(VERDICT_SCORES.get(a.get("verdict"), 0.0) for a in answers)
+    return {
+        "duration_s": max(0, int(duration_s or 0)),
+        "pages_read": 0,
+        "questions_answered": total,
+        "correct": sum(1 for a in answers if a.get("verdict") == "correct"),
+        "partial": sum(1 for a in answers if a.get("verdict") == "partial"),
+        "points": points,
+        "success_rate": round(100 * points / total) if total else 0,
+    }
 
 
 def finalize_quiz_session(
@@ -377,14 +440,40 @@ def finalize_quiz_session(
     subject: str | None = None,
     topic: str | None = None,
     user_id: int = DEFAULT_USER_ID,
-) -> dict:
-    """Sas de sortie d'une session de quiz : réflexions + nudge du profil long terme.
+    session_id: int | None = None,
+) -> dict | None:
+    """Clôture d'une séance de quiz : réflexions + glissement du profil long terme.
 
-    Même rituel de clôture qu'une lecture PDF ou qu'une séance de langue, et
-    surtout le MÊME chemin de finalisation (`services.session.nudge_metacog_profile`) :
-    un quiz est une mesure d'apprentissage, il doit peser sur le profil. `session_id=None`
-    parce qu'un quiz n'est pas une session de lecture (aucun document derrière).
+    Même chemin de finalisation qu'une lecture ou qu'une séance de langue
+    (`services.session.nudge_metacog_profile`) : un quiz est une mesure
+    d'apprentissage, il doit peser sur le profil.
+
+    Avec ``session_id`` (séance enregistrée par `record_quiz_session`), le profil
+    glisse vers la courbe de jauges de la séance, au prorata de ses réponses, et
+    les métriques sont relues en base : le client n'a rien à recompter. Renvoie
+    None si la séance n'existe pas. Sans ``session_id`` (ancien client), le repli
+    d'avant : les trois critères de performance vers le taux de réussite.
     """
+    if session_id is not None:
+        session = get_practice_session(int(session_id))
+        if session is None or session.get("kind") != "quiz":
+            return None
+        answers = get_quiz_answers(int(session_id))
+        metrics = {
+            **quiz_metrics(answers, session.get("duration_s")),
+            **{key: (session.get("settings") or {}).get(key) for key in ("mode", "subject", "topic")},
+        }
+        try:
+            from services.session import nudge_metacog_profile
+
+            nudge_metacog_profile(
+                user_id, float(metrics["success_rate"]), list(responses or []), metrics,
+                session_id=None, practice_session_id=int(session_id), measures=len(answers),
+            )
+        except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
+            logger.debug("Nudge métacognitif (quiz) ignoré", exc_info=True)
+        return {"ok": True, "score": float(metrics["success_rate"]), "session_id": int(session_id)}
+
     score = max(0.0, min(100.0, float(score or 0.0)))
     metrics = {
         "duration_s": max(0, int(duration_s or 0)),
@@ -408,6 +497,7 @@ def analyze_session(
     answers_history: list[dict],
     user_id: int = DEFAULT_USER_ID,
     settings: dict | None = None,
+    session_id: int | None = None,
 ) -> dict:
     """Bilan de fin de session : cours à renforcer (calculés) + analyse LLM.
 
@@ -421,6 +511,9 @@ def analyze_session(
     session (``settings`` : mode, matière, précision). Sans lui, elle commentait le
     profil entier, y compris des matières absentes de la session. Seule l'analyse
     dépend du LLM : s'il échoue, le reste du bilan est rendu quand même.
+
+    Avec ``session_id``, le bilan est gardé avec la séance : « Ma progression » le
+    relit tel quel, sans jamais le régénérer.
     """
     history = [entry for entry in (answers_history or []) if isinstance(entry, dict)]
     result = {"analysis": "", "weak_subjects": [], "courses_to_review": []}
@@ -446,10 +539,29 @@ def analyze_session(
         )
     except Exception as exc:  # pragma: no cover - dégradation best-effort
         logger.warning("Analyse de session de quiz échouée : %s", exc)
-        return result
+        analysis = None
     if isinstance(analysis, dict):
         result["analysis"] = str(analysis.get("analysis") or "").strip()
+    _keep_analysis(session_id, result)
     return result
+
+
+def _keep_analysis(session_id: int | None, result: dict) -> None:
+    """Garde le bilan avec sa séance (best-effort). Une analyse vide — LLM absent —
+    n'efface pas celle qu'une première demande aurait déjà obtenue."""
+    if session_id is None:
+        return
+    try:
+        session = get_practice_session(int(session_id))
+        if session is None or session.get("kind") != "quiz":
+            return
+        update_practice_details(
+            int(session_id),
+            analysis=result["analysis"] or None,
+            details={key: result[key] for key in ("weak_subjects", "courses_to_review")},
+        )
+    except Exception:  # pragma: no cover - le bilan affiché prime sur sa trace
+        logger.debug("Bilan de quiz non gardé avec la séance", exc_info=True)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -723,8 +835,10 @@ def _evaluation(
     hint: str = "",
     completion: str = "",
     graded: bool = True,
+    signals: dict | None = None,
 ) -> dict:
-    """Résultat de correction, tel que l'UI du quiz l'attend."""
+    """Résultat de correction, tel que l'UI du quiz l'attend. ``signals`` : ceux
+    du LLM, absents d'un verdict objectif (QCM, remise en ordre, case vide)."""
     return {
         "verdict": verdict,
         "score": VERDICT_SCORES.get(verdict, 0.0),
@@ -733,7 +847,103 @@ def _evaluation(
         "completion": completion,
         "expected_answer": expected_answer,
         "graded": bool(graded and verdict in VERDICTS),
+        "signals": signals,
     }
+
+
+def _clean_signals(raw) -> dict | None:
+    """Signaux d'une évaluation, ramenés à ce que le moteur de jauges sait lire.
+
+    Ils font l'aller-retour par le navigateur (correction pendant la séance,
+    enregistrement à la fin) : on n'en garde que les clés connues, bornées.
+    Sans `metacog_signals`, rien — la réponse est alors mesurée par son verdict."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("metacog_signals"), dict):
+        return None
+    metacog: dict[str, float] = {}
+    for criterion, value in raw["metacog_signals"].items():
+        if criterion not in CRITERIA or isinstance(value, bool):
+            continue
+        try:
+            metacog[criterion] = max(-2.0, min(2.0, float(value)))
+        except (TypeError, ValueError):
+            continue
+    curiosity = raw.get("curiosity_signals")
+    creativity = raw.get("creativity_signals")
+    clean_creativity: dict = {}
+    if isinstance(creativity, dict):
+        for key, value in creativity.items():
+            if key == "depth_of_reflection":
+                try:
+                    clean_creativity[key] = max(0.0, min(1.0, float(value)))
+                except (TypeError, ValueError):
+                    continue
+            else:
+                clean_creativity[str(key)] = bool(value)
+    return {
+        "metacog_signals": metacog,
+        "curiosity_signals": (
+            {str(k): bool(v) for k, v in curiosity.items()} if isinstance(curiosity, dict) else {}
+        ),
+        "creativity_signals": clean_creativity,
+    }
+
+
+def _clean_answer(entry: dict, index: int) -> dict | None:
+    """Une réponse de séance, telle qu'on la garde. Sans verdict, pas de réponse :
+    une question laissée en plan n'est pas une mesure."""
+    verdict = str(entry.get("verdict") or "").strip().lower()
+    if verdict not in VERDICTS:
+        return None
+    document_id = entry.get("document_id")
+    if not isinstance(document_id, int) or isinstance(document_id, bool) or not get_document(document_id):
+        # Un document supprimé depuis (ou forgé) ne se relie à rien.
+        document_id = None
+    try:
+        response_ms = max(0, min(_MAX_RESPONSE_MS, int(entry.get("response_time_ms"))))
+    except (TypeError, ValueError):
+        response_ms = None
+    question_id = entry.get("question_id")
+    source = str(entry.get("source") or "").strip().lower()
+    return {
+        "position": index,
+        "question_id": question_id if isinstance(question_id, int) and not isinstance(question_id, bool) else None,
+        "question": str(entry.get("question") or "")[:_MAX_ANSWER_CHARS],
+        "question_type": _question_type(entry),
+        "category": (str(entry.get("category") or "").strip() or None),
+        "source": source if source in ("reading", "static") else "reading",
+        "document_id": document_id,
+        "chapter_title": (str(entry.get("chapter_title") or "").strip() or None),
+        "user_answer": str(entry.get("user_answer") or "")[:_MAX_ANSWER_CHARS],
+        "verdict": verdict,
+        "graded": bool(entry.get("graded", True)),
+        "response_time_ms": response_ms,
+        "signals": _clean_signals(entry.get("signals")),
+    }
+
+
+def _quiz_measures(answers: list[dict]) -> list[dict]:
+    """Chaque réponse est une mesure ; l'axe de la courbe est le numéro de question.
+
+    Corrigée par le LLM (signaux à l'appui), elle suit le modèle du lecteur, la
+    forme de la réponse comprise (`augment_evaluation_with_response_signals`) ;
+    jugée par son seul verdict (QCM, remise en ordre, auto-évaluation, « je ne
+    sais pas »), elle tire vers sa cible les jauges que vise son type."""
+    measures = []
+    for answer in answers:
+        qtype = answer.get("question_type") or "open"
+        measure = {
+            "t": float(int(answer.get("position", len(measures))) + 1),
+            "verdict": answer["verdict"],
+            "question_type": qtype,
+            "targets": QUESTION_TYPE_TARGET_GAUGES.get(qtype, ()),
+            "response_time_ms": answer.get("response_time_ms"),
+        }
+        if answer.get("signals"):
+            measure["evaluation"] = augment_evaluation_with_response_signals(
+                {**answer["signals"], "verdict": answer["verdict"]}, answer.get("user_answer") or "",
+            )
+        measures.append(measure)
+    return measures
 
 
 def _stored_reading_question(question_id) -> dict:

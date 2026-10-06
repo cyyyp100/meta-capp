@@ -607,10 +607,14 @@ def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[
     lexique (même traduction d'un épisode à l'autre, et un appel plus court) ;
     les autres, dans l'ordre d'apparition et sans les prénoms, sont demandés —
     au plus LANG_GLOSSARY_MAX_ENTRIES du palier. Deux mots qui ne diffèrent que
-    par un accent sont deux mots."""
+    par un accent sont deux mots. Un mot au lexique sans la prononciation que
+    Clikoda doit écrire (inscrit avant qu'on la lui demande) est redemandé : il
+    ne pourrait sinon jamais devenir une carte."""
     names = ctx.get("speakers") or set()
     known = {}
     for row in (ctx.get("lexicon") or {}).values():
+        if pron_from_clikoda(language) and not row.get("pron"):
+            continue
         known.setdefault(_match_key(language, row["form"]), row)
     tier = ctx["params"]["tier_index"]
     limit = LANG_GLOSSARY_MAX_ENTRIES[min(tier, len(LANG_GLOSSARY_MAX_ENTRIES) - 1)]
@@ -629,7 +633,7 @@ def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[
             if row:
                 from_lexicon.append({"form": tok["text"], "lemma": row["lemma"], "translation": row["translation"],
                                      "pos": row.get("pos") or "expression", "gender": row.get("gender"),
-                                     "from_lexicon": True})
+                                     "pron": row.get("pron"), "from_lexicon": True})
             elif len(asked) < limit:
                 asked.append(tok["text"])
     return asked, from_lexicon
@@ -637,6 +641,13 @@ def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[
 
 def _is_common_noun(entry: dict) -> bool:
     return (entry.get("pos") or "").startswith("nom") and entry.get("pos") != "nom propre"
+
+
+def pron_from_clikoda(language: str) -> bool:
+    """La prononciation d'une entrée vient-elle de Clikoda ? Oui pour les
+    langues latines, dont rien ne la calcule ici ; le pinyin et la
+    translittération arabe, eux, sont calculés (`enrich_glossary`)."""
+    return progress.family(language) == "latin"
 
 
 def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, requested: list[str]) -> dict:
@@ -648,8 +659,10 @@ def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, re
     Allemand : un nom sans genre, ou dont le genre est contredit par un article
     sans ambiguïté du texte, est REFUSÉ seul — son mot redevient manquant et
     sera redemandé avec la raison, au lieu de faire échouer l'épisode entier
-    (§ 14, n° 5)."""
+    (§ 14, n° 5). Langues latines : de même pour une entrée sans prononciation
+    (une expression sans prononciation, facultative, est simplement écartée)."""
     lang = ctx.get("explain_lang") or "fr"
+    needs_pron = pron_from_clikoda(language)
     errors: list[str] = []
     line_keys = [_line_word_keys(language, ln) for ln in lines]
     joined = [" ".join(keys) for keys in line_keys]
@@ -685,6 +698,13 @@ def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, re
         if refused:
             kept = [e for e in kept if e["form"] not in refused]
             seen -= {_match_key(language, w) for w in refused}
+    if needs_pron:
+        unpronounced = [e["form"] for e in kept if not e.get("pron")]
+        if unpronounced:
+            errors.append(_tr(lang, f"prononciation manquante pour : {', '.join(unpronounced[:6])}",
+                              f"pronunciation missing for: {', '.join(unpronounced[:6])}"))
+            kept = [e for e in kept if e.get("pron")]
+            seen -= {_match_key(language, w) for w in unpronounced}
     missing = [w for k, w in wanted.items() if k not in seen]
     missing_error = None
     if missing and len(missing) > max(1, len(wanted) // 10):
@@ -692,6 +712,8 @@ def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, re
                             f"an entry is missing for: {', '.join(missing[:10])} (one entry per word, in order)")
         errors.insert(0, missing_error)
     for e in result.get("expressions") or []:
+        if needs_pron and not e.get("pron"):
+            continue
         key = _match_key(language, e["form"])
         if " " in key and key not in seen and any(f" {key} " in f" {j} " for j in joined):
             seen.add(key)
@@ -1021,6 +1043,7 @@ def _glossary_in_chunks(language: str, lines: list[dict], ctx: dict, asked: list
             result = _llm(llm.generate_lang_episode_glossary_async, {
                 "language_label": pp["language_label"], "words": remaining, "lines": text_lines,
                 "form_rule": pp.get("form_rule", ""), "rejected": rejected, "explain_lang": lang,
+                "pron": pron_from_clikoda(language), "register": pp.get("register", ""),
             }, log, metrics, "glossary")
             if result is None:
                 continue

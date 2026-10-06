@@ -119,7 +119,7 @@ def test_the_exit_reflection_score_keeps_the_warmup_cost(client, monkeypatch):
     monkeypatch.setattr(session, "_measure_meta_cognition", lambda *_a, **_k: 70.0)
     captured: dict = {}
 
-    def fake_update_profile(_user_id, session_score, _sid, confidence=1.0):
+    def fake_update_profile(_user_id, session_score, _sid, confidence=1.0, **_kwargs):
         captured.update(session_score)
         return session_score
 

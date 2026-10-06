@@ -1,7 +1,9 @@
-// SessionDetail.tsx — Ce qu'une session a produit.
+// SessionDetail.tsx — Ce qu'une séance a produit, selon sa catégorie.
 //
-// Trois blocs, trois questions différentes :
-//   1. les courbes — comment j'ai lu, minute par minute ;
+// Trois catégories, chacune avec ses particularités — une lecture dit où l'on a
+// ralenti, un quiz les réponses données, une séance de langue ce qu'elle a fait
+// gagner — et un tronc commun, dans cet ordre :
+//   1. les courbes — comment la séance s'est déroulée, mesure par mesure ;
 //   2. les mouvements de profil — ce que ça a changé (`value_before` →
 //      `value_after` sont déjà stockés par critère, il n'y a rien à recalculer) ;
 //   3. MES MOTS, relus tels quels.
@@ -10,33 +12,31 @@
 // outil ne peut restituer : ni ChatGPT (il n'observe pas la lecture dans la
 // durée), ni Anki (il modélise le rappel, pas la compréhension).
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
 import { api } from "@/api/client";
-import type { ProgressChange, SessionPause } from "@/api/client";
+import type { ProgressKind, SessionPause } from "@/api/client";
 
 import { useT } from "../../i18n";
 import { formatDuration } from "../session/duration";
-import { criterionLabel } from "../stats/labels";
-import { GaugeCurves } from "./GaugeCurves";
+import {
+  Bar,
+  Block,
+  DetailHeader,
+  GaugesBlock,
+  Metric,
+  Metrics,
+  ProfileChangesBlock,
+  ReflectionsBlock,
+} from "./blocks";
+import { LangDetail } from "./LangDetail";
+import { sessionName } from "./names";
+import { QuizDetail } from "./QuizDetail";
 
-/**
- * Le nom d'une session : « <titre du document> · Lecture n ». Une seule
- * définition, pour la frise et pour l'en-tête du détail, sinon les deux
- * divergent. Sans document (session orpheline), on retombe sur le libellé
- * générique ; sans rang connu, sur le titre seul.
- */
-export function sessionName(
-  t: ReturnType<typeof useT>,
-  title: string,
-  readingIndex: number,
-): string {
-  if (!title) return t("progress.detail_title");
-  if (!(readingIndex > 0)) return title;
-  return `${title} · ${t("progress.reading_n", { n: readingIndex })}`;
+export function SessionDetail({ kind, sessionId }: { kind: ProgressKind; sessionId: number }) {
+  return kind === "reading" ? <ReadingDetail sessionId={sessionId} /> : <PracticeDetail sessionId={sessionId} />;
 }
 
-export function SessionDetail({ sessionId }: { sessionId: number }) {
+function ReadingDetail({ sessionId }: { sessionId: number }) {
   const t = useT();
   const { data, isLoading, isError } = useQuery({
     queryKey: ["progress", "session", sessionId],
@@ -48,19 +48,14 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <header>
-        <h2 className="m-0 font-serif text-h2 font-bold">
-          {sessionName(t, data.document.title, data.reading_index)}
-        </h2>
-        <p className="mt-1 mb-0 text-sm text-muted-foreground">
-          {data.completed
-            ? t("progress.session_of", { date: formatDate(data.started_at) })
-            : t("progress.in_progress")}
-        </p>
-      </header>
+      <DetailHeader
+        title={sessionName(t, data.document.title, data.reading_index)}
+        startedAt={data.started_at}
+        completed={data.completed}
+      />
 
       <Block title={t("progress.metrics")}>
-        <dl className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
+        <Metrics>
           <Metric label={t("exit.duration")} value={t("progress.minutes", { n: Math.round((data.metrics.duration_s ?? 0) / 60) })} />
           <Metric label={t("exit.pages")} value={String(data.metrics.pages_read ?? 0)} />
           <Metric label={t("exit.questions")} value={String(data.metrics.questions_answered ?? 0)} />
@@ -74,45 +69,12 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
               })}
             />
           )}
-        </dl>
+        </Metrics>
       </Block>
 
-      <Block title={t("progress.gauges")}>
-        <GaugeCurves gauges={data.gauges} />
-      </Block>
-
-      <Block title={t("progress.changes")}>
-        {data.profile_changes.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground italic">{t("progress.no_changes")}</p>
-        ) : (
-          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2.5 p-0">
-            {data.profile_changes.map((change) => (
-              <li key={change.criterion}>
-                <ChangeRow change={change} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Block>
-
-      <Block title={t("progress.reflections")}>
-        {data.reflections.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground italic">{t("progress.no_reflections")}</p>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {data.reflections.map((reflection, index) => (
-              <div key={index}>
-                <p className="m-0 text-[13px] font-semibold text-muted-foreground">{reflection.question}</p>
-                {/* `whitespace-pre-wrap` : ce que quelqu'un a écrit se relit
-                    comme il l'a écrit, retours à la ligne compris. */}
-                <p className="mt-1.5 mb-0 border-l-2 border-brand pl-3 text-sm leading-relaxed whitespace-pre-wrap">
-                  {reflection.answer}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Block>
+      <GaugesBlock gauges={data.gauges} />
+      <ProfileChangesBlock changes={data.profile_changes} />
+      <ReflectionsBlock reflections={data.reflections} />
 
       {data.page_dwell.length > 0 && (
         <Block title={t("progress.dwell")}>
@@ -129,40 +91,18 @@ export function SessionDetail({ sessionId }: { sessionId: number }) {
   );
 }
 
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-md border border-border bg-surface p-5 shadow-e1">
-      <h3 className="m-0 mb-3.5 text-[13px] font-bold tracking-wide text-muted-foreground uppercase">
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
-}
+/** Quiz et langue partagent leur route (`/api/progress/practice/{id}`) : le
+ *  détail reçu dit lui-même sa catégorie. */
+function PracticeDetail({ sessionId }: { sessionId: number }) {
+  const t = useT();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["progress", "practice", sessionId],
+    queryFn: () => api.progressPractice(sessionId),
+  });
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">{label}</dt>
-      <dd className="m-0 mt-1 text-h3 font-bold tabular-nums">{value}</dd>
-    </div>
-  );
-}
-
-function ChangeRow({ change }: { change: ProgressChange }) {
-  const up = change.delta > 0.05;
-  const down = change.delta < -0.05;
-  const Icon = up ? ArrowUp : down ? ArrowDown : Minus;
-  const tone = up ? "text-success" : down ? "text-warning" : "text-muted-foreground";
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-sm bg-surface-soft px-3 py-2.5">
-      <span className="truncate text-sm font-semibold">{criterionLabel(change.criterion)}</span>
-      <span className={`flex shrink-0 items-center gap-1.5 text-sm font-bold tabular-nums ${tone}`}>
-        <Icon className="size-3.5" aria-hidden />
-        {Math.round(change.before)} → {Math.round(change.after)}
-      </span>
-    </div>
-  );
+  if (isLoading) return <p className="text-muted-foreground">{t("progress.loading")}</p>;
+  if (isError || !data) return <p className="text-danger">{t("progress.error")}</p>;
+  return data.kind === "quiz" ? <QuizDetail data={data} /> : <LangDetail data={data} />;
 }
 
 /** Où la lecture a ralenti. Une barre par page, normalisée sur la plus longue :
@@ -177,12 +117,7 @@ function DwellBars({ dwell }: { dwell: { page: number; dwell_s: number; visits: 
           <span className="w-20 shrink-0 text-[12px] text-muted-foreground">
             {t("progress.dwell_page", { page: entry.page })}
           </span>
-          <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-border">
-            <span
-              className="block h-full rounded-full bg-brand"
-              style={{ width: `${Math.round((entry.dwell_s / max) * 100)}%` }}
-            />
-          </span>
+          <Bar ratio={entry.dwell_s / max} />
           <span className="w-12 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
             {Math.round(entry.dwell_s)}s
           </span>
@@ -215,9 +150,4 @@ function PauseList({ pauses }: { pauses: SessionPause[] }) {
       ))}
     </ul>
   );
-}
-
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return value.replace("T", " ").slice(0, 16);
 }

@@ -1,10 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
-import type { QuizAnswerRecord, QuizEvaluation, QuizQuestion, QuizVerdict } from "../api/types";
+import type {
+  QuizAnswerRecord,
+  QuizEvaluation,
+  QuizQuestion,
+  QuizSessionSettings,
+  QuizSignals,
+  QuizVerdict,
+} from "../api/types";
 import { ArrowLeft, ArrowRight, Check, Eye, Lightbulb, Minus, Plus, Search, Shuffle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,42 +32,26 @@ import { renderMathToHtml } from "../features/reader/renderMath";
 import { WhyButton } from "../features/science/WhyButton";
 import { formatDuration } from "../features/session/duration";
 import { useT } from "../i18n";
-
 // Code de matière (tel que stocké en base) -> clé i18n du libellé affiché.
-const SUBJ_LABEL_KEY: Record<string, string> = {
-  "mathématiques": "subj.math",
-  "physique": "subj.physics",
-  "chimie": "subj.chemistry",
-  "biologie": "subj.biology",
-  "sciences": "subj.science",
-  "informatique": "subj.cs",
-  "technologie": "subj.technology",
-  "histoire": "subj.history",
-  "géographie": "subj.geography",
-  "français": "subj.french",
-  "philosophie": "subj.philosophy",
-  "littérature": "subj.literature",
-  "langues": "subj.languages",
-  "économie": "subj.economics",
-  "sciences-sociales": "subj.social",
-  "droit": "subj.law",
-  "gestion": "subj.management",
-  "psychologie": "subj.psychology",
-  "sociologie": "subj.sociology",
-  "arts": "subj.arts",
-  "musique": "subj.music",
-  "médecine": "subj.medicine",
-  "sport": "subj.sport",
-  "religion": "subj.religion",
-  "culture": "subj.culture",
-};
+import { SUBJECT_I18N_KEYS as SUBJ_LABEL_KEY } from "../features/stats/labels";
 
 /**
  * Ce qu'une question rapporte à la session. Le verdict vient du serveur pour une
  * réponse rédigée ou une remise en ordre, de la comparaison locale pour un QCM ;
  * `score` en est le poids (1 / 0,5 / 0), un « partiel » valant un demi-point.
+ *
+ * Le reste nourrit la courbe de jauges de la séance, enregistrée à la fin :
+ * `graded` (faux quand l'apprenant a tranché lui-même), le temps de réponse, et
+ * les signaux que le LLM a lus dans une réponse rédigée.
  */
-type QuizOutcome = { verdict: QuizVerdict; score: number; userAnswer: string };
+type QuizOutcome = {
+  verdict: QuizVerdict;
+  score: number;
+  userAnswer: string;
+  graded: boolean;
+  responseTimeMs: number;
+  signals?: QuizSignals | null;
+};
 
 /** Un demi-point doit rester lisible dans le bilan : « 3,5 » et pas « 3.5000 ». */
 function formatScore(value: number): string {
@@ -140,22 +131,43 @@ export function Quiz() {
   const [history, setHistory] = useState<QuizAnswerRecord[]>([]);
   const [durationS, setDurationS] = useState(0);
   const startedAt = useRef(0);
-  // Une session ne se clôt qu'une fois : garde-fou contre un double `/finalize`
-  // (qui compterait la session deux fois dans le profil long terme).
-  const finalized = useRef(false);
+
+  // La séance est enregistrée côté serveur à la fin — ou quand on la quitte en
+  // cours de route (barre latérale) : ses réponses y deviennent une courbe de
+  // jauges, que la clôture remonte au profil. Les refs servent le démontage,
+  // qui ne voit plus l'état React.
+  const historyRef = useRef<QuizAnswerRecord[]>([]);
+  const settingsRef = useRef<QuizSessionSettings>({ mode: "subject", subject: null, topic: null });
+  const recording = useRef<Promise<number | null> | null>(null);
+  // Une séance ne se clôt qu'une fois (le serveur le garantit aussi : une
+  // seconde clôture ne fait pas glisser le profil deux fois).
+  const finalizedIds = useRef(new Set<number>());
+  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [recorded, setRecorded] = useState(false);
 
   // L'analyse lit les réglages FIGÉS de la session (matière, précision, mode) :
-  // elle parle de ce qui a été joué, pas du profil entier.
+  // elle parle de ce qui a été joué, pas du profil entier. Elle attend
+  // l'enregistrement de la séance (sans LLM, immédiat) pour être gardée avec elle.
   const analysisQuery = useQuery({
-    queryKey: ["quiz", "analysis", asked],
-    queryFn: () =>
-      api.quizAnalysis(history, {
-        mode: asked?.mode ?? "subject",
-        subject: asked?.subject || null,
-        topic: asked?.topic || null,
-      }),
-    enabled: done && history.length > 0,
+    queryKey: ["quiz", "analysis", asked, sessionId],
+    queryFn: () => api.quizAnalysis(history, settingsRef.current, sessionId),
+    enabled: done && recorded && history.length > 0,
   });
+
+  // La clôture part APRÈS le bilan : elle réécrit l'analyse générale avec
+  // Clikoda, et il n'y a qu'un worker LLM — le bilan affiché passe devant.
+  useEffect(() => {
+    if (analysisQuery.isSuccess || analysisQuery.isError) finalize(sessionId);
+  }, [analysisQuery.isSuccess, analysisQuery.isError, sessionId]);
+
+  // Quitter en cours de quiz (ou pendant le bilan) : la séance est enregistrée
+  // et close quand même — ses réponses sont des mesures. Sans réponse, rien.
+  useEffect(() => {
+    return () => {
+      if (historyRef.current.length === 0) return;
+      void record().then(finalize);
+    };
+  }, []);
 
   /** Libellé affiché d'une matière (code stocké en base → nom traduit). */
   function subjectName(code: string): string {
@@ -177,23 +189,31 @@ export function Quiz() {
   }, [subjectsQuery.data, t]);
 
   function resetState() {
+    // Une séance enregistrée dont le bilan n'est pas arrivé (« Recommencer »
+    // pressé pendant l'analyse) est close maintenant : ses mesures restent.
+    if (recording.current) void recording.current.then(finalize);
+    recording.current = null;
+    historyRef.current = [];
+    setSessionId(null);
+    setRecorded(false);
     setIndex(0);
     setScore(0);
     setDone(false);
     setByCat({});
     setHistory([]);
     setDurationS(0);
-    finalized.current = false;
   }
 
   function answered(q: QuizQuestion, outcome: QuizOutcome) {
     setScore((s) => s + outcome.score);
     const cat = q.category || "autre";
     setByCat((b) => ({ ...b, [cat]: { correct: (b[cat]?.correct ?? 0) + outcome.score, total: (b[cat]?.total ?? 0) + 1 } }));
-    setHistory((h) => [
-      ...h,
+    historyRef.current = [
+      ...historyRef.current,
       {
+        question_id: q.id,
         question: q.question,
+        question_type: q.question_type,
         user_answer: outcome.userAnswer,
         verdict: outcome.verdict,
         score: outcome.score,
@@ -202,33 +222,41 @@ export function Quiz() {
         document: q.document ?? null,
         document_id: q.document_id ?? null,
         chapter_title: q.chapter_title ?? null,
+        graded: outcome.graded,
+        response_time_ms: outcome.responseTimeMs,
+        signals: outcome.signals ?? null,
       },
-    ]);
-    // Le verdict accompagne le booléen : la rétention du profil distingue le
-    // « partiel », que `correct` seul écrasait en « incorrect ».
+    ];
+    setHistory(historyRef.current);
+    // Maîtrise de la matière, tout de suite ; le verdict garde le « partiel ».
     void api.submitQuizAnswer(q.category, outcome.verdict === "correct", outcome.verdict);
   }
 
-  // Clôture métacognitive de la session : même chemin serveur qu'une fin de lecture
-  // (`/api/quiz/finalize` → `nudge_metacog_profile`), pour qu'un quiz pèse sur le profil
-  // long terme. Sans questions de réflexion — le bilan est une page, plus un rituel.
-  // Déclenché depuis le handler et non un effet : l'app est montée en StrictMode.
-  function finalize(total: number, elapsed: number) {
-    if (finalized.current) return;
-    finalized.current = true;
-    void api
-      .quizFinalize({
-        responses: [],
-        score: total > 0 ? Math.round((100 * score) / total) : 0,
-        questions_answered: total,
-        correct: Math.round(score),
-        duration_s: elapsed,
-        subject: asked?.subject || null,
-        topic: asked?.topic || null,
-      })
-      .catch(() => {
-        /* la clôture ne doit jamais abîmer l'affichage du bilan */
-      });
+  /** Enregistre la séance (une fois) ; résout son id, ou null sans réponse ni serveur. */
+  function record(): Promise<number | null> {
+    if (!recording.current) {
+      const answers = historyRef.current;
+      const elapsed = Math.max(0, Math.round((Date.now() - startedAt.current) / 1000));
+      recording.current =
+        answers.length === 0
+          ? Promise.resolve(null)
+          : api
+              .quizRecordSession({ settings: settingsRef.current, answers, duration_s: elapsed })
+              .then((saved) => saved.session_id)
+              .catch(() => null);
+    }
+    return recording.current;
+  }
+
+  // Clôture : même chemin serveur qu'une fin de lecture (`nudge_metacog_profile`),
+  // le profil glissant vers la courbe de jauges de la séance. Sans questions de
+  // réflexion — le bilan est une page, plus un rituel.
+  function finalize(id: number | null) {
+    if (id === null || finalizedIds.current.has(id)) return;
+    finalizedIds.current.add(id);
+    void api.quizFinalize(id).catch(() => {
+      /* la clôture ne doit jamais abîmer l'affichage du bilan */
+    });
   }
 
   function next(total: number) {
@@ -236,7 +264,14 @@ export function Quiz() {
       const elapsed = Math.max(0, Math.round((Date.now() - startedAt.current) / 1000));
       setDurationS(elapsed);
       setDone(true);
-      finalize(total, elapsed);
+      // Déclenché depuis le handler et non un effet : l'app est montée en StrictMode.
+      const pending = record();
+      void pending.then((id) => {
+        // « Recommencer » pressé entre-temps : cette séance n'est plus à l'écran.
+        if (recording.current !== pending) return;
+        setSessionId(id);
+        setRecorded(true);
+      });
     } else setIndex((i) => i + 1);
   }
 
@@ -250,6 +285,11 @@ export function Quiz() {
     const multi = mode === "multi";
     resetState();
     runs.current += 1;
+    settingsRef.current = {
+      mode,
+      subject: multi ? null : subject || null,
+      topic: multi ? null : topic.trim() || null,
+    };
     setAsked({
       mode,
       subject: multi ? "" : subject,
@@ -698,19 +738,35 @@ function QuestionCard({
   const [selfGrading, setSelfGrading] = useState<string | null>(null);
   const widget = answerWidget(q.question_type, q.choices);
   const settled = picked !== null || result !== null;
+  // Temps de réponse (attention) : de l'affichage de la question au geste qui y
+  // répond. L'attente de la correction n'y entre pas — d'où le temps figé à la
+  // soumission, que reprend une auto-évaluation arrivée après coup.
+  const shownAt = useRef(0);
+  const answeredIn = useRef(0);
+  useEffect(() => {
+    shownAt.current = Date.now();
+  }, []);
+  const elapsedMs = () => Math.max(0, Date.now() - shownAt.current);
 
   /** QCM : la comparaison est locale et immédiate — aucun aller-retour à attendre. */
   function pick(choice: string) {
     if (settled) return;
     setPicked(choice);
     const correct = choice.trim() === q.answer.trim();
-    onAnswered({ verdict: correct ? "correct" : "incorrect", score: correct ? 1 : 0, userAnswer: choice });
+    onAnswered({
+      verdict: correct ? "correct" : "incorrect",
+      score: correct ? 1 : 0,
+      userAnswer: choice,
+      graded: true,
+      responseTimeMs: elapsedMs(),
+    });
   }
 
   /** Réponse rédigée ou remise en ordre : corrigée par le serveur, comme en lecture. */
   async function submit(answer: string) {
     const written = answer.trim();
     if (busy || settled || selfGrading !== null || !written) return;
+    answeredIn.current = elapsedMs();
     setBusy(true);
     try {
       const evaluation = await api.quizEvaluate({
@@ -723,7 +779,14 @@ function QuestionCard({
       });
       if (evaluation.graded && evaluation.verdict) {
         setResult(evaluation);
-        onAnswered({ verdict: evaluation.verdict, score: evaluation.score, userAnswer: written });
+        onAnswered({
+          verdict: evaluation.verdict,
+          score: evaluation.score,
+          userAnswer: written,
+          graded: true,
+          responseTimeMs: answeredIn.current,
+          signals: evaluation.signals ?? null,
+        });
       } else setSelfGrading(written);
     } catch {
       setSelfGrading(written);
@@ -737,7 +800,7 @@ function QuestionCard({
     if (settled) return;
     setSelfGrading(null);
     setResult(localVerdict(q.answer, "incorrect"));
-    onAnswered({ verdict: "incorrect", score: 0, userAnswer: "" });
+    onAnswered({ verdict: "incorrect", score: 0, userAnswer: "", graded: false, responseTimeMs: elapsedMs() });
   }
 
   function selfGrade(correct: boolean) {
@@ -745,7 +808,13 @@ function QuestionCard({
     setSelfGrading(null);
     const verdict: QuizVerdict = correct ? "correct" : "incorrect";
     setResult(localVerdict(q.answer, verdict));
-    onAnswered({ verdict, score: correct ? 1 : 0, userAnswer: written });
+    onAnswered({
+      verdict,
+      score: correct ? 1 : 0,
+      userAnswer: written,
+      graded: false,
+      responseTimeMs: answeredIn.current,
+    });
   }
 
   // Une liste de choix et une remise en ordre portent leur propre verdict (couleurs,
@@ -876,5 +945,6 @@ function localVerdict(expected: string, verdict: QuizVerdict): QuizEvaluation {
     completion: "",
     expected_answer: expected,
     graded: false,
+    signals: null,
   };
 }

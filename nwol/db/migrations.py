@@ -195,6 +195,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 37)
         current = 37
 
+    if current < 38 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v38(conn)
+        _set_version(conn, 38)
+        current = 38
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1542,3 +1547,104 @@ def _migrate_to_v37(conn) -> None:
             "ON session_warmup_cards(session_id)"
         )
     logger.info("Migration SQLite v37 terminée")
+
+
+def _migrate_to_v38(conn) -> None:
+    """Séances de PRATIQUE (quiz, langues) : une séance, sa courbe de jauges.
+
+    Un quiz et une séance de langue mesurent l'apprenant comme une lecture, mais
+    n'avaient aucune ligne à eux : ils finalisaient avec `session_id=None`, leurs
+    réflexions n'étaient pas enregistrées et « Ma progression » ne les voyait pas.
+    `reading_sessions` ne peut pas les accueillir (`document_id NOT NULL`, et dix
+    tables qui la référencent supposent une lecture) : la pratique a sa table, et
+    les deux tables qui racontent une séance (`metacog_history`,
+    `session_reflections`) gagnent une colonne pour s'y rattacher.
+
+    - `practice_sessions` : `kind` ('quiz' | 'lang'), la séance de langue d'origine
+      (feuilleton ou flux hérité, une séance de pratique au plus chacune),
+      l'amorce figée des jauges (`seed_json`), les réglages, l'analyse de Clikoda
+      et `finalized_at` — le profil ne glisse qu'une fois par séance ;
+    - `practice_session_gauges` : même forme que `session_gauges` ;
+    - `quiz_session_answers` : les réponses d'un quiz, que rien ne gardait (la
+      session vivait dans le navigateur)."""
+    logger.info("Migration SQLite v38 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS practice_sessions (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id         INTEGER NOT NULL DEFAULT 1 REFERENCES user(id) ON DELETE CASCADE,
+                   kind            TEXT NOT NULL,
+                   lang_run_id     INTEGER REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   lang_lesson_id  INTEGER REFERENCES lang_lessons(id) ON DELETE CASCADE,
+                   started_at      DATETIME DEFAULT (datetime('now')),
+                   ended_at        DATETIME,
+                   duration_s      INTEGER,
+                   seed_json       TEXT,
+                   settings_json   TEXT,
+                   analysis        TEXT,
+                   details_json    TEXT,
+                   finalized_at    DATETIME
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_practice_sessions_user "
+            "ON practice_sessions(user_id, started_at)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_sessions_lang_run "
+            "ON practice_sessions(lang_run_id) WHERE lang_run_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_sessions_lang_lesson "
+            "ON practice_sessions(lang_lesson_id) WHERE lang_lesson_id IS NOT NULL"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS practice_session_gauges (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id  INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,
+                   t           REAL NOT NULL,
+                   gauge_name  TEXT NOT NULL,
+                   value       REAL NOT NULL
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_practice_session_gauges_session "
+            "ON practice_session_gauges(session_id)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS quiz_session_answers (
+                   id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id        INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,
+                   position          INTEGER NOT NULL,
+                   question_id       INTEGER,
+                   question          TEXT NOT NULL,
+                   question_type     TEXT,
+                   category          TEXT,
+                   source            TEXT,
+                   document_id       INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+                   chapter_title     TEXT,
+                   user_answer       TEXT NOT NULL DEFAULT '',
+                   verdict           TEXT NOT NULL,
+                   graded            INTEGER NOT NULL DEFAULT 1,
+                   response_time_ms  INTEGER,
+                   signals_json      TEXT,
+                   UNIQUE(session_id, position)
+               )"""
+        )
+        _ensure_column(
+            conn, "metacog_history", "practice_session_id",
+            "INTEGER REFERENCES practice_sessions(id) ON DELETE SET NULL",
+        )
+        _ensure_column(
+            conn, "session_reflections", "practice_session_id",
+            "INTEGER REFERENCES practice_sessions(id) ON DELETE CASCADE",
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metacog_history_practice "
+            "ON metacog_history(practice_session_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_reflections_practice "
+            "ON session_reflections(practice_session_id)"
+        )
+    logger.info("Migration SQLite v38 terminée")

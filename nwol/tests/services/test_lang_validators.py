@@ -185,7 +185,8 @@ def test_glossary_request_skips_names_and_known_words(real):
     asked, known = ep.glossary_request("espagnol", lines, _ctx(real))
     assert asked and not known
     assert not {fold(n) for n in REAL["bible_characters"]} & {fold(w) for w in asked}
-    lexicon = {"hola": {"form": "Hola", "lemma": "hola", "translation": "salut", "pos": "interjection", "gender": None}}
+    lexicon = {"hola": {"form": "Hola", "lemma": "hola", "translation": "salut", "pos": "interjection", "gender": None,
+                        "pron": "ˈola"}}
     asked2, known2 = ep.glossary_request("espagnol", lines, _ctx(real, lexicon=lexicon))
     if any(fold(w) == "hola" for w in asked):
         assert known2 and known2[0]["translation"] == "salut" and len(asked2) == len(asked) - 1
@@ -194,7 +195,8 @@ def test_glossary_request_skips_names_and_known_words(real):
 def test_glossary_needs_one_entry_per_requested_word(real):
     lines = _lines(real)
     asked, _ = ep.glossary_request("espagnol", lines, _ctx(real))
-    entries = [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m"} for w in asked]
+    entries = [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m", "pron": "x"}
+               for w in asked]
     kept, errors = ep.validate_glossary("espagnol", {"entries": entries}, lines, _ctx(real), asked)
     assert errors == [] and len(kept) == len(asked)
     kept, errors = ep.validate_glossary("espagnol", {"entries": entries[:2]}, lines, _ctx(real), asked)
@@ -206,8 +208,8 @@ def test_expressions_must_be_in_the_text(real):
     words = [t["text"] for t in lines[0]["tokens"] if t["w"]]
     expr = " ".join(words[:2])
     result = {"entries": [], "expressions": [
-        {"form": expr, "lemma": expr, "translation": "x", "pos": "expression", "gender": None},
-        {"form": "no está aquí", "lemma": "x", "translation": "x", "pos": "expression", "gender": None},
+        {"form": expr, "lemma": expr, "translation": "x", "pos": "expression", "gender": None, "pron": "x"},
+        {"form": "no está aquí", "lemma": "x", "translation": "x", "pos": "expression", "gender": None, "pron": "x"},
     ]}
     kept, _ = ep.validate_glossary("espagnol", result, lines, _ctx(real), [])
     assert [e["form"] for e in kept] == [expr]
@@ -304,7 +306,7 @@ def test_glossary_is_cumulative_across_attempts(clean, monkeypatch):
     def stingy(params, ok, err, on_metrics=None, model=None):
         calls.append(list(params["words"]))
         w = params["words"][0]
-        ok({"entries": [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m"}],
+        ok({"entries": [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m", "pron": "x"}],
             "expressions": []})
 
     monkeypatch.setattr(ollama_client, "generate_lang_episode_glossary_async", stingy)
@@ -314,7 +316,7 @@ def test_glossary_is_cumulative_across_attempts(clean, monkeypatch):
     assert calls[1][0] == asked[1]  # …mais chaque appel ne redemande que ce qui manque
 
     def generous(params, ok, err, on_metrics=None, model=None):
-        ok({"entries": [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m"}
+        ok({"entries": [{"form": w, "lemma": w.lower(), "translation": "x", "pos": "nom", "gender": "m", "pron": "x"}
                         for w in params["words"]], "expressions": []})
 
     monkeypatch.setattr(ollama_client, "generate_lang_episode_glossary_async", generous)
@@ -347,7 +349,7 @@ def test_words_differing_by_an_accent_are_two_glossary_entries():
     assert "El" in asked and "él" in asked and not known
     entries = [{"form": w, "lemma": {"El": "el", "él": "él"}.get(w, w.lower()),
                 "translation": {"El": "le", "él": "lui", "café": "café", "es": "être", "para": "pour"}[w],
-                "pos": "pronom", "gender": None} for w in asked]
+                "pos": "pronom", "gender": None, "pron": "x"} for w in asked]
     kept, errors = ep.validate_glossary("espagnol", {"entries": entries}, lines, _es_ctx(), asked)
     assert errors == [] and len(kept) == len(asked)
     glossary = ep.enrich_glossary("espagnol", kept, {})
@@ -358,7 +360,8 @@ def test_words_differing_by_an_accent_are_two_glossary_entries():
 
 def test_a_known_word_does_not_gloss_its_accented_twin():
     lines = _es_lines("Sí, si quieres.")
-    lexicon = {"si": {"form": "si", "lemma": "si", "translation": "si", "pos": "conjonction", "gender": None}}
+    lexicon = {"si": {"form": "si", "lemma": "si", "translation": "si", "pos": "conjonction", "gender": None,
+                      "pron": "si"}}
     asked, known = ep.glossary_request("espagnol", lines, _es_ctx(lexicon=lexicon))
     assert asked[0] == "Sí" and [k["form"] for k in known] == ["si"]
     ctx = _es_ctx(lexicon_forms={ep._match_key("espagnol", "si"), ep._match_key("espagnol", "quieres")})
@@ -367,7 +370,7 @@ def test_a_known_word_does_not_gloss_its_accented_twin():
 
 def test_a_missing_accent_is_forgiven_only_when_unambiguous():
     lines = _es_lines("Es para él.")
-    entry = {"form": "el", "lemma": "él", "translation": "lui", "pos": "pronom", "gender": None}
+    entry = {"form": "el", "lemma": "él", "translation": "lui", "pos": "pronom", "gender": None, "pron": "el"}
     kept, errors = ep.validate_glossary("espagnol", {"entries": [entry]}, lines, _es_ctx(), ["él"])
     assert [e["form"] for e in kept] == ["él"] and errors == []
     both = _es_lines("El café es para él.")
@@ -386,6 +389,44 @@ def test_an_accent_only_distractor_is_a_real_wrong_form():
     assert cleaned["point"]["variants"][0]["distractors"] == ["esta caliente", "es caliente"]
 
 
+# ── Prononciation des langues latines : écrite par Clikoda ───────────────────
+
+def test_the_glossary_parser_reads_the_pronunciation():
+    raw = '{"entries": [["casa", "casa", "maison", "nom", "f", "/ˈkasa/"]], "expressions": []}'
+    assert schema_json.parse_lang_episode_glossary(raw)["entries"][0]["pron"] == "ˈkasa"
+    five = '{"entries": [["casa", "casa", "maison", "nom", "f"]]}'
+    assert schema_json.parse_lang_episode_glossary(five)["entries"][0]["pron"] is None
+
+
+def test_a_latin_entry_without_pronunciation_is_asked_again():
+    lines = _es_lines("Hola, por favor.")
+    entries = [{"form": "Hola", "lemma": "hola", "translation": "salut", "pos": "interjection", "gender": None,
+                "pron": "ˈola"},
+               {"form": "por", "lemma": "por", "translation": "par", "pos": "préposition", "gender": None,
+                "pron": None}]
+    expressions = [{"form": "por favor", "lemma": "por favor", "translation": "s'il te plaît",
+                    "pos": "expression", "gender": None, "pron": None}]
+    check = ep.check_glossary("espagnol", {"entries": entries, "expressions": expressions}, lines, _es_ctx(),
+                              ["Hola", "por"])
+    assert [e["form"] for e in check["kept"]] == ["Hola"] and check["missing"] == ["por"]
+    assert any("prononciation manquante pour : por" in e for e in check["errors"])
+
+
+def test_computed_pronunciations_are_not_asked_to_clikoda():
+    assert ep.pron_from_clikoda("espagnol") and ep.pron_from_clikoda("allemand")
+    assert not ep.pron_from_clikoda("mandarin") and not ep.pron_from_clikoda("arabe")
+
+
+def test_a_known_word_without_pronunciation_is_glossed_again():
+    """Inscrit au lexique avant qu'on demande la prononciation : sans elle, il ne
+    deviendrait jamais une carte."""
+    lines = _es_lines("Sí, si quieres.")
+    lexicon = {"si": {"form": "si", "lemma": "si", "translation": "si", "pos": "conjonction", "gender": None,
+                      "pron": None}}
+    asked, known = ep.glossary_request("espagnol", lines, _es_ctx(lexicon=lexicon))
+    assert "si" in asked and not known
+
+
 # ── Genre allemand : refusé mot par mot, redemandé (§ 14, n° 5) ───────────────
 
 def test_a_german_gender_error_is_asked_again_not_fatal(monkeypatch):
@@ -400,8 +441,8 @@ def test_a_german_gender_error_is_asked_again_not_fatal(monkeypatch):
         calls.append(params)
         gender = "f" if len(calls) == 1 else "n"  # d'abord contredit par « das », puis juste
         entries = [{"form": w, "lemma": w if w == "Haus" else w.lower(), "translation": "x",
-                    "pos": "nom" if w == "Haus" else "adjectif", "gender": gender if w == "Haus" else None}
-                   for w in params["words"]]
+                    "pos": "nom" if w == "Haus" else "adjectif", "gender": gender if w == "Haus" else None,
+                    "pron": "x"} for w in params["words"]]
         ok({"entries": entries, "expressions": []})
 
     monkeypatch.setattr(ollama_client, "generate_lang_episode_glossary_async", glossary)

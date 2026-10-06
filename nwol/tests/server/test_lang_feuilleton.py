@@ -127,7 +127,7 @@ def test_legacy_profile_switches_and_keeps_its_flashcards(client):
     from services.flashcards import create_lang_vocab_flashcards
 
     client.post("/api/lang/placement/skip", json={"language": LANG})
-    create_lang_vocab_flashcards(LANG, [{"word": "casa", "translation": "maison"}])
+    create_lang_vocab_flashcards(LANG, [{"word": "casa", "translation": "maison", "phonetic": "ˈkasa"}])
     status = client.get(f"/api/lang/{LANG}/status").json()
     assert status["words_seen"] == 1
     from db import lang_episode_db as store
@@ -201,9 +201,54 @@ def test_completion_returns_what_was_gained_without_a_score(client, fake, clock)
     assert card["source"] == "lang_feuilleton"
 
 
+def test_every_feuilleton_card_carries_its_pronunciation_on_the_front(client, fake, clock):
+    """Langue latine : la prononciation vient du glossaire de Clikoda (rien ne la
+    calcule) ; elle accompagne le recto, écrit dans la langue apprise."""
+    _onboard(client)
+    _play(client, _start(client), taps=3)
+    assert all(p["pron"] for p in fake.PROMPTS if p["task"] == "glossary")
+    cards = client.get("/api/flashcards").json()
+    assert cards and all(c["pronunciation"] and c["pronunciation_side"] == "front" for c in cards)
+
+
+def test_a_word_without_pronunciation_gets_no_card(client):
+    """Pas de carte de langue sans prononciation : le mot cède sa place. Un nom
+    allemand dit aussi son article, écrit sur le recto."""
+    from db import get_connection
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+    from services.lang_progress import create_episode_flashcards
+
+    profile = {**get_or_create_lang_profile(1, "allemand"), "user_id": 1}
+    glossary = [
+        {"form": "Hund", "lemma": "Hund", "translation": "chien", "pos": "nom", "gender": "m",
+         "article": "der", "pron": "hʊnt", "new": True},
+        {"form": "schnell", "lemma": "schnell", "translation": "vite", "pos": "adverbe", "pron": None, "new": True},
+    ]
+    for entry in glossary:
+        store.insert_lexeme(profile["id"], entry, 1)
+    assert create_episode_flashcards(profile, "allemand", {"glossary": glossary}, set()) == 1
+    rows = get_connection().execute("SELECT front, pronunciation FROM flashcards").fetchall()
+    assert [(r["front"], r["pronunciation"]) for r in rows] == [("der Hund", "deːɐ̯ hʊnt")]
+
+
+def test_a_known_word_receives_the_pronunciation_it_lacked(client):
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+
+    pid = get_or_create_lang_profile(1, LANG)["id"]
+    entry = {"form": "casa", "lemma": "casa", "translation": "maison"}
+    lex_id = store.insert_lexeme(pid, entry, 1)
+    assert store.insert_lexeme(pid, {**entry, "translation": "autre", "pron": "ˈkasa"}, 2) == lex_id
+    store.insert_lexeme(pid, {**entry, "pron": "autre"}, 3)
+    row = store.get_lexeme(pid, "casa")
+    assert (row["pron"], row["translation"], row["first_episode_n"]) == ("ˈkasa", "maison", 1)
+
+
 def test_feeling_answer_joins_the_metacognitive_profile(client, fake, clock, monkeypatch):
     """R8 : la réponse est gardée sur la séance et transmise au profil commun,
-    sans mesure (lecture jamais notée : les jauges ne bougent pas)."""
+    avec la séance de pratique dont les jeux et le « compris » ont fait la
+    courbe de jauges. Le ressenti, choix parmi trois, n'est pas noté."""
     from services import session
 
     calls = []
@@ -214,7 +259,8 @@ def test_feeling_answer_joins_the_metacognitive_profile(client, fake, clock, mon
     stored = client.get(f"/api/lang/run/{run['run_id']}").json()
     assert stored["status"] == "completed"
     args, kwargs = calls[-1]
-    assert kwargs["measures"] == 0 and kwargs["session_id"] is None
+    assert kwargs["session_id"] is None and kwargs["practice_session_id"] is not None
+    assert kwargs["measures"] > 0 and kwargs["measure_meta"] is False
     assert kwargs["questions"][0].endswith("?") or kwargs["questions"][0].endswith("…")
     assert args[2][0] in ("Juste bien", "Un peu", "Le point du jour", "Pareil", "Moyenne", "En cours")
 
@@ -523,7 +569,7 @@ def test_a_run_without_feeling_still_counts_as_a_study_day(client, fake, clock, 
     _onboard(client)
     _play(client, _start(client), feeling=False)
     args, kwargs = calls[-1]
-    assert args[2] == [] and kwargs["questions"] == [] and kwargs["measures"] == 0
+    assert args[2] == [] and kwargs["questions"] == []
 
 
 def test_the_common_streak_moves_without_a_feeling(client, fake, clock):
@@ -533,3 +579,54 @@ def test_the_common_streak_moves_without_a_feeling(client, fake, clock):
     client.post(f"/api/lang/{LANG}/onboarding", json={"interests": [], "has_studied": False})
     _play(client, _start(client), feeling=False)
     assert get_streak()["last_study_day"] is not None
+
+
+# ── Les jauges bougent, la séance rejoint « Ma progression » ─────────────────
+
+def test_a_played_run_draws_its_gauges_and_moves_the_profile(client, fake, clock):
+    """Jeux réussis et « compris » : la courbe de la séance monte sur la
+    compréhension et la rétention, le profil glisse vers elle, et la séance
+    figure dans « Ma progression » avec ce qu'elle a gagné — jamais de score."""
+    from db.metacog import get_history
+    from db.practice_sessions import find_practice_session
+
+    _onboard(client)
+    run = _start(client)
+    _play(client, run, answers="right", signal="compris")
+
+    practice = find_practice_session(lang_run_id=run["run_id"])
+    assert practice is not None and practice["kind"] == "lang"
+    detail = client.get(f"/api/progress/practice/{practice['id']}").json()
+    assert detail["lang"]["language"] == LANG and detail["lang"]["flow"] == "feuilleton"
+    assert detail["lang"]["episode"]["n"] == 1 and detail["lang"]["new_words"]
+    assert "score" not in detail["lang"]
+    gauges = detail["gauges"]
+    assert gauges["axis"] == "time"
+    assert {"retention", "context_comprehension"} <= set(gauges["measured"])
+    assert not {"curiosity", "creativity", "meta_cognition"} & set(gauges["measured"])
+    assert gauges["series"]["context_comprehension"][-1]["value"] > gauges["seed"]["context_comprehension"]
+    assert [row for row in get_history() if row["practice_session_id"] == practice["id"]]
+
+    rows = client.get("/api/progress/sessions", params={"kind": "lang"}).json()["sessions"]
+    assert practice["id"] in {row["session_id"] for row in rows}
+
+
+def test_wrong_answers_and_not_understood_lower_the_run_gauges(client, fake, clock):
+    from db.practice_sessions import find_practice_session
+
+    _onboard(client)
+    run = _start(client)
+    _play(client, run, answers="wrong", signal="pas_compris")
+    practice = find_practice_session(lang_run_id=run["run_id"])
+    gauges = client.get(f"/api/progress/practice/{practice['id']}").json()["gauges"]
+    assert gauges["series"]["context_comprehension"][-1]["value"] < gauges["seed"]["context_comprehension"]
+
+
+def test_a_run_without_any_measure_counts_without_moving_the_profile(client, fake, clock):
+    """La séance zéro ne joue aucun jeu et ne lit aucun épisode : elle compte (la
+    série, le nombre de séances), elle ne déplace rien — un silence ne se note pas."""
+    from db.metacog import ensure_profile, get_history
+
+    _onboard(client)
+    assert int(ensure_profile()["sessions_count"]) == 1
+    assert get_history() == []

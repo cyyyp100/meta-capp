@@ -2,8 +2,8 @@ import {
   BarChart3,
   Globe,
   HelpCircle,
-  Home,
   Layers,
+  Library,
   MessageSquare,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,7 +27,7 @@ import { useDisplayPreferences } from "@/theme/useDisplayPreferences";
 // désigner UNE entrée du rail, et une bulle qui vise `aside nav a` désignerait
 // toujours la première.
 export const NAV = [
-  { to: "/", labelKey: "nav.home", Icon: Home, end: true, tour: "nav-home" },
+  { to: "/", labelKey: "nav.home", Icon: Library, end: true, tour: "nav-home" },
   // Pas d'entrée « Progression » ici : elle vit sous /stats/progress, et on y
   // entre par le bas du profil. Deux destinations pour un même sujet — l'état
   // courant et son histoire — auraient forcé à choisir laquelle ouvrir sans

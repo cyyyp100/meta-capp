@@ -16,6 +16,7 @@ from config.settings import (
     LANG_LEGACY_WRITING_TO_PASSIVE,
     LANG_LEGACY_WRITING_TO_PASSIVE_CONTINUOUS,
     LANG_PILOT_LANGUAGES,
+    LANG_SKILL_TARGET_GAUGES,
     LANGUAGE_SCRIPTS,
     LATIN_SCRIPT,
     SCRIPTS,
@@ -25,6 +26,7 @@ from config.settings import (
 from db.lang_db import (
     SESSION_TYPE_LABEL,
     SESSION_TYPE_RENDER_KIND,
+    SESSION_TYPE_SKILL,
     complete_lang_lesson,
     create_lang_lesson,
     find_lang_flashcard_id,
@@ -50,6 +52,7 @@ from db.lang_db import (
     save_lesson_exercise_cache,
     update_lang_profile,
 )
+from db.practice_sessions import find_practice_session, update_practice_details
 from db.user import DEFAULT_USER_ID
 from llm.ollama_client import (
     evaluate_placement_async,
@@ -59,7 +62,8 @@ from llm.ollama_client import (
     generate_placement_test_async,
     generate_session_content_async,
 )
-from services.flashcards import create_lang_vocab_flashcards, review_flashcard
+from services.flashcards import create_lang_vocab_flashcards, review_flashcard, with_pronunciation_side
+from services import practice
 from services.lang_inflight import InflightRegistry
 from services.lang_sequencer import LESSON_SIZE, decide_session_type, plan_lesson
 from services.llm_bridge import run_llm_sync
@@ -707,7 +711,63 @@ def complete_lesson(
         lesson_id, score=round(avg01 * 100, 1) if avg01 is not None else None, duration_s=duration_s,
     )
     _advance_after_lesson(profile, profile["language"])
+    _record_lesson_practice(lesson, profile, slots, exercise_scores, duration_s)
     return {"ok": True, "total_lessons": get_lang_lesson_count(profile["id"])}
+
+
+def _exercise_score(exercise_scores: list | None, index: int) -> float | None:
+    sc = exercise_scores[index] if exercise_scores and index < len(exercise_scores) else None
+    if isinstance(sc, (int, float)) and not isinstance(sc, bool):
+        return max(0.0, min(1.0, float(sc)))
+    return None
+
+
+def _lesson_measures(slots: list[dict], exercise_scores: list | None) -> list[dict]:
+    """Une mesure par exercice NOTÉ, dans l'ordre de la séance (axe : n° d'exercice).
+
+    Le score de l'exercice (0..1) est une mesure continue ; un exercice sans note
+    n'en est pas une (K1 : jamais 1.0, et pas davantage une mesure). La
+    compétence travaillée dit quelles jauges il informe (`LANG_SKILL_TARGET_GAUGES`)."""
+    measures = []
+    for i, slot in enumerate(slots):
+        score = _exercise_score(exercise_scores, i)
+        if score is None:
+            continue
+        skill = SESSION_TYPE_SKILL.get(slot.get("exercise_type") or "", "")
+        measures.append({"t": float(i + 1), "score": score, "targets": LANG_SKILL_TARGET_GAUGES.get(skill, ())})
+    return measures
+
+
+def _record_lesson_practice(
+    lesson: dict, profile: dict, slots: list[dict], exercise_scores: list | None, duration_s: int,
+) -> None:
+    """La séance rejoint « Ma progression » : séance de pratique + courbe de jauges.
+
+    Rejouée depuis les scores d'exercices que la clôture vient d'écrire. Le
+    nombre de mesures est gardé pour la finalisation, qui arrive après le sas de
+    sortie. Best-effort : la séance est close quoi qu'il arrive ici."""
+    try:
+        session_id = practice.start_for_lang(
+            int(profile.get("user_id") or DEFAULT_USER_ID),
+            lang_lesson_id=int(lesson["id"]),
+            started_at=lesson.get("created_at"),
+            settings={"language": profile["language"], "theme": lesson.get("theme") or "",
+                      "level": lesson.get("level") or "", "flow": "lecons"},
+        )
+        measured = practice.close(session_id, _lesson_measures(slots, exercise_scores), duration_s)
+        update_practice_details(session_id, details={
+            "measures": measured,
+            "exercises": [
+                {
+                    "label": slot.get("label") or SESSION_TYPE_LABEL.get(slot.get("exercise_type") or "", ""),
+                    "skill": SESSION_TYPE_SKILL.get(slot.get("exercise_type") or "", ""),
+                    "score": _exercise_score(exercise_scores, i),
+                }
+                for i, slot in enumerate(slots)
+            ],
+        })
+    except Exception:  # pragma: no cover - la clôture ne casse jamais sur la progression
+        logger.debug("Séance de pratique (leçon) non enregistrée", exc_info=True)
 
 
 # ── Rituel de séance (SAS entrée/sortie, calqué sur le flux PDF) ───────────────
@@ -729,7 +789,10 @@ def lang_warmup_cards(language: str, limit: int = 5, user_id: int = DEFAULT_USER
             if len(cards) >= limit:
                 break
     return [
-        {"id": c["id"], "front": c["front"], "back": c["back"], "pronunciation": c.get("pronunciation")}
+        with_pronunciation_side(
+            {"id": c["id"], "front": c["front"], "back": c["back"],
+             "pronunciation": c.get("pronunciation"), "source": c.get("source")}
+        )
         for c in cards[:limit]
     ]
 
@@ -768,9 +831,17 @@ def lang_lesson_analysis(lesson_id: int, user_id: int = DEFAULT_USER_ID) -> dict
             lambda ok, err: generate_session_summary_async(context, ok, err),
         )
         summary = (result or {}).get("session_summary") or {}
-        return {"analysis": str(summary.get("qualitative_summary") or ""), "skills": skills}
+        analysis = str(summary.get("qualitative_summary") or "")
     except Exception:  # pragma: no cover - best-effort, LLM indisponible
-        return {"analysis": "", "skills": skills}
+        analysis = ""
+    # Le bilan accompagne la séance dans « Ma progression » : relu tel quel, jamais
+    # régénéré. Une analyse vide (LLM absent) n'écrase pas une analyse déjà écrite.
+    practice_row = find_practice_session(lang_lesson_id=lesson_id)
+    if practice_row is not None:
+        update_practice_details(
+            int(practice_row["id"]), analysis=analysis or None, details={"skills": skills},
+        )
+    return {"analysis": analysis, "skills": skills}
 
 
 def finalize_lang_lesson(
@@ -803,14 +874,23 @@ def finalize_lang_lesson(
         "language": profile["language"],
         "theme": lesson.get("theme"),
     }
+    # La courbe de jauges de la séance (rejouée à sa clôture) porte la mesure ;
+    # sans elle (séance close avant cette version), le repli d'avant.
+    practice_row = find_practice_session(lang_lesson_id=lesson_id)
+    if practice_row is not None:
+        practice_id = int(practice_row["id"])
+        measures = int((practice_row.get("details") or {}).get("measures") or 0)
+    else:
+        practice_id = None
+        # Rien de noté : la séance compte, mais ne déplace pas le profil.
+        measures = 0 if score is None else None
     try:
         from services.session import nudge_metacog_profile
 
         nudge_metacog_profile(
             owner, score if score is not None else 0.0, list(responses or []), metrics,
             session_id=None, questions=list(questions or []),
-            # Rien de noté : la séance compte, mais ne déplace pas le profil.
-            measures=0 if score is None else None,
+            measures=measures, practice_session_id=practice_id,
         )
     except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
         logger.debug("Nudge métacognitif (langue) ignoré", exc_info=True)

@@ -122,15 +122,159 @@ def test_update_profile_persists_and_increments_sessions(fresh_db):
     assert 0.0 < float(profile["attention"]) < 100.0
 
 
-def test_update_retention_from_quiz(fresh_db):
-    from db.user import DEFAULT_USER_ID
-    from metacog.profile import update_retention_from_quiz
+# ── Modèle du verdict (quiz, langues : mesures sans signal du LLM) ──────────
 
-    before = update_retention_from_quiz(DEFAULT_USER_ID, verdict=None)  # cible neutre 50
-    after = update_retention_from_quiz(DEFAULT_USER_ID, verdict="correct")
-    assert float(after["retention"]) > float(before["retention"])
-    worst = update_retention_from_quiz(DEFAULT_USER_ID, verdict="incorrect")
-    assert float(worst["retention"]) < float(after["retention"])
+def test_a_verdict_pulls_only_the_targeted_performance_gauges():
+    """Un QCM vise rétention + attention : elles parcourent GAUGE_VERDICT_WEIGHT
+    du chemin vers la cible du verdict. Les autres ne bougent pas — être juste ne
+    dit rien de la curiosité ni de la créativité."""
+    from config.settings import GAUGE_VERDICT_TARGETS, GAUGE_VERDICT_WEIGHT
+    from metacog.gauges import make_gauges, update_gauges_from_verdict
+
+    gauges = make_gauges({c: 50.0 for c in CRITERIA})  # amorce : 40 partout
+    values = update_gauges_from_verdict(gauges, "correct", ("retention", "attention"))
+    expected = 40.0 + GAUGE_VERDICT_WEIGHT * (GAUGE_VERDICT_TARGETS["correct"] - 40.0)
+    assert values["retention"] == pytest.approx(expected)
+    assert values["attention"] == pytest.approx(expected)
+    for untouched in ("context_comprehension", "curiosity", "creativity", "meta_cognition"):
+        assert values[untouched] == pytest.approx(40.0)
+
+
+def test_a_verdict_never_moves_curiosity_creativity_or_metacognition():
+    """Même visées par le type de question (estimation -> curiosité), ces trois
+    jauges restent intactes : un verdict n'informe que la performance."""
+    from metacog.gauges import make_gauges, update_gauges_from_verdict
+
+    gauges = make_gauges({c: 50.0 for c in CRITERIA})
+    values = update_gauges_from_verdict(
+        gauges, "correct", ("curiosity", "creativity", "meta_cognition", "context_comprehension"),
+    )
+    assert values["context_comprehension"] > 40.0
+    assert values["curiosity"] == values["creativity"] == values["meta_cognition"] == pytest.approx(40.0)
+
+
+def test_a_missing_verdict_moves_nothing():
+    """Un signal absent n'est jamais un succès (P-5) — ni un échec."""
+    from metacog.gauges import make_gauges, snapshot, update_gauges_from_verdict
+
+    gauges = make_gauges({c: 50.0 for c in CRITERIA})
+    before = snapshot(gauges)
+    assert update_gauges_from_verdict(gauges, None, ("retention",)) == before
+    assert update_gauges_from_verdict(gauges, "peut-être", ("retention",)) == before
+
+
+def test_a_verdict_session_converges_on_its_success_rate_whatever_its_seed():
+    """Huit bonnes réponses portent la jauge bien au-dessus du profil, huit
+    mauvaises bien en dessous : la courbe dit la séance, pas son amorce."""
+    from metacog.gauges import make_gauges, update_gauges_from_verdict
+
+    good = make_gauges({"retention": 50.0})
+    bad = make_gauges({"retention": 50.0})
+    for _ in range(8):
+        update_gauges_from_verdict(good, "correct", ("retention",))
+        update_gauges_from_verdict(bad, "incorrect", ("retention",))
+    assert good["retention"].value > 80.0
+    assert bad["retention"].value < 25.0
+
+
+def test_slow_answers_and_error_streaks_cost_attention_even_untargeted():
+    """Lenteur et série d'erreurs sont des observations : elles coûtent de
+    l'attention quel que soit le type, comme dans le lecteur."""
+    from metacog.gauges import make_gauges, update_gauges_from_verdict
+
+    gauges = make_gauges({c: 50.0 for c in CRITERIA})
+    values = update_gauges_from_verdict(
+        gauges, "incorrect", ("retention",), response_time_ms=24000, consecutive_incorrect=3,
+    )
+    # 6 points de lenteur (plafond) + 2 de série d'erreurs.
+    assert values["attention"] == pytest.approx(40.0 - 6.0 - 2.0)
+
+
+def test_a_continuous_score_sits_on_the_verdict_scale():
+    from config.settings import GAUGE_VERDICT_TARGETS
+    from metacog.gauges import score_target
+
+    assert score_target(1.0) == pytest.approx(GAUGE_VERDICT_TARGETS["correct"])
+    assert score_target(0.5) == pytest.approx(GAUGE_VERDICT_TARGETS["partial"])
+    assert score_target(0.0) == pytest.approx(GAUGE_VERDICT_TARGETS["incorrect"])
+    assert GAUGE_VERDICT_TARGETS["partial"] < score_target(0.75) < GAUGE_VERDICT_TARGETS["correct"]
+
+
+def test_replay_starts_on_the_seed_and_adds_one_point_per_measure():
+    """La courbe d'une séance de pratique : l'amorce, puis un point par mesure,
+    sur l'axe que la mesure donne. Une mesure sans verdict n'en est pas une."""
+    from config.settings import GAUGE_VERDICT_TARGETS as TARGETS
+    from config.settings import GAUGE_VERDICT_WEIGHT as W
+    from metacog.gauges import replay
+
+    seed = {c: 40.0 for c in CRITERIA}
+    points = replay(seed, [
+        {"t": 1, "verdict": "correct", "targets": ("retention",)},
+        {"t": 2, "verdict": None, "targets": ("retention",)},
+        {"t": 3, "verdict": "incorrect", "targets": ("retention",)},
+    ])
+    assert [t for t, _ in points] == [0.0, 1.0, 3.0]
+    assert points[0][1] == seed
+    after_good = 40.0 + W * (TARGETS["correct"] - 40.0)
+    assert points[1][1]["retention"] == pytest.approx(after_good)
+    assert points[2][1]["retention"] == pytest.approx(after_good + W * (TARGETS["incorrect"] - after_good))
+    # Rejouer les mêmes mesures donne la même courbe.
+    assert replay(seed, [{"t": 1, "verdict": "correct", "targets": ("retention",)}]) == points[:2]
+
+
+def test_replay_follows_the_reader_model_when_the_llm_graded_the_answer():
+    """Une réponse rédigée corrigée par le LLM porte ses signaux : elle suit le
+    modèle du lecteur (signal amplifié sur la jauge visée par le type)."""
+    from metacog.gauges import replay
+
+    seed = {c: 40.0 for c in CRITERIA}
+    (_, _), (_, after) = replay(seed, [{
+        "t": 1, "verdict": "correct", "question_type": "curiosity", "targets": ("curiosity",),
+        "evaluation": {"metacog_signals": {"curiosity": 1.0}},
+    }])
+    assert after["curiosity"] > 40.0 + 8.0  # signal × 8 × 1,5 + bonus de verdict
+    # Ce que l'évaluation n'informe pas reste à l'amorce : ni bonus de verdict
+    # sur la créativité, ni dérive de la métacognition (elle se note au sas).
+    assert after["creativity"] == pytest.approx(40.0)
+    assert after["meta_cognition"] == pytest.approx(40.0)
+    assert after["attention"] != pytest.approx(40.0)  # chaque réponse observe l'attention
+
+
+def test_replay_counts_the_measures_that_informed_each_criterion():
+    """Le poids de chaque critère à la finalisation : quatre QCM éprouvent la
+    rétention quatre fois ; une réponse rédigée relève la curiosité une fois."""
+    from metacog.gauges import informed_counts
+
+    seed = {c: 40.0 for c in CRITERIA}
+    counts = informed_counts(seed, [
+        *({"t": i, "verdict": "correct", "targets": ("retention", "attention")} for i in range(1, 5)),
+        {"t": 5, "verdict": "partial", "question_type": "open", "targets": (),
+         "evaluation": {"metacog_signals": {"curiosity": 0.5, "creativity": 0.0}}},
+    ])
+    assert counts["retention"] == 4
+    assert counts["attention"] == 5
+    assert counts["curiosity"] == 1
+    assert "meta_cognition" not in counts
+
+
+def test_update_profile_weighs_each_criterion_by_its_own_confidence(fresh_db):
+    """Une séance de pratique pondère critère par critère : un critère absent
+    des poids n'a rien mesuré et ne bouge pas, même si sa jauge a bougé."""
+    from db.user import DEFAULT_USER_ID
+    from metacog.profile import update_profile
+
+    update_profile(DEFAULT_USER_ID, {c: 50.0 for c in CRITERIA}, session_id=None)  # sessions_count = 1
+    profile = update_profile(
+        DEFAULT_USER_ID,
+        {"retention": 90.0, "curiosity": 90.0, "creativity": 90.0},
+        session_id=None,
+        confidence={"retention": 1.0, "curiosity": 0.25},
+    )
+    retention_move = float(profile["retention"]) - 50.0
+    curiosity_move = float(profile["curiosity"]) - 50.0
+    assert retention_move > 0 and curiosity_move > 0
+    assert curiosity_move == pytest.approx(retention_move / 4)
+    assert float(profile["creativity"]) == pytest.approx(50.0)
 
 
 def test_web_and_shared_engine_apply_the_same_alpha(fresh_db):

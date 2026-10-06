@@ -102,9 +102,9 @@ def test_glossary_prompt_fits(family, lang):
     prompt = prompts.build_lang_episode_glossary_prompt({
         "language_label": "arabe littéraire", "words": [word] * max(LANG_GLOSSARY_MAX_ENTRIES),
         "lines": [(text, tr)] * MAX_LINES, "form_rule": LONG_FR[:300], "rejected": REJECTED,
-        "explain_lang": lang,
+        "explain_lang": lang, "pron": family == "latin", "register": LONG_FR[:120],
     })
-    _check("lang_episode_glossary", prompt, lang)
+    _check("lang_episode_glossary_pron" if family == "latin" else "lang_episode_glossary", prompt, lang)
 
 
 @pytest.mark.parametrize("lang", LANGS)

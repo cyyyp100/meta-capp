@@ -119,6 +119,8 @@ export interface Flashcard {
   chapter_title: string | null;
   /** Prononciation d'une carte de vocabulaire de langue (jamais dans `back`, qui reste la réponse). */
   pronunciation?: string | null;
+  /** Face écrite dans la langue apprise, celle qu'accompagne la prononciation (null sans prononciation). */
+  pronunciation_side?: "front" | "back" | null;
 }
 
 export interface Chapter {
@@ -160,6 +162,16 @@ export interface QuizEvaluation {
   expected_answer: string;
   /** false = LLM indisponible : l'UI repasse à l'auto-évaluation. */
   graded: boolean;
+  /** Ce que le LLM a lu de la réponse au-delà du verdict ; null pour un verdict
+   *  objectif. Renvoyés tels quels à l'enregistrement de la séance. */
+  signals?: QuizSignals | null;
+}
+
+/** Signaux d'une réponse rédigée corrigée par le LLM (bornés par le serveur). */
+export interface QuizSignals {
+  metacog_signals: Record<string, number>;
+  curiosity_signals: Record<string, boolean>;
+  creativity_signals: Record<string, boolean | number>;
 }
 
 // Matière disponible pour le quiz (avec son effectif de questions stockées).
@@ -202,9 +214,13 @@ export interface QuizAnalysis {
   courses_to_review: QuizCourse[];
 }
 
-// Entrée d'historique d'une réponse de quiz (envoyée à l'analyse de fin de session).
+// Entrée d'historique d'une réponse de quiz : envoyée à l'analyse de fin de
+// session, et enregistrée avec la séance (POST /api/quiz/session) pour en tracer
+// la courbe de jauges.
 export interface QuizAnswerRecord {
+  question_id?: number | null;
   question: string;
+  question_type?: string;
   user_answer: string;
   verdict: QuizVerdict;
   score: number;
@@ -213,6 +229,17 @@ export interface QuizAnswerRecord {
   document: string | null;
   document_id: number | null;
   chapter_title: string | null;
+  /** false : verdict de l'apprenant (auto-évaluation hors ligne, « je ne sais pas »). */
+  graded?: boolean;
+  /** De l'affichage de la question à la réponse (la correction n'y compte pas). */
+  response_time_ms?: number | null;
+  signals?: QuizSignals | null;
+}
+
+// Séance de quiz enregistrée : `session_id` rattache ensuite le bilan et la clôture.
+export interface QuizSessionRecord {
+  session_id: number | null;
+  metrics: { questions_answered: number; success_rate: number; duration_s: number };
 }
 
 export interface Highlight {

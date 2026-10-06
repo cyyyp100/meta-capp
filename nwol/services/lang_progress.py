@@ -50,6 +50,7 @@ from config.settings import (
 )
 from db import get_connection
 from db import lang_episode_db as store
+from services.lang_latin import de_article_pron
 
 logger = logging.getLogger("services.lang_progress")
 
@@ -516,10 +517,24 @@ def apply_run_acquisition(run_id: int) -> dict:
     return stats
 
 
+def _card_pronunciation(entry: dict) -> str | None:
+    """Prononciation du RECTO d'une carte du feuilleton : celle du lemme, précédée
+    de celle de l'article quand le recto l'écrit (allemand)."""
+    pron = (entry.get("pron") or "").strip()
+    if not pron:
+        return None
+    article = de_article_pron(entry.get("article"))
+    return f"{article} {pron}" if article else pron
+
+
 def create_episode_flashcards(profile: dict, language: str, episode: dict, tapped_lemmas: set[str]) -> int:
     """P12 : cartes du feuilleton — recto en langue cible, verso traduction,
-    prononciation calculée (jamais de Clikoda), dédoublonnées par lemme. Les mots
-    touchés au passage 2 d'abord, puis les mots nouveaux non transparents."""
+    prononciation du recto, dédoublonnées par lemme. Les mots touchés au passage 2
+    d'abord, puis les mots nouveaux non transparents.
+
+    Pas de carte de langue sans prononciation : calculée (pinyin, translittération
+    arabe) ou écrite par Clikoda (langues latines). Un mot qui n'en a pas laisse
+    sa place au suivant ; il aura sa carte quand un épisode la lui donnera."""
     from services.flashcards import create_flashcard
 
     user_id = int(profile.get("user_id") or 1)
@@ -529,6 +544,8 @@ def create_episode_flashcards(profile: dict, language: str, episode: dict, tappe
         lemma = entry.get("lemma") or entry.get("form")
         row = lexicon.get(lemma)
         if not row or row.get("card_id") or (entry.get("pos") or "") == "nom propre":
+            continue
+        if not _card_pronunciation(entry):
             continue
         priority = 0 if lemma in tapped_lemmas else (1 if entry.get("new") and not entry.get("transparent") else 9)
         if priority < 9:
@@ -545,7 +562,7 @@ def create_episode_flashcards(profile: dict, language: str, episode: dict, tappe
                 user_id, front=front, back=entry["translation"], tags=[language],
                 source="lang_feuilleton", language=language,
                 origin=("lang_lemma", f"{language}\x1f{lemma}"),
-                pronunciation=entry.get("pron") or None,
+                pronunciation=_card_pronunciation(entry),
             )
         except Exception:  # une carte ratée ne casse pas la clôture
             logger.warning("Carte du feuilleton non créée (%s)", lemma, exc_info=True)
@@ -559,7 +576,7 @@ def due_cards(profile: dict, language: str, cap: int = LANG_DUE_CARDS_CAP) -> li
     """P13 : cartes dues de la langue, les plus anciennes d'abord, plafonnées ;
     le reste attend naturellement les séances suivantes."""
     rows = get_connection().execute(
-        """SELECT id, front, back, pronunciation, due_at FROM flashcards
+        """SELECT id, front, back, pronunciation, source, due_at FROM flashcards
            WHERE language=? AND user_id=? AND due_at IS NOT NULL
              AND due_at <= datetime('now', 'localtime')
            ORDER BY due_at ASC, id ASC LIMIT ?""",

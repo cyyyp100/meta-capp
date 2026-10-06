@@ -30,6 +30,7 @@ import type {
   QuizEvaluation,
   QuizOptions,
   QuizQuestion,
+  QuizSessionRecord,
   QuizSessionSettings,
   QuizSubject,
   ReaderBlock,
@@ -206,8 +207,10 @@ export const api = {
     if (interleaved) params.set("interleaved", "true");
     return getJSON<QuizQuestion[]>(`/api/quiz/questions?${params}`);
   },
+  // Maîtrise de la matière, réponse par réponse. Le profil, lui, glisse à la
+  // clôture de la séance, vers sa courbe de jauges (`quizRecordSession`).
   submitQuizAnswer: (category: string | null, correct: boolean, verdict?: string) =>
-    postJSON<{ updated: boolean; level?: number; retention: number; verdict: string }>(
+    postJSON<{ updated: boolean; level?: number; verdict: string }>(
       "/api/quiz/answer", { category, correct, verdict },
     ),
   // Correction d'une réponse rédigée (ou d'une remise en ordre) : c'est elle qui
@@ -223,19 +226,24 @@ export const api = {
   // Langue du backend : pilote les prompts LLM, pas seulement les libellés.
   setBackendLang: (lang: string) =>
     postJSON<{ lang: string; supported: string[] }>("/api/preferences/lang", { lang }),
-  // Analyse LLM de fin de session de quiz (dans le cadre choisi) + cours à renforcer.
-  quizAnalysis: (answers: QuizAnswerRecord[], settings: QuizSessionSettings) =>
-    postJSON<QuizAnalysis>("/api/quiz/analysis", { answers, settings }),
-  // Sas de sortie du quiz : réflexions de métacognition + nudge du profil.
-  quizFinalize: (body: {
-    responses: string[];
-    score: number;
-    questions_answered: number;
-    correct: number;
+  // Séance jouée, enregistrée d'un bloc à la fin (ou quand on la quitte) : ses
+  // réponses deviennent une courbe de jauges. `session_id` rattache ensuite le
+  // bilan et la clôture ; nul s'il n'y avait aucune réponse.
+  quizRecordSession: (body: {
+    settings: QuizSessionSettings;
+    answers: QuizAnswerRecord[];
     duration_s: number;
-    subject?: string | null;
-    topic?: string | null;
-  }) => postJSON<{ ok: boolean; score: number }>("/api/quiz/finalize", body),
+  }) => postJSON<QuizSessionRecord>("/api/quiz/session", body),
+  // Analyse LLM de fin de session de quiz (dans le cadre choisi) + cours à
+  // renforcer. Avec `sessionId`, le bilan est gardé avec la séance.
+  quizAnalysis: (answers: QuizAnswerRecord[], settings: QuizSessionSettings, sessionId?: number | null) =>
+    postJSON<QuizAnalysis>("/api/quiz/analysis", { answers, settings, session_id: sessionId ?? null }),
+  // Clôture : le profil glisse vers la courbe de jauges de la séance (une fois).
+  quizFinalize: (sessionId: number) =>
+    postJSON<{ ok: boolean; score: number; session_id: number }>("/api/quiz/finalize", {
+      session_id: sessionId,
+      responses: [],
+    }),
   searchPage: (docId: number, page: number, q: string) =>
     getJSON<{ rects_pts: number[][] }>(`/api/library/doc/${docId}/page/${page}/search?q=${encodeURIComponent(q)}`),
   pageBlocks: (docId: number, page: number) =>
@@ -454,10 +462,15 @@ export const api = {
     }),
 
   // ── Ma progression (historique longitudinal) ─────────────────────────────
-  progressSessions: (limit = 40) =>
-    getJSON<ProgressTimeline>(`/api/progress/sessions?limit=${limit}`),
+  // `kind` omis : toutes catégories mêlées. Filtré côté serveur, et non dans la
+  // frise : sinon une rafale de quiz évinçait les lectures des 40 lignes servies.
+  progressSessions: (limit = 40, kind?: ProgressKind) =>
+    getJSON<ProgressTimeline>(`/api/progress/sessions?limit=${limit}${kind ? `&kind=${kind}` : ""}`),
   progressSession: (sessionId: number) =>
     getJSON<ProgressSession>(`/api/progress/session/${sessionId}`),
+  // Détail d'une séance de quiz ou de langue (ids propres aux séances de pratique).
+  progressPractice: (sessionId: number) =>
+    getJSON<PracticeProgress>(`/api/progress/practice/${sessionId}`),
   // Bilan de la semaine — le rendez-vous récurrent, pas un cumul depuis toujours.
   weeklyRecap: () => getJSON<WeeklyRecap>("/api/progress/weekly"),
 };
@@ -493,31 +506,64 @@ export interface UpdateStatus {
 }
 
 // ── Progression ───────────────────────────────────────────────────────────────
+/** Les catégories de « Ma progression ». */
+export type ProgressKind = "reading" | "quiz" | "lang";
+
+/** Langue d'une séance, telle que la page Langues l'affiche. */
+export interface LanguageView {
+  language: string;
+  language_label: string;
+  flag: string;
+}
+
+/**
+ * Une ligne de la frise. `session_id` n'est unique qu'au sein d'une famille :
+ * la clé d'une ligne est (`kind`, `session_id`). Les champs propres à chaque
+ * catégorie sont dans la ligne (lecture) ou sous `quiz` / `lang`.
+ */
 export interface ProgressSessionRow {
+  kind: ProgressKind;
   session_id: number;
-  document_id: number | null;
-  document_title: string;
-  /** « Lecture n » de ce document (0 : session sans document). */
-  reading_index: number;
   started_at: string;
   ended_at: string;
   duration_s: number;
-  pages_read: number;
   completed: boolean;
   criteria_moved: number;
   profile_delta: number;
   has_reflections: boolean;
+  // Lecture
+  document_id?: number | null;
+  document_title?: string;
+  /** « Lecture n » de ce document (0 : session sans document). */
+  reading_index?: number;
+  pages_read?: number;
+  quiz?: {
+    mode: "subject" | "multi";
+    subject: string | null;
+    topic: string | null;
+    questions_answered: number;
+    success_rate: number;
+  };
+  lang?: LanguageView & {
+    flow: "feuilleton" | "lecons";
+    mode: string | null;
+    theme: string;
+    episode: { n: number; title: string } | null;
+  };
 }
 
 export interface ProgressTimeline {
   sessions: ProgressSessionRow[];
   total: number;
+  /** Effectif de chaque catégorie, toutes séances confondues. */
+  counts: Record<ProgressKind, number>;
   criteria: string[];
 }
 
 export interface WeeklyRecap {
   since: string;
   sessions: number;
+  by_kind?: Record<ProgressKind, number>;
   duration_s: number;
   pages_read: number;
   documents: string[];
@@ -541,7 +587,26 @@ export interface GaugePoint {
   value: number;
 }
 
+/** La courbe des jauges pendant une séance — le point commun des trois catégories. */
+export interface GaugeSeries {
+  /** Ce que porte `t` : des secondes (lecture, épisode de langue), un numéro de
+   *  question (quiz) ou d'exercice (leçon de langue). */
+  axis: "time" | "question" | "exercise";
+  seed: Record<string, number>;
+  series: Record<string, GaugePoint[]>;
+  /** Jauges que la séance a réellement exercées — les autres sont restées à
+   *  leur amorce et ne veulent rien dire. */
+  measured: string[];
+}
+
+export interface Reflection {
+  question: string;
+  answer: string;
+  created_at: string;
+}
+
 export interface ProgressSession {
+  kind: "reading";
   session_id: number;
   document: { id: number | null; title: string; subject: string };
   /** « Lecture n » de ce document (0 : session sans document). */
@@ -550,18 +615,97 @@ export interface ProgressSession {
   ended_at: string;
   completed: boolean;
   metrics: SessionMetrics;
-  gauges: {
-    seed: Record<string, number>;
-    series: Record<string, GaugePoint[]>;
-    /** Jauges que la séance a réellement exercées — les autres sont restées à
-     *  leur amorce et ne veulent rien dire. */
-    measured: string[];
-  };
+  gauges: GaugeSeries;
   profile_changes: ProgressChange[];
-  reflections: { question: string; answer: string; created_at: string }[];
+  reflections: Reflection[];
   page_dwell: { page: number; dwell_s: number; visits: number }[];
   pauses?: SessionPause[];
 }
+
+/** Une réponse d'une séance de quiz, telle qu'elle a été jouée. */
+export interface QuizPlayedAnswer {
+  position: number;
+  question: string;
+  question_type: string;
+  category: string;
+  source: string;
+  user_answer: string;
+  verdict: "correct" | "partial" | "incorrect";
+  /** false : verdict de l'apprenant (auto-évaluation, « je ne sais pas »). */
+  graded: boolean;
+  response_time_ms: number | null;
+  document_id: number | null;
+  document_title: string;
+  chapter_title: string;
+}
+
+interface PracticeProgressBase {
+  session_id: number;
+  started_at: string;
+  ended_at: string;
+  completed: boolean;
+  gauges: GaugeSeries;
+  profile_changes: ProgressChange[];
+  reflections: Reflection[];
+  /** Ce que Clikoda a écrit à la fin de la séance — relu, jamais régénéré. */
+  analysis: string;
+}
+
+export interface QuizProgress extends PracticeProgressBase {
+  kind: "quiz";
+  metrics: {
+    duration_s: number;
+    questions_answered: number;
+    correct: number;
+    partial: number;
+    points: number;
+    success_rate: number;
+  };
+  quiz: {
+    mode: "subject" | "multi";
+    subject: string | null;
+    topic: string | null;
+    answers: QuizPlayedAnswer[];
+    by_category: { category: string; points: number; total: number }[];
+    courses_to_review: {
+      document_id: number;
+      title: string;
+      chapters: string[];
+      answered: number;
+      missed: number;
+    }[];
+    weak_subjects: string[];
+  };
+}
+
+export interface LangProgress extends PracticeProgressBase {
+  kind: "lang";
+  metrics: { duration_s: number; answered: number };
+  lang: LanguageView & {
+    flow: "feuilleton" | "lecons";
+    mode: string | null;
+    theme: string;
+    level: string;
+    episode: { n: number; title: string } | null;
+    point: string | null;
+    new_words: string[];
+    cards_created: number;
+    acquired_today: number;
+    units_acquired_today: number;
+    words_seen: number | null;
+    words_acquired: number | null;
+    signals: {
+      understood: "compris" | "a_peu_pres" | "pas_compris" | null;
+      reveal_rate: number | null;
+      games_rate: number | null;
+      second_wave_rate: number | null;
+      answered: number | null;
+    };
+    exercises: { label: string; skill: string; score: number | null }[];
+  };
+}
+
+export type PracticeProgress = QuizProgress | LangProgress;
 
 /** Une pause prise pendant la lecture, et ce qui l'a précédée. */
 export interface SessionPause {

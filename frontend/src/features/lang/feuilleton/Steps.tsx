@@ -500,10 +500,16 @@ export function CartesStep({ step, tracker, onNext, title }: StepProps & { title
       {card ? (
         <div style={{ textAlign: "center", display: "grid", gap: 10 }}>
           <div style={{ fontSize: 24, fontWeight: 600 }}><bdi dir="auto">{card.front}</bdi></div>
+          {/* La prononciation accompagne la face écrite dans la langue apprise. */}
+          {card.pronunciation && card.pronunciation_side === "front" && (
+            <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
+          )}
           {flipped ? (
             <>
               <div style={{ fontSize: 18 }}>{card.back}</div>
-              {card.pronunciation && <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>}
+              {card.pronunciation && card.pronunciation_side === "back" && (
+                <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
+              )}
               <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
                 <button style={ghostBtn} onClick={() => verdict("incorrect")}>{t("feuil.cards.no")}</button>
                 <button style={ghostBtn} onClick={() => verdict("partial")}>{t("feuil.cards.almost")}</button>

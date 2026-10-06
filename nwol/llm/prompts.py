@@ -3105,22 +3105,36 @@ def build_lang_episode_glossary_prompt(p: dict) -> str:
         return _build_lang_episode_glossary_prompt_en(p)
     lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
     wanted = " | ".join(p["words"])
+    # `pron` : langues latines, dont rien n'est calculé ici — Clikoda écrit la
+    # prononciation du lemme, qui suit le mot jusqu'à sa flashcard.
+    if p.get("pron"):
+        asked, count = "sa nature, son genre et sa prononciation", "six"
+        fields = "mot tel que donné, lemme, traduction, nature, genre, prononciation"
+        skeleton = '["mot", "lemme", "traduction", "nature", "genre", "prononciation"]'
+        pron_rule = ('\n"prononciation" : celle du lemme, en alphabet phonétique international, dans la variété '
+                     "du registre, sans barres obliques ni crochets ; jamais vide.")
+        register = f"\n{p.get('register', '')}"
+    else:
+        asked, count = "sa nature et son genre", "cinq"
+        fields = "mot tel que donné, lemme, traduction, nature, genre"
+        skeleton = '["mot", "lemme", "traduction", "nature", "genre"]'
+        pron_rule = register = ""
     return f"""Voici un texte en {p['language_label']} avec sa traduction française, réplique par réplique :
 {lines}
-
+{register}
 Pour CHACUN des {len(p['words'])} mots suivants, dans cet ordre, donne son lemme (forme du dictionnaire), sa
-traduction française DANS CE TEXTE, sa nature et son genre :
+traduction française DANS CE TEXTE, {asked} :
 {wanted}
 {p.get('form_rule', '')}
 {_rejected_block(p.get('rejected', ''))}
 Réponds UNIQUEMENT en JSON valide, sans markdown, avec exactement {len(p['words'])} entrées dans le même ordre.
-Chaque entrée est une liste de cinq chaînes : [mot tel que donné, lemme, traduction, nature, genre].
+Chaque entrée est une liste de {count} chaînes : [{fields}].
 Ajoute dans "expressions", au même format, jusqu'à 5 expressions de plusieurs mots du texte utiles à un
 débutant (par exemple une formule de politesse), recopiées exactement ; liste vide s'il n'y en a pas.
-{{"entries": [["mot", "lemme", "traduction", "nature", "genre"]], "expressions": []}}
+{{"entries": [{skeleton}], "expressions": []}}
 
 "nature" parmi : nom, verbe, adjectif, adverbe, pronom, préposition, conjonction, déterminant, interjection,
-expression. "genre" : m, f ou n pour un nom, sinon chaîne vide."""
+expression. "genre" : m, f ou n pour un nom, sinon chaîne vide.{pron_rule}"""
 
 
 def build_lang_episode_notes_point_prompt(p: dict) -> str:
@@ -3264,22 +3278,34 @@ at least twice."""
 def _build_lang_episode_glossary_prompt_en(p: dict) -> str:
     lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
     wanted = " | ".join(p["words"])
+    if p.get("pron"):
+        asked, count = "its part of speech, its gender and its pronunciation", "six"
+        fields = "word as given, lemma, translation, part of speech, gender, pronunciation"
+        skeleton = '["word", "lemma", "translation", "part of speech", "gender", "pronunciation"]'
+        pron_rule = ('\n"pronunciation": that of the lemma, in the International Phonetic Alphabet, in the variety '
+                     "of the register, without slashes or brackets; never empty.")
+        register = f"\n{p.get('register', '')}"
+    else:
+        asked, count = "its part of speech and its gender", "five"
+        fields = "word as given, lemma, translation, part of speech, gender"
+        skeleton = '["word", "lemma", "translation", "part of speech", "gender"]'
+        pron_rule = register = ""
     return f"""Here is a text in {p['language_label']} with its English translation, line by line:
 {lines}
-
+{register}
 For EACH of the {len(p['words'])} following words, in this order, give its lemma (dictionary form), its English
-translation IN THIS TEXT, its part of speech and its gender:
+translation IN THIS TEXT, {asked}:
 {wanted}
 {p.get('form_rule', '')}
 {_rejected_block(p.get('rejected', ''), en=True)}
 Answer ONLY with valid JSON, no markdown, with exactly {len(p['words'])} entries in the same order.
-Each entry is a list of five strings: [word as given, lemma, translation, part of speech, gender].
+Each entry is a list of {count} strings: [{fields}].
 Add in "expressions", in the same format, up to 5 multi-word expressions of the text that are useful to a
 beginner (a polite formula, for instance), copied exactly; an empty list if there are none.
-{{"entries": [["word", "lemma", "translation", "part of speech", "gender"]], "expressions": []}}
+{{"entries": [{skeleton}], "expressions": []}}
 
 "part of speech" among: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner,
-interjection, expression. "gender": m, f or n for a noun, otherwise an empty string."""
+interjection, expression. "gender": m, f or n for a noun, otherwise an empty string.{pron_rule}"""
 
 
 def _build_lang_episode_notes_point_prompt_en(p: dict) -> str:

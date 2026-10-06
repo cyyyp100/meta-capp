@@ -121,6 +121,13 @@ def list_sessions(user_id: int = DEFAULT_USER_ID, limit: int = 20) -> list[dict]
     return [_decode_session(row) for row in rows]
 
 
+def count_sessions(user_id: int = DEFAULT_USER_ID) -> int:
+    row = get_connection().execute(
+        "SELECT COUNT(*) AS n FROM reading_sessions WHERE user_id=?", (user_id,),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 def reading_ranks(user_id: int = DEFAULT_USER_ID) -> dict[int, int]:
     """Rang de chaque session PARMI les lectures de son document : {id: n}.
 

@@ -143,6 +143,9 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # Une entrée par mot inconnu de l'apprenant (au plus LANG_GLOSSARY_MAX_ENTRIES),
     # ~18 tokens chacune en liste compacte.
     "lang_episode_glossary":    {"num_ctx": 4096, "num_predict": 900,  "temperature": 0.20},
+    # Langues latines : ~10 tokens de plus par entrée pour la prononciation en API
+    # qu'écrit Clikoda (le pinyin et la translittération arabe sont calculés).
+    "lang_episode_glossary_pron": {"num_ctx": 4096, "num_predict": 1200, "temperature": 0.20},
     # Notes + explication + micro-exercices : 700 coupait au banc dès l'A2.
     "lang_episode_notes_point": {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
     "lang_weekly_analysis":     {"num_ctx": 2048, "num_predict": 300,  "temperature": 0.20},
@@ -723,7 +726,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 37
+DB_SCHEMA_VERSION = 38
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -829,6 +832,59 @@ WARMUP_RUSH_META = 1.5
 WARMUP_SLOW_FRONT_RETENTION = 1.0
 WARMUP_SLOW_BACK_RETENTION = 2.0
 WARMUP_DRIFT_ATTENTION = 3.0
+
+# ── Séances de pratique : le quiz et les langues font bouger les jauges ──────
+# Un quiz et une séance de langue mesurent l'apprenant comme une lecture. Leurs
+# mesures sont rejouées en fin de séance en une courbe de jauges
+# (`practice_session_gauges`), qui fait glisser le profil par le moteur unique
+# (`services/session.nudge_metacog_profile`). Lues par `metacog/gauges.py`.
+#
+# Une réponse jugée par un verdict SEUL — QCM, jeu de langue, auto-évaluation,
+# aucun signal du LLM — tire chaque jauge qu'elle vise vers la cible de son
+# verdict. Un verdict n'informe que la performance (attention, compréhension,
+# rétention) : il ne dit rien de la curiosité, de la créativité ni de la
+# métacognition, qui restent alors intactes. Une réponse rédigée corrigée par le
+# LLM garde le modèle du lecteur (signaux, `update_gauges_from_evaluation`).
+GAUGE_VERDICT_TARGETS: dict[str, float] = {"correct": 100.0, "partial": 60.0, "incorrect": 15.0}
+# Part du chemin vers la cible parcourue à chaque verdict : au bout de huit
+# réponses, la jauge dit la séance plutôt que son amorce (profil × 0,8).
+GAUGE_VERDICT_WEIGHT = 0.2
+
+# Jauge(s) que chaque mesure d'une séance de langue informe — toujours parmi
+# les trois critères de performance ci-dessus. Un jeu de lexique travaille la
+# mémoire, un jeu sur le dialogue la compréhension, un repérage l'attention.
+# Feuilleton : par jeu (services/lang_runs.py) ; flux hérité : par compétence de
+# l'exercice (services/lang.py).
+LANG_GAME_TARGET_GAUGES: dict[str, tuple[str, ...]] = {
+    "qui_a_dit": ("context_comprehension",),
+    "completer_replique": ("context_comprehension", "retention"),
+    "remettre_en_ordre": ("context_comprehension",),
+    "bonne_forme": ("context_comprehension", "retention"),
+    "apparier": ("retention",),
+    "caractere_sens": ("retention",),
+    "caractere_pinyin": ("retention",),
+    "ton_du_caractere": ("retention",),
+    "lettre_forme": ("retention",),
+    "lire_vocalise": ("retention",),
+    "trouver_dans_le_texte": ("attention",),
+    "retrouver_la_lettre": ("attention",),
+}
+# Deuxième vague : l'apprenant retraduit une réplique, la confronte à l'original
+# puis juge son rappel (« su », « à peu près », « pas su »).
+LANG_SECOND_WAVE_TARGET_GAUGES: tuple[str, ...] = ("retention",)
+# Le « compris / à peu près / pas compris » qui ferme un passage de lecture.
+LANG_UNDERSTOOD_TARGET_GAUGES: tuple[str, ...] = ("context_comprehension",)
+LANG_SKILL_TARGET_GAUGES: dict[str, tuple[str, ...]] = {
+    "comprehension_orale": ("context_comprehension", "attention"),
+    "comprehension_ecrite": ("context_comprehension",),
+    "grammaire_contexte": ("context_comprehension",),
+    "vocabulaire": ("retention",),
+    "revision": ("retention",),
+    "ecriture": ("retention",),
+    "prononciation": ("attention",),
+    "production_orale": ("retention",),
+    "production_ecrite": ("retention", "context_comprehension"),
+}
 
 # ── Questions de lecture ────────────────────────────────────────────────────
 # La grille des types vit dans config/question_types.py (registre canonique).

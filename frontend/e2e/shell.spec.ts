@@ -71,18 +71,18 @@ test.describe("Coque de l'application", () => {
   });
 
   test("bascule la langue depuis les Réglages", async ({ page }) => {
-    await expect(page.getByRole("link", { name: "Accueil" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Bibliothèque" })).toBeVisible();
 
     // Le segmenté FR/EN du pied de barre vit maintenant dans /settings/language.
     await page.goto("/settings/language");
     await page.getByRole("button", { name: "EN", exact: true }).click();
 
-    await expect(page.getByRole("link", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Library" })).toBeVisible();
 
     // Remise en français : la langue est persistée côté serveur, elle
     // contaminerait les scénarios suivants.
     await page.getByRole("button", { name: "FR", exact: true }).click();
-    await expect(page.getByRole("link", { name: "Accueil" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Bibliothèque" })).toBeVisible();
   });
 
   test("tout élément interactif est atteignable au clavier avec un focus visible", async ({

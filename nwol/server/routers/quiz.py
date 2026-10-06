@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from config.settings import (
     QUIZ_DEFAULT_QUESTIONS,
@@ -17,6 +17,7 @@ from services.quiz import (
     evaluate_quiz_answer,
     finalize_quiz_session,
     list_subjects,
+    record_quiz_session,
     submit_answer,
 )
 
@@ -26,7 +27,6 @@ router = APIRouter(prefix="/quiz", tags=["quiz"])
 class AnswerBody(BaseModel):
     category: str | None = None
     correct: bool = False
-    session_id: int | None = None
     # Verdict rendu par la correction ("correct" / "partial" / "incorrect") :
     # le booléen seul perdait le « partiel » des réponses rédigées.
     verdict: str | None = None
@@ -55,11 +55,43 @@ class AnalysisBody(BaseModel):
     answers: list[dict[str, Any]] = []
     # Sans réglages (ancien client), l'analyse reste cadrée par l'historique seul.
     settings: SessionSettings | None = None
+    # Séance enregistrée (`POST /quiz/session`) : le bilan est gardé avec elle.
+    session_id: int | None = None
+
+
+class SessionAnswer(BaseModel):
+    """Une réponse de la séance, telle que le quiz l'a jouée."""
+
+    question_id: int | None = None
+    question: str = ""
+    question_type: str = ""
+    category: str | None = None
+    source: str | None = None
+    document_id: int | None = None
+    chapter_title: str | None = None
+    user_answer: str = ""
+    verdict: str = ""
+    # False : verdict de l'apprenant (auto-évaluation hors ligne, « je ne sais pas »).
+    graded: bool = True
+    response_time_ms: int | None = None
+    # Signaux renvoyés par `/quiz/evaluate` pour une réponse rédigée, tels quels.
+    signals: dict[str, Any] | None = None
+
+
+class SessionBody(BaseModel):
+    """Séance jouée, enregistrée d'un bloc à la fin (ou quand on la quitte)."""
+
+    settings: SessionSettings | None = None
+    answers: list[SessionAnswer] = Field(default_factory=list, max_length=200)
+    duration_s: int = 0
 
 
 class FinalizeBody(BaseModel):
     """Clôture d'une session de quiz (sas de sortie)."""
 
+    # Séance enregistrée : le profil glisse vers SA courbe de jauges, et les
+    # métriques sont relues en base. Les champs suivants ne servent qu'au repli.
+    session_id: int | None = None
     responses: list[str] = []
     score: float = 0.0  # taux de réussite 0–100
     questions_answered: int = 0
@@ -106,10 +138,9 @@ def questions(
 
 @router.post("/answer")
 def answer(body: AnswerBody) -> dict:
-    """Enregistre une réponse : maîtrise de la matière + rétention du profil."""
-    return submit_answer(
-        body.category, body.correct, session_id=body.session_id, verdict=body.verdict,
-    )
+    """Enregistre une réponse : maîtrise de la matière (le profil, lui, glisse à
+    la clôture de la séance, vers sa courbe de jauges)."""
+    return submit_answer(body.category, body.correct, verdict=body.verdict)
 
 
 @router.post("/evaluate")
@@ -129,17 +160,27 @@ def evaluate(body: EvaluateBody) -> dict:
     )
 
 
+@router.post("/session")
+def session(body: SessionBody) -> dict:
+    """Enregistre la séance jouée : ses réponses et sa courbe de jauges. Renvoie
+    ``{session_id, metrics}`` (``session_id`` nul s'il n'y avait aucune réponse)."""
+    settings = body.settings.model_dump() if body.settings else None
+    return record_quiz_session(
+        settings, [entry.model_dump() for entry in body.answers], duration_s=body.duration_s,
+    )
+
+
 @router.post("/analysis")
 def analysis(body: AnalysisBody) -> dict:
     """Analyse de fin de session (dans le cadre choisi) + cours à renforcer."""
     settings = body.settings.model_dump() if body.settings else None
-    return analyze_session(body.answers, settings=settings)
+    return analyze_session(body.answers, settings=settings, session_id=body.session_id)
 
 
 @router.post("/finalize")
 def finalize(body: FinalizeBody) -> dict:
-    """Sas de sortie : réflexions de métacognition + nudge du profil long terme."""
-    return finalize_quiz_session(
+    """Clôture : réflexions de métacognition + glissement du profil long terme."""
+    result = finalize_quiz_session(
         body.responses,
         body.score,
         questions_answered=body.questions_answered,
@@ -147,4 +188,8 @@ def finalize(body: FinalizeBody) -> dict:
         duration_s=body.duration_s,
         subject=body.subject,
         topic=body.topic,
+        session_id=body.session_id,
     )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Séance de quiz introuvable")
+    return result

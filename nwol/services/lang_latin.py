@@ -75,10 +75,18 @@ _DE_ARTICLE_GENDERS: dict[str, set[str]] = {
     "eines": {"m", "n"},
 }
 _DE_ARTICLES_FOR_GENDER = {"m": "der", "f": "die", "n": "das"}
+# Prononciation (API) des trois articles. L'article est écrit sur le recto
+# d'une carte allemande, sa prononciation précède donc celle du lemme, que
+# Clikoda donne sans article (le genre, lui, est vérifié contre le texte).
+_DE_ARTICLE_PRON = {"der": "deːɐ̯", "die": "diː", "das": "das"}
 
 
 def de_article(gender: str | None) -> str | None:
     return _DE_ARTICLES_FOR_GENDER.get((gender or "").lower()[:1])
+
+
+def de_article_pron(article: str | None) -> str | None:
+    return _DE_ARTICLE_PRON.get((article or "").lower())
 
 
 def de_gender_conflict_pairs(tokens: list[str], glossary: list[dict]) -> list[tuple[str, str, str]]:

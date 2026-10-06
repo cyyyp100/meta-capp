@@ -148,3 +148,37 @@ def test_v36_gives_existing_profiles_french_explanations(fresh_db, monkeypatch):
     assert _schema_version(conn) == 36
     profile = conn.execute("SELECT * FROM lang_profiles WHERE language='espagnol'").fetchone()
     assert profile["explain_lang"] == "fr" and profile["flow"] == "feuilleton" and profile["episode_n"] == 4
+
+
+# ── v38 : séances de pratique (quiz, langues) ────────────────────────────────
+
+def test_v38_adds_practice_sessions_without_touching_reading_history(fresh_db, monkeypatch):
+    """Une base v37 avec une lecture finalisée : la migration ajoute la table des
+    séances de pratique, sa courbe de jauges, les réponses de quiz, et rattache
+    `metacog_history` et `session_reflections` — sans rien perdre, rejouable."""
+    from db import get_connection, migrations
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 37)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+        conn.execute("INSERT OR IGNORE INTO metacog_profile (user_id) VALUES (1)")
+        conn.execute(
+            "INSERT INTO metacog_history (user_id, criterion, value_before, value_after, session_score, alpha) "
+            "VALUES (1, 'retention', 50, 60, 70, 0.5)"
+        )
+    assert "practice_sessions" not in _tables(conn)
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 38)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 38
+    assert {"practice_sessions", "practice_session_gauges", "quiz_session_answers"} <= _tables(conn)
+    for table in ("metacog_history", "session_reflections"):
+        columns = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        assert "practice_session_id" in columns
+    row = conn.execute("SELECT * FROM metacog_history").fetchone()
+    assert row["value_after"] == 60 and row["practice_session_id"] is None
