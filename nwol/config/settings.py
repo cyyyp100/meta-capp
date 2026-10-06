@@ -666,6 +666,12 @@ LIBRARY_SEARCH_LIMIT = 60
 # copié dans le dossier de données. Plafond large — un manuel scanné dépasse
 # vite 100 Mo — mais borné : le corps de la requête arrive en mémoire disque.
 UPLOAD_MAX_BYTES = 512 * 1024 * 1024
+# « Localiser le fichier » (services/relink) : après une re-liaison, les AUTRES
+# documents introuvables rangés sous l'ancien dossier sont cherchés au même
+# endroit relatif sous le nouveau. Chaque candidat coûte une lecture complète du
+# fichier (empreinte), dans la requête : borné, et un second « Localiser »
+# reprend où le premier s'est arrêté.
+RELINK_SIBLINGS_MAX = 100
 
 # Mode navigateur (services/lifecycle) : fermer l'onglet ne dit rien au
 # serveur, et sans terminal personne ne peut faire Ctrl+C. Il s'arrête quand

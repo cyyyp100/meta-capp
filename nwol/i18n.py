@@ -565,6 +565,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.busy": "Clikoda répond déjà dans cette discussion : attends sa réponse.",
         "brainstorm.failed": "Clikoda n'a pas pu traiter ce message. Réessaie dans un instant.",
         "library.title_empty": "Le titre ne peut pas être vide.",
+        # « Localiser le fichier » (services/relink) : refus traduits, renvoyés
+        # tels quels par le serveur et affichés par l'interface.
+        "library.file_missing": "Fichier introuvable : il a été déplacé, renommé ou supprimé depuis l'import.",
+        "library.relink_different_file": (
+            "Ce fichier ne correspond pas au document importé : son contenu a changé depuis l'import."
+        ),
+        "library.relink_already_imported": (
+            "Ce fichier est déjà dans la bibliothèque, sous « {name} ». Retire ce doublon de la "
+            "bibliothèque, puis relance « Localiser »."
+        ),
+        "library.relink_wrong_kind": (
+            "Ce n'est pas le bon type de fichier : un PDF pour un PDF, un fichier de code pour un fichier de code."
+        ),
+        "library.relink_unreadable": "Ce fichier est illisible.",
         # ── Visite guidée : le document emprunté ──────────────────────────
         # La fiche du document de démonstration est écrite ici plutôt que
         # générée par le LLM : la carte doit être complète immédiatement et
@@ -1176,6 +1190,16 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.busy": "Clikoda is already answering in this discussion: wait for the reply.",
         "brainstorm.failed": "Clikoda could not process this message. Try again in a moment.",
         "library.title_empty": "The title cannot be empty.",
+        "library.file_missing": "File not found: it was moved, renamed or deleted since the import.",
+        "library.relink_different_file": (
+            "This file does not match the imported document: its content has changed since the import."
+        ),
+        "library.relink_already_imported": (
+            "This file is already in the library, as “{name}”. Remove that duplicate from the library, "
+            "then try “Locate” again."
+        ),
+        "library.relink_wrong_kind": "Wrong kind of file: a PDF for a PDF, a code file for a code file.",
+        "library.relink_unreadable": "This file cannot be read.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",
         "onboarding.doc_subject": "Computer science",

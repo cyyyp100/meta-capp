@@ -1,9 +1,10 @@
 // DocumentCard.test.tsx — Renommer et supprimer un document passent par le
-// CLIC DROIT, et par lui seul : ni crayon ni corbeille sur la carte.
+// CLIC DROIT, et par lui seul : ni crayon ni corbeille sur la carte. Seule
+// exception, un fichier introuvable montre son bouton « Localiser… ».
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DocumentSummary } from "../../api/types";
@@ -27,20 +28,37 @@ const doc: DocumentSummary = {
 const folder = (id: number, name: string, depth: number, parent_id: number | null): FlatFolder =>
   ({ id, name, depth, parent_id, position: 0, doc_count: 0, total_count: 0, children: [] }) as FlatFolder;
 
-function renderCard(onDelete = vi.fn(), onMove = vi.fn(), onRename = vi.fn()) {
-  render(
+// Fichier déplacé depuis l'import (services/library.file_missing).
+const missing = { ...doc, file_missing: true, last_known_folder: "~/Cours" } as DocumentSummary;
+
+/** La carte, et la route du lecteur : on voit si un clic l'a ouvert. */
+function renderCard(card: DocumentSummary = doc) {
+  const onDelete = vi.fn();
+  const onMove = vi.fn();
+  const onRename = vi.fn();
+  const onRelink = vi.fn();
+  const view = render(
     <MemoryRouter>
-      <DocumentCard
-        doc={doc}
-        folders={[folder(1, "Maths", 0, null), folder(2, "Algèbre", 1, 1)]}
-        onKeyword={() => {}}
-        onMove={onMove}
-        onRename={onRename}
-        onDelete={onDelete}
-      />
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <DocumentCard
+              doc={card}
+              folders={[folder(1, "Maths", 0, null), folder(2, "Algèbre", 1, 1)]}
+              onKeyword={() => {}}
+              onMove={onMove}
+              onRename={onRename}
+              onDelete={onDelete}
+              onRelink={onRelink}
+            />
+          }
+        />
+        <Route path="/reader/:docId" element={<p>Lecteur ouvert</p>} />
+      </Routes>
     </MemoryRouter>,
   );
-  return { onDelete, onMove, onRename };
+  return { onDelete, onMove, onRename, onRelink, container: view.container };
 }
 
 describe("DocumentCard", () => {
@@ -106,5 +124,39 @@ describe("DocumentCard", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "Algèbre" }));
 
     expect(onMove).toHaveBeenCalledWith(7, 2);
+  });
+
+  it("remplace la vignette d'un fichier introuvable par « Localiser… », sans ouvrir le lecteur", async () => {
+    const { onRelink, container } = renderCard(missing);
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByText(/fichier introuvable|file not found/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /localiser|locate/i }));
+
+    expect(onRelink).toHaveBeenCalledWith(missing);
+    expect(screen.queryByText("Lecteur ouvert")).not.toBeInTheDocument();
+    // Le reste de la carte ouvre toujours le lecteur (qui proposera de localiser).
+    await userEvent.click(screen.getByText("Analyse — chapitre 3"));
+    expect(screen.getByText("Lecteur ouvert")).toBeInTheDocument();
+  });
+
+  it("propose « Localiser le fichier… » en tête du menu d'un fichier introuvable", async () => {
+    const { onRelink } = renderCard(missing);
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByText("Analyse — chapitre 3") });
+
+    const items = await screen.findAllByRole("menuitem");
+    expect(items[0]).toHaveTextContent(/localiser le fichier|locate file/i);
+    await userEvent.click(items[0]);
+
+    expect(onRelink).toHaveBeenCalledWith(missing);
+  });
+
+  it("garde sa vignette et ne propose rien à localiser quand le fichier est là", async () => {
+    const { container } = renderCard();
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /localiser|locate/i })).not.toBeInTheDocument();
+
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByText("Analyse — chapitre 3") });
+    expect(await screen.findByRole("menu")).not.toHaveTextContent(/localiser|locate/i);
   });
 });

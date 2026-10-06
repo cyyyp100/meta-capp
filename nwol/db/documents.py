@@ -17,6 +17,8 @@ def upsert_document(
     has_toc: bool,
     doc_type: str = "book",
     subject: str | None = None,
+    *,
+    content_hash: str | None = None,
 ) -> int:
     conn = get_connection()
     with conn:
@@ -24,19 +26,23 @@ def upsert_document(
         # bibliothèque, que l'utilisateur peut renommer (`rename_document`).
         # Le chemin est la clé du conflit, donc le nom sur disque n'a pas changé ;
         # ré-importer ne doit pas défaire un renommage.
+        # `content_hash` (services/relink.file_digest) : un appelant qui ne le
+        # calcule pas (document de démonstration) n'efface pas celui qui est connu.
         conn.execute(
             """INSERT INTO documents
-               (path, filename, page_count, doc_type, extraction_engine, has_toc, last_opened, subject)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               (path, filename, page_count, doc_type, extraction_engine, has_toc, last_opened, subject,
+                content_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
                  page_count=excluded.page_count,
                  doc_type=excluded.doc_type,
                  extraction_engine=excluded.extraction_engine,
                  has_toc=excluded.has_toc,
                  last_opened=excluded.last_opened,
-                 subject=COALESCE(excluded.subject, subject)""",
+                 subject=COALESCE(excluded.subject, subject),
+                 content_hash=COALESCE(excluded.content_hash, content_hash)""",
             (path, filename, page_count, doc_type, engine, int(has_toc),
-             datetime.now().isoformat(), subject)
+             datetime.now().isoformat(), subject, content_hash)
         )
         row = conn.execute("SELECT id FROM documents WHERE path=?", (path,)).fetchone()
         if row is None:
@@ -101,10 +107,66 @@ def update_last_page(doc_id: int, page: int) -> None:
 
 
 def update_page_count(doc_id: int, page_count: int) -> None:
-    """Réaligne `page_count` sur le fichier quand il a été réécrit depuis l'import."""
+    """Réaligne `page_count` sur le fichier quand il a été réécrit depuis l'import
+    (ou remplacé par une autre version, services/relink). Le marque-page suit :
+    une page au-delà de la dernière n'existe plus."""
     conn = get_connection()
     with conn:
-        conn.execute("UPDATE documents SET page_count=? WHERE id=?", (page_count, doc_id))
+        conn.execute(
+            "UPDATE documents SET page_count=?, last_page=MIN(COALESCE(last_page, 1), ?) WHERE id=?",
+            (page_count, max(1, int(page_count)), doc_id),
+        )
+
+
+def set_document_path(doc_id: int, path: str, content_hash: str | None) -> None:
+    """Relie un document à un nouvel emplacement de son fichier (services/relink).
+
+    C'est la seule réécriture de `documents.path` après l'import : la ligne,
+    donc tout son historique (sessions, surlignages, dossier, titre), reste la
+    même. Laisse remonter `sqlite3.IntegrityError` si un autre document occupe
+    déjà ce chemin — la colonne est UNIQUE, c'est l'identité de l'import."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE documents SET path=?, content_hash=? WHERE id=?",
+            (path, content_hash, doc_id),
+        )
+
+
+def update_content_hash(doc_id: int, content_hash: str | None) -> None:
+    """Réaligne l'empreinte sur un fichier réécrit sur place depuis l'import."""
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE documents SET content_hash=? WHERE id=?", (content_hash, doc_id))
+
+
+def set_content_hash_if_unset(doc_id: int, path: str, content_hash: str) -> bool:
+    """Remplit l'empreinte d'un document qui n'en a pas (documents importés avant
+    qu'elle soit calculée). N'écrit que si la ligne désigne TOUJOURS ce chemin :
+    une re-liaison passée entre la lecture du fichier et cette écriture gagne."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE documents SET content_hash=? WHERE id=? AND path=? AND content_hash IS NULL",
+            (content_hash, doc_id, path),
+        )
+    return cur.rowcount > 0
+
+
+def list_documents_by_hash(content_hash: str) -> list[dict]:
+    """Documents de même contenu, du plus récemment ouvert au plus ancien."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM documents WHERE content_hash=? ORDER BY last_opened DESC, id DESC",
+        (content_hash,),
+    ).fetchall()
+    return [_decode_document(r) for r in rows]
+
+
+def list_documents_without_hash() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM documents WHERE content_hash IS NULL ORDER BY id").fetchall()
+    return [_decode_document(r) for r in rows]
 
 
 def get_document_subject(doc_id: int) -> str | None:

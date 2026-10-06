@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -23,11 +24,21 @@ from services.library import (
     search_page,
 )
 
+if TYPE_CHECKING:
+    from services.relink import RelinkError
+
 router = APIRouter(prefix="/library", tags=["library"])
 
 
 class ImportBody(BaseModel):
     path: str
+
+
+class RelinkBody(BaseModel):
+    path: str
+    # Relier même si le contenu diffère de celui de l'import (nouvelle version) :
+    # l'interface ne l'envoie qu'après confirmation (`different_file`).
+    force: bool = False
 
 
 class FolderBody(BaseModel):
@@ -124,21 +135,58 @@ def delete_folder(folder_id: int) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/import")
-def import_document(body: ImportBody) -> dict:
+def _checked_import_path(raw: str) -> str:
+    """Chemin choisi dans le sélecteur natif, passé à la garde S2. Renvoie le
+    chemin résolu (realpath) : celui qu'un import enregistrerait. HTTP 400 sinon.
+
+    Partagé par `/import` et `/relink` : relier un document à un fichier, c'est
+    l'importer à nouveau — une garde plus lâche ferait de `/relink` un moyen de
+    lire ce que `/import` refuse."""
     from services import code_reader
 
-    if not body.path or not os.path.isfile(body.path):
+    if not raw or not os.path.isfile(raw):
         raise HTTPException(status_code=400, detail="Fichier introuvable")
-    is_pdf = body.path.lower().endswith(".pdf")
-    is_code = code_reader.is_code_file(body.path)
-    if not is_pdf and not is_code:
+    if not raw.lower().endswith(".pdf") and not code_reader.is_code_file(raw):
         raise HTTPException(status_code=400, detail="Format non pris en charge (PDF ou fichier de code)")
     # S2 : confinement aux dossiers utilisateur (realpath, symlinks résolus).
-    if not import_path_allowed(body.path):
+    if not import_path_allowed(raw):
         raise HTTPException(status_code=400, detail="Chemin non autorisé")
-    real = os.path.realpath(body.path)
-    if is_pdf:
+    return os.path.realpath(raw)
+
+
+async def _receive_upload(request: Request, filename: str) -> tuple[str, bool]:
+    """Corps brut d'un envoi → copie dans le dossier de données (services/uploads).
+
+    Renvoie (chemin, nouveau) : `nouveau` est faux si ce contenu était déjà là
+    sous ce nom — un échec ultérieur ne doit alors PAS effacer une copie qu'un
+    document existant référence."""
+    from services import code_reader, uploads
+
+    name = uploads.safe_filename(filename)
+    if not name.lower().endswith(".pdf") and not code_reader.is_code_file(name):
+        raise HTTPException(status_code=400, detail="Format non pris en charge (PDF ou fichier de code)")
+
+    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    try:
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > UPLOAD_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="Fichier trop volumineux")
+            spool.write(chunk)
+        spool.seek(0)
+        try:
+            return await run_in_threadpool(uploads.store, name, spool)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        spool.close()
+
+
+@router.post("/import")
+def import_document(body: ImportBody) -> dict:
+    real = _checked_import_path(body.path)
+    if real.lower().endswith(".pdf"):
         from services.orchestrator import import_pdf
 
         return import_pdf(real)
@@ -158,28 +206,10 @@ async def upload_document(request: Request, filename: str = Query(..., min_lengt
     Mêmes gardes que tout `/api` (Host, Origin, nonce). Le fichier est copié dans
     le dossier de données (services/uploads), puis importé par le même chemin
     que `/import`."""
-    from services import code_reader, uploads
+    from services import uploads
 
-    name = uploads.safe_filename(filename)
-    is_pdf = name.lower().endswith(".pdf")
-    if not is_pdf and not code_reader.is_code_file(name):
-        raise HTTPException(status_code=400, detail="Format non pris en charge (PDF ou fichier de code)")
-
-    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
-    try:
-        size = 0
-        async for chunk in request.stream():
-            size += len(chunk)
-            if size > UPLOAD_MAX_BYTES:
-                raise HTTPException(status_code=413, detail="Fichier trop volumineux")
-            spool.write(chunk)
-        spool.seek(0)
-        try:
-            path, is_new = await run_in_threadpool(uploads.store, name, spool)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    finally:
-        spool.close()
+    path, is_new = await _receive_upload(request, filename)
+    is_pdf = path.lower().endswith(".pdf")
 
     def _import() -> dict:
         if is_pdf:
@@ -214,6 +244,63 @@ def delete_document(doc_id: int) -> dict:
         return delete_document_service(doc_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+# ── « Localiser le fichier » ────────────────────────────────────────────────
+# Toute la politique (identité, voisins, nettoyage) est dans services/relink ;
+# ici, la garde S2 et la traduction de ses refus en `{detail, code}`.
+
+
+def _relink_refusal(exc: RelinkError) -> JSONResponse:
+    """RelinkError → réponse lisible : `detail` traduit pour l'utilisateur, `code`
+    pour l'interface (`different_file` y déclenche « Relier quand même ? »)."""
+    return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status)
+
+
+@router.post("/doc/{doc_id}/relink", response_model=None)
+def relink_document(doc_id: int, body: RelinkBody) -> dict | JSONResponse:
+    """Relie le document à l'emplacement actuel de son fichier (sélecteur natif).
+
+    Même garde que `/import`, et les autres documents introuvables déplacés
+    avec lui sont cherchés sous le nouveau dossier, chacun passant cette garde."""
+    from services.relink import RelinkError
+    from services.relink import relink_document as relink_service
+
+    real = _checked_import_path(body.path)
+    try:
+        return relink_service(doc_id, real, force=body.force, path_allowed=import_path_allowed)
+    except RelinkError as exc:
+        return _relink_refusal(exc)
+
+
+@router.post("/doc/{doc_id}/relink/upload", response_model=None)
+async def relink_upload(
+    request: Request,
+    doc_id: int,
+    filename: str = Query(..., min_length=1, max_length=255),
+    force: bool = False,
+) -> dict | JSONResponse:
+    """Le pendant de `/relink` en mode navigateur : le fichier est ENVOYÉ, et
+    c'est sa copie (services/uploads) qui devient le fichier du document.
+
+    Pas de passe sur les voisins : un navigateur ne dit pas où était le fichier
+    choisi. La copie n'est jetée en cas d'échec que si cet envoi l'a créée — un
+    document existant peut référencer une copie identique."""
+    from services import uploads
+    from services.relink import RelinkError
+    from services.relink import relink_document as relink_service
+
+    path, is_new = await _receive_upload(request, filename)
+    try:
+        return await run_in_threadpool(lambda: relink_service(doc_id, path, force=force))
+    except RelinkError as exc:
+        if is_new:
+            uploads.discard(path)
+        return _relink_refusal(exc)
+    except BaseException:
+        if is_new:
+            uploads.discard(path)
+        raise
 
 
 @router.post("/doc/{doc_id}/rename")

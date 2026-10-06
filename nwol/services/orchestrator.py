@@ -17,6 +17,7 @@ from config.settings import (
 from db.chapters import save_chapters
 from db.documents import (
     get_document,
+    get_document_by_path,
     set_document_digest_status,
     update_document_digest,
     upsert_document,
@@ -30,6 +31,7 @@ from llm.ollama_client import (
 from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.pdf_document import PdfDocument
 from services import library, pdf_rag
+from services.relink import adopt_missing_twin, file_digest
 
 logger = logging.getLogger("services.orchestrator")
 
@@ -50,7 +52,8 @@ def import_pdf(path: str) -> dict:
     """Importe un PDF : upsert document + index de chapitres. Renvoie le détail.
 
     Le PDF est rendu tel quel (moteur "pdfium_scroll") : aucune reconstruction,
-    aucun appel réseau.
+    aucun appel réseau. Un fichier déplacé depuis son import retrouve son
+    document, historique compris (`_adopt`).
     """
     with PdfDocument(path) as pdf:
         page_count = pdf.page_count()
@@ -58,11 +61,30 @@ def import_pdf(path: str) -> dict:
         doc_path = pdf.path
         filename = pdf.filename
 
-    doc_id = upsert_document(doc_path, filename, page_count, "pdfium_scroll", has_toc)
+    content_hash = file_digest(doc_path)
+    adopted = _adopt(doc_path, content_hash, code=False)
+    if adopted is not None:
+        return adopted
+    doc_id = upsert_document(
+        doc_path, filename, page_count, "pdfium_scroll", has_toc, content_hash=content_hash,
+    )
     save_chapters(doc_id, build_chapter_index(doc_path))
     pdf_rag.clear_index(doc_id)  # réimport sous le même chemin : l'index mémoire est périmé
     generate_document_digest(doc_id, filename)
 
+    return library.get_document(doc_id) or {"id": doc_id}
+
+
+def _adopt(path: str, content_hash: str, *, code: bool) -> dict | None:
+    """Chemin encore inconnu, mais contenu déjà dans la bibliothèque sous un
+    document INTROUVABLE (fichier déplacé, puis réimporté) : c'est ce document
+    qu'on rouvre, relié au nouveau chemin (services/relink), plutôt qu'un
+    doublon vierge. None : import ordinaire."""
+    if get_document_by_path(path) is not None:
+        return None
+    doc_id = adopt_missing_twin(path, content_hash, code=code)
+    if doc_id is None:
+        return None
     return library.get_document(doc_id) or {"id": doc_id}
 
 
@@ -152,7 +174,13 @@ def import_code(path: str) -> dict:
 
     filename = os.path.basename(path)
     pages = code_reader.page_count(path)  # lève ValueError si binaire/trop gros
-    doc_id = upsert_document(path, filename, pages, "code", False, doc_type="code")
+    content_hash = file_digest(path)
+    adopted = _adopt(path, content_hash, code=True)
+    if adopted is not None:
+        return adopted
+    doc_id = upsert_document(
+        path, filename, pages, "code", False, doc_type="code", content_hash=content_hash,
+    )
     pdf_rag.clear_index(doc_id)
     # Un fichier de code est précisément le cas où le nom seul ne dit rien :
     # la fiche (résumé + mots-clés) est ce qui permettra de le retrouver.

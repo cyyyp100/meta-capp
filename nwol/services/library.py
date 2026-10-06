@@ -6,8 +6,10 @@
 # zoom d'affichage) — voir pdf_viewer/pdf_document.py pour la convention.
 from __future__ import annotations
 
+import errno
 import logging
 import os
+import stat
 from collections import OrderedDict
 from datetime import datetime, timezone
 
@@ -28,11 +30,13 @@ from db.documents import list_all_documents as _list_all
 from db.documents import list_documents_for_search as _list_for_search
 from db.documents import list_recent_documents as _list_recent
 from db.documents import rename_document as _rename_document
+from db.documents import update_content_hash as _update_content_hash
 from db.documents import update_page_count as _update_page_count
 from i18n import t
 from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.page_renderer import clear_page_cache as _clear_page_cache
 from pdf_viewer.page_renderer import clear_reader_cache as _clear_reader_cache
+from pdf_viewer.page_renderer import page_cache_dir as _page_cache_dir
 from pdf_viewer.page_renderer import render_page as _render_page
 from pdf_viewer.pdf_document import PdfDocument
 from utils.text import fold
@@ -40,6 +44,8 @@ from utils.text import fold
 logger = logging.getLogger("services.library")
 
 __all__ = [
+    "DocumentFileMissing",
+    "file_missing",
     "list_recent_documents",
     "list_all_documents",
     "search_documents",
@@ -50,9 +56,53 @@ __all__ = [
     "page_words",
     "search_page",
     "clear_reader_cache",
+    "forget_path_caches",
     "delete_document",
     "rename_document",
 ]
+
+
+class DocumentFileMissing(FileNotFoundError):
+    """Le fichier d'un document a quitté son emplacement (déplacé, renommé,
+    supprimé). `documents.path` le désigne encore : le serveur répond 410
+    `file_missing` (server/app.py) et l'interface propose « Localiser le
+    fichier » (services/relink) au lieu d'une erreur 500."""
+
+    def __init__(self, doc_id: int, path: str | None):
+        super().__init__(errno.ENOENT, "Fichier du document introuvable", path or "")
+        self.doc_id = int(doc_id)
+
+
+def file_missing(path: str | None) -> bool:
+    """Le fichier n'est-il plus à cet emplacement ?
+
+    Seules l'absence (`FileNotFoundError`) et un dossier du chemin devenu
+    fichier (`NotADirectoryError`) comptent. Un refus d'accès (protection de la
+    vie privée de macOS) ou une erreur d'entrée-sortie (partage réseau qui ne
+    répond plus) ne sont pas un déplacement : proposer de « localiser » un
+    fichier resté en place serait faux. Un chemin vide ou invalide ne désigne
+    aucun fichier."""
+    if not path:
+        return True
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError, ValueError):
+        return True
+    except OSError:
+        return False
+    return not stat.S_ISREG(st.st_mode)
+
+
+def _require_file(doc: dict) -> str:
+    """Chemin du fichier d'un document, ou `DocumentFileMissing` s'il a disparu.
+
+    Vérifié AVANT le cache PNG : une vignette encore en cache ne doit pas faire
+    croire que le document s'ouvre, et le rendu d'un fichier absent créait un
+    dossier de cache vide avant d'échouer."""
+    path = doc.get("path") or ""
+    if file_missing(path):
+        raise DocumentFileMissing(doc["id"], path)
+    return path
 
 
 def list_recent_documents(limit: int = 10) -> list[dict]:
@@ -118,11 +168,15 @@ def get_document(doc_id: int) -> dict | None:
         # Pas de PDF : tailles de page uniformes (repli avant chargement des blocs).
         detail["page_sizes_pts"] = [[595, 842]] * (doc.get("page_count") or 1)
         return detail
-    try:
-        with PdfDocument(doc["path"]) as pdf:
-            sizes = [[w, h] for (w, h) in pdf.page_sizes()]
-    except Exception:
-        sizes = []
+    sizes: list[list[float]] = []
+    # Fichier introuvable : le détail part quand même (le lecteur affiche
+    # « Localiser le fichier »), sans réveiller PDFium pour un échec certain.
+    if not file_missing(doc.get("path")):
+        try:
+            with PdfDocument(doc["path"]) as pdf:
+                sizes = [[w, h] for (w, h) in pdf.page_sizes()]
+        except Exception:
+            sizes = []
     if sizes and len(sizes) != doc.get("page_count"):
         doc = _resync_rewritten_pdf(doc, len(sizes))
     detail = _summary(doc)
@@ -136,14 +190,25 @@ def _resync_rewritten_pdf(doc: dict, page_count: int) -> dict:
 
     `page_count` fixe la liste des pages du lecteur : resté à l'ancienne valeur,
     il fait demander des pages qui n'existent plus. Le texte de page et l'index
-    RAG se revalident seuls sur le mtime ; les chapitres et les PNG (cache
-    indexé par le seul chemin) non — on refait donc ce que ferait un réimport.
+    RAG se revalident seuls sur le mtime ; les chapitres, les PNG (cache
+    indexé par le seul chemin) et l'empreinte du contenu non — on refait donc
+    ce que ferait un réimport.
     """
+    from services.relink import file_digest
+
     logger.info(
         "PDF réécrit depuis l'import id=%s : %s -> %s pages",
         doc["id"], doc.get("page_count"), page_count,
     )
     _update_page_count(doc["id"], page_count)
+    # Restée à l'ancienne version, l'empreinte ferait prendre ce fichier pour un
+    # AUTRE au prochain « Localiser » (`different_file`). Illisible : inconnue,
+    # la re-liaison se rabat alors sur le nombre de pages.
+    try:
+        content_hash: str | None = file_digest(doc["path"])
+    except OSError:
+        content_hash = None
+    _update_content_hash(doc["id"], content_hash)
     try:
         save_chapters(doc["id"], build_chapter_index(doc["path"]))
     except Exception:  # pragma: no cover - des chapitres périmés valent mieux qu'un lecteur fermé
@@ -152,17 +217,25 @@ def _resync_rewritten_pdf(doc: dict, page_count: int) -> dict:
         _clear_page_cache(doc["path"])
     except OSError:  # pragma: no cover - le cache disque est jetable
         pass
-    return {**doc, "page_count": page_count}
+    return {
+        **doc,
+        "page_count": page_count,
+        "last_page": min(int(doc.get("last_page") or 1), page_count),
+        "content_hash": content_hash,
+    }
 
 
 def render_page(doc_id: int, page: int, zoom: float = 2.5) -> str | None:
-    """Chemin du PNG d'une page (cache disque géré par page_renderer)."""
+    """Chemin du PNG d'une page (cache disque géré par page_renderer).
+
+    `DocumentFileMissing` si le fichier a disparu — testé APRÈS la nature du
+    document : un fichier de code n'a jamais d'image (404), même déplacé."""
     doc = _get_document(doc_id)
     if doc is None:
         return None
     if doc.get("extraction_engine") == "code":
         return None  # Document code : pas d'image (rendu texte côté client).
-    return _render_page(doc["path"], page, zoom)
+    return _render_page(_require_file(doc), page, zoom)
 
 
 # Cache du texte de page : {(doc_id, page): (mtime, texte)}, borné, FIFO.
@@ -175,9 +248,13 @@ _PAGE_TEXT_CACHE_MAX = 128
 
 
 def page_text(doc_id: int, page: int) -> str:
-    """Texte d'une page — LE point d'alimentation de tout l'empilement LLM."""
+    """Texte d'une page — LE point d'alimentation de tout l'empilement LLM.
+
+    Fichier introuvable : "" et non une exception. Tous les appelants savent
+    déjà traiter une page sans texte (page scannée) ; une exception, elle,
+    fermait le WebSocket du lecteur et arrêtait le ticker d'intervention."""
     doc = _get_document(doc_id)
-    if doc is None:
+    if doc is None or file_missing(doc.get("path")):
         return ""
     key = (int(doc_id), int(page))
     mtime = _mtime(doc.get("path"))
@@ -215,7 +292,7 @@ def page_blocks(doc_id: int, page: int) -> list[dict] | None:
         return None
     from services import code_reader
 
-    return [code_reader.page_block(doc["path"], page)]
+    return [code_reader.page_block(_require_file(doc), page)]
 
 
 def page_words(doc_id: int, page: int) -> list[list]:
@@ -226,7 +303,7 @@ def page_words(doc_id: int, page: int) -> list[list]:
     doc = _get_document(doc_id)
     if doc is None or doc.get("extraction_engine") == "code":
         return []
-    with PdfDocument(doc["path"]) as pdf:
+    with PdfDocument(_require_file(doc)) as pdf:
         return [[x0, y0, x1, y1, word] for (x0, y0, x1, y1, word) in pdf.words(page)]
 
 
@@ -237,6 +314,22 @@ def clear_reader_cache(doc_id: int) -> None:
     doc = _get_document(doc_id)
     if doc and doc.get("path"):
         _clear_reader_cache(doc["path"])
+
+
+def forget_path_caches(doc_id: int, path: str | None, engine: str | None) -> None:
+    """Oublie tout ce qui a été dérivé du fichier à `path` pour ce document :
+    texte de page en mémoire, PNG rendus (vignette comprise) et leur dossier,
+    une fois vide — le cache disque est indexé par le CHEMIN, il ne servirait
+    plus à personne. Partagé par la suppression et la re-liaison (services/relink)."""
+    for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
+        _PAGE_TEXT_CACHE.pop(key, None)
+    if not path or engine == "code":
+        return
+    try:
+        _clear_page_cache(path)
+        _page_cache_dir(path).rmdir()  # n'aboutit que si le dossier est vide
+    except OSError:  # le cache disque est jetable
+        pass
 
 
 def delete_document(doc_id: int) -> dict:
@@ -256,13 +349,7 @@ def delete_document(doc_id: int) -> dict:
     doc = _get_document(doc_id)
     if doc is None:
         raise ValueError(t("folders.document_missing"))
-    for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
-        _PAGE_TEXT_CACHE.pop(key, None)
-    if doc.get("path") and doc.get("extraction_engine") != "code":
-        try:
-            _clear_page_cache(doc["path"])
-        except OSError:  # pragma: no cover - le cache disque est jetable
-            pass
+    forget_path_caches(doc_id, doc.get("path"), doc.get("extraction_engine"))
     _delete_document(doc_id)
     from services import uploads
 
@@ -294,7 +381,7 @@ def search_page(doc_id: int, page: int, needle: str) -> list[list[float]]:
     doc = _get_document(doc_id)
     if doc is None or doc.get("extraction_engine") == "code":
         return []
-    with PdfDocument(doc["path"]) as pdf:
+    with PdfDocument(_require_file(doc)) as pdf:
         return [list(rect) for rect in pdf.search_text(page, needle)]
 
 
@@ -311,7 +398,31 @@ def _local_import_date(created_at: str) -> str:
     return utc.astimezone().isoformat(timespec="seconds")
 
 
+def _last_known_folder(path: str | None) -> str | None:
+    """Dossier où était le fichier, pour aider à le retrouver (`~` = dossier
+    personnel). Rien pour une copie envoyée par le navigateur : son dossier
+    est celui des données de l'application, l'utilisateur ne l'a jamais choisi."""
+    if not path:
+        return None
+    from services import uploads
+
+    if uploads.is_upload(path):
+        return None
+    folder = os.path.dirname(path)
+    home = os.path.expanduser("~")
+    try:
+        relative = os.path.relpath(folder, home)
+    except ValueError:  # Windows : autre lecteur que le dossier personnel
+        return folder
+    if relative == os.curdir:
+        return "~"
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return folder
+    return os.path.join("~", relative)
+
+
 def _summary(doc: dict) -> dict:
+    missing = file_missing(doc.get("path"))
     return {
         "id": doc["id"],
         "title": doc.get("filename") or "",
@@ -331,4 +442,12 @@ def _summary(doc: dict) -> dict:
         "summary": doc.get("auto_summary") or "",
         "keywords": doc.get("keywords") or [],
         "digest_status": doc.get("digest_status") or "none",
+        # Fichier déplacé, renommé ou supprimé depuis l'import : la carte et le
+        # lecteur proposent « Localiser le fichier » (services/relink).
+        "file_missing": missing,
+        # Empreinte du contenu. Le frontend en versionne l'URL des pages : le PNG
+        # est servi `immutable`, et une re-liaison vers une autre version du
+        # fichier ne doit pas laisser l'ancienne image dans le cache du navigateur.
+        "content_hash": doc.get("content_hash"),
+        "last_known_folder": _last_known_folder(doc.get("path")) if missing else None,
     }

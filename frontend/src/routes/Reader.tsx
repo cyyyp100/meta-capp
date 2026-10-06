@@ -1048,7 +1048,7 @@ export function Reader() {
                   }}
                 >
                   <img
-                    src={pageImageUrl(id, n, renderZoom)}
+                    src={pageImageUrl(id, n, renderZoom, data.content_hash)}
                     alt={`Page ${n}`}
                     loading="lazy"
                     draggable={false}

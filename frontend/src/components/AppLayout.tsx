@@ -6,7 +6,7 @@ import {
   Layers,
   MessageSquare,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Suspense, useCallback } from "react";
 import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
@@ -43,6 +43,7 @@ export function AppLayout() {
   const t = useT();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const reduce = useReducedMotion();
   const { data: preferences } = usePreferences();
   const { data: streak } = useQuery({ queryKey: ["streak"], queryFn: api.streak });
@@ -60,13 +61,15 @@ export function AppLayout() {
     if (!picked) return;
     try {
       const doc = await api.importDocument(picked);
+      // Le détail est déjà là : le lecteur s'ouvre sans écran de chargement.
+      queryClient.setQueryData(["document", doc.id], doc);
       navigate(`/reader/${doc.id}`);
     } catch {
       // L'accueil porte déjà le message d'erreur d'import détaillé ; ici on ne
       // fait qu'y ramener plutôt que d'échouer en silence sur un raccourci.
       navigate("/");
     }
-  }, [navigate]);
+  }, [navigate, queryClient]);
   useAppShortcuts({ onOpenDocument: () => void openDocument() });
   // `useOutlet()` plutôt que `<Outlet />` : il FIGE l'élément de la route
   // courante. Un `<Outlet />` rendu dans l'enveloppe sortante lirait le contexte

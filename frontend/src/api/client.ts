@@ -32,10 +32,26 @@ import type {
   QuizQuestion,
   QuizSubject,
   ReaderBlock,
+  RelinkResult,
   SavedHighlight,
   SessionAnalysis,
   SessionMetrics,
 } from "./types";
+
+/** Erreur d'un appel d'API. `message` est le `detail` du serveur, `code` l'état
+ *  qu'il nomme quand l'interface doit y réagir autrement qu'en l'affichant
+ *  (`different_file` : proposer de relier quand même). */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -52,35 +68,38 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await apiError(res);
   }
   return (await res.json()) as T;
 }
 
 /** Mode navigateur : le CONTENU du fichier, copié côté serveur (services/uploads)
  *  — un navigateur ne donne jamais de chemin. Corps brut, comme `importDb`. */
-async function uploadDocument(file: File): Promise<DocumentDetail> {
-  const res = await fetch(`/api/library/upload?filename=${encodeURIComponent(file.name)}`, {
+async function uploadFile<T>(url: string, file: File): Promise<T> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: file,
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(res));
+    throw await apiError(res);
   }
-  return (await res.json()) as DocumentDetail;
+  return (await res.json()) as T;
 }
 
-/** Message d'erreur lisible : le `detail` de FastAPI est déjà traduit côté
- *  serveur (le garde-fou de cycle, par exemple) — bien plus utile qu'un « 400 ». */
-async function errorMessage(res: Response): Promise<string> {
+/** Erreur lisible : le `detail` de FastAPI est déjà traduit côté serveur (le
+ *  garde-fou de cycle, par exemple) — bien plus utile qu'un « 400 ». */
+async function apiError(res: Response): Promise<ApiError> {
+  let message = `${res.status} ${res.statusText}`;
+  let code: string | undefined;
   try {
     const data = await res.json();
-    if (data && typeof data.detail === "string") return data.detail;
+    if (data && typeof data.detail === "string") message = data.detail;
+    if (data && typeof data.code === "string") code = data.code;
   } catch {
     // Réponse non-JSON : on retombe sur le statut.
   }
-  return `${res.status} ${res.statusText}`;
+  return new ApiError(message, res.status, code);
 }
 
 export const api = {
@@ -106,7 +125,7 @@ export const api = {
     postJSON<FolderNode>(`/api/library/folders/${id}/move`, { parent_id: parentId }),
   deleteFolder: (id: number) =>
     fetch(`/api/library/folders/${id}`, { method: "DELETE" }).then(async (r) => {
-      if (!r.ok) throw new Error(await errorMessage(r));
+      if (!r.ok) throw await apiError(r);
       return r.json() as Promise<{ deleted_folders: number; detached_documents: number }>;
     }),
   moveDocument: (docId: number, folderId: number | null) =>
@@ -123,7 +142,7 @@ export const api = {
   // Retire le document de la bibliothèque — jamais le fichier de l'utilisateur.
   deleteDocument: (docId: number) =>
     fetch(`/api/library/doc/${docId}`, { method: "DELETE" }).then(async (r) => {
-      if (!r.ok) throw new Error(await errorMessage(r));
+      if (!r.ok) throw await apiError(r);
       return r.json() as Promise<{ deleted: boolean; id: number }>;
     }),
   flashcards: (filters?: { difficulty?: number; tags?: string }) => {
@@ -158,7 +177,17 @@ export const api = {
   importDocument: (picked: PickedDocument) =>
     "path" in picked
       ? postJSON<DocumentDetail>("/api/library/import", { path: picked.path })
-      : uploadDocument(picked.file),
+      : uploadFile<DocumentDetail>(`/api/library/upload?filename=${encodeURIComponent(picked.file.name)}`, picked.file),
+  /** « Localiser le fichier… » : le même document, relié au fichier choisi.
+   *  `force` relie un contenu différent (nouvelle version) — seulement après la
+   *  confirmation que demande l'erreur `different_file`. */
+  relinkDocument: (docId: number, picked: PickedDocument, force = false) =>
+    "path" in picked
+      ? postJSON<RelinkResult>(`/api/library/doc/${docId}/relink`, { path: picked.path, force })
+      : uploadFile<RelinkResult>(
+          `/api/library/doc/${docId}/relink/upload?filename=${encodeURIComponent(picked.file.name)}&force=${force}`,
+          picked.file,
+        ),
   quizSubjects: () => getJSON<QuizSubject[]>("/api/quiz/subjects"),
   quizOptions: () => getJSON<QuizOptions>("/api/quiz/options"),
   // `topic` : précision libre DANS la matière (« révolution française »), ou dans
@@ -812,6 +841,11 @@ export interface LangCorrection {
 }
 
 // URL de la vignette/page d'un document (servie + cachée par le backend).
-export function pageImageUrl(docId: number, page: number, zoom = 0.4): string {
-  return `/api/library/doc/${docId}/page/${page}.png?zoom=${zoom}${extraTokenParam()}`;
+// `rev` est l'empreinte du contenu (`content_hash`) : le PNG est servi
+// `immutable`, et un document relié à une AUTRE version de son fichier
+// (« Localiser… », puis « Relier quand même ») ne doit pas garder l'ancienne
+// image dans le cache du navigateur.
+export function pageImageUrl(docId: number, page: number, zoom = 0.4, rev?: string | null): string {
+  const version = rev ? `&v=${encodeURIComponent(rev)}` : "";
+  return `/api/library/doc/${docId}/page/${page}.png?zoom=${zoom}${version}${extraTokenParam()}`;
 }

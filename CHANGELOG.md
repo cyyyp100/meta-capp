@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browser mode can be quit without a terminal: **Quit Meta-Capp** in the profile menu,
   or close the tab — the app stops by itself three minutes after the last tab closes,
   once Clikoda has finished what it was doing.
+- **Locate a moved file.** A document whose file was moved, renamed or deleted says
+  so on its card, on the resume card and in the reader, with a **Locate…** button:
+  pick the file where it is now and the same document comes back — progress,
+  highlights, sessions, folder and title included. Other missing documents moved
+  along with it are found at the same time. A file whose content changed since the
+  import is only linked after confirmation.
 
 ### Changed
 
@@ -47,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app's own server and to Ollama no longer go through the proxy.
 - Windows: every call to Ollama waited about 2 s (`localhost` tried IPv6 first, which
   Ollama does not listen on).
+- A document whose file had moved no longer breaks the app: its thumbnail answered
+  with a server error (500) and an error trace in the log, and the reader opened a
+  session on broken pages and lost its connection to Clikoda at the first
+  rephrasing. The reader now offers to locate the file instead.
+- Re-importing a file that was moved since its import reopens its document instead
+  of creating a blank duplicate.
 
 ### Security
 

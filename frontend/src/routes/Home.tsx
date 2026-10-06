@@ -21,6 +21,7 @@ import { ResumeCard } from "../features/library/ResumeCard";
 import { SearchBox } from "../features/library/SearchBox";
 import { useDebounced } from "../features/library/useDebounced";
 import { useLibraryUi } from "../features/library/useLibraryUi";
+import { useRelinkDocument } from "../features/library/useRelinkDocument";
 import { useT } from "../i18n";
 
 /** Nombre de documents de l'entrée « Récents » (le catalogue est déjà trié). */
@@ -35,6 +36,9 @@ export function Home() {
   const queryClient = useQueryClient();
   const t = useT();
   const confirm = useConfirm();
+  // « Localiser le fichier… » d'une carte ou de la reprise : un seul dialogue,
+  // ici, transmis aux cartes (qui se rendent sans QueryClient dans leurs tests).
+  const { relink, pendingId: relinkingId } = useRelinkDocument();
   const [importing, setImporting] = useState(false);
   const [rawQuery, setRawQuery] = useState("");
 
@@ -110,6 +114,8 @@ export function Home() {
     setImporting(true);
     try {
       const doc = await api.importDocument(picked);
+      // Le détail est déjà là : le lecteur s'ouvre sans écran de chargement.
+      queryClient.setQueryData(["document", doc.id], doc);
       await refreshLibrary();
       navigate(`/reader/${doc.id}`);
     } catch (e) {
@@ -266,7 +272,11 @@ export function Home() {
           disparaît en recherche — on cherche alors autre chose que la suite. */}
       {documents && documents.length > 0 && !searching && selection.kind !== "folder" && (
         <div className="mt-5.5">
-          <ResumeCard documents={allDocuments} />
+          <ResumeCard
+            documents={allDocuments}
+            onRelink={(doc) => void relink(doc)}
+            relinkingId={relinkingId}
+          />
         </div>
       )}
 
@@ -294,6 +304,8 @@ export function Home() {
               onMove={handlers.onDropDocument}
               onRename={handleRename}
               onDelete={(doc) => void handleDelete(doc)}
+              onRelink={(doc) => void relink(doc)}
+              relinkingId={relinkingId}
               // L'état vide porte lui-même l'appel à l'import : c'est le premier
               // écran d'un nouvel utilisateur, le bouton du bandeau est loin.
               onImport={selection.kind === "all" ? handleImport : undefined}

@@ -55,6 +55,23 @@ export interface DocumentSummary {
   keywords: string[];
   // "none" (jamais tenté) | "pending" (fiche en cours) | "done" | "failed".
   digest_status: string;
+  // Fichier déplacé, renommé ou supprimé depuis l'import : la carte et le
+  // lecteur proposent « Localiser le fichier » (nwol/services/relink.py).
+  file_missing: boolean;
+  // Empreinte du contenu — versionne l'URL des pages (`pageImageUrl`). Nulle
+  // pour un document importé avant qu'elle existe.
+  content_hash: string | null;
+  // Dossier où était le fichier (`~` = dossier personnel), seulement s'il est
+  // introuvable ; nul pour une copie envoyée par le navigateur.
+  last_known_folder: string | null;
+}
+
+/** Réponse de « Localiser le fichier » : le document relié, et les AUTRES
+ *  documents introuvables retrouvés au même endroit. */
+export interface RelinkResult {
+  ok: boolean;
+  document: DocumentDetail;
+  relinked: number[];
 }
 
 /** Nœud de l'arbre de dossiers de la bibliothèque. */

@@ -21,6 +21,8 @@ export function DocumentGrid({
   onMove,
   onRename,
   onDelete,
+  onRelink,
+  relinkingId = null,
   onImport,
   importing,
 }: {
@@ -36,6 +38,10 @@ export function DocumentGrid({
   onMove: (docId: number, folderId: number | null) => void;
   onRename: (docId: number, title: string) => void;
   onDelete: (doc: DocumentSummary) => void;
+  /** « Localiser… » sur la carte d'un fichier introuvable. */
+  onRelink: (doc: DocumentSummary) => void;
+  /** Document dont la re-liaison est en cours (bouton en attente). */
+  relinkingId?: number | null;
   /** Import depuis l'état vide — le tout premier écran d'un nouvel utilisateur. */
   onImport?: () => void;
   importing?: boolean;
@@ -127,6 +133,8 @@ export function DocumentGrid({
               onMove={onMove}
               onRename={onRename}
               onDelete={onDelete}
+              onRelink={onRelink}
+              relinking={relinkingId === doc.id}
             />
           </motion.div>
         ))}

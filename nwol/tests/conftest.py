@@ -49,6 +49,19 @@ def no_real_generation(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_startup_backfill(monkeypatch):
+    """Le démarrage du serveur (lifespan) lance le calcul des empreintes dans un
+    thread (services/relink). Ce thread survivrait au test qui l'a lancé : il
+    pourrait écrire dans la VRAIE base une fois `db.DB_PATH` rétabli. Coupé
+    partout ; le test qui le vérifie reçoit la vraie fonction par cette fixture."""
+    from services import relink
+
+    real = relink.backfill_content_hashes
+    monkeypatch.setattr(relink, "backfill_content_hashes", lambda: 0)
+    return real
+
+
+@pytest.fixture(autouse=True)
 def reference_throughput():
     """Les budgets temps dépendent du débit MESURÉ (llm/throughput) : un test
     qui simule un appel lent ou expiré ne doit pas étirer ceux des suivants —

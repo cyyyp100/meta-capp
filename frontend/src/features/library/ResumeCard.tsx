@@ -9,7 +9,7 @@
 // sessions déjà terminées par cette personne. Promettre « 20 min » à quelqu'un
 // qui lit par tranches de 8 est la meilleure façon de ne pas être cru.
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Flame } from "lucide-react";
+import { BookOpen, FileQuestionMark, Flame } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api/client";
@@ -22,7 +22,18 @@ import { useT } from "../../i18n";
  *  plausible, annoncée comme une estimation et non comme une mesure. */
 const DEFAULT_MINUTES = 20;
 
-export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
+export function ResumeCard({
+  documents,
+  onRelink,
+  relinkingId = null,
+}: {
+  documents: DocumentSummary[];
+  /** Le document à reprendre est introuvable : son bouton devient « Localiser
+   *  le fichier… » (le dialogue est celui de `useRelinkDocument`, dans Home). */
+  onRelink: (doc: DocumentSummary) => void;
+  /** Document dont la re-liaison est en cours (bouton en attente). */
+  relinkingId?: number | null;
+}) {
   const t = useT();
   const navigate = useNavigate();
 
@@ -56,6 +67,12 @@ export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
           <span aria-hidden>·</span>
           <span>{t("resume.estimate", { n: minutes })}</span>
         </p>
+        {doc.file_missing && (
+          <p className="mt-1.5 mb-0 flex items-center gap-1.5 text-[13px] text-warning">
+            <FileQuestionMark className="size-3.5 shrink-0" aria-hidden />
+            {t("resume.file_missing")}
+          </p>
+        )}
       </div>
 
       {/* La série est affichée là où elle a du sens — à côté du geste qui la
@@ -73,9 +90,17 @@ export function ResumeCard({ documents }: { documents: DocumentSummary[] }) {
         </div>
       )}
 
-      <Button size="lg" onClick={() => navigate(`/reader/${doc.id}`)}>
-        {t("resume.action")}
-      </Button>
+      {/* Reprendre un fichier introuvable mènerait à l'écran qui demande de le
+          localiser : autant proposer ce geste-là directement. */}
+      {doc.file_missing ? (
+        <Button size="lg" pending={relinkingId === doc.id} onClick={() => onRelink(doc)}>
+          {t("library.locate_file")}
+        </Button>
+      ) : (
+        <Button size="lg" onClick={() => navigate(`/reader/${doc.id}`)}>
+          {t("resume.action")}
+        </Button>
+      )}
     </section>
   );
 }

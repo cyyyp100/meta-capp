@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from i18n import t
 from server import security
 from server.config import APP_VERSION, DEV_ORIGINS, FRONTEND_DIST
 from server.routers import (
@@ -33,6 +34,7 @@ from server.routers import (
     stats,
     updates,
 )
+from services.library import DocumentFileMissing
 
 logger = logging.getLogger("server")
 
@@ -62,6 +64,13 @@ async def _lifespan(_app: FastAPI):
     from llm.ollama_client import calibrate_throughput
 
     threading.Thread(target=calibrate_throughput, daemon=True, name="llm-calibration").start()
+    # Empreinte des documents importés avant qu'elle existe : c'est elle qui
+    # les reconnaîtra s'ils sont déplacés (services/relink). En thread : relire
+    # chaque fichier n'a rien à faire dans le démarrage. Importée ICI et non en
+    # tête de module, pour que les tests puissent la remplacer (tests/conftest.py).
+    from services.relink import backfill_content_hashes
+
+    threading.Thread(target=backfill_content_hashes, daemon=True, name="content-hash-backfill").start()
     logger.info("Serveur Meta-Capp prêt (v%s).", APP_VERSION)
     yield
 
@@ -93,6 +102,19 @@ async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"error": "internal"}, status_code=500)
 
 
+async def _file_missing(request: Request, exc: Exception) -> JSONResponse:
+    """Fichier d'un document déplacé ou supprimé (services/library) : un état
+    connu, pas une panne — 410 et un `code` que l'interface reconnaît pour
+    proposer « Localiser le fichier ». Une ligne de log, sans trace. Jamais mis
+    en cache : la même adresse redevient valide dès que le fichier est relié."""
+    logger.info("Fichier introuvable sur %s %s : %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        {"detail": t("library.file_missing"), "code": "file_missing"},
+        status_code=410,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 def _pin_bundle_mime_types() -> None:
     """Types MIME du bundle fixés, et non devinés par la machine.
 
@@ -113,6 +135,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Meta-Capp", version=APP_VERSION, lifespan=_lifespan)
     app.add_exception_handler(Exception, _unhandled_error)
+    app.add_exception_handler(DocumentFileMissing, _file_missing)
 
     app.add_middleware(
         CORSMiddleware,

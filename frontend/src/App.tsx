@@ -17,7 +17,9 @@ const Lang = lazy(() => import("./routes/Lang").then((m) => ({ default: m.Lang }
 const LangLesson = lazy(() => import("./routes/LangLesson").then((m) => ({ default: m.LangLesson })));
 const LangEpisode = lazy(() => import("./routes/LangEpisode").then((m) => ({ default: m.LangEpisode })));
 const Brainstorming = lazy(() => import("./routes/Brainstorming").then((m) => ({ default: m.Brainstorming })));
-const Reader = lazy(() => import("./routes/Reader").then((m) => ({ default: m.Reader })));
+// La porte du lecteur : elle ne monte `Reader` que sur un document lisible
+// (un fichier introuvable n'ouvre ni session ni WebSocket).
+const Reader = lazy(() => import("./routes/ReaderRoute").then((m) => ({ default: m.ReaderRoute })));
 const Progress = lazy(() => import("./routes/Progress").then((m) => ({ default: m.Progress })));
 const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.Settings })));
 

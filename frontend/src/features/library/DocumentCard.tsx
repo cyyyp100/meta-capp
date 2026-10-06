@@ -6,8 +6,15 @@
 // renommer, déplacer, supprimer). Renommer et supprimer ne vivent QUE là :
 // ni crayon ni corbeille sur la carte — une grille de documents n'a pas à
 // exposer en permanence les gestes qu'on fait le moins souvent.
+//
+// Exception assumée : un fichier INTROUVABLE (déplacé, renommé, supprimé) montre
+// son bouton « Localiser… » à la place de la vignette. Ce n'est pas un geste
+// rare, c'est la seule chose à faire avec ce document tant qu'il n'est pas relié.
+import { FileQuestionMark } from "lucide-react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+import { Button } from "@/components/ui/button";
 
 import {
   ContextMenu,
@@ -43,6 +50,8 @@ export function DocumentCard({
   onMove,
   onRename,
   onDelete,
+  onRelink,
+  relinking = false,
 }: {
   doc: DocumentSummary;
   /** Renseigné en mode recherche : le résultat vient peut-être d'un autre dossier. */
@@ -54,6 +63,11 @@ export function DocumentCard({
   onRename: (docId: number, title: string) => void;
   /** Clic droit → « Supprimer ». La confirmation est du ressort de l'appelant. */
   onDelete: (doc: DocumentSummary) => void;
+  /** « Localiser… » d'un fichier introuvable. Le dialogue (sélecteur,
+   *  confirmation, toasts) est celui de `useRelinkDocument`, chez l'appelant. */
+  onRelink: (doc: DocumentSummary) => void;
+  /** Re-liaison en cours pour ce document. */
+  relinking?: boolean;
 }) {
   const navigate = useNavigate();
   const t = useT();
@@ -83,7 +97,8 @@ export function DocumentCard({
   const progress = doc.page_count > 0 ? Math.round((doc.last_page / doc.page_count) * 100) : 0;
   const pending = doc.digest_status === "pending" && !doc.summary;
   const importedOn = doc.imported_at ? formatDay(doc.imported_at, lang) : "";
-  const showRibbon = Boolean(doc.summary) || doc.keywords.length > 0 || pending;
+  // Le ruban couvrirait le bouton « Localiser… » de l'encart.
+  const showRibbon = !doc.file_missing && (Boolean(doc.summary) || doc.keywords.length > 0 || pending);
 
   return (
     <ContextMenu>
@@ -107,7 +122,30 @@ export function DocumentCard({
       style={{ ...card, opacity: dragging ? 0.45 : 1 }}
     >
       <div style={thumbnail}>
-        {doc.extraction_engine === "code" ? (
+        {doc.file_missing ? (
+          // Pas de vignette à rendre : le serveur répondrait 410. On dit ce
+          // qui se passe, et on propose la seule chose utile à faire.
+          <div style={missingThumb}>
+            <FileQuestionMark className="size-8" aria-hidden />
+            <span style={{ fontWeight: 600, fontSize: 13 }}>{t("library.file_missing")}</span>
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.35 }}>
+              {t("library.file_missing_hint")}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              pending={relinking}
+              // Le clic sur la carte ouvre le lecteur : celui-ci ne doit rien ouvrir.
+              onClick={(e) => {
+                e.stopPropagation();
+                onRelink(doc);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              {t("library.locate")}
+            </Button>
+          </div>
+        ) : doc.extraction_engine === "code" ? (
           // Fichier de code : pas d'image de page → vignette dédiée.
           <div style={codeThumb}>
             <span style={{ fontSize: 34 }}>{"</>"}</span>
@@ -117,7 +155,7 @@ export function DocumentCard({
           </div>
         ) : (
           <img
-            src={pageImageUrl(doc.id, 1, 0.5)}
+            src={pageImageUrl(doc.id, 1, 0.5, doc.content_hash)}
             alt={doc.title}
             loading="lazy"
             draggable={false}
@@ -246,6 +284,12 @@ export function DocumentCard({
         setRenaming(true);
       }}
     >
+      {doc.file_missing && (
+        <>
+          <ContextMenuItem onSelect={() => onRelink(doc)}>{t("library.locate_file")}</ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
       <ContextMenuItem onSelect={() => navigate(`/reader/${doc.id}`)}>
         {t("library.open")}
       </ContextMenuItem>
@@ -320,6 +364,22 @@ const codeThumb: React.CSSProperties = {
   background: "var(--surface-soft)",
   color: "var(--muted)",
   fontFamily: "var(--font-mono)",
+};
+
+// Encart d'un fichier introuvable : `--warning` dit « à reprendre », pas
+// « danger » (cf. tokens.css) — rien n'est perdu, le fichier est ailleurs.
+const missingThumb: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  padding: "0 14px",
+  textAlign: "center",
+  background: "var(--warning-soft)",
+  color: "var(--warning)",
 };
 
 // Ruban translucide. Le fond (`color-mix` sur --surface, qui suit le thème) et
