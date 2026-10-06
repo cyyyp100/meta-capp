@@ -530,46 +530,15 @@ def parse_curiosity_hook(raw: str | dict) -> dict | None:
 
 
 def parse_quiz_session_analysis(raw: str | dict) -> dict | None:
+    """Texte d'analyse d'une session de quiz. Le reste du bilan (cours à renforcer,
+    matières faibles) est calculé par `services.quiz`, pas demandé au LLM."""
     data = _load_json(raw)
     if not isinstance(data, dict):
         return None
-
-    analysis = data.get("analysis", "")
-    if not isinstance(analysis, str):
-        analysis = ""
-
-    weak_subjects = data.get("weak_subjects", [])
-    if not isinstance(weak_subjects, list):
-        weak_subjects = []
-    weak_subjects = [str(s).strip() for s in weak_subjects if s]
-
-    courses_raw = data.get("courses_to_review", [])
-    if not isinstance(courses_raw, list):
-        courses_raw = []
-
-    courses = []
-    for item in courses_raw[:3]:
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("title") or item.get("subject") or "").strip()
-        subject = str(item.get("subject") or "").strip()
-        reason = str(item.get("reason") or "").strip()
-        document = str(item.get("document") or "").strip()
-        chapter_title = str(item.get("chapter_title") or "").strip()
-        if title or subject:
-            courses.append({
-                "title": title or subject,
-                "subject": subject,
-                "reason": reason,
-                "document": document,
-                "chapter_title": chapter_title,
-            })
-
-    return {
-        "analysis": analysis.strip(),
-        "weak_subjects": weak_subjects,
-        "courses_to_review": courses,
-    }
+    analysis = data.get("analysis")
+    if not isinstance(analysis, str) or not analysis.strip():
+        return None
+    return {"analysis": analysis.strip()}
 
 
 def parse_quiz_distractors(raw: str | dict) -> dict | None:

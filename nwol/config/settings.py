@@ -850,6 +850,10 @@ QUIZ_MAX_QUESTIONS = 30
 # lot borné et on filtre EN PYTHON (utils.text.fold).
 QUIZ_SEARCH_POOL = 400
 QUIZ_SEARCH_MAX_TERMS = 6
+# Bilan de session : « cours à renforcer » affichés au plus. Ils sont CALCULÉS
+# (`services.quiz._courses_to_review`) depuis les questions de lecture manquées,
+# jamais proposés par le LLM — le catalogue statique n'a pas de cours à ouvrir.
+QUIZ_REVIEW_MAX_COURSES = 3
 
 # ── Sélection : ne pas resservir toujours les mêmes lignes ───────────────────
 # Lues par `services/selection.py` et ses appelants (quiz, sas d'entrée,

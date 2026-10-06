@@ -117,46 +117,139 @@ def test_quiz_questions_fallback_on_llm_failure(client, monkeypatch):
         assert q["answer"]
 
 
-def test_quiz_analysis_enriches_document_id(client, monkeypatch):
-    """L'analyse enrichit chaque cours conseillé avec un document_id pour le deep-link."""
+def _capture_analysis(monkeypatch, *, analysis: str = "Bilan.", fail: bool = False) -> list[dict]:
+    """Remplace l'appel LLM d'analyse ; renvoie la liste des contextes reçus."""
+    seen: list[dict] = []
 
-    def _fake_analysis(context, on_success, on_error, model=None):
-        on_success(
-            {
-                "analysis": "Quelques lacunes en physique.",
-                "weak_subjects": ["physique"],
-                "courses_to_review": [
-                    {
-                        "title": "physique.pdf",
-                        "subject": "physique",
-                        "reason": "2 erreurs sur ce cours",
-                        "document": "physique.pdf",
-                        "chapter_title": "",
-                    }
-                ],
-            }
-        )
+    def _fake(context, on_success, on_error, model=None):
+        seen.append(context)
+        if fail:
+            on_error("LLM indisponible")
+            return
+        # Le LLM « propose » un cours qui n'existe pas : il doit être ignoré.
+        on_success({"analysis": analysis, "courses_to_review": [{"title": "git commit"}]})
 
-    monkeypatch.setattr("services.quiz.generate_quiz_session_analysis_async", _fake_analysis)
+    monkeypatch.setattr("services.quiz.generate_quiz_session_analysis_async", _fake)
+    return seen
 
+
+def _answer(verdict: str, *, category: str = "physique", doc_id=None, document=None,
+            chapter=None, source: str | None = None) -> dict:
+    return {
+        "question": "Q",
+        "user_answer": "R",
+        "verdict": verdict,
+        "score": {"correct": 1.0, "partial": 0.5, "incorrect": 0.0}[verdict],
+        "category": category,
+        "source": source or ("reading" if doc_id is not None else "static"),
+        "document": document,
+        "document_id": doc_id,
+        "chapter_title": chapter,
+    }
+
+
+def test_quiz_analysis_courses_are_library_documents_only(client, monkeypatch):
+    """Les cours à renforcer sont calculés depuis les questions de LECTURE manquées.
+
+    Une question du catalogue statique n'a pas de cours : elle n'en produit aucun,
+    et ce que le LLM « recommande » de son côté n'arrive jamais à l'écran."""
+    _capture_analysis(monkeypatch)
+    doc_id, _ = _seed_subject_questions("physique")
     answers = [
-        {
-            "question": "Q1",
-            "user_answer": "faux",
-            "verdict": "incorrect",
-            "score": 0.0,
-            "category": "physique",
-            "source": "reading",
-            "document": "physique.pdf",
-            "document_id": 42,
-            "chapter_title": None,
-        }
+        _answer("incorrect", doc_id=doc_id, document="physique.pdf", chapter="Ondes"),
+        _answer("partial", doc_id=doc_id, document="physique.pdf", chapter="Optique"),
+        _answer("correct", doc_id=doc_id, document="physique.pdf", chapter="Ondes"),
+        _answer("incorrect", category="informatique"),  # catalogue statique
     ]
     resp = client.post("/api/quiz/analysis", json={"answers": answers})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["analysis"]
-    assert body["courses_to_review"][0]["document_id"] == 42
+    assert body["analysis"] == "Bilan."
+    assert body["courses_to_review"] == [{
+        "document_id": doc_id,
+        "title": "physique.pdf",
+        "subject": "physique",
+        "chapters": ["Ondes", "Optique"],
+        "answered": 3,
+        "missed": 2,
+    }]
+    assert body["weak_subjects"] == ["informatique", "physique"]
+
+
+def test_quiz_analysis_skips_missing_documents_and_mastered_courses(client, monkeypatch):
+    """Document supprimé (ou id forgé) : pas de carte. Cours sans erreur : pas de carte."""
+    _capture_analysis(monkeypatch)
+    doc_id, _ = _seed_subject_questions("physique")
+    answers = [
+        _answer("correct", doc_id=doc_id, document="physique.pdf"),
+        _answer("incorrect", doc_id=999_999, document="disparu.pdf"),
+    ]
+    body = client.post("/api/quiz/analysis", json={"answers": answers}).json()
+    assert body["courses_to_review"] == []
+
+
+def test_quiz_analysis_shows_the_current_document_title(client, monkeypatch):
+    """Le titre affiché est relu en base : un renommage se voit dans le bilan."""
+    from db.documents import rename_document
+
+    _capture_analysis(monkeypatch)
+    doc_id, _ = _seed_subject_questions("physique")
+    rename_document(doc_id, "Cours de physique")
+    answers = [_answer("incorrect", doc_id=doc_id, document="physique.pdf")]
+    body = client.post("/api/quiz/analysis", json={"answers": answers}).json()
+    assert body["courses_to_review"][0]["title"] == "Cours de physique"
+
+
+def test_quiz_analysis_is_framed_by_the_session_settings(client, monkeypatch):
+    """Matière et précision choisies au lancement atteignent le prompt, et seuls les
+    niveaux des matières de la session l'accompagnent (pas le profil entier)."""
+    from db.subjects import update_subject_from_answer
+    from db.user import DEFAULT_USER_ID
+
+    update_subject_from_answer(DEFAULT_USER_ID, "informatique", True)
+    update_subject_from_answer(DEFAULT_USER_ID, "histoire", False)
+    seen = _capture_analysis(monkeypatch)
+    answers = [_answer("incorrect", category="informatique"), _answer("correct", category="informatique")]
+    settings = {"mode": "subject", "subject": "informatique", "topic": " git "}
+    client.post("/api/quiz/analysis", json={"answers": answers, "settings": settings})
+
+    context = seen[0]
+    assert context["session"] == {
+        "mode": "subject", "subject": "informatique", "topic": "git", "answered": 2,
+    }
+    assert [p["subject"] for p in context["subject_profiles"]] == ["informatique"]
+    # Le score brut ne part pas au prompt : le LLM le recopiait (« score de 0.0 »).
+    assert all("score" not in entry for entry in context["answers_history"])
+
+
+def test_quiz_analysis_multi_mode_has_no_subject_nor_topic(client, monkeypatch):
+    """Multi-apprentissage : matière et précision envoyées quand même sont ignorées."""
+    seen = _capture_analysis(monkeypatch)
+    settings = {"mode": "multi", "subject": "physique", "topic": "ondes"}
+    client.post("/api/quiz/analysis", json={"answers": [_answer("correct")], "settings": settings})
+    assert seen[0]["session"] == {"mode": "multi", "subject": None, "topic": None, "answered": 1}
+
+
+def test_quiz_analysis_keeps_the_courses_when_the_llm_fails(client, monkeypatch):
+    """Sans LLM, le bilan perd son texte, pas ses cours : ils sont calculés."""
+    _capture_analysis(monkeypatch, fail=True)
+    doc_id, _ = _seed_subject_questions("physique")
+    answers = [_answer("incorrect", doc_id=doc_id, document="physique.pdf")]
+    body = client.post("/api/quiz/analysis", json={"answers": answers}).json()
+    assert body["analysis"] == ""
+    assert [c["document_id"] for c in body["courses_to_review"]] == [doc_id]
+
+
+def test_quiz_analysis_prompt_states_the_chosen_frame():
+    """Le prompt nomme la matière et les mots-clés choisis, ou le multi-apprentissage."""
+    from llm.prompts import build_quiz_session_analysis_prompt
+
+    prompt = build_quiz_session_analysis_prompt(
+        [], session={"mode": "subject", "subject": "informatique", "topic": "git", "answered": 4},
+    )
+    assert "informatique" in prompt and '"git"' in prompt
+    multi = build_quiz_session_analysis_prompt([], session={"mode": "multi", "answered": 4})
+    assert "multi-apprentissage" in multi and "mots-clés tapés" not in multi
 
 
 def test_quiz_analysis_empty_history(client):

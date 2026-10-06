@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { QuizAnswerRecord, QuizEvaluation, QuizQuestion, QuizVerdict } from "../api/types";
-import { ArrowRight, Check, Eye, Lightbulb, Minus, Plus, Search, Shuffle, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Eye, Lightbulb, Minus, Plus, Search, Shuffle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -144,9 +144,16 @@ export function Quiz() {
   // (qui compterait la session deux fois dans le profil long terme).
   const finalized = useRef(false);
 
+  // L'analyse lit les réglages FIGÉS de la session (matière, précision, mode) :
+  // elle parle de ce qui a été joué, pas du profil entier.
   const analysisQuery = useQuery({
     queryKey: ["quiz", "analysis", asked],
-    queryFn: () => api.quizAnalysis(history),
+    queryFn: () =>
+      api.quizAnalysis(history, {
+        mode: asked?.mode ?? "subject",
+        subject: asked?.subject || null,
+        topic: asked?.topic || null,
+      }),
     enabled: done && history.length > 0,
   });
 
@@ -256,6 +263,16 @@ export function Quiz() {
   function restart() {
     resetState();
     setAsked(null);
+  }
+
+  /** « Retour » : l'écran de lancement par défaut, sans les réglages de la session
+   *  jouée — « Recommencer », lui, les garde. */
+  function backToStart() {
+    setMode("subject");
+    setSubject("");
+    setTopic("");
+    setLength(null);
+    restart();
   }
 
   return (
@@ -429,25 +446,34 @@ export function Quiz() {
               {analysisQuery.data.courses_to_review.length > 0 ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontWeight: 700 }}>{t("quiz.reviewTitle")}</div>
-                  {analysisQuery.data.courses_to_review.map((course, i) => (
-                    <div key={`${course.title}-${i}`} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", padding: "var(--space-md)" }}>
+                  {analysisQuery.data.courses_to_review.map((course) => (
+                    <div key={course.document_id} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", padding: "var(--space-md)" }}>
                       <div style={{ fontWeight: 600 }}>{course.title}</div>
-                      {course.reason && <div style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 8px" }}>{course.reason}</div>}
-                      {course.document_id != null && (
-                        <Button size="sm" onClick={() => navigate(`/reader/${course.document_id}`)}>
-                          {t("quiz.launchReading")}
-                        </Button>
-                      )}
+                      <div style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 8px" }}>
+                        <div>{t("quiz.course_missed", { missed: course.missed, answered: course.answered })}</div>
+                        {course.chapters.length > 0 && (
+                          <div>{t("quiz.course_chapters", { chapters: course.chapters.join(", ") })}</div>
+                        )}
+                      </div>
+                      <Button size="sm" onClick={() => navigate(`/reader/${course.document_id}`)}>
+                        {t("quiz.launchReading")}
+                      </Button>
                     </div>
                   ))}
                 </div>
               ) : (
-                analysisQuery.data.analysis && <p style={{ color: "var(--success)", fontWeight: 600 }}>{t("quiz.noWeakness")}</p>
+                // Pas de cours à proposer ne veut pas dire « aucune faiblesse » : les
+                // questions manquées peuvent venir du catalogue, qui n'a pas de cours.
+                score === data.length && <p style={{ color: "var(--success)", fontWeight: 600 }}>{t("quiz.noWeakness")}</p>
               )}
             </div>
           )}
 
           <div className="mt-5 flex flex-wrap justify-center gap-2.5">
+            <Button variant="secondary" onClick={backToStart}>
+              <ArrowLeft aria-hidden />
+              {t("quiz.back")}
+            </Button>
             <Button onClick={restart}>{t("quiz.restart")}</Button>
           </div>
         </div>

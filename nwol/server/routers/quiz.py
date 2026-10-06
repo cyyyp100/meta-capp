@@ -43,8 +43,18 @@ class EvaluateBody(BaseModel):
     choices: list[str] | None = None
 
 
+class SessionSettings(BaseModel):
+    """Réglages figés au lancement de la session (écran « Lancer le quiz »)."""
+
+    mode: str = "subject"               # "subject" | "multi" (pratique entrelacée)
+    subject: str | None = None
+    topic: str | None = None
+
+
 class AnalysisBody(BaseModel):
     answers: list[dict[str, Any]] = []
+    # Sans réglages (ancien client), l'analyse reste cadrée par l'historique seul.
+    settings: SessionSettings | None = None
 
 
 class FinalizeBody(BaseModel):
@@ -121,8 +131,9 @@ def evaluate(body: EvaluateBody) -> dict:
 
 @router.post("/analysis")
 def analysis(body: AnalysisBody) -> dict:
-    """Analyse de fin de session + conseil de cours à renforcer."""
-    return analyze_session(body.answers)
+    """Analyse de fin de session (dans le cadre choisi) + cours à renforcer."""
+    settings = body.settings.model_dump() if body.settings else None
+    return analyze_session(body.answers, settings=settings)
 
 
 @router.post("/finalize")

@@ -714,6 +714,8 @@ def generate_quiz_session_analysis_async(
 ) -> None:
     prompt = build_quiz_session_analysis_prompt(
         answers_history=context.get("answers_history") or [],
+        session=context.get("session") or {},
+        courses_to_review=context.get("courses_to_review") or [],
         subject_profiles=context.get("subject_profiles") or [],
     )
     return _run_json_async("quiz_analysis", prompt, parse_quiz_session_analysis, on_success, on_error, model)
@@ -1513,13 +1515,7 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
   "estimated_accessibility": 0.6
 }""",
         "quiz_analysis": """
-{
-  "analysis": "synthèse courte",
-  "weak_subjects": [],
-  "courses_to_review": [
-    {"title": "nom du cours", "subject": "matière", "reason": "raison courte", "document": "", "chapter_title": ""}
-  ]
-}""",
+{"analysis": "synthèse courte"}""",
         "math_render": """
 {"rendered": "texte nettoyé"}""",
         "document_digest": """
@@ -1592,8 +1588,9 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
         return _fallback_chapter_summary_from_prompt(prompt)
     if label == "curiosity_hook":
         return _fallback_curiosity_hook_from_prompt(prompt)
-    if label == "quiz_analysis":
-        return _fallback_quiz_analysis_from_prompt(prompt)
+    # quiz_analysis : pas de repli local. Cours à renforcer et matières faibles
+    # sont calculés par `services.quiz` ; sans LLM, le bilan s'affiche sans texte
+    # d'analyse plutôt qu'avec une phrase générique qui ne dirait rien de vrai.
     if label == "math_render":
         return _fallback_math_render_from_prompt(prompt)
     if label == "document_digest":
@@ -2222,39 +2219,6 @@ def _fallback_curiosity_hook_from_prompt(prompt: str) -> dict | None:
         "tone": "concrete",
         "link_with_chapter": chapter or target,
         "estimated_accessibility": 0.7,
-    })
-
-
-def _fallback_quiz_analysis_from_prompt(prompt: str) -> dict | None:
-    history = _extract_prompt_json(prompt, "Historique des réponses")
-    weak_subjects: list[str] = []
-    if isinstance(history, list):
-        for item in history:
-            if not isinstance(item, dict):
-                continue
-            correct = item.get("correct")
-            verdict = str(item.get("verdict", item.get("result", ""))).lower()
-            is_wrong = correct is False or verdict in {"incorrect", "wrong", "faux"}
-            subject = str(item.get("subject", item.get("category", ""))).strip()
-            if is_wrong and subject and subject not in weak_subjects:
-                weak_subjects.append(subject)
-    courses = [
-        {
-            "title": subject,
-            "subject": subject,
-            "reason": "Des erreurs récentes indiquent que ce thème mérite une reprise ciblée.",
-        }
-        for subject in weak_subjects[:3]
-    ]
-    analysis = (
-        "Analyse locale : reprends en priorité les thèmes associés aux réponses incorrectes."
-        if weak_subjects
-        else "Analyse locale : aucune faiblesse nette n'a été isolée dans l'historique disponible."
-    )
-    return parse_quiz_session_analysis({
-        "analysis": analysis,
-        "weak_subjects": weak_subjects,
-        "courses_to_review": courses,
     })
 
 

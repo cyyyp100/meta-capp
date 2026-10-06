@@ -1959,80 +1959,112 @@ Contraintes :
 - Ne mets rien en dehors du JSON."""
 
 
+def _quiz_session_frame(session: dict, en: bool) -> str:
+    """Cadre choisi par l'apprenant au lancement de la session, en clair.
+
+    Aucun mot d'exemple : gemma recopie ceux des consignes générales. Seules les
+    valeurs réellement choisies (matière, précision tapée) apparaissent."""
+    answered = int(session.get("answered") or 0)
+    if session.get("mode") == "multi":
+        if en:
+            return (
+                "- mode: multi-learning (interleaved practice: questions drawn from every "
+                "subject, alternating from one subject to the next)\n"
+                f"- questions answered: {answered}"
+            )
+        return (
+            "- mode : multi-apprentissage (pratique entrelacée : questions tirées dans toutes "
+            "les matières, en alternant d'une matière à l'autre)\n"
+            f"- questions répondues : {answered}"
+        )
+    subject = (session.get("subject") or "").strip()
+    topic = (session.get("topic") or "").strip()
+    if en:
+        return "\n".join((
+            "- mode: by subject",
+            f"- subject: {subject}" if subject else "- subject: all subjects",
+            f"- keywords typed by the student: {_json(topic)}" if topic else "- keywords: none",
+            f"- questions answered: {answered}",
+        ))
+    return "\n".join((
+        "- mode : par matière",
+        f"- matière : {subject}" if subject else "- matière : toutes les matières",
+        f"- mots-clés tapés par l'apprenant : {_json(topic)}" if topic else "- mots-clés : aucun",
+        f"- questions répondues : {answered}",
+    ))
+
+
 def build_quiz_session_analysis_prompt(
     answers_history: list[dict],
+    session: dict | None = None,
+    courses_to_review: list[dict] | None = None,
     subject_profiles: list[dict] | None = None,
 ) -> str:
-    if _i18n.current_lang() == "en":
+    """Analyse de fin de session de quiz, DANS le cadre choisi par l'apprenant.
+
+    Le LLM ne rédige que le texte : les cours à renforcer lui sont fournis
+    (calculés par `services.quiz`), il n'en propose aucun — il en inventait à
+    partir des questions du catalogue statique, qui n'ont pas de cours."""
+    en = _i18n.current_lang() == "en"
+    frame = _quiz_session_frame(session or {}, en)
+    if en:
         return f"""You are the adaptive learning companion of MetaC-App.
 The student has just completed a quiz session.
 
-Answer history (each entry contains: question, user_answer, verdict, score [0.0=incorrect, 0.5=partial, 1.0=correct], category, source, document, chapter_title):
+Session settings, chosen by the student before starting it:
+{frame}
+
+Answer history:
 {_json(answers_history)}
+Each entry: question, user_answer, verdict (correct / partial / incorrect), category, source, document, chapter_title.
+source=reading: question drawn from a course in the student's library. source=static: question from the built-in practice catalogue, with no course behind it.
 
-Current mastery levels by subject:
+Courses from the student's library to reinforce (computed from the missed answers; may be empty):
+{_json(courses_to_review or [])}
+
+Current mastery levels of this session's subjects:
 {_json(subject_profiles or [])}
-
-Analyze the performance, identify gaps, and recommend specific courses to review.
-To recommend a course: use each answer's score to group questions by document/chapter (fields document and chapter_title). Prioritize recommending courses (document + chapter) where the average score is lowest.
 
 Respond only in valid JSON, without Markdown, in the exact format:
-{{
-  "analysis": "supportive pedagogical summary in 2-3 sentences, factual and direct",
-  "weak_subjects": ["subject 1", "subject 2"],
-  "courses_to_review": [
-    {{
-      "title": "title of the course or chapter to review (= document if available, otherwise subject)",
-      "subject": "subject key, one of: {SUBJECT_KEYS}",
-      "reason": "short pedagogical reason based on scores (one sentence)",
-      "document": "value of the document field if source=reading, otherwise empty string",
-      "chapter_title": "value of the chapter_title field if source=reading, otherwise empty string"
-    }}
-  ]
-}}
+{{"analysis": "..."}}
 
 Constraints:
-- courses_to_review contains between 0 and 3 elements, sorted by ascending average score (lowest first).
-- If all answers have score=1.0, courses_to_review must be [].
-- Each reason cites the score or number of errors found for this course/chapter.
-- Stay factual: base yourself only on the provided history.
-- If source=reading and document is not null, use that document as title and set document and chapter_title.
-- If source=static, leave document and chapter_title as empty strings."""
+- analysis: 2 to 3 sentences in English, addressed to the student ("you"), supportive, factual and direct.
+- Frame the analysis within the chosen settings: relate successes and gaps to the session's subject and keywords. In multi-learning, comment on how the student did across the subjects encountered.
+- Only talk about the subjects present in the history; never comment on other subjects or on missing data.
+- Never present a source=static question as a course or a document: name the notion, not a course.
+- Recommend no course or document that is absent from the list of courses to reinforce.
+- Speak in numbers of right answers; write no raw score and no decimal number.
+- Rely only on the inputs provided; invent nothing."""
 
     return f"""Tu es le compagnon d'apprentissage adaptatif de MetaC-App.
-L'étudiant vient de terminer une session de quiz.
+L'apprenant vient de terminer une session de quiz.
 
-Historique des réponses (chaque entrée contient : question, user_answer, verdict, score [0.0=incorrect, 0.5=partiel, 1.0=correct], category, source, document, chapter_title) :
+Cadre de la session, choisi par l'apprenant avant de la lancer :
+{frame}
+
+Historique des réponses :
 {_json(answers_history)}
+Chaque entrée : question, user_answer, verdict (correct / partial / incorrect), category, source, document, chapter_title.
+source=reading : question tirée d'un cours de sa bibliothèque. source=static : question du catalogue d'entraînement intégré, sans cours derrière elle.
 
-Niveaux de maîtrise actuels par matière :
+Cours de sa bibliothèque à renforcer (calculés à partir des réponses manquées ; la liste peut être vide) :
+{_json(courses_to_review or [])}
+
+Niveaux de maîtrise actuels des matières de cette session :
 {_json(subject_profiles or [])}
 
-Analyse les performances, identifie les lacunes et recommande des cours spécifiques à réviser.
-Pour recommander un cours : utilise le score de chaque réponse pour regrouper les questions par document/chapitre (champs document et chapter_title). Recommande en priorité les cours (document + chapitre) où le score moyen est le plus faible.
-
 Réponds uniquement en JSON valide, sans Markdown, au format exact :
-{{
-  "analysis": "synthèse pédagogique bienveillante en 2-3 phrases, factuelle et directe",
-  "weak_subjects": ["sujet 1", "sujet 2"],
-  "courses_to_review": [
-    {{
-      "title": "titre du cours ou chapitre à réviser (= document si disponible, sinon matière)",
-      "subject": "clé de matière, l'une de : {SUBJECT_KEYS}",
-      "reason": "raison courte et pédagogique basée sur les scores (une phrase)",
-      "document": "valeur du champ document si source=reading, sinon chaîne vide",
-      "chapter_title": "valeur du champ chapter_title si source=reading, sinon chaîne vide"
-    }}
-  ]
-}}
+{{"analysis": "..."}}
 
 Contraintes :
-- courses_to_review contient entre 0 et 3 éléments, triés par score moyen croissant (le plus faible en premier).
-- Si toutes les réponses ont score=1.0, courses_to_review doit être [].
-- Chaque reason cite le score ou le nombre d'erreurs constatés pour ce cours/chapitre.
-- Reste factuel : base-toi uniquement sur l'historique fourni.
-- Si source=reading et document non null, utilise ce document comme title et renseigne document et chapter_title.
-- Si source=static, laisse document et chapter_title comme chaînes vides."""
+- analysis : 2 à 3 phrases en français, adressées à l'apprenant (« tu »), bienveillantes, factuelles et directes.
+- Situe l'analyse dans le cadre choisi : rapporte réussites et lacunes à la matière et aux mots-clés de la session. En multi-apprentissage, commente le parcours à travers les matières rencontrées.
+- Ne parle que des matières présentes dans l'historique ; ne commente ni les autres matières ni le manque de données.
+- Ne présente jamais une question source=static comme un cours ou un document : nomme la notion, pas un cours.
+- Ne recommande aucun cours ni document absent de la liste des cours à renforcer.
+- Parle en nombre de bonnes réponses ; n'écris aucun score brut ni aucun nombre décimal.
+- Base-toi uniquement sur les entrées fournies ; n'invente rien."""
 
 
 def build_quiz_distractors_prompt(items: list[dict]) -> str:

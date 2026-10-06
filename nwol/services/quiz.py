@@ -15,9 +15,11 @@ from config.settings import (
     QUIZ_FRESHNESS_HALF_LIFE_DAYS,
     QUIZ_MAX_QUESTIONS,
     QUIZ_MIN_QUESTIONS,
+    QUIZ_REVIEW_MAX_COURSES,
     QUIZ_SEARCH_MAX_TERMS,
     QUIZ_SEARCH_POOL,
 )
+from db.documents import get_document
 from db.questions import get_question
 from db.quiz_exposures import get_exposures, record_exposures
 from db.quiz_questions import (
@@ -402,50 +404,52 @@ def finalize_quiz_session(
     return {"ok": True, "score": score}
 
 
-def analyze_session(answers_history: list[dict], user_id: int = DEFAULT_USER_ID) -> dict:
-    """Analyse LLM de fin de session + conseil de cours à renforcer.
+def analyze_session(
+    answers_history: list[dict],
+    user_id: int = DEFAULT_USER_ID,
+    settings: dict | None = None,
+) -> dict:
+    """Bilan de fin de session : cours à renforcer (calculés) + analyse LLM.
 
-    Réutilise le prompt/parseur existants puis enrichit chaque cours recommandé d'un
-    ``document_id`` (déduit de l'historique) pour permettre le deep-link vers le reader.
+    Les **cours à renforcer** ne viennent pas du LLM : ce sont les documents de la
+    bibliothèque dont des questions ont été manquées (:func:`_courses_to_review`).
+    Laissé à lui-même, le LLM en fabriquait à partir des questions du catalogue
+    statique (« git commit »), qui n'a aucun cours derrière lui — la carte
+    affichait alors un cours introuvable. ``weak_subjects`` est calculé de même.
+
+    L'**analyse** est rédigée dans le cadre que l'apprenant a choisi en lançant la
+    session (``settings`` : mode, matière, précision). Sans lui, elle commentait le
+    profil entier, y compris des matières absentes de la session. Seule l'analyse
+    dépend du LLM : s'il échoue, le reste du bilan est rendu quand même.
     """
-    history = answers_history or []
-    empty = {"analysis": "", "weak_subjects": [], "courses_to_review": []}
+    history = [entry for entry in (answers_history or []) if isinstance(entry, dict)]
+    result = {"analysis": "", "weak_subjects": [], "courses_to_review": []}
     if not history:
-        return empty
+        return result
 
-    subject_profiles = get_all_subjects(user_id)
+    scope = _session_scope(settings, len(history))
+    courses = _courses_to_review(history)
+    result["weak_subjects"] = _weak_subjects(history)
+    result["courses_to_review"] = courses
+    context = {
+        "session": scope,
+        "answers_history": [_history_for_prompt(entry) for entry in history],
+        "courses_to_review": [
+            {key: course[key] for key in ("title", "chapters", "answered", "missed")}
+            for course in courses
+        ],
+        "subject_profiles": _session_profiles(user_id, scope, history),
+    }
     try:
-        result = run_llm_sync(
-            lambda ok, err: generate_quiz_session_analysis_async(
-                {"answers_history": history, "subject_profiles": subject_profiles}, ok, err
-            ),
+        analysis = run_llm_sync(
+            lambda ok, err: generate_quiz_session_analysis_async(context, ok, err),
         )
     except Exception as exc:  # pragma: no cover - dégradation best-effort
         logger.warning("Analyse de session de quiz échouée : %s", exc)
-        return empty
-    if not isinstance(result, dict):
-        return empty
-
-    # Map document (nom de fichier) -> document_id depuis l'historique des réponses.
-    doc_map: dict[str, int] = {}
-    for entry in history:
-        doc = str(entry.get("document") or "").strip().lower()
-        did = entry.get("document_id")
-        if doc and isinstance(did, int):
-            doc_map.setdefault(doc, did)
-
-    courses = result.get("courses_to_review") or []
-    for course in courses:
-        if not isinstance(course, dict):
-            continue
-        key = str(course.get("document") or course.get("title") or "").strip().lower()
-        course["document_id"] = doc_map.get(key)
-
-    return {
-        "analysis": result.get("analysis", ""),
-        "weak_subjects": result.get("weak_subjects", []),
-        "courses_to_review": courses,
-    }
+        return result
+    if isinstance(analysis, dict):
+        result["analysis"] = str(analysis.get("analysis") or "").strip()
+    return result
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -599,6 +603,116 @@ def _interleave_by_category(items: list[dict], count: int) -> list[dict]:
         if drained:  # tous les domaines épuisés avant `count`
             break
     return picked
+
+
+# Champs de l'historique transmis au prompt d'analyse. Le score brut (0.0 / 0.5 /
+# 1.0) n'y est pas : le verdict dit la même chose, et le LLM recopiait « (score de
+# 0.0) » tel quel dans le texte destiné à l'apprenant.
+_PROMPT_HISTORY_FIELDS = (
+    "question", "user_answer", "verdict", "category", "source", "document", "chapter_title",
+)
+
+
+def _entry_score(entry: dict) -> float:
+    """Poids d'une réponse de l'historique : le verdict fait foi, le score est un repli."""
+    verdict = str(entry.get("verdict") or "").strip().lower()
+    if verdict in VERDICT_SCORES:
+        return VERDICT_SCORES[verdict]
+    try:
+        return max(0.0, min(1.0, float(entry.get("score"))))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _session_scope(settings: dict | None, answered: int) -> dict:
+    """Réglages choisis au lancement de la session, normalisés pour le prompt.
+
+    Même exclusivité que :func:`build_quiz` : le multi-apprentissage n'a ni
+    matière ni précision, quoi que le client envoie."""
+    settings = settings if isinstance(settings, dict) else {}
+    interleaved = settings.get("mode") == "multi"
+    subject = "" if interleaved else str(settings.get("subject") or "").strip()
+    topic = "" if interleaved else str(settings.get("topic") or "").strip()
+    return {
+        "mode": "multi" if interleaved else "subject",
+        "subject": subject or None,
+        "topic": topic or None,
+        "answered": answered,
+    }
+
+
+def _history_for_prompt(entry: dict) -> dict:
+    return {key: entry.get(key) for key in _PROMPT_HISTORY_FIELDS}
+
+
+def _session_profiles(user_id: int, scope: dict, history: list[dict]) -> list[dict]:
+    """Niveaux de maîtrise des SEULES matières de la session.
+
+    Tout le profil partait au prompt : l'analyse d'un quiz d'informatique finissait
+    sur « d'autres domaines où les données sont limitées »."""
+    wanted = {str(entry.get("category") or "").strip().lower() for entry in history}
+    if scope.get("subject"):
+        wanted.add(scope["subject"].lower())
+    wanted.discard("")
+    return [
+        {key: row.get(key) for key in ("subject", "level", "questions_count", "correct_count")}
+        for row in get_all_subjects(user_id)
+        if str(row.get("subject") or "").strip().lower() in wanted
+    ]
+
+
+def _weak_subjects(history: list[dict]) -> list[str]:
+    """Matières où au moins une réponse n'est pas juste, la plus faible d'abord."""
+    scores: dict[str, list[float]] = {}
+    for entry in history:
+        category = str(entry.get("category") or "").strip()
+        if category:
+            scores.setdefault(category, []).append(_entry_score(entry))
+    weak = [(sum(s) / len(s), category) for category, s in scores.items() if min(s) < 1.0]
+    return [category for _average, category in sorted(weak)]
+
+
+def _courses_to_review(history: list[dict]) -> list[dict]:
+    """Documents de la bibliothèque à relire, d'après les questions manquées.
+
+    Seules les questions de LECTURE ont un cours derrière elles : celles du
+    catalogue statique n'en ont pas, et ne produisent donc aucune carte. Chaque
+    document est relu en base — un ``document_id`` envoyé par le client mais
+    supprimé depuis (ou forgé) n'ouvrirait rien —, et c'est son titre ACTUEL qui
+    s'affiche, renommage compris. Le plus faible score moyen passe en premier.
+    """
+    groups: dict[int, dict] = {}
+    for entry in history:
+        doc_id = entry.get("document_id")
+        if entry.get("source") != "reading" or not isinstance(doc_id, int) or isinstance(doc_id, bool):
+            continue
+        group = groups.setdefault(doc_id, {"answered": 0, "points": 0.0, "missed": 0, "chapters": []})
+        score = _entry_score(entry)
+        group["answered"] += 1
+        group["points"] += score
+        if score < 1.0:
+            group["missed"] += 1
+            chapter = str(entry.get("chapter_title") or "").strip()
+            if chapter and chapter not in group["chapters"]:
+                group["chapters"].append(chapter)
+
+    ranked: list[tuple[float, int, dict]] = []
+    for doc_id, group in groups.items():
+        if not group["missed"]:
+            continue
+        doc = get_document(doc_id)
+        if not doc:
+            continue
+        ranked.append((group["points"] / group["answered"], -group["missed"], {
+            "document_id": doc_id,
+            "title": doc.get("filename") or "",
+            "subject": doc.get("subject") or "",
+            "chapters": group["chapters"],
+            "answered": group["answered"],
+            "missed": group["missed"],
+        }))
+    ranked.sort(key=lambda item: item[:2])
+    return [course for _average, _missed, course in ranked[:QUIZ_REVIEW_MAX_COURSES]]
 
 
 def _evaluation(

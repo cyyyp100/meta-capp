@@ -177,16 +177,25 @@ export interface QuizOptions {
 }
 
 // Cours recommandé en fin de session (document à relire pour se renforcer).
+// Cours de la bibliothèque à renforcer : calculé par le serveur depuis les
+// questions de lecture manquées (jamais proposé par le LLM), donc toujours ouvrable.
 export interface QuizCourse {
+  document_id: number;
   title: string;
   subject: string;
-  reason: string;
-  document: string;
-  chapter_title: string;
-  document_id: number | null;
+  chapters: string[];
+  answered: number;
+  missed: number;
 }
 
-// Analyse LLM de fin de session de quiz + conseils de cours.
+// Réglages figés au lancement d'une session : ils cadrent l'analyse de fin.
+export interface QuizSessionSettings {
+  mode: "subject" | "multi";
+  subject: string | null;
+  topic: string | null;
+}
+
+// Analyse LLM de fin de session de quiz + cours à renforcer.
 export interface QuizAnalysis {
   analysis: string;
   weak_subjects: string[];

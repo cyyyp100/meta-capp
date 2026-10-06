@@ -30,6 +30,7 @@ import type {
   QuizEvaluation,
   QuizOptions,
   QuizQuestion,
+  QuizSessionSettings,
   QuizSubject,
   ReaderBlock,
   RelinkResult,
@@ -222,9 +223,9 @@ export const api = {
   // Langue du backend : pilote les prompts LLM, pas seulement les libellés.
   setBackendLang: (lang: string) =>
     postJSON<{ lang: string; supported: string[] }>("/api/preferences/lang", { lang }),
-  // Analyse LLM de fin de session de quiz + conseils de cours à renforcer.
-  quizAnalysis: (answers: QuizAnswerRecord[]) =>
-    postJSON<QuizAnalysis>("/api/quiz/analysis", { answers }),
+  // Analyse LLM de fin de session de quiz (dans le cadre choisi) + cours à renforcer.
+  quizAnalysis: (answers: QuizAnswerRecord[], settings: QuizSessionSettings) =>
+    postJSON<QuizAnalysis>("/api/quiz/analysis", { answers, settings }),
   // Sas de sortie du quiz : réflexions de métacognition + nudge du profil.
   quizFinalize: (body: {
     responses: string[];

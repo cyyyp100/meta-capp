@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rephrasing. The reader now offers to locate the file instead.
 - Re-importing a file that was moved since its import reopens its document instead
   of creating a blank duplicate.
+- **Quiz debrief.** The analysis now speaks about the session you set up (subject,
+  keywords, or multi-learning) instead of your whole profile. *Courses to reinforce*
+  only lists documents from your library where you missed questions; questions from
+  the built-in catalogue no longer turn into courses that do not exist. A **Back**
+  button next to **Restart** returns to a blank quiz setup, and **Next** shows a
+  single arrow.
 
 ### Security
 
