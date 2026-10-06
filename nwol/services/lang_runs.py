@@ -1137,7 +1137,7 @@ def _nudge(
 
             nudge_metacog_profile(
                 user_id, 0.0, responses, metrics, session_id=None, questions=questions,
-                measures=measured, practice_session_id=practice_id, measure_meta=False,
+                measures=measured, practice_session_id=practice_id, measure_meta=False, kind="lang",
             )
         except Exception:  # pragma: no cover - la clôture ne casse jamais sur le profil
             logger.debug("Nudge métacognitif (feuilleton) ignoré", exc_info=True)

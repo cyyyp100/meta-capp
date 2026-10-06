@@ -42,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers and graded lesson exercises are its measures. Your profile then moves
   toward that curve, by as much as was actually measured: a right or wrong answer
   only informs attention, comprehension and retention, and a skill measured once
-  weighs less than one measured ten times.
+  weighs less than one measured ten times. A quiz weighs half as much as a reading
+  or a language session: it checks what you learned rather than teaching it.
 - **My progress has three categories: Reading, Quiz and Languages**, each session
   with what is specific to it — the answers you gave in a quiz, with Clikoda's
   debrief and the courses to reinforce; the episode, the point of the day and the

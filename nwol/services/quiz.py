@@ -487,7 +487,7 @@ def finalize_quiz_session(
     try:
         from services.session import nudge_metacog_profile
 
-        nudge_metacog_profile(user_id, score, list(responses or []), metrics, session_id=None)
+        nudge_metacog_profile(user_id, score, list(responses or []), metrics, session_id=None, kind="quiz")
     except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
         logger.debug("Nudge métacognitif (quiz) ignoré", exc_info=True)
     return {"ok": True, "score": score}

@@ -833,6 +833,15 @@ WARMUP_SLOW_FRONT_RETENTION = 1.0
 WARMUP_SLOW_BACK_RETENTION = 2.0
 WARMUP_DRIFT_ATTENTION = 3.0
 
+# ── Poids d'une séance dans le profil long terme, par catégorie ──────────────
+# Le profil glisse vers les jauges de chaque séance finalisée d'une part α
+# (adaptatif, `metacog.profile.compute_alpha`) × la confiance de la séance (ce
+# qu'elle a mesuré). Ce poids s'y multiplie selon la CATÉGORIE de la séance : une
+# lecture et une séance de langue font apprendre, un quiz vérifie ce qui a été
+# appris — il pèse moins. Valeurs dans [0, 1]. Lu par
+# `services/session.nudge_metacog_profile`, l'unique finalisation.
+PROFILE_SESSION_KIND_WEIGHT: dict[str, float] = {"reading": 1.0, "lang": 1.0, "quiz": 0.5}
+
 # ── Séances de pratique : le quiz et les langues font bouger les jauges ──────
 # Un quiz et une séance de langue mesurent l'apprenant comme une lecture. Leurs
 # mesures sont rejouées en fin de séance en une courbe de jauges

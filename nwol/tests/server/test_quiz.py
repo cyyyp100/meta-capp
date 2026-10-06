@@ -671,10 +671,10 @@ def test_quiz_finalize_goes_through_the_shared_metacog_finalisation(client, monk
     """Le sas de sortie du quiz emprunte le MÊME chemin qu'une fin de lecture."""
     seen: dict = {}
 
-    def _fake_nudge(user_id, score, responses, metrics, session_id=None, session_gauges=None):
+    def _fake_nudge(user_id, score, responses, metrics, session_id=None, session_gauges=None, **extra):
         seen.update(
             user_id=user_id, score=score, responses=responses,
-            metrics=metrics, session_id=session_id,
+            metrics=metrics, session_id=session_id, kind=extra.get("kind"),
         )
         return {}
 
@@ -695,6 +695,7 @@ def test_quiz_finalize_goes_through_the_shared_metacog_finalisation(client, monk
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "score": 80.0}
     assert seen["session_id"] is None  # un quiz n'est pas une session de lecture
+    assert seen["kind"] == "quiz"  # sans séance, il dit ce qu'il est : son poids est celui d'un quiz
     assert seen["score"] == 80.0
     assert len(seen["responses"]) == 3
     assert seen["metrics"]["questions_answered"] == 10

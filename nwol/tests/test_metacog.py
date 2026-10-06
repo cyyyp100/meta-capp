@@ -398,3 +398,29 @@ def test_short_session_moves_the_profile_less_than_a_full_one(fresh_db):
     full = update_profile(DEFAULT_USER_ID, gauges, None, confidence=1.0)
     assert float(full["attention"]) > partial_value
     assert FULL_CONFIDENCE_MEASURES >= 1
+
+
+def test_a_quiz_weighs_less_than_a_language_session_in_the_profile(fresh_db):
+    """Une lecture et une séance de langue font apprendre, un quiz vérifie : à
+    mesures égales, un quiz déplace le profil d'autant moins que son poids de
+    catégorie le dit (`PROFILE_SESSION_KIND_WEIGHT`, en plus de l'α adaptatif et
+    de la confiance de la séance)."""
+    from config.settings import PROFILE_SESSION_KIND_WEIGHT as WEIGHT
+    from db.metacog import get_history
+    from db.user import DEFAULT_USER_ID
+    from metacog.profile import compute_alpha, compute_confidence
+    from services import practice
+    from services.session import nudge_metacog_profile
+
+    assert WEIGHT["quiz"] < WEIGHT["lang"] and WEIGHT["quiz"] < WEIGHT["reading"]
+    measures = [{"t": i, "verdict": "correct", "targets": ("retention",)} for i in range(1, 5)]
+    for sessions_before, kind in enumerate(("quiz", "lang")):
+        sid = practice.start(kind, DEFAULT_USER_ID)
+        practice.close(sid, measures, 60)
+        nudge_metacog_profile(DEFAULT_USER_ID, 0.0, [], {}, practice_session_id=sid, measures=len(measures))
+        row = next(
+            r for r in get_history()
+            if r["practice_session_id"] == sid and r["criterion"] == "retention"
+        )
+        expected = compute_alpha(sessions_before) * compute_confidence(len(measures)) * WEIGHT[kind]
+        assert row["alpha"] == pytest.approx(expected)

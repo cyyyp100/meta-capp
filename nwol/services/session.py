@@ -10,6 +10,7 @@ import time
 from config.settings import (
     ATTENTION_PASSIVE_FLOOR,
     ATTENTION_PERSIST_EVERY_S,
+    PROFILE_SESSION_KIND_WEIGHT,
 )
 from db.answers import get_answers_for_session
 from db.metacog import (
@@ -481,11 +482,25 @@ def _measured_gauges(session_id: int, scope: str = READING) -> dict[str, float]:
     return measured
 
 
-def _practice_measured_by(practice_session_id: int) -> dict[str, int]:
+def _measured_by(practice: dict | None) -> dict[str, int]:
     """Mesures par critère d'une séance de pratique (`services.practice.record`)."""
-    session = _safe(lambda: get_practice_session(practice_session_id), None) or {}
-    counts = (session.get("details") or {}).get("measured_by") or {}
+    counts = ((practice or {}).get("details") or {}).get("measured_by") or {}
     return {str(criterion): int(n) for criterion, n in counts.items() if int(n) > 0}
+
+
+def _session_kind(session_id: int | None, practice: dict | None) -> str:
+    """Catégorie de la séance finalisée : celle de la séance de pratique, ou une lecture."""
+    if practice:
+        return str(practice.get("kind") or "")
+    return "reading" if session_id is not None else ""
+
+
+def _kind_weight(kind: str) -> float:
+    """Poids de la catégorie dans l'évolution du profil (`PROFILE_SESSION_KIND_WEIGHT`).
+
+    Une catégorie inconnue garde le plein poids : on ne réduit pas en silence
+    l'effet d'une séance qu'on ne sait pas nommer."""
+    return max(0.0, min(1.0, float(PROFILE_SESSION_KIND_WEIGHT.get(kind, 1.0))))
 
 
 def _session_measures(session_id: int | None, metrics: dict) -> int | None:
@@ -516,6 +531,7 @@ def nudge_metacog_profile(
     measures: int | None = None,
     practice_session_id: int | None = None,
     measure_meta: bool = True,
+    kind: str | None = None,
 ) -> dict:
     """Finalisation métacognitive partagée : lecture, quiz, séance de langue.
 
@@ -538,6 +554,12 @@ def nudge_metacog_profile(
     quitté puis clos, une clôture renvoyée, ne font pas glisser le profil deux fois.
     `measure_meta=False` : les réponses sont gardées sans être notées (le ressenti
     à choix du feuilleton n'est pas une réflexion écrite).
+
+    **Une séance pèse selon sa catégorie** (`PROFILE_SESSION_KIND_WEIGHT`) : une
+    lecture et une séance de langue font apprendre, un quiz vérifie ce qui a été
+    appris et déplace moins le profil. La catégorie se déduit de la séance
+    (lecture, ou celle de la séance de pratique) ; `kind` la donne quand il n'y a
+    pas de séance (ancien client du quiz, leçon close avant les séances de pratique).
     """
     if practice_session_id is not None and not mark_finalized(int(practice_session_id)):
         logger.info("Séance de pratique %s déjà finalisée : profil inchangé", practice_session_id)
@@ -579,6 +601,11 @@ def nudge_metacog_profile(
         return {}
 
     confidence = compute_confidence(measures)
+    practice = (
+        _safe(lambda: get_practice_session(int(practice_session_id)), None)
+        if practice_session_id is not None else None
+    )
+    kind_weight = _kind_weight(kind or _session_kind(session_id, practice))
     # La métacognition se mesure ici, et nulle part ailleurs : sur ce que
     # l'étudiant écrit dans le sas de sortie.
     meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges) if measure_meta else None
@@ -594,18 +621,19 @@ def nudge_metacog_profile(
         # jauges de la séance via le moteur unique `metacog.profile.update_profile`
         # (historique par critère + incrément du compteur de sessions inclus).
         session_score = dict(session_gauges)
-        weights: float | dict[str, float] = confidence
-        if practice_session_id is not None:
+        weights: float | dict[str, float] = confidence * kind_weight
+        measured_by = _measured_by(practice)
+        if measured_by:
             # Séance de pratique : chaque critère pèse à hauteur des mesures qui
             # l'ont informé — une curiosité relevée une fois ne pèse pas comme une
             # rétention éprouvée dix fois.
-            measured_by = _practice_measured_by(int(practice_session_id))
-            if measured_by:
-                weights = {criterion: compute_confidence(n) for criterion, n in measured_by.items()}
+            weights = {
+                criterion: compute_confidence(n) * kind_weight for criterion, n in measured_by.items()
+            }
         if meta_score is not None:
             session_score["meta_cognition"] = meta_score
             if isinstance(weights, dict):
-                weights["meta_cognition"] = confidence
+                weights["meta_cognition"] = confidence * kind_weight
         updated = update_profile(
             user_id, session_score, session_id,
             confidence=weights, practice_session_id=practice_session_id,
@@ -615,8 +643,8 @@ def nudge_metacog_profile(
         # Repli (séance sans canal temps réel) : le taux de réussite n'informe
         # honnêtement que ces trois critères — plus la métacognition quand le sas
         # a été rempli. On ne bouge pas les autres plutôt que d'inventer une
-        # mesure — mais on utilise le MÊME alpha adaptatif.
-        alpha = compute_alpha(int(profile.get("sessions_count") or 0)) * confidence
+        # mesure — mais on utilise le MÊME alpha adaptatif, et le même poids de catégorie.
+        alpha = compute_alpha(int(profile.get("sessions_count") or 0)) * confidence * kind_weight
         targets = {criterion: float(score) for criterion in _PROFILE_NUDGE_CRITERIA}
         if meta_score is not None:
             targets["meta_cognition"] = meta_score

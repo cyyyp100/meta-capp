@@ -890,7 +890,7 @@ def finalize_lang_lesson(
         nudge_metacog_profile(
             owner, score if score is not None else 0.0, list(responses or []), metrics,
             session_id=None, questions=list(questions or []),
-            measures=measures, practice_session_id=practice_id,
+            measures=measures, practice_session_id=practice_id, kind="lang",
         )
     except Exception:  # pragma: no cover - best-effort : la clôture ne doit pas casser
         logger.debug("Nudge métacognitif (langue) ignoré", exc_info=True)
