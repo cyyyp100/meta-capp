@@ -33,13 +33,10 @@ export function LangEntrySas({
     staleTime: Infinity,
   });
 
-  // Décompte (phase intro) : à 0, on passe au warm-up (pas direct à la séance).
+  // Décompte (phase intro) : à 0, il s'arrête et le sas ATTEND — comme avant un
+  // PDF, c'est l'apprenant qui décide quand passer aux cartes (« Continuer »).
   useEffect(() => {
-    if (phase !== "intro") return;
-    if (left <= 0) {
-      setPhase("review");
-      return;
-    }
+    if (phase !== "intro" || left <= 0) return;
     const id = setTimeout(() => setLeft((l) => l - 1), 1000);
     return () => clearTimeout(id);
   }, [left, phase]);
@@ -57,7 +54,9 @@ export function LangEntrySas({
         </SasOverlay>
       );
     }
-    if (cards.length > 0) return <WarmUp cards={cards} onDone={onStart} />;
+    // Le rythme du warm-up n'est lu que dans le lecteur de PDF : une séance de
+    // langue n'a pas de jauges live à qui le verser.
+    if (cards.length > 0) return <WarmUp cards={cards} onDone={() => onStart()} />;
     return <SasOverlay contained />;
   }
 

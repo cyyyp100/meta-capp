@@ -13,6 +13,7 @@ import {
   Globe,
   LifeBuoy,
   Palette,
+  Timer,
   User,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -26,6 +27,7 @@ import { AppearanceSection } from "../features/settings/AppearanceSection";
 import { HelpSection } from "../features/settings/HelpSection";
 import { LanguageSection } from "../features/settings/LanguageSection";
 import { ProfileSection } from "../features/settings/ProfileSection";
+import { ReadingSection } from "../features/settings/ReadingSection";
 import { UpdatesSection } from "../features/settings/UpdatesSection";
 import { usePreferences } from "../features/shell/usePreferences";
 
@@ -34,6 +36,7 @@ import { usePreferences } from "../features/shell/usePreferences";
 const SECTIONS = [
   { id: "profile", labelKey: "settings.section.profile", Icon: User },
   { id: "appearance", labelKey: "settings.section.appearance", Icon: Palette },
+  { id: "reading", labelKey: "settings.section.reading", Icon: Timer },
   { id: "language", labelKey: "settings.section.language", Icon: Globe },
   { id: "data", labelKey: "settings.section.data", Icon: Database },
   { id: "updates", labelKey: "settings.section.updates", Icon: Download },
@@ -89,6 +92,7 @@ export function Settings() {
             <>
               {current === "profile" && <ProfileSection payload={data} streak={streak} />}
               {current === "appearance" && <AppearanceSection payload={data} />}
+              {current === "reading" && <ReadingSection payload={data} />}
               {current === "language" && <LanguageSection payload={data} />}
               {current === "data" && <DataSection />}
               {current === "updates" && <UpdatesSection payload={data} />}

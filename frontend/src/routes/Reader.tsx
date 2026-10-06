@@ -16,6 +16,7 @@ import { PageTextLayer } from "../features/reader/PageTextLayer";
 import { placedBoxes } from "../features/reader/textLayer";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
+import type { WarmUpTiming } from "../features/session/WarmUp";
 import { PauseSas, type ReadingPause } from "../features/session/PauseSas";
 import { currentStep, useTour } from "../features/tour/useTour";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
@@ -145,6 +146,8 @@ export function Reader() {
   const [exit, setExit] = useState<{ sessionId: number; metrics: SessionMetrics | null } | null>(null);
   const [showPostExitRest, setShowPostExitRest] = useState(false);
   const [entered, setEntered] = useState(false);
+  // Le rythme de la révision éclair, remis à Clikoda à l'entrée en lecture.
+  const [warmup, setWarmup] = useState<WarmUpTiming[]>([]);
   // 0 = pas encore monté ; la vraie valeur est posée par l'effet de démarrage de session.
   const startTimeRef = useRef(0);
   const maxPageRef = useRef(1);
@@ -869,7 +872,8 @@ export function Reader() {
   }
 
   /** Sortie du sas d'entrée : on lit. */
-  function startReading() {
+  function startReading(timings: WarmUpTiming[]) {
+    setWarmup(timings);
     setEntered(true);
     // Et le sas rend la main à la visite : la dernière carte du warm-up franchie
     // fait entrer dans la lecture, donc l'étape qui expliquait les cartes n'a
@@ -1369,6 +1373,7 @@ export function Reader() {
         pageCount={data?.page_count}
         demo={demo}
         reading={entered}
+        warmup={warmup}
         ended={exit !== null}
         paused={pause}
         onPauseRequest={(minutes) => startPause("suggested", minutes)}

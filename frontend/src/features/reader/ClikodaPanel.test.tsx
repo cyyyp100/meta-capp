@@ -477,4 +477,15 @@ describe("ClikodaPanel", () => {
     );
     await waitFor(() => expect(sentTypes()).toContain("start_reading"));
   });
+
+  // Le rythme de la révision éclair part avec l'entrée en lecture : c'est le
+  // serveur qui le juge (services/warmup.py), pas le panneau.
+  it("remet le rythme de la révision éclair avec l'entrée dans la lecture", async () => {
+    const warmup = [{ card_id: 4, front_ms: 5200, back_ms: 1800 }];
+    await renderOpenPanel({ sessionId: 12, reading: true, warmup });
+    await waitFor(() => {
+      const start = (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m)).find((m) => m.type === "start_reading");
+      expect(start).toEqual({ type: "start_reading", session_id: 12, warmup });
+    });
+  });
 });

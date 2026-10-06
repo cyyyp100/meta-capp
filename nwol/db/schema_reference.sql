@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 36).
+-- (config.settings.DB_SCHEMA_VERSION = 37).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -654,6 +654,17 @@ CREATE TABLE session_reflections (
     created_at      DATETIME DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_session_reflections_session ON session_reflections(session_id);
+CREATE TABLE session_warmup_cards (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id  INTEGER NOT NULL REFERENCES reading_sessions(id) ON DELETE CASCADE,
+                   position    INTEGER NOT NULL,
+                   card_id     INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+                   front_ms    INTEGER NOT NULL,
+                   back_ms     INTEGER NOT NULL,
+                   front_pace  TEXT NOT NULL,
+                   back_pace   TEXT NOT NULL
+               );
+CREATE INDEX idx_session_warmup_cards_session ON session_warmup_cards(session_id);
 CREATE TABLE subject_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,

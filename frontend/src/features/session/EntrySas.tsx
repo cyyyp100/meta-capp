@@ -8,23 +8,30 @@ import { Button } from "@/components/ui/button";
 import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
 import { DEMO_CARDS } from "../reader/demoScript";
+import { usePreferences } from "../shell/usePreferences";
 import { currentStep, useTour } from "../tour/useTour";
 import { useLangStore, useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
-import { WarmUp } from "./WarmUp";
+import { WarmUp, type WarmUpTiming } from "./WarmUp";
 
-// SAS d'entrée : accroche de curiosité (LLM, 1 min, passable après 30 s) PUIS warm-up
-// de 5 cartes sélectionnées par pertinence (clic-only), avant de démarrer la lecture.
+// SAS d'entrée : accroche de curiosité (LLM, 1 min par défaut, passable à mi-course
+// et au plus tard après 30 s) PUIS warm-up de 5 cartes sélectionnées par
+// pertinence (clic-only), avant de démarrer la lecture.
+//
+// À la fin du compte à rebours, le sas ATTEND : c'est l'élève qui décide quand
+// passer aux cartes. La durée est un réglage (`entry_sas_s`, Réglages ▸ Lecture).
 //
 // C'est un moment RITUEL, pas un écran d'attente : sa raison d'être est de faire
 // ralentir avant de lire. D'où le cercle qui respire à la cadence d'une
 // inspiration lente (≈5,5 s) et l'anneau qui se remplit — la durée devient
 // perceptible au lieu d'être un simple chiffre qui décrémente.
 
-const TOTAL_SECONDS = 60;
-/** En dessous de ce reliquat, on peut passer à la suite. */
-const SKIP_AT = 30;
+/** Durée du sas tant que le réglage n'est pas lu (c'est aussi son défaut). */
+const DEFAULT_SECONDS = 60;
+/** On peut passer à la suite à mi-course, et jamais plus tard que ça : un sas
+ *  long est un rituel que l'élève s'offre, pas une attente qu'on lui impose. */
+const MAX_WAIT_SECONDS = 30;
 /** Visite guidée : on montre le rituel, on ne l'impose pas. */
 const DEMO_SECONDS = 8;
 
@@ -40,7 +47,8 @@ export function EntrySas({
 }: {
   docId: number;
   title: string;
-  onStart: () => void;
+  /** Sas franchi. `warmup` : le rythme de la révision éclair, vide sans carte. */
+  onStart: (warmup: WarmUpTiming[]) => void;
   /**
    * « ← Bibliothèque » : on a ouvert le mauvais document. Le sas est le SEUL
    * moment où ce retour a un sens — rien n'a encore été lu, rien ne doit être
@@ -51,8 +59,9 @@ export function EntrySas({
    * Séance de démonstration de la visite guidée. Trois différences, toutes
    * pour la même raison — le sas est un rituel de RALENTISSEMENT, et on ne
    * ralentit pas quelqu'un qui découvre le produit :
-   *   * le compte à rebours passe de 60 s à quelques secondes, et ne franchit
-   *     plus le sas de lui-même : c'est la visite qui le fait, au clic ;
+   *   * le compte à rebours passe de la durée réglée à quelques secondes ;
+   *     comme hors démonstration, il ne franchit pas le sas de lui-même :
+   *     c'est la visite qui le fait, au clic ;
    *   * l'accroche de curiosité est écrite d'avance (pas d'appel LLM, donc pas
    *     d'attente ni de dépendance à Ollama au premier lancement) ;
    *   * le warm-up joue DEUX cartes écrites d'avance (`DEMO_CARDS`) au lieu de
@@ -66,10 +75,16 @@ export function EntrySas({
   const t = useT();
   const reduce = useReducedMotion();
   const [phase, setPhase] = useState<"intro" | "review">("intro");
-  const totalSeconds = demo ? DEMO_SECONDS : TOTAL_SECONDS;
-  // SAS de 1 minute, passable seulement après 30 s écoulées.
-  const [left, setLeft] = useState(totalSeconds);
-  const canSkip = demo || left <= SKIP_AT;
+  // Durée réglée par l'élève. Le temps ÉCOULÉ est l'état, pas le reliquat :
+  // un réglage lu après le montage allonge ou raccourcit le sas en cours au
+  // lieu de le faire repartir de zéro.
+  const { data: preferences } = usePreferences();
+  const setting = Number(preferences?.preferences.entry_sas_s);
+  const totalSeconds = demo ? DEMO_SECONDS : setting > 0 ? setting : DEFAULT_SECONDS;
+  const [elapsed, setElapsed] = useState(0);
+  const left = Math.max(0, totalSeconds - elapsed);
+  const skipAfter = Math.min(MAX_WAIT_SECONDS, Math.ceil(totalSeconds / 2));
+  const canSkip = demo || elapsed >= skipAfter;
 
   // La langue fait partie de la clé : l'accroche est générée dans la langue de
   // l'interface, et une accroche mise en cache en anglais ne doit pas resservir
@@ -111,26 +126,21 @@ export function EntrySas({
     if (demo && atWarmUpStep) setPhase("review");
   }, [demo, atWarmUpStep]);
 
-  // Compte à rebours (phase intro) : à 0, on passe au warm-up (pas direct à la lecture).
+  // Compte à rebours (phase intro). À 0, il s'ARRÊTE et le sas reste à l'écran :
+  // ni la lecture ni les cartes ne s'imposent d'elles-mêmes. Ce qui fait
+  // avancer est un clic — « Continuer » ici, ou « Suivant » dans la visite.
+  // (En démonstration, l'écran changeait de lui-même au milieu de la bulle qui
+  // explique le sas : la seule étape de la visite qu'on ne pouvait pas lire à
+  // son rythme. L'élève a désormais le même droit.)
   useEffect(() => {
-    if (phase !== "intro") return;
-    if (left <= 0) {
-      // En démonstration, le compte à rebours MONTRE le rituel, il ne le
-      // franchit pas : il s'arrête à 0 et le sas reste à l'écran. Il appelait
-      // `onStart()`, et l'écran changeait donc de lui-même au milieu de la
-      // bulle qui explique le sas — la seule étape de la visite qu'on ne
-      // pouvait pas lire à son rythme. Ce qui fait entrer dans la lecture est
-      // un clic : « Suivant » dans la visite, ou « Continuer » ici.
-      if (!demo) setPhase("review");
-      return;
-    }
-    const id = setTimeout(() => setLeft((l) => l - 1), 1000);
+    if (phase !== "intro" || left <= 0) return;
+    const id = setTimeout(() => setElapsed((e) => e + 1), 1000);
     return () => clearTimeout(id);
-  }, [left, phase, demo, onStart]);
+  }, [left, phase]);
 
   // Warm-up sans carte disponible : on démarre la lecture directement.
   useEffect(() => {
-    if (phase === "review" && cards && cards.length === 0) onStart();
+    if (phase === "review" && cards && cards.length === 0) onStart([]);
   }, [phase, cards, onStart]);
 
   if (phase === "review") {
@@ -145,8 +155,6 @@ export function EntrySas({
     if (cards.length > 0) return <WarmUp cards={cards} onDone={onStart} />;
     return <SasOverlay contained />;
   }
-
-  const elapsed = totalSeconds - left;
 
   return (
     // Le retour n'attend pas les 30 s : se tromper de document est précisément
@@ -211,7 +219,7 @@ export function EntrySas({
               strokeWidth="3"
               strokeLinecap="round"
               strokeDasharray={RING_CIRCUMFERENCE}
-              strokeDashoffset={RING_CIRCUMFERENCE * (1 - elapsed / totalSeconds)}
+              strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, elapsed / totalSeconds))}
               // Une seconde pile : l'anneau glisse au lieu de sauter par crans.
               style={{ transition: "stroke-dashoffset 1s linear" }}
             />
@@ -226,8 +234,8 @@ export function EntrySas({
         </div>
 
         <div className="flex flex-wrap justify-center gap-2.5">
-          <Button size="lg" onClick={() => (demo ? onStart() : setPhase("review"))} disabled={!canSkip}>
-            {canSkip ? t("entry.continue") : t("entry.skip_in", { n: left - SKIP_AT })}
+          <Button size="lg" onClick={() => (demo ? onStart([]) : setPhase("review"))} disabled={!canSkip}>
+            {canSkip ? t("entry.continue") : t("entry.skip_in", { n: skipAfter - elapsed })}
           </Button>
         </div>
       </motion.div>

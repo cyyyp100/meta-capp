@@ -723,7 +723,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 36
+DB_SCHEMA_VERSION = 37
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -801,6 +801,34 @@ ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hor
 ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue
 ATTENTION_PASSIVE_FLOOR = 15.0       # plancher de la seule dérive passive
 ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives en base
+
+# ── Révision éclair : le RYTHME des cartes du sas d'entrée ──────────────────
+# Les cartes du warm-up ne sont pas notées (un clic retourne, un clic avance) :
+# ce qui se mesure, c'est le temps passé sur chaque face. Chaque face a des
+# temps de référence tirés de son propre texte, et le temps passé est classé :
+#   * rushed  : sous le temps de SURVOL -> la face n'a pas été lue, on clique ;
+#   * slow    : au-delà de la lecture + une marge (chercher la réponse au recto,
+#               la confronter au verso) -> la trace en mémoire est fragile ;
+#   * drifted : au-delà de la lecture + WARMUP_DRIFT_S -> l'élève n'est plus là ;
+#   * steady  : entre les deux, aucun effet.
+# Lues uniquement par services/warmup.py.
+WARMUP_MAX_CARDS = 5
+WARMUP_SKIM_MS_PER_WORD = 100        # ≈ 600 mots/min : plus vite, on ne lit pas, on clique
+WARMUP_READ_MS_PER_WORD = 250        # ≈ 240 mots/min : lecture attentive
+WARMUP_MIN_FACE_MS = 800             # plancher du survol, même pour une réponse d'un mot
+WARMUP_RECALL_ALLOWANCE_S = 15.0     # recto : chercher la réponse avant de retourner
+WARMUP_CHECK_ALLOWANCE_S = 8.0       # verso : confronter la réponse à la sienne
+WARMUP_DRIFT_S = 60.0                # au-delà (lecture comprise), l'attention a décroché
+# Effets sur les jauges live, PAR FACE (une carte en a deux). Cliquer sans lire
+# coûte attention ET métacognition (on ne se teste pas, on se donne l'illusion
+# de savoir) ; la lenteur coûte de la rétention, surtout au verso (on réapprend
+# la réponse au lieu de la reconnaître) ; le décrochage ne coûte que l'attention
+# — un temps pareil ne dit plus rien de la mémoire.
+WARMUP_RUSH_ATTENTION = 1.5
+WARMUP_RUSH_META = 1.5
+WARMUP_SLOW_FRONT_RETENTION = 1.0
+WARMUP_SLOW_BACK_RETENTION = 2.0
+WARMUP_DRIFT_ATTENTION = 3.0
 
 # ── Questions de lecture ────────────────────────────────────────────────────
 # La grille des types vit dans config/question_types.py (registre canonique).

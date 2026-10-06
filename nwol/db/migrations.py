@@ -190,6 +190,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 36)
         current = 36
 
+    if current < 37 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v37(conn)
+        _set_version(conn, 37)
+        current = 37
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1506,3 +1511,34 @@ def _migrate_to_v36(conn) -> None:
     with conn:
         _ensure_column(conn, "lang_profiles", "explain_lang", "TEXT DEFAULT 'fr'")
     logger.info("Migration SQLite v36 terminée")
+
+
+def _migrate_to_v37(conn) -> None:
+    """Révision éclair du sas d'entrée (`session_warmup_cards`), une ligne par carte.
+
+    Le warm-up n'est pas noté : on garde le temps passé sur chaque face et le
+    rythme que `services/warmup.py` en a tiré (rushed / steady / slow / drifted).
+    Les rythmes sont stockés plutôt que recalculés : si les seuils changent, une
+    séance passée reste lue comme elle a été jugée.
+
+    En cascade sur la session (abandonner la séance emporte son warm-up) ; la
+    carte peut disparaître depuis, la mesure reste."""
+    logger.info("Migration SQLite v37 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS session_warmup_cards (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session_id  INTEGER NOT NULL REFERENCES reading_sessions(id) ON DELETE CASCADE,
+                   position    INTEGER NOT NULL,
+                   card_id     INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+                   front_ms    INTEGER NOT NULL,
+                   back_ms     INTEGER NOT NULL,
+                   front_pace  TEXT NOT NULL,
+                   back_pace   TEXT NOT NULL
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_warmup_cards_session "
+            "ON session_warmup_cards(session_id)"
+        )
+    logger.info("Migration SQLite v37 terminée")

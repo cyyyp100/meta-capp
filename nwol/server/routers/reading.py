@@ -11,8 +11,11 @@
 #                       acceptée : minutes = durée conseillée) -> tout est figé :
 #                       ni observation, ni intervention, ni horloge (services/pause)
 #                     {"type":"resume"}  # fin de la pause -> enregistrée en base
-#                     {"type":"start_reading"}  # sas d'entrée franchi -> départ du
-#                       warm-up de la première question (aucune intervention avant)
+#                     {"type":"start_reading","session_id",
+#                      "warmup":[{"card_id","front_ms","back_ms"}]}  # sas d'entrée
+#                       franchi -> départ du warm-up de la première question
+#                       (aucune intervention avant) ; `warmup` = temps passés sur
+#                       chaque face de la révision éclair (services/warmup)
 # serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
 #                     {"type":"error","message"} | {"type":"intervention",...}
 #                     {"type":"system","message"}
@@ -41,6 +44,7 @@ from config.settings import (
     FOCUS_DEFAULT_MIN,
     PAUSE_DEFAULT_MIN,
     PAUSE_MAX_MIN,
+    WARMUP_MAX_CARDS,
 )
 from db.answers import save_answer
 from db.documents import get_document, update_last_page
@@ -56,7 +60,7 @@ from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
-from services import assistant, flashcards as flashcards_service, library, pdf_rag, session
+from services import assistant, flashcards as flashcards_service, library, pdf_rag, session, warmup
 from services.intervention import AssistantInterventionPolicy
 from services.pause import PAUSE_SOURCES, PauseTracker, attention_credit
 from services.session_memory import SessionMemory
@@ -74,6 +78,9 @@ _MAX_HISTORY_TEXT_CHARS = 240
 # Bornage des entrées client (S4) : longueurs maximales acceptées.
 _MAX_QUESTION_CHARS = 4000
 _MAX_SNIPPET_CHARS = 1000
+# Temps d'une face de la révision éclair : au-delà d'une heure, ce n'est plus
+# une mesure (onglet oublié, machine en veille) — et c'est déjà « drifted ».
+_MAX_WARMUP_FACE_MS = 3_600_000
 # Demandes de l'élève sans objet pendant une pause (le lecteur est masqué).
 _PAUSED_ACTIONS = frozenset({"ask", "rephrase", "recap", "hook", "start_qa", "qa_answer"})
 
@@ -98,6 +105,7 @@ class ReaderMessage(BaseModel):
     question: str | None = None
     answer: str | None = None
     selected_snippets: list[str] = []
+    warmup: list[dict] = []
 
     @field_validator("page", mode="before")
     @classmethod
@@ -149,6 +157,26 @@ class ReaderMessage(BaseModel):
         cleaned = [str(s).strip()[:_MAX_SNIPPET_CHARS] for s in value if str(s).strip()]
         return cleaned[:5]
 
+    @field_validator("warmup", mode="before")
+    @classmethod
+    def _bounded_warmup(cls, value):
+        # Temps de la révision éclair : entiers bornés, nombre de cartes borné.
+        # Une carte malformée est écartée, pas le message.
+        if not isinstance(value, list):
+            return []
+        cleaned: list[dict] = []
+        for item in value[:WARMUP_MAX_CARDS]:
+            try:
+                card = {
+                    "card_id": int(item["card_id"]),
+                    "front_ms": max(0, min(int(item["front_ms"]), _MAX_WARMUP_FACE_MS)),
+                    "back_ms": max(0, min(int(item["back_ms"]), _MAX_WARMUP_FACE_MS)),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+            cleaned.append(card)
+        return cleaned
+
 
 @router.post("/reader/cancel")
 def cancel_generations() -> dict:
@@ -191,6 +219,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
         "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
         "pages_seen": 0,  # pages distinctes vues au dernier tick (progression)
+        "pending_warmup": None,  # temps de la révision éclair, en attente du session_id
     }
     # Pause en cours (bouton de l'élève ou carte de Clikoda acceptée) et dernière
     # recommandation du LLM. Tant qu'elle dure, tout est figé (cf. end_pause).
@@ -488,6 +517,34 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             await loop.run_in_executor(None, gauges.recover_attention, credit)
         await loop.run_in_executor(None, persist_pause, record)
 
+    def attach_session(sid: int | None) -> None:
+        """Rattache la séance (premier `viewport` ou `start_reading` qui la porte)."""
+        if not sid:
+            return
+        state["session_id"] = sid
+        if state["live_gauges"] is not None:
+            # Fige l'amorce de la session en base : la finalisation
+            # s'en sert pour ne remonter que les jauges exercées.
+            state["live_gauges"].attach_session(sid)
+
+    async def flush_warmup() -> None:
+        """Juge et verse la révision éclair dès que la séance est connue.
+
+        Elle arrive avec `start_reading`, qui peut précéder l'identifiant de
+        séance (création encore en vol) : elle attend alors le `viewport` qui le
+        porte. Versée APRÈS l'amorce, pour compter comme une mesure de la séance."""
+        cards, sid = state["pending_warmup"], state["session_id"]
+        if not cards or not sid:
+            return
+        state["pending_warmup"] = None
+        try:
+            deltas = await loop.run_in_executor(None, warmup.record, int(sid), cards)
+        except Exception:  # best-effort : la lecture démarre quoi qu'il arrive
+            logger.debug("Révision éclair non enregistrée", exc_info=True)
+            return
+        if deltas and state["live_gauges"] is not None:
+            await loop.run_in_executor(None, state["live_gauges"].apply_warmup, deltas)
+
     async def _ticker() -> None:
         last_tick = time.monotonic()
         while True:
@@ -521,13 +578,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             page = clamp_page(msg.page)
 
             if kind == "viewport":
-                sid = msg.session_id
-                if sid:
-                    state["session_id"] = sid
-                    if state["live_gauges"] is not None:
-                        # Fige l'amorce de la session en base : la finalisation
-                        # s'en sert pour ne remonter que les jauges exercées.
-                        state["live_gauges"].attach_session(sid)
+                attach_session(msg.session_id)
+                await flush_warmup()
                 # En pause, la page ne bouge pas (le lecteur est masqué) : un
                 # viewport tardif ne doit pas ouvrir de dwell sur une autre page.
                 if page != state["page"] and not pause.active:
@@ -576,6 +628,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # Sas d'entrée franchi : le warm-up de la première question part
                 # d'ici, pas de l'ouverture du socket (cf. policy.start_reading).
                 policy.start_reading()
+                attach_session(msg.session_id)
+                if msg.warmup:
+                    state["pending_warmup"] = msg.warmup
+                await flush_warmup()
                 continue
 
             if kind == "mode":

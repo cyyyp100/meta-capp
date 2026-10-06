@@ -65,6 +65,11 @@ PREFERENCES: dict[str, Pref] = {
     # restauration de sauvegarde, et la visite recommencerait chez quelqu'un qui
     # l'a déjà faite.
     "tour_done": Pref("tour_done", "false", kind="bool"),
+    # Durée du sas d'entrée avant un PDF, en secondes : le temps du rituel de
+    # ralentissement. À la fin, le sas attend — c'est l'élève qui décide d'aller
+    # aux cartes. Une énumération et non un nombre libre : aucun réglage n'est
+    # du texte libre (cf. `Pref`).
+    "entry_sas_s": Pref("entry_sas_s", "60", choices=("30", "60", "120", "180", "300")),
 }
 
 

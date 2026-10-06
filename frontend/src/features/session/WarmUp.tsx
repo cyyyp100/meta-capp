@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
@@ -6,17 +6,29 @@ import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
 
+/** Temps passé sur les deux faces d'une carte, jugé côté serveur (services/warmup.py). */
+export interface WarmUpTiming {
+  card_id: number;
+  front_ms: number;
+  back_ms: number;
+}
+
 // Warm-up clic-only partagé (SAS d'entrée PDF et séance de langue) : clic => retourne ;
-// re-clic => revue neutre (avance la répétition espacée) + carte suivante. « Passer »
-// démarre la session. Source partagée pour éviter la divergence entre les deux flux.
+// re-clic => revue neutre (avance la répétition espacée) + carte suivante. Source
+// partagée pour éviter la divergence entre les deux flux.
+//
+// On ne PASSE pas la révision : il n'y a plus de bouton pour l'écourter. Ce qui
+// s'y mesure, c'est son rythme — le temps sur chaque face, renvoyé à `onDone` —
+// et Clikoda le lit (trop vite : on clique sans se tester ; trop lent : la trace
+// est fragile ; beaucoup trop long : l'attention est ailleurs).
 export function WarmUp({
   cards,
   onDone,
   demo = false,
 }: {
   cards: Flashcard[];
-  onDone: () => void;
-  /** Warm-up de la visite guidée : cartes fictives, aucune révision écrite. */
+  onDone: (timings: WarmUpTiming[]) => void;
+  /** Warm-up de la visite guidée : cartes fictives, aucune révision écrite, aucun temps remonté. */
   demo?: boolean;
 }) {
   const t = useT();
@@ -24,15 +36,45 @@ export function WarmUp({
   const [flipped, setFlipped] = useState(false);
   const card = cards[i];
 
+  // Chronomètre de la face affichée. Le temps passé dans « Pourquoi ? » en est
+  // retiré : lire la justification n'est ni se presser ni décrocher.
+  const faceStart = useRef(0);
+  useEffect(() => {
+    faceStart.current = performance.now(); // la première carte est à l'écran
+  }, []);
+  const whyOpenedAt = useRef<number | null>(null);
+  const whyMs = useRef(0);
+  const frontMs = useRef(0);
+  const timings = useRef<WarmUpTiming[]>([]);
+
+  function closeFace(now: number): number {
+    const ms = Math.max(0, Math.round(now - faceStart.current - whyMs.current));
+    faceStart.current = now;
+    whyMs.current = 0;
+    return ms;
+  }
+
+  function onWhyOpenChange(open: boolean) {
+    const now = performance.now();
+    if (open) whyOpenedAt.current = now;
+    else if (whyOpenedAt.current !== null) {
+      whyMs.current += now - whyOpenedAt.current;
+      whyOpenedAt.current = null;
+    }
+  }
+
   function advance() {
+    const now = performance.now();
     if (!flipped) {
+      frontMs.current = closeFace(now);
       setFlipped(true);
       return;
     }
+    timings.current.push({ card_id: card.id, front_ms: frontMs.current, back_ms: closeFace(now) });
     // La démonstration n'écrit rien : ses cartes n'existent pas en base, et une
     // révision enregistrée avancerait une répétition espacée qui n'a pas lieu.
     if (!demo) api.reviewFlashcard(card.id, "partial").catch(() => {});
-    if (i + 1 >= cards.length) onDone();
+    if (i + 1 >= cards.length) onDone(demo ? [] : timings.current);
     else {
       setI((v) => v + 1);
       setFlipped(false);
@@ -46,7 +88,7 @@ export function WarmUp({
           {t("entry.warmup_title")} · {i + 1}/{cards.length}
         </div>
         <div style={{ margin: "0 0 14px" }}>
-          <WhyButton whyKey="warmup" />
+          <WhyButton whyKey="warmup" onOpenChange={onWhyOpenChange} />
         </div>
         <div
           data-tour="warmup-card"
@@ -66,9 +108,8 @@ export function WarmUp({
             )}
           </div>
         </div>
-        <div style={{ marginTop: 16, display: "flex", gap: 14, justifyContent: "center", alignItems: "center" }}>
-          <span style={{ color: "var(--muted)", fontSize: 13 }}>{flipped ? t("flash.tap_next") : t("flash.tap_reveal")}</span>
-          <button onClick={onDone} style={{ border: "1px solid var(--border)", background: "var(--surface-soft)", color: "var(--text-soft)", borderRadius: "var(--radius-sm)", padding: "8px 16px", fontWeight: 600, cursor: "pointer" }}>{t("entry.start")}</button>
+        <div style={{ marginTop: 16, color: "var(--muted)", fontSize: 13 }}>
+          {flipped ? t("flash.tap_next") : t("flash.tap_reveal")}
         </div>
       </div>
     </SasOverlay>

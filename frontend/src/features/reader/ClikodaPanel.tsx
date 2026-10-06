@@ -27,6 +27,7 @@ import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
 import type { ReadingPause } from "../session/PauseSas";
+import type { WarmUpTiming } from "../session/WarmUp";
 import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
@@ -150,6 +151,7 @@ export function ClikodaPanel({
   pageCount,
   demo = false,
   reading = false,
+  warmup = [],
   ended = false,
   paused = null,
   onPauseRequest,
@@ -185,6 +187,11 @@ export function ClikodaPanel({
    * qui fait partir le warm-up avant la première question de Clikoda.
    */
   reading?: boolean;
+  /**
+   * Le rythme de la révision éclair du sas d'entrée (temps par face), remis au
+   * serveur avec `start_reading` : Clikoda le juge (services/warmup.py).
+   */
+  warmup?: WarmUpTiming[];
   /**
    * La session est terminée (« Terminer ») : le WebSocket se ferme tout de
    * suite, pendant que le sas de sortie recouvre le lecteur. Côté serveur, la
@@ -263,6 +270,10 @@ export function ClikodaPanel({
   gatedRef.current = gated;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const warmupRef = useRef(warmup);
+  warmupRef.current = warmup;
   // Page-contexte de la question bloquante : le lecteur y revient si la
   // réponse est fausse, après avoir été libéré le temps de la correction.
   const gatedPageRef = useRef<number | undefined>(undefined);
@@ -518,11 +529,14 @@ export function ClikodaPanel({
   }, [paused, demo, t]);
 
   // Entrée dans la lecture : le serveur démarre le warm-up de la première
-  // question. `connected` couvre le socket pas encore ouvert à la sortie du sas ;
-  // un envoi répété est sans effet côté serveur.
+  // question, et juge le rythme de la révision éclair. `connected` couvre le
+  // socket pas encore ouvert à la sortie du sas ; un envoi répété est sans
+  // effet côté serveur (la révision n'est enregistrée qu'une fois par séance).
   useEffect(() => {
     const ws = wsRef.current;
-    if (reading && connected && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "start_reading" }));
+    if (reading && connected && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "start_reading", session_id: sessionIdRef.current ?? null, warmup: warmupRef.current }));
+    }
   }, [reading, connected]);
 
   // ── La séance de démonstration ──────────────────────────────────────────

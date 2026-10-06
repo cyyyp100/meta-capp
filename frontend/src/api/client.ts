@@ -467,7 +467,8 @@ export type PreferenceKey =
   | "density"
   | "text_size"
   | "updates_check"
-  | "tour_done";
+  | "tour_done"
+  | "entry_sas_s";
 export type Preferences = Record<PreferenceKey, string>;
 
 export interface PreferencesPayload {

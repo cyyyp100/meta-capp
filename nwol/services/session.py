@@ -43,6 +43,7 @@ from metacog.gauges import (
 )
 from metacog.profile import compute_alpha, compute_confidence, update_profile
 from metacog.reflection import fallback_meta_cognition_analysis, pick_reflection_question
+from services import warmup
 from services.pause import summarize as summarize_pauses
 
 logger = logging.getLogger("services.session")
@@ -85,7 +86,9 @@ class LiveGauges:
         d'erreurs (le modèle d'attention les attendait depuis toujours) ;
       * `apply_reading_behaviour` — la dérive passive du comportement de lecture,
         seul chemin par lequel `attention` bouge sans LLM ;
-      * `recover_attention` — le crédit d'une pause recommandée et prise.
+      * `recover_attention` — le crédit d'une pause recommandée et prise ;
+      * `apply_warmup` — l'effet du RYTHME de la révision éclair du sas
+        d'entrée (cf. `services.warmup`), versé une fois, à l'entrée en lecture.
 
     Persistance best-effort dans `session_gauges` dès qu'un `session_id` est connu
     (alimente le radar de stats) — un incident n'interrompt jamais la lecture."""
@@ -172,6 +175,19 @@ class LiveGauges:
         if gauge is None or float(points) <= 0.0:
             return self.snapshot()
         gauge.apply_delta(float(points))
+        self._record()
+        return self.snapshot()
+
+    def apply_warmup(self, deltas: dict[str, float]) -> dict[str, float]:
+        """Verse l'effet de la révision éclair (deltas de `services.warmup`).
+
+        À appeler APRÈS `attach_session` : l'amorce doit être en base avant,
+        sans quoi le warm-up passerait pour le point de départ de la séance et
+        `_measured_gauges` ne le verrait jamais."""
+        for criterion, delta in (deltas or {}).items():
+            gauge = self._gauges.get(criterion)
+            if gauge is not None and delta:
+                gauge.apply_delta(float(delta))
         self._record()
         return self.snapshot()
 
@@ -280,6 +296,11 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
         "pause_s": metrics["pause_s"],
         "pauses_after_recommendation": metrics["pauses_after_recommendation"],
     }
+    # Le rythme de la révision éclair (temps par carte, par face, au total) :
+    # absent quand la séance n'en a pas eu, pour ne pas commenter un vide.
+    warmup_summary = _safe(lambda: warmup.summary(session_id), None)
+    if warmup_summary:
+        stats["warmup"] = warmup_summary
     session_data = {**stats, "gauges": session_gauges, "profile": profile_gauges}
     context = {"session_data": session_data, "metacog_profile": profile_gauges}
 
@@ -524,6 +545,12 @@ def nudge_metacog_profile(
     # La métacognition se mesure ici, et nulle part ailleurs : sur ce que
     # l'étudiant écrit dans le sas de sortie.
     meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges)
+    if meta_score is not None and session_id is not None:
+        # Une révision éclair cliquée sans lire a déjà coûté de la métacognition
+        # à la jauge live ; la note du sas de sortie REMPLACE cette jauge, elle
+        # reprend donc ce coût — sinon il s'effaçait dès qu'on écrivait.
+        warmup_meta = _safe(lambda: warmup.session_deltas(int(session_id)), {}).get("meta_cognition", 0.0)
+        meta_score = clamp_gauge(meta_score + warmup_meta)
 
     if session_gauges:
         # Canal temps réel disponible : tout le profil (6 critères) glisse vers les

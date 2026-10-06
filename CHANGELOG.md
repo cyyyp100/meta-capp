@@ -29,8 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highlights, sessions, folder and title included. Other missing documents moved
   along with it are found at the same time. A file whose content changed since the
   import is only linked after confirmation.
+- **Clikoda reads the pace of the quick review.** The time spent on each card's
+  question and answer, and on the whole review, is measured before reading starts.
+  Clicking through faster than the text can be read lowers attention and
+  metacognition; lingering, especially on the answer, lowers retention; a very long
+  stop on one side lowers attention. The end-of-session debrief comments on it.
+- **The entry airlock's length is a setting** (Settings ▸ Reading): 30 s to 5 min,
+  1 min by default.
 
 ### Changed
+
+- **The entry airlock waits for you.** When its countdown ends it no longer moves
+  on to the cards by itself (before a PDF or a language session): you continue
+  when you are ready.
+- **The quick review can no longer be skipped.** The *Start now* button under the
+  cards is gone; the review ends after its last card.
 
 - **The assistant is now called Clikoda.** It still runs on Google's open-source
   Gemma 4 model (`gemma4:e4b`) through Ollama; only its name changes. The floating

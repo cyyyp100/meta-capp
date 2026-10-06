@@ -1260,7 +1260,8 @@ Constraints:
 - success_rate is between 0.0 and 1.0.
 - qualitative_summary: 2 to 3 sentences in English. Mention at least one positive point, one area for improvement, and one concrete suggestion. If a gauge exceeds its profile by ≥8 pts, explicitly note this (e.g., "your attention was noticeably above your usual level"). If a gauge is below by ≥8 pts, note that too. Be precise and personalized.
 - Provide exactly 3 short, clear, and distinct metacognitive questions, adapted to the session data and gauges.
-- pauses / pause_s: breaks taken during reading, already excluded from duration_s; pauses_after_recommendation: how many followed a recommendation from the assistant. A break is never disengagement: one taken after a recommendation is self-regulation, say so if relevant."""
+- pauses / pause_s: breaks taken during reading, already excluded from duration_s; pauses_after_recommendation: how many followed a recommendation from the assistant. A break is never disengagement: one taken after a recommendation is self-regulation, say so if relevant.
+- warmup (only when present): the quick flashcard review that opened the session, before reading. Per card, question_s / answer_s are the seconds spent on the question and on the answer, total_s the whole review; each side's pace is rushed (clicked faster than the text can be read: the student did not actually test themselves), slow (memory still fragile, especially on the answer), drifted (so long that attention had wandered) or steady. If several sides are not steady, mention it in qualitative_summary and link it to the gauges; never quote the field names."""
 
     return f"""Tu produis le sas de sortie d'une session MetaC-App.
 
@@ -1294,7 +1295,8 @@ Contraintes :
 - success_rate est entre 0.0 et 1.0.
 - qualitative_summary : 2 à 3 phrases en français. Mentionne au moins un point positif, un point d'amélioration, et une suggestion concrète. Si une jauge dépasse de ≥8 pts son profil, signale explicitement ce surpassement (ex : "ton attention était nettement au-dessus de ton niveau habituel"). Si une jauge est en retrait de ≥8 pts, signale-le aussi. Sois précis et personnalisé.
 - Fournis exactement 3 questions métacognitives courtes, claires et différentes, adaptées aux données et aux jauges de la session.
-- pauses / pause_s : pauses prises pendant la lecture, déjà exclues de duration_s ; pauses_after_recommendation : combien suivaient une recommandation de l'assistant. Une pause n'est jamais un décrochage : prise après une recommandation, c'est de l'autorégulation, signale-le si c'est pertinent."""
+- pauses / pause_s : pauses prises pendant la lecture, déjà exclues de duration_s ; pauses_after_recommendation : combien suivaient une recommandation de l'assistant. Une pause n'est jamais un décrochage : prise après une recommandation, c'est de l'autorégulation, signale-le si c'est pertinent.
+- warmup (seulement s'il est présent) : la révision éclair de flashcards qui a ouvert la séance, avant la lecture. Par carte, question_s / answer_s sont les secondes passées sur la question et sur la réponse, total_s la révision entière ; le rythme de chaque face vaut rushed (cliquée plus vite que le texte ne se lit : l'élève ne s'est pas vraiment testé), slow (mémoire encore fragile, surtout sur la réponse), drifted (si long que l'attention était ailleurs) ou steady. Si plusieurs faces ne sont pas steady, mentionne-le dans qualitative_summary et relie-le aux jauges ; ne cite jamais le nom des champs."""
 
 
 def build_meta_cognition_questions_prompt(

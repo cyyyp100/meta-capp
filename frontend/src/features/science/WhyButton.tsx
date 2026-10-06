@@ -28,22 +28,27 @@ import { whyContent, type WhyKey } from "./metacogContent";
  * `variant="icon"` : une simple icône « ? », pour un réglage qu'elle explique sans
  * lui voler la vedette (le mode multi-apprentissage du quiz). Son libellé
  * accessible est alors `label`, qui doit nommer ce qu'elle justifie.
+ *
+ * `onOpenChange` : pour qui chronomètre l'écran derrière (la révision éclair ne
+ * compte pas le temps passé à lire la justification).
  */
 export function WhyButton({
   whyKey,
   variant = "button",
   label,
+  onOpenChange,
 }: {
   whyKey: WhyKey;
   variant?: "button" | "icon";
   label?: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const t = useT();
   const lang = useLangStore((s) => s.lang);
   const content = whyContent[lang][whyKey];
 
   return (
-    <Dialog>
+    <Dialog onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         {variant === "icon" ? (
           <Button
