@@ -149,6 +149,11 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # Notes + explication + micro-exercices : 700 coupait au banc dès l'A2.
     "lang_episode_notes_point": {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
     "lang_weekly_analysis":     {"num_ctx": 2048, "num_predict": 300,  "temperature": 0.20},
+    # Leçon d'un point, une fois par point et par langue d'explication, après
+    # l'épisode qui l'introduit : règle, formes, emplois, pièges, exemples.
+    "lang_point_lesson":        {"num_ctx": 4096, "num_predict": 1500, "temperature": 0.30},
+    # Correction d'une expression écrite : trois erreurs au plus et le texte corrigé.
+    "lang_writing_feedback":    {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
     # ── Brainstorming (chat libre + RAG sur la base utilisateur) ────────────────
     # Décision de recherche : JSON court (faut-il chercher + mots-clés).
     "brainstorm_search_decide": {"num_ctx": 2048, "num_predict": 160, "temperature": 0.10},
@@ -420,20 +425,24 @@ LANG_SCRIPT_FAMILY: dict[str, str] = {
 LANG_EXPLAIN_LANGUAGES: tuple[str, ...] = ("fr", "en")
 
 # C2 — durées (secondes). Le plafond est strict : au-delà, les étapes non
-# essentielles sont sautées et l'au revoir est toujours joué (R24).
-LANG_RUN_TARGET_S = 900
-LANG_RUN_MAX_S = 1200
-LANG_RUN_SHORT_TARGET_S = 480
+# essentielles sont sautées et la séance va à la première étape essentielle
+# non faite — l'au revoir est toujours joué (R24). Une séance « épisode » :
+# rappel 120 + lecture 300 + leçon 240 + expression 210 + jeux 210 + au revoir 30
+# ≈ 18,5 min (sas d'entrée en plus) ; 2e vague et jalon compris, ≤ 1 470 s.
+LANG_RUN_TARGET_S = 1080
+LANG_RUN_MAX_S = 1500
+LANG_RUN_SHORT_TARGET_S = 600
 # Budget indicatif par étape : sert à ordonner ce qu'on saute quand le plafond
 # approche, et à la barre de progression. Jamais un compte à rebours affiché.
 LANG_STEP_BUDGET_S: dict[str, int] = {
-    "rappel": 120, "episode_p1": 210, "episode_p2": 150, "notes": 60,
-    "point": 150, "jeux": 180, "deuxieme_vague": 180, "au_revoir": 30,
+    "rappel": 120, "lecture": 300, "lecon": 240, "expression": 210, "jeux": 210,
+    "deuxieme_vague": 180, "au_revoir": 30,
     "accueil": 120, "phrases": 360, "ecriture": 180, "interets": 90,
     "recap": 240, "relecture": 360, "cartes": 180, "controle": 240, "jalon": 180,
 }
-# Étapes jamais sautées par le plafond de durée.
-LANG_ESSENTIAL_STEPS: tuple[str, ...] = ("episode_p1", "au_revoir")
+# Étapes jamais sautées par le plafond de durée : la lecture de l'épisode, ce
+# que l'apprenant en écrit, et l'au revoir.
+LANG_ESSENTIAL_STEPS: tuple[str, ...] = ("lecture", "expression", "au_revoir")
 # Au-delà de ce silence (aucune interaction), le temps n'est plus « effectif ».
 LANG_IDLE_CUTOFF_S = 90
 
@@ -498,8 +507,21 @@ LANG_CEFR_ORDER: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1")
 LANG_LADDER_BAND = 3
 
 # C5 — adaptation (signaux déterministes, § 9.2).
-LANG_REVEAL_RATE_HIGH = 12.0    # taps / 100 jetons au passage 2 : au-delà, trop dur
+LANG_REVEAL_RATE_HIGH = 12.0    # taps / 100 mots lus sans traduction : au-delà, trop dur
 LANG_REVEAL_RATE_LOW = 3.0      # en deçà, facile
+# En dessous de ce nombre de mots lus SANS traduction, le taux de taps ne dit
+# rien (une réplique ou deux) : il vaut None, jamais « facile ».
+LANG_REVEAL_MIN_TOKENS = 20
+# Part des répliques dont la traduction a été montrée pendant la lecture, par
+# palier d'ancrage (index 0-4) : au-delà de HARD le texte était trop dur (aux
+# paliers A1 et A1-A2, « Tout traduire » est une aide prévue, jamais un échec) ;
+# « facile » demande d'être resté en deçà de EASY.
+LANG_TRANSLATED_SHARE_HARD: tuple[float | None, ...] = (None, None, 0.75, 0.6, 0.5)
+LANG_TRANSLATED_SHARE_EASY: tuple[float, ...] = (0.5, 0.35, 0.25, 0.15, 0.1)
+# Paliers dont la lecture propose « Tout traduire » (valeur `translation` du
+# palier, LANG_DIFFICULTY_LADDER) ; au-delà, la traduction se demande réplique
+# par réplique.
+LANG_TRANSLATE_ALL_MODES: tuple[str, ...] = ("toujours", "masquable")
 LANG_GAMES_SUCCESS_EASY = 0.85  # réussite aux jeux et micro-items (items non répondus exclus)
 LANG_GAMES_SUCCESS_HARD = 0.5
 LANG_SECOND_WAVE_WEIGHT = 0.5   # poids de l'auto-évaluation « su » dans la réussite du jour
@@ -535,6 +557,19 @@ LANG_MAX_UNITS_PER_EPISODE: dict[str, int] = {"latin": 450, "hanzi": 700, "arabe
 # amorcé — au premier épisode, tout est nouveau — et avec une marge.
 LANG_NEW_WORDS_CHECK_MIN_LEXICON = 60
 LANG_NEW_WORDS_TOLERANCE = 1.5
+# … et seulement là où le lexique dit ce que l'apprenant sait : aux paliers
+# A1 et A1-A2 (index ≤ N), pour un apprenant parti du début du programme
+# (point de départ ≤ N). Un apprenant placé par le test de niveau sait bien plus
+# que son lexique — deux profils placés (A1, C1) voyaient chaque épisode refusé.
+LANG_NEW_WORDS_CHECK_MAX_TIER = 1
+LANG_NEW_WORDS_CHECK_MAX_START_ORDER = 1
+# Un dépassement de mots nouveaux est un problème « doux » : relancé au plus N
+# fois (le modèle ne les réduit pas quand on le lui redemande), puis la
+# meilleure tentative est acceptée et journalisée. Une erreur dure échoue.
+LANG_SOFT_PROBLEM_RETRIES = 1
+# Mots que l'apprenant connaît déjà, donnés au prompt du texte (acquis d'abord) :
+# budget en tokens estimés (`llm.prompts.estimate_prompt_tokens`).
+LANG_KNOWN_WORDS_PROMPT_TOKENS = 300
 # Glossaire : mots inconnus de l'apprenant demandés à Clikoda par épisode, par
 # palier d'ancrage (index 0-4). Les mots déjà au lexique sont glosés depuis
 # le lexique ; au-delà de la borne, le tap montre la traduction de la réplique.
@@ -549,9 +584,48 @@ LANG_GLOSSARY_MAX_MISSING = 0.1
 # Cartes créées par épisode (P12) : les mots touchés au passage 2 d'abord, puis
 # les mots nouveaux non transparents. Au-delà, la pile déborde.
 LANG_CARDS_PER_EPISODE = 8
-LANG_GAMES_AVOID_LAST_RUNS = 2          # ne pas reprendre les jeux des N séances précédentes
-LANG_GAMES_PER_RUN = 2
+# Ne pas reprendre les jeux des N séances précédentes : à 2, il ne resterait
+# plus aucun jeu neuf en langue latine (quatre jeux hors micro-items, trois par séance).
+LANG_GAMES_AVOID_LAST_RUNS = 1
+LANG_GAMES_PER_RUN = 3
 LANG_POINT_MICRO_ITEMS = 3
+
+# C12 — la leçon du point (services/lang_point_lesson.py). Écrite par Clikoda
+# une fois par point et par langue d'explication, gardée en base, lue d'abord
+# dans nwol/data/lang/lessons/<langue>.json quand une leçon y est écrite à la main.
+LANG_LESSON_ITEMS = 3                    # micro-items tirés de la leçon (en plus des 3 du texte)
+LANG_LESSON_RULE_MAX_CHARS = 600
+LANG_LESSON_REMEMBER_MAX_CHARS = 180
+LANG_LESSON_TEXT_MAX_CHARS = 160         # un exemple, une forme fautive, une traduction
+LANG_LESSON_NOTE_MAX_CHARS = 220         # un emploi, une explication de piège
+LANG_LESSON_FORMS_MAX = (8, 4)           # tableau de formes : lignes, colonnes (en-tête compris)
+LANG_LESSON_CELL_MAX_CHARS = 40
+LANG_LESSON_USES = (1, 4)
+LANG_LESSON_PITFALLS = (0, 3)
+LANG_LESSON_EXAMPLES = (2, 4)
+# Appels refusés au-delà desquels la leçon d'un point n'est plus redemandée
+# (deux générations complètes) : l'étape garde son repli, l'épisode n'est jamais touché.
+LANG_LESSON_MAX_ATTEMPTS = 6
+
+# C13 — l'expression écrite (services/lang_writing.py). Corrigée par Clikoda en
+# arrière-plan : la séance n'attend jamais la correction.
+LANG_WRITING_MAX_CHARS = 1200
+# Longueur demandée (min, max), par famille d'écriture puis par palier
+# d'ancrage (index 0-4) : en mots, en caractères pour le mandarin.
+LANG_WRITING_LENGTH: dict[str, tuple[tuple[int, int], ...]] = {
+    "latin": ((15, 40), (25, 60), (40, 90), (60, 120), (80, 150)),
+    "hanzi": ((15, 40), (25, 60), (40, 100), (60, 140), (80, 180)),
+    "arabe": ((8, 25), (15, 40), (25, 60), (40, 90), (55, 120)),
+}
+LANG_WRITING_TARGET_WORDS = 3            # mots du jour à employer
+LANG_WRITING_BANK_WORDS = 8              # banque de mots proposée à côté de la consigne
+LANG_WRITING_MAX_ERRORS = 3              # erreurs relevées par la correction, les plus importantes d'abord
+# Vocabulaire des erreurs, hérité de la correction du flux historique
+# (llm/prompts.build_lang_correction_prompt) : une seule taxonomie dans l'application.
+LANG_WRITING_ERROR_TYPES: tuple[str, ...] = (
+    "genre", "accord", "conjugaison", "ordre des mots", "préposition", "faux-ami", "orthographe",
+    "registre", "vocabulaire",
+)
 
 # C6 — acquisition (mot, puis signe d'écriture). Un mot est acquis après N
 # reconnaissances (lu au passage 2 sans le toucher, ou bien répondu dans un jeu)
@@ -573,10 +647,14 @@ LANG_STUDY_DAY_CUTOFF_HOUR = 4
 LANG_STUDY_DAY_MIN_S = 300
 
 # C9 — pré-génération. L'épisode N+1 part à l'étape LANG_PREGEN_TRIGGER_STEP de
-# la séance N, avec les signaux du jour (taps du passage 2 déjà connus).
+# la séance N (séance courte comprise), avec les signaux du jour : la lecture
+# est faite, ses taps et ses traductions montrées sont connus.
 LANG_PREGEN_BUFFER = 1
-LANG_PREGEN_TRIGGER_STEP = "notes"
+LANG_PREGEN_TRIGGER_STEP = "lecon"
 LANG_GEN_MAX_ATTEMPTS_PER_CALL = 3
+# Échecs d'écriture d'un même épisode au-delà desquels l'accueil mentionne les
+# limites du modèle local (une ligne statique, aucun appel, rien de bloqué).
+LANG_GEN_FAILURES_PRO_HINT = 2
 # G9 : similarité (Jaccard sur les mots) du titre + résumé avec les N derniers
 # épisodes, au-dessus de laquelle l'épisode est rejeté comme redite.
 LANG_REPEAT_WINDOW = 20
@@ -726,7 +804,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 39
+DB_SCHEMA_VERSION = 40
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -882,6 +960,10 @@ LANG_GAME_TARGET_GAUGES: dict[str, tuple[str, ...]] = {
 # Deuxième vague : l'apprenant retraduit une réplique, la confronte à l'original
 # puis juge son rappel (« su », « à peu près », « pas su »).
 LANG_SECOND_WAVE_TARGET_GAUGES: tuple[str, ...] = ("retention",)
+# Expression écrite : le verdict de la correction de Clikoda, s'il est arrivé
+# avant la clôture. Les contrôles calculés (longueur, mots employés) ne sont
+# ni une mesure ni un score.
+LANG_WRITING_TARGET_GAUGES: tuple[str, ...] = ("retention", "context_comprehension")
 # Le « compris / à peu près / pas compris » qui ferme un passage de lecture.
 LANG_UNDERSTOOD_TARGET_GAUGES: tuple[str, ...] = ("context_comprehension",)
 LANG_SKILL_TARGET_GAUGES: dict[str, tuple[str, ...]] = {

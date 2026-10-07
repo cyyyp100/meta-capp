@@ -112,6 +112,23 @@ function Prompt({ item, episode, rtl }: { item: GameItem; episode?: EpisodeView;
     case "qui_a_dit":
       return <Target rtl={rtl} style={{ fontSize: 18 }}>« {lineText(episode, p.line)} »</Target>;
     case "bonne_forme":
+      // Items de la leçon : une case du tableau de formes, ou un piège.
+      if (p.source === "pitfall") {
+        return <div style={{ color: "var(--muted)", fontSize: 14 }}>{t("feuil.lecon.which_right")}</div>;
+      }
+      if (p.source === "forms") {
+        const cue = ((p.cue as string[]) ?? []).filter(Boolean);
+        return (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", fontSize: 16 }}>
+            {cue.map((c, i) => (
+              <bdi key={i} dir="auto" style={{ padding: "2px 8px", borderRadius: 6, background: "var(--surface-soft)", fontFamily: rtl ? "var(--font-arabic)" : undefined }}>
+                {c}
+              </bdi>
+            ))}
+            <span aria-hidden>→ ____</span>
+          </div>
+        );
+      }
       return (
         <div>
           <Target rtl={rtl} style={{ fontSize: 18 }}>{String(p.sentence ?? "")}</Target>

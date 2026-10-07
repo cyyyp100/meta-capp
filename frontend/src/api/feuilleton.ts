@@ -28,7 +28,17 @@ export interface FeuilletonStatus {
   episodes_played: number;
   open_run: number | null;
   has_placement: boolean;
+  /** Le modèle local qui écrit les épisodes (config/settings.py:OLLAMA_MODEL). */
+  model: string;
+  /** Échecs d'écriture de l'épisode à jouer, tant qu'il n'est pas prêt. */
+  generation_failures: number;
+  /** Où rappeler les limites du modèle local (le service décide, le front affiche). */
+  pro_hints: ProHint[];
+  /** Une correction d'expression écrite arrivée après sa séance, pas encore vue. */
+  unseen_writing: { id: number; run_id: number | null } | null;
 }
+
+export type ProHint = "generation" | "program_end";
 
 export interface RubySyllable {
   hanzi: string;
@@ -110,6 +120,87 @@ export interface PointView {
   explanation: string;
   highlights: { line: number; tokens: number[]; example: string }[];
   episode_ref?: number;
+  /** Bilan : la règle et « à retenir » de la leçon du point, quand elle existe. */
+  rule?: string;
+  remember?: string;
+}
+
+/** La leçon d'un point (services/lang_point_lesson.py), prononciations calculées. */
+export interface Lesson {
+  rule: string;
+  forms: { columns: string[]; rows: string[][] } | null;
+  uses: { use: string; example: string; translation: string; pron?: string | null }[];
+  pitfalls: { wrong: string; right: string; why: string; pron?: string | null }[];
+  examples: { text: string; translation: string; pron?: string | null }[];
+  remember: string;
+}
+
+/** Ce que renvoie GET /api/lang/run/{id}/lesson en entrant dans l'étape. */
+export interface LessonState {
+  lesson: Lesson | null;
+  lesson_source: "file" | "db" | "fallback" | null;
+  lesson_pending: boolean;
+  lesson_items: GameItem[];
+}
+
+/** Une touche du clavier d'expression écrite (`label` : ce qui s'affiche). */
+export interface KeyboardKey {
+  char: string;
+  label: string;
+}
+
+export interface WritingKeyboard {
+  layout: "keys" | "ime";
+  rtl: boolean;
+  groups: { name: string; keys: KeyboardKey[] }[];
+}
+
+export interface WritingWord {
+  form: string;
+  match: string[];
+  translation: string;
+}
+
+/** La consigne de l'expression écrite, déterministe (services/lang_writing.py). */
+export interface WritingTask {
+  kind: "repondre" | "message" | "journal" | "decrire" | "suite";
+  prompt: string;
+  speaker: string | null;
+  use_words: WritingWord[];
+  use_forms: string[];
+  length: { min: number; max: number; unit: "words" | "chars" };
+  bank: WritingWord[];
+  tier_index: number;
+  explain_lang: ExplainLang;
+  max_chars: number;
+}
+
+export type WritingStatus = "pending" | "correcting" | "ready" | "failed" | "skipped";
+
+export interface WritingChecks {
+  length: { value: number; min: number; max: number; unit: "words" | "chars"; ok: boolean };
+  script: { ok: boolean; problem: string | null };
+  words_used: { form: string; used: boolean }[];
+  forms_used: { form: string; used: boolean }[];
+}
+
+export interface WritingFeedbackData {
+  verdict: "correct" | "partial" | "incorrect";
+  errors: { original: string; correction: string; error_type: string; explanation: string }[];
+  corrected: string;
+  praise: string;
+}
+
+export interface WritingView {
+  id: number;
+  run_id: number | null;
+  status: WritingStatus;
+  text: string;
+  task: WritingTask;
+  checks: WritingChecks | null;
+  feedback: WritingFeedbackData | null;
+  corrected_at: string | null;
+  seen: boolean;
 }
 
 export interface GameItem {
@@ -148,6 +239,8 @@ export interface RunStep {
 }
 
 export interface RunPlan {
+  /** Format du plan : 2 = lecture unique, leçon, expression écrite. */
+  version: number;
   run_id: number;
   status: string;
   current_step: string | null;
@@ -172,6 +265,8 @@ export interface RunPlan {
 export type RunEvent =
   | { type: "step"; step: string; started?: boolean; ended?: boolean; active_s?: number; skipped?: boolean; signal?: string | null }
   | { type: "reveal"; episode_id: number; line: number; token: number; pass: string }
+  /** Traduction d'une réplique montrée — la réplique seule, ou « Tout traduire » (`all`). */
+  | { type: "line"; episode_id: number; line: number; pass: string; all?: boolean }
   | { type: "answer"; item: string; given: unknown; ms?: number }
   | { type: "rating"; episode_id: number; line: number; typed?: string | null; rating: "su" | "a_peu_pres" | "pas_su" }
   | { type: "card"; card_id: number; verdict: "correct" | "partial" | "incorrect" };
@@ -196,6 +291,8 @@ export interface RunCompletion {
   acquired_today: number;
   units_acquired_today: number;
   suggest_rewind: number | null;
+  /** L'expression écrite de la séance : l'écran de fin attend sa correction. */
+  writing: { id: number; status: WritingStatus } | null;
 }
 
 export interface PlacementItemView {

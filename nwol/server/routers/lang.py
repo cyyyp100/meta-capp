@@ -4,8 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from config.settings import LANG_WRITING_MAX_CHARS
 from db.lang_db import SESSION_TYPES_SEED
-from services import lang_runs
+from services import lang_runs, lang_writing
 from services.lang import (
     complete_lesson,
     complete_session,
@@ -215,10 +216,16 @@ class CompareBody(BaseModel):
     typed: str = Field(default="", max_length=2000)
 
 
+class WritingBody(BaseModel):
+    # Le service normalise et coupe à LANG_WRITING_MAX_CHARS ; ici, seulement
+    # un garde-fou contre une requête démesurée.
+    text: str = Field(default="", max_length=LANG_WRITING_MAX_CHARS * 4)
+
+
 def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except lang_runs.RunError as exc:
+    except (lang_runs.RunError, lang_writing.WritingError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
@@ -264,6 +271,28 @@ def feuilleton_run_events(run_id: int, body: RunEventsBody) -> dict:
 @router.post("/run/{run_id}/complete")
 def feuilleton_run_complete(run_id: int, body: RunCompleteBody) -> dict:
     return _call(lang_runs.complete_run, run_id, body.end_reason, body.feeling)
+
+
+@router.get("/run/{run_id}/lesson")
+def feuilleton_run_lesson(run_id: int) -> dict:
+    """La leçon de l'étape « leçon », relue en y entrant (sans attente)."""
+    return _call(lang_runs.run_lesson, run_id)
+
+
+@router.post("/run/{run_id}/writing")
+def feuilleton_run_writing(run_id: int, body: WritingBody) -> dict:
+    """L'expression écrite de la séance ; sa correction part en arrière-plan."""
+    return _call(lang_writing.submit, run_id, body.text)
+
+
+@router.get("/writing/{writing_id}")
+def feuilleton_writing(writing_id: int) -> dict:
+    return _call(lang_writing.get, writing_id)
+
+
+@router.post("/writing/{writing_id}/seen")
+def feuilleton_writing_seen(writing_id: int) -> dict:
+    return _call(lang_writing.mark_seen, writing_id)
 
 
 @router.get("/{language}/library")

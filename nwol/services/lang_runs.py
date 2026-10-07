@@ -7,7 +7,9 @@
 #
 # Une séance (`lang_runs`) porte son plan complet : les étapes, les épisodes à
 # afficher (aides déjà décidées selon l'acquis de l'apprenant), les items des
-# jeux avec leurs clés. Le front reçoit ce plan, renvoie des lots d'événements
+# jeux avec leurs clés. Une séance « épisode » (plan v2) : [rappel] · lecture
+# (une seule, aide à la demande) · leçon · expression écrite · jeux ·
+# [2e vague] · [jalon] · au revoir. Le front reçoit ce plan, renvoie des lots d'événements
 # à chaque changement d'étape, et c'est ici que les réponses sont recorrigées
 # (R23), que la pré-génération de l'épisode suivant part (G16) et que le
 # plafond de durée est appliqué (R24).
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 from datetime import datetime
 
 from config.settings import (
@@ -23,6 +26,7 @@ from config.settings import (
     LANG_DUE_CARDS_CAP,
     LANG_ESSENTIAL_STEPS,
     LANG_GAME_TARGET_GAUGES,
+    LANG_GEN_FAILURES_PRO_HINT,
     LANG_IDLE_CUTOFF_S,
     LANG_MILESTONES_EPISODE_1,
     LANG_PILOT_LANGUAGES,
@@ -41,9 +45,12 @@ from config.settings import (
     LANG_SECOND_WAVE_START,
     LANG_SECOND_WAVE_TARGET_GAUGES,
     LANG_STEP_BUDGET_S,
+    LANG_TRANSLATE_ALL_MODES,
     LANG_TRANSPARENT_FLAG_UNTIL_EPISODE,
     LANG_UNDERSTOOD_TARGET_GAUGES,
+    LANG_WRITING_TARGET_GAUGES,
     LANG_ZH_TONE_COLORS,
+    OLLAMA_MODEL,
     WARMUP_MAX_CARDS,
 )
 from db import lang_episode_db as store
@@ -59,7 +66,9 @@ from i18n import t
 from services import lang_activity as activity
 from services import lang_episodes as episodes
 from services import lang_games as games
+from services import lang_point_lesson as lessons
 from services import lang_progress as progress
+from services import lang_writing as writing
 from services import practice
 from services.lang_scripts import (
     ARABIC_SCRIPT,
@@ -70,7 +79,7 @@ from services.lang_scripts import (
     arabic_word_display,
     seen_units,
 )
-from services.lang_static import explain_languages, localized
+from services.lang_static import LANG_ISO, explain_languages, localized, writing_keyboard
 from services.lang_static import onboarding as onboarding_data
 from services.lang_text import find_token_span, word_diff, words
 
@@ -84,6 +93,13 @@ _UNDERSTOOD_VERDICT = {"compris": "correct", "a_peu_pres": "partial", "pas_compr
 _RATING_VERDICT = {"su": "correct", "a_peu_pres": "partial", "pas_su": "incorrect"}
 EPISODE_MODES = ("episode", "court")
 MODES = ("zero", "episode", "bilan", "reprise", "relecture", "court", "jalon")
+# Format du plan. Une séance ouverte d'un autre format (passages 1 et 2, notes,
+# point du jour) est abandonnée au démarrage et remplacée : le front ne garde
+# aucune de ses vues.
+PLAN_VERSION = 2
+# Lectures-écritures du plan JSON d'une séance (pré-génération, leçon lue à
+# l'entrée de son étape, clôture) : jamais deux à la fois.
+_PLAN_LOCK = threading.RLock()
 
 
 class RunError(ValueError):
@@ -130,11 +146,14 @@ def ensure_feuilleton(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
 
 def _import_legacy_flashcards(profile: dict, language: str) -> int:
     """Cartes de vocabulaire du flux hérité -> lexique (recto « X en langue »,
-    verso = mot cible). Les mots importés restent non acquis."""
+    verso = mot cible). Les mots importés restent non acquis. Les cartes du
+    feuilleton (recto = mot cible) n'en sont pas : un profil recréé les aurait
+    réimportées à l'envers."""
     from db import get_connection
 
     rows = get_connection().execute(
-        "SELECT id, front, back, pronunciation FROM flashcards WHERE language=? AND user_id=?",
+        """SELECT id, front, back, pronunciation FROM flashcards
+           WHERE language=? AND user_id=? AND COALESCE(source, '') <> 'lang_feuilleton'""",
         (language, profile["user_id"]),
     ).fetchall()
     suffix = f" en {language}"
@@ -509,7 +528,7 @@ def _relecture_choice(profile: dict, exclude: set[int]) -> list[tuple[dict, str]
         out.append((played[0], "last"))
     older = [e for e in played[1:] if e["id"] not in exclude]
     if older and len(out) < LANG_RELECTURE_EPISODES:
-        taps = store.p2_reveal_counts(profile["id"])
+        taps = store.reveal_counts(profile["id"], progress.FIRST_READING_PASSES)
         out.append((max(older, key=lambda e: (taps.get(e["id"], 0), -e["episode_n"])), "hard"))
     return out[:LANG_RELECTURE_EPISODES]
 
@@ -561,11 +580,37 @@ def _cards_view(profile: dict, language: str, cap: int = LANG_DUE_CARDS_CAP) -> 
     return [_card_view(c) for c in progress.due_cards(profile, language, cap)]
 
 
+def _register_items(plan: dict, step_key: str, items: list[dict]) -> None:
+    """Les clés de correction d'items, rangées dans le plan (jamais montrées au
+    front par `run_view`) : c'est là que `record_events` recorrige (R23)."""
+    for it in items:
+        plan["items"][it["ref"]] = {
+            "kind": it["kind"], "expected": it.get("expected"), "lexemes": it.get("lexemes") or [],
+            "units": it.get("units") or [], "step": step_key, "episode_id": it.get("episode_id"),
+        }
+
+
+def _lesson_step(profile: dict, language: str, ep: dict, plan: dict, *, run_seed: int, compact: bool) -> dict:
+    """L'étape « leçon » : observer le point dans le texte, la leçon, puis
+    s'entraîner — trois micro-items du texte et trois de la leçon, corrigés
+    sous `lecon`. Une leçon pas encore écrite (tout premier épisode) laisse
+    l'étape `lesson_pending` : le front la redemande en y entrant (`run_lesson`)."""
+    lang = _explain(profile)
+    view = lessons.lesson_view(language, ep.get("program_point_id"), lang, ep)
+    micro = games.point_micro_items(ep, _family(language), run_seed)
+    lesson_items = lessons.lesson_items(language, view["lesson"], run_seed)
+    _register_items(plan, "lecon", micro + lesson_items)
+    return _step("lecon", episode_ref=ep["id"], point=_point_view(language, ep, lang), lesson=view["lesson"],
+                 lesson_source=view["source"], lesson_pending=view["lesson"] is None, items=micro,
+                 lesson_items=lesson_items, compact=compact)
+
+
 def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed: int,
                absence_days: int | None, cards_cap: int = LANG_DUE_CARDS_CAP) -> dict:
     fam = _family(language)
     lang = _explain(profile)
     plan: dict = {
+        "version": PLAN_VERSION,
         "mode": mode, "language": language, "family": fam, "rtl": fam == "arabe", "explain_lang": lang,
         "target_s": LANG_RUN_SHORT_TARGET_S if mode == "court" else LANG_RUN_TARGET_S,
         "max_s": LANG_RUN_MAX_S, "idle_cutoff_s": LANG_IDLE_CUTOFF_S,
@@ -584,11 +629,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         plan["readings"].append({"step": step_key, "episode_id": ep["id"], "pass": pass_})
 
     def register_items(step_key: str, items: list[dict]) -> None:
-        for it in items:
-            plan["items"][it["ref"]] = {
-                "kind": it["kind"], "expected": it.get("expected"), "lexemes": it.get("lexemes") or [],
-                "units": it.get("units") or [], "step": step_key, "episode_id": it.get("episode_id"),
-            }
+        _register_items(plan, step_key, items)
 
     steps = plan["steps"]
     if mode == "zero":
@@ -619,18 +660,21 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         elif prev and prev["status"] == "played":
             steps.append(_step("rappel", episode_ref=add_episode(prev), summary=prev["summary"], long=False))
             add_reading("rappel", prev, "rappel")
+        # Une seule lecture, aide à la demande : un mot au tap, la traduction
+        # d'une réplique sur demande, « Tout traduire » aux premiers paliers ;
+        # les notes s'ouvrent sous leur réplique.
         translation = (ep.get("params") or {}).get("translation", "toujours")
-        steps.append(_step("episode_p1", episode_ref=ep["id"], translation=translation))
-        steps.append(_step("episode_p2", episode_ref=ep["id"]))
-        add_reading("episode_p2", ep, "p2")
+        notes, components = episode_notes(profile, language, ep)
+        plan["component_units"] = components
+        steps.append(_step("lecture", episode_ref=ep["id"], translate_all=translation in LANG_TRANSLATE_ALL_MODES,
+                           notes=notes))
+        add_reading("lecture", ep, "lecture")
+        steps.append(_lesson_step(profile, language, ep, plan, run_seed=run_seed, compact=mode == "court"))
         if mode == "episode":
-            notes, components = episode_notes(profile, language, ep)
-            plan["component_units"] = components
-            steps.append(_step("notes", episode_ref=ep["id"], notes=notes))
-        micro = games.point_micro_items(ep, fam, run_seed)
-        register_items("point", micro)
-        steps.append(_step("point", episode_ref=ep["id"], point=_point_view(language, ep, lang), items=micro))
-        if mode == "episode":
+            # L'écrit juste après la leçon : l'application est immédiate, et la
+            # correction a le temps des jeux pour arriver avant l'écran de fin.
+            steps.append(_step("expression", episode_ref=ep["id"], task=writing.writing_task(language, ep, lang),
+                               keyboard=writing_keyboard(language), lang=LANG_ISO.get(language, "")))
             recent_kinds = [[g["kind"] for g in s.get("games", [])]
                             for r in store.recent_runs(profile["id"], limit=2)
                             for s in (r.get("plan") or {}).get("steps", []) if s.get("kind") == "jeux"]
@@ -650,7 +694,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
                     steps.append(_step("jalon", episode_ref=add_episode(first), first_taps=first_taps,
                                        tokens=progress.word_token_count(first["lines"])))
                     add_reading("jalon", first, "jalon")
-        plan["pregen_step"] = LANG_PREGEN_TRIGGER_STEP if mode == "episode" else "point"
+        plan["pregen_step"] = LANG_PREGEN_TRIGGER_STEP
         steps.append(_step("au_revoir", take_away=_take_away(language, ep), teaser=ep.get("teaser", ""),
                            feeling=_feeling(runs_done)))
         return plan
@@ -667,6 +711,9 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
             seen_points.add(e["program_point_id"])
             view = _point_view(language, e, lang)
             view["episode_ref"] = add_episode(e)
+            found = lessons.lesson_for(language, e["program_point_id"], lang)
+            if found:
+                view.update(rule=found["lesson"].get("rule", ""), remember=found["lesson"].get("remember", ""))
             points.append(view)
             micro_all += [it for it in games.point_micro_items(e, fam, run_seed + e["episode_n"])
                           if it["kind"] == "bonne_forme"][:1]
@@ -729,7 +776,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
 
 
 def _first_reading_taps(profile_id: int, episode_id: int) -> int:
-    reveals = store.reveals_for_episode(profile_id, episode_id, "p2")
+    reveals = store.reveals_for_episode(profile_id, episode_id, progress.FIRST_READING_PASSES)
     if not reveals:
         return 0
     first_run = reveals[0]["run_id"]
@@ -764,7 +811,8 @@ def start_run(language: str, mode: str | None = None, warmup: int = 0) -> dict:
     profile = ensure_feuilleton(language)
     today = activity.study_date()
     for run in store.open_runs(profile["id"]):
-        if run.get("study_date") != today:
+        if run.get("study_date") != today or (run.get("plan") or {}).get("version") != PLAN_VERSION:
+            # Une séance d'un autre jour, ou d'un autre format : abandonnée.
             store.update_run(run["id"], status="abandoned", end_reason="quitte")
         elif mode in (None, run["mode"]):
             return run_view(run["id"], resumed=True)
@@ -814,6 +862,8 @@ def _prepare_respiration(profile: dict, language: str) -> None:
             format=decision["format"], ladder_step=decision["ladder_step"], params=decision["params"],
             status="queued", lines=None, glossary=None, notes=None, point=None, aids=None,
         )
+        # Le cran du profil suit l'épisode redécidé, comme à la réservation.
+        store.update_profile_fields(profile["id"], ladder_step=decision["ladder_step"])
         if decision["params"].get("forced"):
             store.update_profile_fields(profile["id"], force_respiration=0)
         episodes.trigger_generation(profile["id"], n)
@@ -867,7 +917,16 @@ def record_events(run_id: int, events: list[dict], current_step: str | None = No
             try:
                 reveals += store.add_reveals(run_id, run.get("episode_id"), [{
                     "episode_id": int(ev["episode_id"]), "line_idx": int(ev["line"]), "token_idx": int(ev["token"]),
-                    "pass": str(ev.get("pass") or "p2")[:12],
+                    "pass": str(ev.get("pass") or "lecture")[:12],
+                }])
+            except (KeyError, TypeError, ValueError):
+                continue
+        elif kind == "line":
+            # Traduction d'une réplique montrée (la réplique seule, ou « Tout traduire »).
+            try:
+                store.add_line_reveals(run_id, [{
+                    "episode_id": int(ev["episode_id"]), "line_idx": int(ev["line"]),
+                    "pass": str(ev.get("pass") or "lecture")[:12], "via": "all" if ev.get("all") else "line",
                 }])
             except (KeyError, TypeError, ValueError):
                 continue
@@ -906,16 +965,26 @@ def record_events(run_id: int, events: list[dict], current_step: str | None = No
         _on_episode_read(run_id)
     cap = effective >= LANG_RUN_MAX_S
     return {"ok": True, "effective_s": effective, "cap_reached": cap,
-            "skip_to": "au_revoir" if cap else None}
+            "skip_to": _skip_target(run_id, plan) if cap else None}
+
+
+def _skip_target(run_id: int, plan: dict) -> str | None:
+    """R24 : au plafond, la séance va à la première étape ESSENTIELLE pas encore
+    faite — la lecture, l'expression écrite, l'au revoir —, dans l'ordre du plan."""
+    done = {s["step"] for s in store.get_steps(run_id) if s["ended_at"]}
+    return next((st["key"] for st in plan.get("steps") or [] if st.get("essential") and st["key"] not in done), None)
 
 
 def _on_episode_read(run_id: int) -> None:
     """L'épisode est lu (étape de déclenchement atteinte) : il est joué, son
     point introduit, et l'épisode suivant part avec les signaux du jour."""
-    run = store.get_run(run_id)
-    plan = run["plan"]
-    plan["pregen_done"] = True
-    store.update_run(run_id, plan=plan)
+    with _PLAN_LOCK:
+        run = store.get_run(run_id)
+        plan = run["plan"]
+        if plan.get("pregen_done"):
+            return
+        plan["pregen_done"] = True
+        store.update_run(run_id, plan=plan)
     profile = _profile(run["profile_id"])
     episode = store.get_episode(run["episode_id"]) if run.get("episode_id") else None
     if not episode:
@@ -961,7 +1030,7 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
     reason = end_reason if end_reason in ("fini", "plafond", "quitte") else "fini"
     lexicon_before = store.lexicon_counts(profile["id"])
     episode = store.get_episode(run["episode_id"]) if run.get("episode_id") else None
-    read = any(s["step"] in ("episode_p1", "episode_p2") and s["ended_at"] and not s["skipped"]
+    read = any(s["step"] in ("lecture", "episode_p1", "episode_p2") and s["ended_at"] and not s["skipped"]
                for s in store.get_steps(run_id))
     if episode and run["mode"] in EPISODE_MODES:
         if read and not plan.get("pregen_done"):
@@ -971,9 +1040,12 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         if episode["status"] != "played":
             episode = None  # quitté avant d'avoir lu : l'épisode reste à jouer
     signals = progress.episode_signals(run_id)
-    plan["signals"] = signals
-    store.update_run(run_id, plan=plan, status="completed", end_reason=reason, feeling=(feeling or "")[:80] or None,
-                     ended_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    with _PLAN_LOCK:
+        # Relu sous le verrou : une leçon servie entre-temps a pu inscrire ses items.
+        plan = store.get_run(run_id)["plan"]
+        plan["signals"] = signals
+        store.update_run(run_id, plan=plan, status="completed", end_reason=reason,
+                         feeling=(feeling or "")[:80] or None, ended_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     acquisition = progress.apply_run_acquisition(run_id)
     for unit in plan.get("component_units") or []:
         store.bump_script_unit(profile["id"], COMPONENTS_SCRIPT, unit, exposures=1)
@@ -982,7 +1054,7 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
     if episode and run["mode"] in EPISODE_MODES:
         tapped = set()
         for r in store.get_reveals(run_id):
-            if r["episode_id"] == episode["id"] and r["pass"] == "p2":
+            if r["episode_id"] == episode["id"] and r["pass"] in progress.FIRST_READING_PASSES:
                 try:
                     gi = episode["lines"][r["line_idx"]]["tokens"][r["token_idx"]].get("g")
                     if gi is not None:
@@ -1014,10 +1086,17 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         "acquired_today": max(0, lexicon_after["acquired"] - lexicon_before["acquired"]),
         "units_acquired_today": acquisition.get("units", 0),
         "suggest_rewind": rewind,
+        # L'écran de fin attend la correction de l'expression écrite, si elle n'est pas encore là.
+        "writing": _writing_summary(run_id),
     }
     practice_id, measured = _record_practice(run_id, plan, profile, gained)
     _nudge(profile, run, plan, feeling, practice_id=practice_id, measures=measured)
     return gained
+
+
+def _writing_summary(run_id: int) -> dict | None:
+    w = store.get_writing_for_run(run_id)
+    return {"id": w["id"], "status": w["status"]} if w else None
 
 
 def _run_measures(run_id: int, plan: dict) -> list[dict]:
@@ -1059,6 +1138,11 @@ def _run_measures(run_id: int, plan: dict) -> list[dict]:
         by_step.setdefault(key or "deuxieme_vague", []).append(
             {"verdict": verdict, "targets": LANG_SECOND_WAVE_TARGET_GAUGES},
         )
+    # L'expression écrite : le verdict de Clikoda s'il est arrivé avant la
+    # clôture. Ses contrôles calculés ne sont ni une mesure ni un score.
+    written = writing.run_measure(run_id)
+    if written:
+        by_step.setdefault("expression", []).append({"verdict": written, "targets": LANG_WRITING_TARGET_GAUGES})
 
     keys = [s["key"] for s in steps]
     keys += [k for k in by_step if k not in keys]
@@ -1201,8 +1285,14 @@ def language_status(language: str) -> dict:
     point = store.get_point_by_order(language, max(order, 1))
     counts = store.lexicon_counts(profile["id"])
     open_run = next((r for r in store.open_runs(profile["id"]) if r.get("study_date") == activity.study_date()), None)
+    failures = generation_failures(upcoming)
     return {
         "language": language, "flow": "feuilleton", "family": _family(language),
+        # Le modèle local qui écrit les épisodes, et quand en montrer les limites.
+        "model": OLLAMA_MODEL, "generation_failures": failures,
+        "pro_hints": pro_hints(language, order, failures),
+        # Une correction d'expression écrite arrivée après sa séance.
+        "unseen_writing": writing.unseen_for(profile["id"]),
         "onboarding_done": bool(profile.get("onboarding_done")),
         "episode_n": int(profile.get("episode_n") or 0), "next_episode": next_n,
         "next_status": upcoming["status"] if upcoming else None,
@@ -1216,6 +1306,25 @@ def language_status(language: str) -> dict:
         "open_run": open_run["id"] if open_run else None,
         "has_placement": bool(store.get_placement_items(language)),
     }
+
+
+def generation_failures(upcoming: dict | None) -> int:
+    """Échecs d'écriture de l'épisode à jouer, tant qu'il n'est pas prêt."""
+    if not upcoming or upcoming["status"] in ("ready", "played"):
+        return 0
+    return episodes._previous_failures(upcoming)  # le même compte que le générateur
+
+
+def pro_hints(language: str, order: int, failures: int) -> list[str]:
+    """Où l'accueil rappelle les limites du modèle local (une ligne statique,
+    aucun appel, rien de bloqué) : après LANG_GEN_FAILURES_PRO_HINT échecs
+    d'écriture d'un même épisode, et en fin de programme."""
+    hints = []
+    if failures >= LANG_GEN_FAILURES_PRO_HINT:
+        hints.append("generation")
+    if progress.program_ended(language, order):
+        hints.append("program_end")
+    return hints
 
 
 def library(language: str) -> list[dict]:
@@ -1233,8 +1342,38 @@ def episode_view(episode_id: int) -> dict:
     profile = _profile(episode["profile_id"])
     language = profile["language"]
     notes, _components = episode_notes(profile, language, episode)
+    lang = _explain(profile)
     return {**display_episode(profile, language, episode), "notes": notes,
-            "point": _point_view(language, episode, _explain(profile))}
+            "point": _point_view(language, episode, lang),
+            "lesson": lessons.lesson_view(language, episode.get("program_point_id"), lang, episode)["lesson"]}
+
+
+def run_lesson(run_id: int) -> dict:
+    """La leçon de l'étape « leçon », demandée par le front en y entrant. Pas
+    encore écrite à l'assemblage (`lesson_pending`, cas du tout premier
+    épisode) : la base est relue ; si la leçon y est, ses items rejoignent le
+    plan — corrigés comme les autres —, sinon l'étape garde son repli. Aucune
+    attente, aucun appel à Clikoda."""
+    with _PLAN_LOCK:
+        run = store.get_run(run_id)
+        if not run:
+            raise RunError("séance introuvable")
+        plan = run["plan"]
+        step = next((st for st in plan.get("steps") or [] if st.get("kind") == "lecon"), None)
+        if not step:
+            raise RunError("pas de leçon dans cette séance")
+        if step.get("lesson_pending") and run["status"] == "in_progress":
+            profile = _profile(run["profile_id"])
+            episode = store.get_episode(step["episode_ref"]) or {}
+            view = lessons.lesson_view(plan["language"], episode.get("program_point_id"), _explain(profile), episode)
+            if view["lesson"]:
+                items = lessons.lesson_items(plan["language"], view["lesson"], run_id)
+                _register_items(plan, "lecon", items)
+                step.update(lesson=view["lesson"], lesson_source=view["source"], lesson_pending=False,
+                            lesson_items=items)
+                store.update_run(run_id, plan=plan)
+    return {"lesson": step.get("lesson"), "lesson_source": step.get("lesson_source"),
+            "lesson_pending": bool(step.get("lesson_pending")), "lesson_items": step.get("lesson_items") or []}
 
 
 def report(episode_id: int, line_idx: int | None, token_idx: int | None, kind: str, comment: str) -> dict:
@@ -1306,3 +1445,7 @@ def on_startup() -> None:
     except Exception:  # pragma: no cover - jamais bloquant au démarrage
         logger.exception("Injection des données de langue échouée")
     episodes.requeue_stuck()
+    try:
+        writing.requeue_stuck()
+    except Exception:  # pragma: no cover - jamais bloquant au démarrage
+        logger.exception("Relance des corrections d'expression écrite échouée")

@@ -3,8 +3,9 @@
 Rejoue les invariants de services/lang_static.py sur chaque fichier de
 nwol/data/lang/ : programmes (ids, ordre continu, CECR croissant, prérequis
 antérieurs, groupes de bilan par blocs de 6), tests de niveau (clés, points du
-programme), phrases de survie, faux-amis et registres d'écriture. À lancer
-après toute relecture :
+programme), phrases de survie et clavier, faux-amis, leçons écrites à la main
+(lessons/<langue>.json, s'il existe) et registres d'écriture. À lancer après
+toute relecture :
 
     python tools/validate_lang_data.py
 
@@ -26,6 +27,7 @@ def check_all() -> dict[str, list[str]]:
         load_json,
         script_registry,
         validate_faux_amis,
+        validate_lessons_file,
         validate_onboarding,
         validate_placement,
         validate_program,
@@ -50,6 +52,9 @@ def check_all() -> dict[str, list[str]]:
         if language in ("espagnol", "anglais", "allemand"):
             fa = load_json("helpers", f"faux_amis_{language}.json")
             report[f"helpers/faux_amis_{language}.json"] = validate_faux_amis(fa, language) if fa else ["absent"]
+        lessons = load_json("lessons", f"{language}.json")
+        if lessons is not None:  # facultatif : Clikoda écrit les leçons qui manquent
+            report[f"lessons/{language}.json"] = validate_lessons_file(lessons, language, ids)
     arabic = script_registry("arabic")
     letters = arabic.get("letters") or []
     errors = []

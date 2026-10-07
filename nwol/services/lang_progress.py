@@ -33,13 +33,18 @@ from config.settings import (
     LANG_FORMAT_AVOID_LAST,
     LANG_GAMES_SUCCESS_EASY,
     LANG_GAMES_SUCCESS_HARD,
+    LANG_KNOWN_WORDS_PROMPT_TOKENS,
     LANG_LADDER_BAND,
     LANG_LADDER_MAX_STEP_PER_EPISODE,
     LANG_LADDER_STEPS_PER_TIER,
     LANG_MAX_CONSECUTIVE_RESPIRATION,
+    LANG_NEW_WORDS_CHECK_MAX_START_ORDER,
+    LANG_NEW_WORDS_CHECK_MAX_TIER,
+    LANG_NEW_WORDS_CHECK_MIN_LEXICON,
     LANG_RECYCLE_WORDS,
     LANG_RECYCLE_WORDS_RESPIRATION,
     LANG_RESPIRATION_NEW_WORDS_FACTOR,
+    LANG_REVEAL_MIN_TOKENS,
     LANG_REVEAL_RATE_HIGH,
     LANG_REVEAL_RATE_LOW,
     LANG_SCRIPT_ACQUIRED_MIN_EPISODES,
@@ -47,6 +52,8 @@ from config.settings import (
     LANG_SCRIPT_FAMILY,
     LANG_SECOND_WAVE_WEIGHT,
     LANG_TEXT_FORMATS,
+    LANG_TRANSLATED_SHARE_EASY,
+    LANG_TRANSLATED_SHARE_HARD,
 )
 from db import get_connection
 from db import lang_episode_db as store
@@ -55,9 +62,14 @@ from services.lang_latin import de_article_pron
 logger = logging.getLogger("services.lang_progress")
 
 SECOND_WAVE_SCORES = {"su": 1.0, "a_peu_pres": 0.5, "pas_su": 0.0}
-# Passes de lecture SANS traduction affichée : un mot lu sans être touché y est
-# une reconnaissance (C6). Le passage 1 montre la traduction, il ne compte pas.
-RECOGNITION_PASSES = ("p2", "relecture", "rappel", "jalon", "recap")
+# Passes de lecture SANS traduction affichée d'office : un mot lu sans être
+# touché y est une reconnaissance (C6), sauf dans une réplique dont l'apprenant
+# a demandé la traduction (lang_line_reveals). L'ancien passage 1 montrait la
+# traduction, il ne compte pas ; `p2` reste pour les séances d'avant la lecture unique.
+RECOGNITION_PASSES = ("lecture", "p2", "relecture", "rappel", "jalon", "recap")
+# LA lecture de l'épisode du jour : l'étape « lecture », ou le passage 2 des
+# séances d'avant (données anciennes comprises).
+FIRST_READING_PASSES = ("lecture", "p2")
 
 
 def family(language: str) -> str:
@@ -105,13 +117,21 @@ def ladder_params(language: str, step: int) -> dict:
     }
 
 
+def new_words_cap(params: dict, kind: str | None) -> int:
+    """Mots nouveaux (caractères en mandarin) permis par un épisode : la borne
+    haute du cran, réduite pour une respiration. Le prompt l'annonce et le
+    validateur la contrôle — un seul calcul pour les deux."""
+    cap = int(params["new_words"][1])
+    if kind == "respiration":
+        cap = max(1, round(cap * LANG_RESPIRATION_NEW_WORDS_FACTOR))
+    return cap
+
+
 def prompt_constraints(language: str, params: dict, kind: str, explain_lang: str = "fr") -> str:
     """P2 : les paramètres du cran traduits en consignes pour le prompt du texte,
     dans la langue du prompt (langue d'explication du profil)."""
     hanzi = family(language) == "hanzi"
-    new_max = params["new_words"][1]
-    if kind == "respiration":
-        new_max = max(1, round(new_max * LANG_RESPIRATION_NEW_WORDS_FACTOR))
+    new_max = new_words_cap(params, kind)
     wpl = params.get("words_per_line")
     lo, hi = params["lines"]
     if explain_lang == "en":
@@ -217,6 +237,30 @@ def placement_start_order(language: str, passed_points: list[str]) -> int:
     return max(1, last - LANG_PLACEMENT_SAFETY_MARGIN + 1) if last else 1
 
 
+def start_order_of(profile_id: int) -> int:
+    """Point de départ du parcours : la dernière ligne `placement` de
+    l'historique de niveau (test de niveau, ou 1 pour un débutant). Sans elle,
+    le parcours est parti du début."""
+    placements = [h for h in store.get_level_history(profile_id) if h["source"] == "placement"]
+    return int(placements[-1]["program_order"] or 1) if placements else 1
+
+
+def program_ended(language: str, order: int) -> bool:
+    """Tout le programme est introduit : il n'y a plus de point après `order`."""
+    points = program(language)
+    return bool(points) and int(order or 0) >= points[-1]["order"]
+
+
+def new_words_check_applies(params: dict, lexicon_size: int, start_order: int) -> bool:
+    """Le contrôle des mots nouveaux n'a de sens que là où le lexique dit ce que
+    l'apprenant sait : paliers A1 et A1-A2, lexique amorcé, parcours commencé au
+    début du programme. Un apprenant placé (A1 au point 23, C1 au point 262)
+    sait bien plus que les quelques dizaines de mots de son lexique."""
+    return (int(params.get("tier_index") or 0) <= LANG_NEW_WORDS_CHECK_MAX_TIER
+            and int(lexicon_size) >= LANG_NEW_WORDS_CHECK_MIN_LEXICON
+            and int(start_order) <= LANG_NEW_WORDS_CHECK_MAX_START_ORDER)
+
+
 def mark_point_introduced(profile: dict, language: str, point_id: str | None, episode_n: int) -> int:
     """P7 : un épisode normal joué introduit son point ; la position courante
     avance (jamais de recul). Renvoie la nouvelle position."""
@@ -245,33 +289,52 @@ def word_token_count(lines: list[dict]) -> int:
 
 def episode_signals(run_id: int) -> dict:
     """P3 : signaux d'une séance. `None` quand rien n'a été mesuré — un signal
-    absent n'est jamais un succès (principe 5)."""
+    absent n'est jamais un succès (principe 5).
+
+    La lecture du jour est l'étape « lecture » (le passage 2 d'une séance
+    d'avant). Une réplique dont l'apprenant a demandé la traduction ne dit rien
+    de ce qu'il lit seul : le taux de taps se calcule sur les AUTRES, et vaut
+    None sous LANG_REVEAL_MIN_TOKENS mots ; la part de répliques traduites
+    (`translated_share`) est un signal à part, jugé selon le palier."""
     run = store.get_run(run_id) or {}
     episode = store.get_episode(run["episode_id"]) if run.get("episode_id") else None
-    tokens = word_token_count(episode["lines"]) if episode else 0
     steps = {s["step"]: s for s in store.get_steps(run_id)}
-    p2 = steps.get("episode_p2")
-    reveals = [r for r in store.get_reveals(run_id) if r["pass"] == "p2" and episode and r["episode_id"] == episode["id"]]
-    reveal_rate = (len(reveals) * 100.0 / tokens) if (tokens and p2 and not p2["skipped"]) else None
+    key, pass_ = ("episode_p2", "p2") if "episode_p2" in steps and "lecture" not in steps else ("lecture", "lecture")
+    reading = steps.get(key)
+    done = bool(reading and not reading["skipped"])
+    lines = (episode or {}).get("lines") or []
+    tokens = word_token_count(lines)
+    translated = {r["line_idx"] for r in store.get_line_reveals(run_id)
+                  if episode and r["episode_id"] == episode["id"] and r["pass"] == pass_}
+    open_tokens = word_token_count([ln for li, ln in enumerate(lines) if li not in translated])
+    reveals = [r for r in store.get_reveals(run_id) if r["pass"] == pass_ and episode
+               and r["episode_id"] == episode["id"] and r["line_idx"] not in translated]
+    reveal_rate = (len(reveals) * 100.0 / open_tokens) if done and open_tokens >= LANG_REVEAL_MIN_TOKENS else None
+    translated_share = (len(translated) / len(lines)) if done and lines else None
     understood = None
-    for key in ("episode_p2", "episode_p1"):
-        if steps.get(key) and steps[key].get("signal"):
-            understood = steps[key]["signal"]
+    for step_key in ("lecture", "episode_p2", "episode_p1"):
+        if steps.get(step_key) and steps[step_key].get("signal"):
+            understood = steps[step_key]["signal"]
             break
     answered = [a for a in store.get_attempts(run_id) if a["correct"] is not None]
     games_rate = (sum(a["correct"] for a in answered) / len(answered)) if answered else None
     ratings = [SECOND_WAVE_SCORES[r["rating"]] for r in store.get_second_wave_ratings(run_id)
                if r["rating"] in SECOND_WAVE_SCORES]
     sw_rate = (sum(ratings) / len(ratings)) if ratings else None
+    tier = ((episode or {}).get("params") or {}).get("tier_index")
     return {
         "reveal_rate": round(reveal_rate, 2) if reveal_rate is not None else None,
         "reveals": len(reveals),
         "tokens": tokens,
+        "read_tokens": open_tokens,
+        "translated_lines": len(translated),
+        "translated_share": round(translated_share, 3) if translated_share is not None else None,
+        "tier_index": int(tier) if tier is not None else None,
         "understood": understood,
         "games_rate": round(games_rate, 3) if games_rate is not None else None,
         "answered": len(answered),
         "second_wave_rate": round(sw_rate, 3) if sw_rate is not None else None,
-        "p2_done": bool(p2 and not p2["skipped"]),
+        "reading_done": done,
     }
 
 
@@ -288,18 +351,35 @@ def success_rate(signals: dict) -> float | None:
     return games * (1 - LANG_SECOND_WAVE_WEIGHT) + sw * LANG_SECOND_WAVE_WEIGHT
 
 
+def _share_thresholds(signals: dict) -> tuple[float | None, float | None]:
+    """(seuil « dur », seuil « facile ») de la part traduite, pour le palier du
+    texte lu ; (None, None) sans part mesurée — d'anciens signaux se classent
+    comme avant."""
+    share, tier = signals.get("translated_share"), signals.get("tier_index")
+    if share is None or tier is None:
+        return None, None
+    i = max(0, min(int(tier), len(LANG_TRANSLATED_SHARE_HARD) - 1))
+    return LANG_TRANSLATED_SHARE_HARD[i], LANG_TRANSLATED_SHARE_EASY[min(i, len(LANG_TRANSLATED_SHARE_EASY) - 1)]
+
+
 def classify(signals: dict) -> str:
-    """hard | easy | ok. Il faut un signal POSITIF pour dire « facile »."""
+    """hard | easy | ok. Il faut un signal POSITIF pour dire « facile ».
+
+    La part de répliques traduites compte selon le palier : en A1, « Tout
+    traduire » est une aide prévue et ne rend jamais « dur » ; en B1, traduire
+    presque tout l'est. « Facile » demande d'être resté sous le seuil du palier."""
     rate = signals.get("reveal_rate")
     understood = signals.get("understood")
     success = success_rate(signals)
+    share = signals.get("translated_share")
+    hard_share, easy_share = _share_thresholds(signals)
     if (rate is not None and rate > LANG_REVEAL_RATE_HIGH) or understood == "pas_compris" or (
         success is not None and success < LANG_GAMES_SUCCESS_HARD
-    ):
+    ) or (hard_share is not None and share >= hard_share):
         return "hard"
     if rate is not None and rate < LANG_REVEAL_RATE_LOW and understood in (None, "compris") and (
         success is None or success >= LANG_GAMES_SUCCESS_EASY
-    ):
+    ) and (easy_share is None or share <= easy_share):
         return "easy"
     return "ok"
 
@@ -322,19 +402,74 @@ def choose_format(language: str, params: dict, point: dict | None, recent_format
     return pool[seed % len(pool)]
 
 
+def lemma_polluted(language: str, form: str | None, lemma: str | None, translation: str | None) -> bool:
+    """Lemme « pollué » : Clikoda y a mis la traduction (« demographic » →
+    lemme « démographie »). Il est égal à sa traduction, différent de sa forme,
+    et la forme ne commence pas par lui (« restaurants » → « restaurant » est un
+    vrai lemme). En mandarin et en arabe, un lemme hors de l'écriture cible."""
+    from services.lang_text import fold
+
+    lemma = (lemma or "").strip()
+    if not lemma:
+        return False
+    fam = family(language)
+    if fam == "hanzi":
+        from services.lang_mandarin import is_han
+
+        return not any(is_han(c) for c in lemma)
+    if fam == "arabe":
+        from services.lang_arabic import is_arabic_letter
+
+        return not any(is_arabic_letter(c) for c in lemma)
+    f_form, f_lemma = fold(form or ""), fold(lemma)
+    return f_lemma == fold(translation or "") and f_lemma != f_form and not f_form.startswith(f_lemma)
+
+
+def lexeme_polluted(language: str, row: dict) -> bool:
+    """Une ligne du lexique inscrite avec un lemme pollué (avant la réparation) :
+    elle n'est plus proposée au réemploi, ni comme mot connu."""
+    return lemma_polluted(language, row.get("form"), row.get("lemma"), row.get("translation"))
+
+
 def recycle_words(profile_id: int, language: str, count: int) -> list[str]:
     """P6 : mots vus mais non acquis ; ceux dont la carte est due d'abord, puis
-    ceux qui ont suscité le plus de taps."""
+    ceux qui ont suscité le plus de taps. Un lemme pollué (une traduction prise
+    pour un lemme) n'est pas un mot à réemployer."""
     rows = get_connection().execute(
-        """SELECT l.form, l.lemma, l.reveals,
+        """SELECT l.form, l.lemma, l.translation, l.reveals,
                   CASE WHEN f.due_at IS NOT NULL AND f.due_at <= datetime('now', 'localtime') THEN 1 ELSE 0 END AS due
            FROM lang_lexicon l LEFT JOIN flashcards f ON f.id = l.card_id
            WHERE l.profile_id=? AND l.acquired_at IS NULL
-           ORDER BY due DESC, l.reveals DESC, l.last_episode_n DESC, l.id DESC
-           LIMIT ?""",
-        (profile_id, int(count)),
+           ORDER BY due DESC, l.reveals DESC, l.last_episode_n DESC, l.id DESC""",
+        (profile_id,),
     ).fetchall()
-    return [r["lemma"] or r["form"] for r in rows]
+    kept = [r["lemma"] or r["form"] for r in rows if not lexeme_polluted(language, dict(r))]
+    return kept[: max(0, int(count))]
+
+
+def known_words_for_prompt(profile_id: int, language: str, *, read_chars=(), exclude=()) -> list[str]:
+    """Ce que l'apprenant connaît déjà, pour le prompt du texte : ses lemmes,
+    acquis d'abord puis les plus reconnus ; en mandarin, ses caractères (acquis,
+    vus, puis lus dans un épisode joué). Bornés à LANG_KNOWN_WORDS_PROMPT_TOKENS."""
+    from llm.prompts import fit_word_list
+
+    skip = set(exclude)
+    if family(language) == "hanzi":
+        from services.lang_scripts import HANZI_SCRIPT
+
+        rows = store.get_script_progress(profile_id, HANZI_SCRIPT)
+        ranked = sorted(rows.items(), key=lambda kv: (kv[1].get("acquired_at") is None,
+                                                      -int(kv[1].get("recognitions_ok") or 0)))
+        chars = list(dict.fromkeys([unit for unit, _row in ranked] + list(read_chars)))
+        return fit_word_list([c for c in chars if c not in skip], LANG_KNOWN_WORDS_PROMPT_TOKENS)
+    rows = get_connection().execute(
+        """SELECT form, lemma, translation, pos FROM lang_lexicon WHERE profile_id=?
+           ORDER BY (acquired_at IS NULL), recognitions_ok DESC, exposures DESC, id""",
+        (profile_id,),
+    ).fetchall()
+    lemmas = [r["lemma"] for r in rows if r["lemma"] and r["lemma"] not in skip
+              and (r["pos"] or "") != "nom propre" and not lexeme_polluted(language, dict(r))]
+    return fit_word_list(list(dict.fromkeys(lemmas)), LANG_KNOWN_WORDS_PROMPT_TOKENS)
 
 
 def next_episode_decision(profile: dict, language: str, *, current: dict | None, signals: dict | None,
@@ -346,10 +481,15 @@ def next_episode_decision(profile: dict, language: str, *, current: dict | None,
       LANG_MAX_CONSECUTIVE_RESPIRATION d'affilée ;
     - « facile » LANG_EASY_STREAK_TO_STEP_UP fois de suite -> un cran de plus ;
     - une reprise après absence impose une respiration (force_respiration) ;
-    - jamais de recul dans le programme ; le cran bouge d'au plus un cran."""
+    - jamais de recul dans le programme ; le cran bouge d'au plus un cran, à
+      partir de celui de l'épisode joué (`current`) quand il est connu : le cran
+      du profil a pu avancer déjà, avec un épisode décidé d'avance que l'on
+      redécide (une respiration imposée par une reprise montait d'un cran)."""
     signals = signals or {}
     verdict = classify(signals) if signals else "ok"
     step = int(profile.get("ladder_step") or 0)
+    if current is not None and current.get("ladder_step") is not None:
+        step = int(current["ladder_step"])
     order = int(profile.get("program_order") or 0)
     points = program(language)
     recent = store.list_episodes(profile["id"], limit=LANG_MAX_CONSECUTIVE_RESPIRATION + 3)
@@ -395,7 +535,8 @@ def next_episode_decision(profile: dict, language: str, *, current: dict | None,
         "ladder_step": new_step,
         "format": fmt,
         "params": {**params, "recycle": recycle, "verdict": verdict, "signals": signals,
-                   "easy_streak": streak, "forced": forced and kind == "respiration"},
+                   "easy_streak": streak, "forced": forced and kind == "respiration",
+                   "program_end": program_ended(language, order)},
     }
 
 
@@ -428,11 +569,12 @@ def ensure_lexemes(profile_id: int, episode: dict) -> dict[int, int]:
 def apply_run_acquisition(run_id: int) -> dict:
     """P10-P11 : met à jour lexique et signes après une séance.
 
-    Pour chaque épisode lu SANS traduction pendant la séance (passage 2,
-    relecture, rappel, jalon) : un mot touché compte un tap et un échec, un mot
-    lu sans être touché une reconnaissance. Les réponses aux jeux qui portent un
-    mot (`lexeme`) ou un signe (`unit`) comptent aussi. Chaque épisode ne compte
-    qu'une fois par séance."""
+    Pour chaque épisode lu SANS traduction pendant la séance (lecture,
+    relecture, rappel, jalon ; passage 2 des séances d'avant) : un mot touché
+    compte un tap et un échec, un mot lu sans être touché une reconnaissance —
+    sauf dans une réplique dont la traduction a été montrée, qui ne donne
+    qu'une exposition. Les réponses aux jeux qui portent un mot (`lexeme`) ou un
+    signe (`unit`) comptent aussi. Chaque épisode ne compte qu'une fois par séance."""
     from services.lang_scripts import script_units_of_token
 
     run = store.get_run(run_id) or {}
@@ -443,6 +585,9 @@ def apply_run_acquisition(run_id: int) -> dict:
     tapped: dict[tuple[int, str], set[tuple[int, int]]] = {}
     for r in reveals:
         tapped.setdefault((int(r["episode_id"] or 0), r["pass"]), set()).add((r["line_idx"], r["token_idx"]))
+    translated: dict[tuple[int, str], set[int]] = {}
+    for r in store.get_line_reveals(run_id):
+        translated.setdefault((int(r["episode_id"]), r["pass"]), set()).add(int(r["line_idx"]))
     steps = {s["step"]: s for s in store.get_steps(run_id)}
     stats = {"lexemes": 0, "acquired": 0, "units": 0}
     seen_units: set[tuple[str, str]] = set()
@@ -455,23 +600,25 @@ def apply_run_acquisition(run_id: int) -> dict:
             continue
         lex_ids = ensure_lexemes(profile_id, episode)
         taps = tapped.get((episode["id"], reading["pass"]), set())
+        shown = translated.get((episode["id"], reading["pass"]), set())
         counted_ok: dict[int, int] = {}
         counted_ko: dict[int, int] = {}
         for li, line in enumerate(episode["lines"]):
+            exposure_only = li in shown  # traduction montrée : ni reconnaissance ni échec
             for ti, tok in enumerate(line.get("tokens") or []):
                 if not tok.get("w"):
                     continue
                 touched = (li, ti) in taps
                 gi = tok.get("g")
-                if gi is not None and gi in lex_ids and reading["pass"] in RECOGNITION_PASSES:
+                if gi is not None and gi in lex_ids and reading["pass"] in RECOGNITION_PASSES and not exposure_only:
                     target = counted_ko if touched else counted_ok
                     target[lex_ids[gi]] = 1
                 for script, unit in script_units_of_token(language, tok.get("text", "")):
                     key = (script, unit)
                     store.bump_script_unit(
-                        profile_id, script, unit, episode_n=episode["episode_n"],
-                        exposures=1, ok=0 if touched else int(key not in seen_units),
-                        ko=1 if touched else 0,
+                        profile_id, script, unit, episode_n=episode["episode_n"], exposures=1,
+                        ok=0 if touched or exposure_only else int(key not in seen_units),
+                        ko=1 if touched and not exposure_only else 0,
                     )
                     seen_units.add(key)
         reveals_per_lexeme: dict[int, int] = {}

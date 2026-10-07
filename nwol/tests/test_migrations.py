@@ -251,3 +251,53 @@ def test_v39_spreads_the_old_languages_subject(fresh_db, monkeypatch):
     assert profile["informatique"]["level"] == 60.0
     history = [r["subject"] for r in conn.execute("SELECT subject FROM subject_history ORDER BY id")]
     assert history == ["anglais", "anglais", "informatique"]
+
+
+# ── v40 : leçon du point, expression écrite, traductions montrées ────────────
+
+def test_v40_adds_lessons_writings_and_line_reveals(fresh_db, monkeypatch):
+    """Une base v39 avec un profil et une séance : la migration ajoute les trois
+    tables sans rien toucher, rejouable ; une séance n'a qu'une expression
+    écrite, et une traduction montrée ne se compte qu'une fois par passe."""
+    import sqlite3
+
+    from db import get_connection, migrations
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 39)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+        conn.execute("INSERT INTO lang_profiles (user_id, language, flow, episode_n) VALUES (1, 'espagnol', 'feuilleton', 2)")
+        conn.execute("INSERT INTO lang_runs (profile_id, mode, plan_json, status, study_date) "
+                     "VALUES (1, 'episode', '{}', 'completed', '2026-10-01')")
+        conn.execute("INSERT INTO lang_episodes (profile_id, episode_n, kind, format, ladder_step, params_json, status) "
+                     "VALUES (1, 1, 'normal', 'dialogue', 0, '{}', 'played')")
+    assert not {"lang_point_lessons", "lang_writings", "lang_line_reveals"} & _tables(conn)
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 40)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 40
+    assert {"lang_point_lessons", "lang_writings", "lang_line_reveals"} <= _tables(conn)
+    assert conn.execute("SELECT episode_n FROM lang_profiles").fetchone()[0] == 2
+
+    from db import lang_episode_db as store
+
+    first = store.create_writing(1, 1, 1, task={"kind": "message"}, text="Hola", checks=None, status="pending")
+    assert store.create_writing(1, 1, 1, task={}, text="otra", checks=None, status="pending") == first
+    assert store.get_writing(first)["text"] == "Hola"
+    with pytest.raises(sqlite3.IntegrityError):
+        with conn:
+            conn.execute("INSERT INTO lang_writings (profile_id, run_id, task_json) VALUES (1, 1, '{}')")
+    events = [{"episode_id": 1, "line_idx": 0, "pass": "lecture", "via": "line"}]
+    assert store.add_line_reveals(1, events) == 1 and store.add_line_reveals(1, events) == 0
+    store.save_point_lesson("espagnol", "es.a1.saludos", "fr", status="ready", lesson={"rule": "r"},
+                            point_hash="h1", model="m", attempts=1, generation={})
+    store.save_point_lesson("espagnol", "es.a1.saludos", "fr", status="ready", lesson={"rule": "r2"},
+                            point_hash="h2", model="m", attempts=2, generation={})
+    lesson = store.get_point_lesson("espagnol", "es.a1.saludos", "fr")
+    assert lesson["lesson"] == {"rule": "r2"} and lesson["point_hash"] == "h2"
+    assert store.get_point_lesson("espagnol", "es.a1.saludos", "en") is None

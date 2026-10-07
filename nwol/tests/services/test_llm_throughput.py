@@ -130,7 +130,7 @@ def fake_ollama(monkeypatch):
             self.wfile.write(payload)
 
         def do_POST(self):  # noqa: N802 - API de http.server
-            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            state["last"] = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             state["requests"] += 1
             if state["delay"]:
                 stop.wait(state["delay"])
@@ -313,3 +313,37 @@ def test_each_calibration_starts_differently(monkeypatch):
     assert prompts[0] != prompts[1]
     assert prompts[0].split("\n", 1)[0] != prompts[1].split("\n", 1)[0], "la différence doit être au DÉBUT"
     assert all(p.endswith(ollama_client._CALIBRATION_PROMPT) for p in prompts)
+
+
+def test_a_json_schema_constrains_the_decoding(fake_ollama):
+    """Sorties structurées : un schéma passe tel quel dans `format` (le glossaire
+    y impose une entrée par mot) ; sans lui, le simple mode JSON."""
+    from llm.schema_json import lang_episode_glossary_schema
+
+    fake_ollama["body"] = _ollama_reply(output_tps=30.0, prompt_tps=300.0)
+    schema = lang_episode_glossary_schema(20, pron=True)
+    ollama_client._call_ollama_http("prompt", "model", format_json=schema, task="lang_episode_glossary_pron")
+    assert fake_ollama["last"]["format"] == schema
+    assert schema["properties"]["entries"]["minItems"] == schema["properties"]["entries"]["maxItems"] == 20
+    assert schema["properties"]["entries"]["items"]["minItems"] == 6
+    ollama_client._call_ollama_http("prompt", "model", task="question")
+    assert fake_ollama["last"]["format"] == "json"
+
+
+def test_the_glossary_asks_one_entry_per_word_at_decoding(monkeypatch):
+    """gemma4:e4b refermait la liste du glossaire après UNE entrée, à chaque
+    appel, sur certains textes (banc du 2026-10-07) : le nombre d'entrées est
+    imposé au décodage, et la consigne reste la même."""
+    seen = {}
+    monkeypatch.setattr(ollama_client, "_run_json_async", lambda label, prompt, parser, *a, **kw: seen.update(label=label, **kw))
+    ollama_client.generate_lang_episode_glossary_async(
+        {"language_label": "espagnol", "words": ["Hola", "Cómo", "te"], "lines": [("Hola", "Salut")], "pron": True},
+        lambda r: None, lambda e: None)
+    entries = seen["json_schema"]["properties"]["entries"]
+    assert seen["label"] == "lang_episode_glossary_pron" and entries["minItems"] == entries["maxItems"] == 3
+    calls = []
+    monkeypatch.setattr(ollama_client, "_call_ollama",
+                        lambda prompt, model, images=None, options=None, format_json=True, task="": calls.append(format_json) or '{"entries": []}')
+    ollama_client._generate_json("lang_episode_glossary", "p", lambda raw: {"ok": True}, model="m",
+                                 json_schema={"type": "object"})
+    assert calls == [{"type": "object"}]

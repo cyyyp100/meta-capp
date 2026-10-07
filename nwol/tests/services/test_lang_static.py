@@ -118,3 +118,46 @@ def test_english_overlays_are_validated():
     item = next(it for it in placement["items"] if "choices_en" in it)
     item["choices_en"] = item["choices_en"][:-1]  # l'ordre des choix porte la clé : un par un
     assert any("choices_en" in e for e in validate_placement(placement, "espagnol", ids))
+
+
+# ── Clavier de l'expression écrite, leçons écrites à la main ─────────────────
+
+def test_writing_keyboards():
+    """Espagnol et allemand : leurs touches ; arabe : bâti depuis le registre
+    (28 lettres, porteurs de hamza, 8 voyelles brèves, ة ى آ ء, ponctuation) ;
+    mandarin : la méthode de saisie du système ; anglais : rien."""
+    from services.lang_static import writing_keyboard
+
+    chars = lambda kb: [k["char"] for g in kb["groups"] for k in g["keys"]]  # noqa: E731
+    assert chars(writing_keyboard("espagnol")) == list("áéíóúüñ¿¡")
+    assert chars(writing_keyboard("allemand")) == list("äöüßÄÖÜ")
+    assert writing_keyboard("anglais") is None
+    assert writing_keyboard("mandarin") == {"layout": "ime", "rtl": False, "groups": []}
+    arabic = writing_keyboard("arabe")
+    groups = {g["name"]: [k["char"] for k in g["keys"]] for g in arabic["groups"]}
+    assert arabic["rtl"] and len(groups["letters"]) == 28 and groups["hamza"] == list("أإؤئ")
+    assert len(groups["vowels"]) == 8 and groups["other"] == list("ةىآء") and groups["punctuation"] == list("،؛؟")
+    vowel = next(g for g in arabic["groups"] if g["name"] == "vowels")["keys"][0]
+    assert vowel["label"] == "◌" + vowel["char"]  # une voyelle seule serait invisible
+
+
+def test_keyboard_field_is_validated():
+    from services.lang_static import load_json, validate_onboarding
+
+    for keyboard, needle in (({"keys": ["á", "á"]}, "double"), ({"keys": ["ab"]}, "un seul caractère"),
+                             ({"layout": "ime"}, "ime"), ({"layout": "registry"}, "registry"),
+                             ({"layout": "x"}, "disposition"), ([], "pas un objet")):
+        data = copy.deepcopy(load_json("onboarding", "espagnol.json"))
+        data["keyboard"] = keyboard
+        assert any(needle in e for e in validate_onboarding(data, "espagnol")), keyboard
+    decomposed = copy.deepcopy(load_json("onboarding", "espagnol.json"))
+    decomposed["keyboard"] = {"keys": ["á"]}
+    assert validate_onboarding(decomposed, "espagnol")
+
+
+def test_no_hand_written_lessons_today_and_the_tool_would_check_them():
+    """Aucune leçon écrite à la main aujourd'hui : Clikoda les écrit. Un fichier
+    déposé serait validé par la suite et par tools/validate_lang_data.py."""
+    from services.lang_static import lessons_file
+
+    assert all(lessons_file(language) == {} for language in LANG_PILOT_LANGUAGES)

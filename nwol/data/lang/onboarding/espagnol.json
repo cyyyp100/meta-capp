@@ -108,18 +108,33 @@
   "comic_springs": "Pablo's excuses; Carmen's rumours; Lucía and Iñaki arguing over the menu of the day.",
   "register_notes": "Everyday Spanish from Spain, day-to-day conversations at the café and in the neighbourhood."
  },
+ "keyboard": {
+  "keys": [
+   "á",
+   "é",
+   "í",
+   "ó",
+   "ú",
+   "ü",
+   "ñ",
+   "¿",
+   "¡"
+  ]
+ },
  "prompt_params": {
   "language_label": "espagnol",
   "register": "Registre : espagnol d'Espagne d'aujourd'hui, situations de la vie quotidienne.",
   "script_rules": "Écris en espagnol d'Espagne, avec tous les accents et la ponctuation espagnole (¿ ? ¡ !).",
   "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en espagnol\", \"translation\": \"traduction française\"}",
-  "form_rule": ""
+  "form_rule": "",
+  "writing_rules": "Écris l'espagnol d'Espagne avec tous ses accents et sa ponctuation (¿ ? ¡ !)."
  },
  "prompt_params_en": {
   "language_label": "Spanish",
   "register": "Register: present-day Spanish from Spain, everyday situations.",
   "script_rules": "Write in Spanish from Spain, with all the accents and the Spanish punctuation (¿ ? ¡ !).",
   "line_schema": "{\"speaker\": \"first name\", \"text\": \"line in Spanish\", \"translation\": \"English translation\"}",
-  "form_rule": ""
+  "form_rule": "",
+  "writing_rules": "Write Spanish from Spain with all its accents and its punctuation (¿ ? ¡ !)."
  }
 }

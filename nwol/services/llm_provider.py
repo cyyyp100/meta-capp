@@ -36,7 +36,7 @@ def generate(
     model: str,
     images: list[str] | None = None,
     options: dict | None = None,
-    format_json: bool = True,
+    format_json: bool | dict = True,
     task: str = "",
 ) -> str:
     """Génération synchrone via Ollama local.
@@ -46,7 +46,7 @@ def generate(
     return _ollama_generate(prompt, model=model, images=images, options=options, format_json=format_json, task=task)
 
 
-def _ollama_generate(prompt: str, model: str, images, options, format_json: bool, task: str = "") -> str:
+def _ollama_generate(prompt: str, model: str, images, options, format_json: bool | dict, task: str = "") -> str:
     # Import au call-time : évite l'import circulaire (ollama_client délègue ici).
     from llm.ollama_client import _call_ollama_http
 

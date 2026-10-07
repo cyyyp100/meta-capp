@@ -75,6 +75,7 @@
   "register": "Registre : anglais britannique d'aujourd'hui, situations de la vie quotidienne.",
   "script_rules": "Écris en anglais britannique (orthographe britannique : colour, centre), avec la ponctuation anglaise.",
   "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en anglais\", \"translation\": \"traduction française\"}",
-  "form_rule": ""
+  "form_rule": "",
+  "writing_rules": "Écris en anglais britannique, avec l'orthographe et la ponctuation anglaises."
  }
 }

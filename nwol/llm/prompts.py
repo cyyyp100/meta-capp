@@ -2997,6 +2997,35 @@ def estimate_prompt_tokens(text: str) -> int:
     return han + (arabic + 1) // 2 + (rest + 2) // 3
 
 
+def fit_word_list(words: list[str], budget_tokens: int, sep: str = ", ") -> list[str]:
+    """Les premiers mots de `words` qui tiennent, joints par `sep`, dans
+    `budget_tokens` tokens estimés (G2) : un lexique qui grandit ne doit jamais
+    faire déborder le prompt. Chaque mot est estimé seul, séparateur compris —
+    la somme des arrondis majore l'estimation de la liste entière."""
+    out: list[str] = []
+    used = 0
+    for word in words:
+        cost = estimate_prompt_tokens(f"{word}{sep}")
+        if used + cost > budget_tokens:
+            break
+        out.append(word)
+        used += cost
+    return out
+
+
+def _known_words_line(p: dict, en: bool = False) -> str:
+    """Ce que l'apprenant connaît déjà : SES mots, pas un exemple de consigne —
+    le texte doit être écrit d'abord avec eux. Rien quand il ne connaît rien."""
+    known = p.get("known_words") or []
+    if not known:
+        return ""
+    if en:
+        unit = "Characters" if p.get("known_chars") else "Words"
+        return f"{unit} the learner already knows (write with them first): {', '.join(known)}."
+    unit = "Caractères" if p.get("known_chars") else "Mots"
+    return f"{unit} que l'apprenant connaît déjà (écris d'abord avec eux) : {', '.join(known)}."
+
+
 def _rejected_block(rejected: str, en: bool = False) -> str:
     rejected = (rejected or "").strip()
     if not rejected:
@@ -3084,6 +3113,7 @@ Forme du texte : {p['format_rule']}.
 Point de langue du jour : {p['point_title']}. {p['point_constraint']}
 Contraintes de niveau : {p['constraints']}
 Réemploie si possible ces mots déjà vus : {recycle}.
+{_known_words_line(p)}
 {p.get('script_rules', '')}
 {_rejected_block(p.get('rejected', ''))}
 Réponds UNIQUEMENT en JSON valide, sans markdown, avec EXACTEMENT {p['lines_target']} répliques dans "lines" :
@@ -3175,6 +3205,69 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
 les exemples sont des sous-chaînes EXACTES du texte en {p['language_label']}, jamais de la traduction."""
 
 
+def build_lang_point_lesson_prompt(p: dict) -> str:
+    """La leçon d'un point, une fois par point : ce que le texte d'un épisode
+    montre, expliqué en entier. Squelette sans AUCUN mot de la langue cible —
+    un petit modèle recopie les exemples d'une consigne (mesuré au banc) ; les
+    seuls mots cibles du prompt sont ceux des données du point."""
+    if _explain_en(p):
+        return _build_lang_point_lesson_prompt_en(p)
+    lang = p["language_label"]
+    return f"""Tu écris la LEÇON d'un point de langue en {lang}, pour un apprenant francophone de niveau {p['cefr']}.
+Point : {p['point_title']}.
+Ce que l'apprenant doit savoir faire : {p['learner_goal']}
+Ce qu'il faut remarquer : {p['point_notice']}
+Explication de référence (ne la contredis pas) : {p['point_seed']}
+{p.get('register', '')}
+{p.get('writing_rules', '')}
+{_rejected_block(p.get('rejected', ''))}
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{
+  "rule": "la règle, en deux à quatre phrases simples (fr, {p['rule_max']} caractères au plus)",
+  "forms": {{"columns": ["…", "…"], "rows": [["…", "…"]]}},
+  "uses": [{{"use": "quand l'employer (fr)", "example": "une phrase en {lang}", "translation": "sa traduction (fr)"}}],
+  "pitfalls": [{{"wrong": "une forme fautive en {lang}", "right": "la forme juste en {lang}", "why": "pourquoi (fr)"}}],
+  "examples": [{{"text": "une phrase en {lang}", "translation": "sa traduction (fr)"}}],
+  "remember": "ce qu'il faut retenir, une phrase (fr, {p['remember_max']} caractères au plus)"
+}}
+
+Règles : "forms" est le tableau des formes du point (au plus {p['forms_rows']} lignes et {p['forms_cols']}
+colonnes, en-tête compris), ou null si le point n'en a pas ; de {p['uses_min']} à {p['uses_max']} emplois ; au plus
+{p['pitfalls_max']} pièges, ceux que fait vraiment un francophone ; de {p['examples_min']} à {p['examples_max']}
+exemples courts et naturels, du niveau {p['cefr']}, différents de ceux des emplois. Les phrases en {lang} le sont
+UNIQUEMENT ; tout le reste est en français. Aucune mise en forme : ni astérisque, ni dièse, ni tiret bas."""
+
+
+def build_lang_writing_feedback_prompt(p: dict) -> str:
+    """Correction d'une expression écrite : au plus N erreurs, le texte corrigé.
+    Aucun exemple de faute dans la consigne (cf. build_lang_point_lesson_prompt)."""
+    if _explain_en(p):
+        return _build_lang_writing_feedback_prompt_en(p)
+    lang = p["language_label"]
+    return f"""Tu corriges un court texte écrit en {lang} par un apprenant francophone de niveau {p['cefr']}.
+Consigne qu'il avait reçue : {p['task']}
+Son texte :
+<<<
+{p['text']}
+>>>
+{p.get('writing_rules', '')}
+{_rejected_block(p.get('rejected', ''))}
+Relève au plus {p['errors_max']} erreurs, les plus utiles pour lui, puis réécris son texte entier corrigé, en gardant ses
+idées et ses mots quand ils sont justes.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{
+  "verdict": "…",
+  "errors": [{{"original": "passage recopié EXACTEMENT de son texte", "correction": "le passage corrigé", "error_type": "…", "explanation": "pourquoi, une phrase simple (fr)"}}],
+  "corrected": "son texte entier corrigé, en {lang}",
+  "praise": "une phrase sur ce qui est réussi (fr)"
+}}
+
+"verdict" : "correct" s'il n'y a aucune erreur, "partial" si le sens passe malgré les erreurs, "incorrect" sinon ;
+"errors" est vide si le texte est correct. "error_type" parmi : {", ".join(p['error_types'])}. Les explications et
+"praise" sont en français ; "original", "correction" et "corrected" sont en {lang}."""
+
+
 def build_lang_weekly_analysis_prompt(p: dict) -> str:
     if _explain_en(p):
         return _build_lang_weekly_analysis_prompt_en(p)
@@ -3262,6 +3355,7 @@ Text form: {p['format_rule']}.
 Language point of the day: {p['point_title']}. {p['point_constraint']}
 Level constraints: {p['constraints']}
 If possible, reuse these words the learner has already seen: {recycle}.
+{_known_words_line(p, en=True)}
 {p.get('script_rules', '')}
 {_EN_REFERENCE_NOTE}
 {_rejected_block(p.get('rejected', ''), en=True)}
@@ -3343,6 +3437,60 @@ Answer ONLY with valid JSON, no markdown:
 
 "kind" among: grammar, usage, culture, pronunciation. "line" is the number of the line. Anchors and examples
 are EXACT substrings of the {p['language_label']} text, never of the translation."""
+
+
+def _build_lang_point_lesson_prompt_en(p: dict) -> str:
+    lang = p["language_label"]
+    return f"""You are writing the LESSON of a language point in {lang}, for an English-speaking learner at level {p['cefr']}.
+Point: {p['point_title']}.
+What the learner must be able to do: {p['learner_goal']}
+What to notice: {p['point_notice']}
+Reference explanation (never contradict it): {p['point_seed']}
+{p.get('register', '')}
+{p.get('writing_rules', '')}
+{_EN_REFERENCE_NOTE}
+{_rejected_block(p.get('rejected', ''), en=True)}
+Answer ONLY with valid JSON, no markdown:
+{{
+  "rule": "the rule, in two to four simple sentences (en, {p['rule_max']} characters at most)",
+  "forms": {{"columns": ["…", "…"], "rows": [["…", "…"]]}},
+  "uses": [{{"use": "when to use it (en)", "example": "a sentence in {lang}", "translation": "its translation (en)"}}],
+  "pitfalls": [{{"wrong": "a wrong form in {lang}", "right": "the right form in {lang}", "why": "why (en)"}}],
+  "examples": [{{"text": "a sentence in {lang}", "translation": "its translation (en)"}}],
+  "remember": "what to remember, one sentence (en, {p['remember_max']} characters at most)"
+}}
+
+Rules: "forms" is the table of the forms of the point (at most {p['forms_rows']} rows and {p['forms_cols']}
+columns, header included), or null if the point has none; from {p['uses_min']} to {p['uses_max']} uses; at most
+{p['pitfalls_max']} pitfalls, the ones an English speaker really makes; from {p['examples_min']} to
+{p['examples_max']} short and natural examples, at level {p['cefr']}, different from those of the uses. The sentences
+in {lang} are ONLY in {lang}; everything else is in English. No formatting: no asterisk, no hash, no underscore."""
+
+
+def _build_lang_writing_feedback_prompt_en(p: dict) -> str:
+    lang = p["language_label"]
+    return f"""You are correcting a short text written in {lang} by an English-speaking learner at level {p['cefr']}.
+The instruction they were given: {p['task']}
+Their text:
+<<<
+{p['text']}
+>>>
+{p.get('writing_rules', '')}
+{_rejected_block(p.get('rejected', ''), en=True)}
+Point out at most {p['errors_max']} errors, the most useful ones for them, then rewrite their whole text corrected,
+keeping their ideas and their words when they are right.
+
+Answer ONLY with valid JSON, no markdown:
+{{
+  "verdict": "…",
+  "errors": [{{"original": "passage copied EXACTLY from their text", "correction": "the corrected passage", "error_type": "…", "explanation": "why, one simple sentence (en)"}}],
+  "corrected": "their whole text corrected, in {lang}",
+  "praise": "one sentence about what they did well (en)"
+}}
+
+"verdict": "correct" if there is no error, "partial" if the meaning comes through despite the errors, "incorrect"
+otherwise; "errors" is empty if the text is correct. "error_type" among: {", ".join(p['error_types'])}. The
+explanations and "praise" are in English; "original", "correction" and "corrected" are in {lang}."""
 
 
 def _build_lang_weekly_analysis_prompt_en(p: dict) -> str:

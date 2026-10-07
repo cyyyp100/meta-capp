@@ -70,6 +70,10 @@ PREFERENCES: dict[str, Pref] = {
     # aux cartes. Une énumération et non un nombre libre : aucun réglage n'est
     # du texte libre (cf. `Pref`).
     "entry_sas_s": Pref("entry_sas_s", "60", choices=("30", "60", "120", "180", "300")),
+    # L'encart de l'accueil d'une langue qui dit les limites du modèle local et
+    # ce que va plus loin la version Pro : masqué une fois pour toutes quand
+    # l'apprenant le ferme. Texte statique : aucun appel, rien de bloqué.
+    "lang_pro_note_dismissed": Pref("lang_pro_note_dismissed", "false", kind="bool"),
 }
 
 

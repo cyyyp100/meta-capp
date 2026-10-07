@@ -195,18 +195,23 @@
   "comic_springs": "كَرِيم's imaginary scoops; سَلْمَى's obsessive order; أَبُو يُوسُف getting lost in his own neighbourhood; نَادِيَة's culinary remedies.",
   "register_notes": "Modern standard Arabic (fuṣḥā): letters, notices at the centre, stories and careful conversations, as in a TV series in standard Arabic."
  },
+ "keyboard": {
+  "layout": "registry"
+ },
  "prompt_params": {
   "language_label": "arabe littéraire",
   "register": "Registre : arabe littéraire moderne (fuṣḥā), celui des livres, de la presse et des feuilletons en arabe standard ; aucun mot de dialecte. Les prénoms s'écrivent uniquement en lettres arabes, sans translittération.",
   "script_rules": "Écris en arabe ENTIÈREMENT VOCALISÉ : chaque consonne porte sa voyelle brève, son sukūn ou sa šadda, et les noms indéfinis leur tanwīn. Le DERNIER mot de chaque réplique est en forme pausale : sa dernière lettre porte un sukūn au lieu de sa voyelle finale. N'ajoute aucun mot pour cela : garde la phrase telle quelle. Ponctuation arabe (، ؛ ؟). Aucune lettre latine, aucun chiffre latin.",
   "line_schema": "{\"speaker\": \"nom\", \"text\": \"réplique en arabe entièrement vocalisé\", \"translation\": \"traduction française\"}",
-  "form_rule": "Pour un mot arabe, recopie le mot tel qu'il est écrit dans le texte, voyelles comprises ; le lemme est la forme du dictionnaire, vocalisée (le singulier pour un nom, le passé à la 3e personne du masculin singulier pour un verbe : كَتَبَ) ; le genre est m ou f pour un nom."
+  "form_rule": "Pour un mot arabe, recopie le mot tel qu'il est écrit dans le texte, voyelles comprises ; le lemme est la forme du dictionnaire, vocalisée (le singulier pour un nom, le passé à la 3e personne du masculin singulier pour un verbe : كَتَبَ) ; le genre est m ou f pour un nom.",
+  "writing_rules": "Écris l'arabe ENTIÈREMENT VOCALISÉ : chaque consonne porte sa voyelle brève, son sukūn ou sa šadda, et un nom indéfini son tanwīn. Ponctuation arabe ; aucune translittération, aucune lettre latine."
  },
  "prompt_params_en": {
   "language_label": "Modern Standard Arabic",
   "register": "Register: modern standard Arabic (fuṣḥā), the Arabic of books, the press and TV series in standard Arabic; no dialect words. First names are written in Arabic letters only, without transliteration.",
   "script_rules": "Write FULLY VOCALIZED Arabic: every consonant carries its short vowel, its sukūn or its šadda, and indefinite nouns their tanwīn. The LAST word of every line is in pausal form: its last letter carries a sukūn instead of its final vowel. Do not add any word for this: keep the sentence as it is. Arabic punctuation (، ؛ ؟). No Latin letter, no Latin digit.",
   "line_schema": "{\"speaker\": \"name\", \"text\": \"line in fully vocalized Arabic\", \"translation\": \"English translation\"}",
-  "form_rule": "For an Arabic word, copy the word as it is written in the text, vowels included; the lemma is the dictionary form, vocalized (the singular for a noun, the past 3rd person masculine singular for a verb: كَتَبَ); the gender is m or f for a noun."
+  "form_rule": "For an Arabic word, copy the word as it is written in the text, vowels included; the lemma is the dictionary form, vocalized (the singular for a noun, the past 3rd person masculine singular for a verb: كَتَبَ); the gender is m or f for a noun.",
+  "writing_rules": "Write FULLY VOCALIZED Arabic: every consonant carries its short vowel, its sukūn or its šadda, and an indefinite noun its tanwīn. Arabic punctuation; no transliteration, no Latin letter."
  }
 }

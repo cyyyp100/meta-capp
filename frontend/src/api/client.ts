@@ -6,6 +6,8 @@ import type {
   EpisodeView,
   EventsResult,
   FeuilletonStatus,
+  Lesson,
+  LessonState,
   LibraryEntry,
   PlacementItemView,
   PlacementOutcome,
@@ -13,6 +15,7 @@ import type {
   RunCompletion,
   RunEvent,
   RunPlan,
+  WritingView,
 } from "./feuilleton";
 import { extraTokenParam } from "./security";
 import type { PickedDocument } from "./platform";
@@ -311,7 +314,14 @@ export const api = {
   feuilletonLibrary: (language: string) =>
     getJSON<LibraryEntry[]>(`/api/lang/${encodeURIComponent(language)}/library`),
   feuilletonEpisode: (episodeId: number) =>
-    getJSON<EpisodeView & { notes: EpisodeNote[]; point: PointView }>(`/api/lang/episode/${episodeId}`),
+    getJSON<EpisodeView & { notes: EpisodeNote[]; point: PointView; lesson: Lesson | null }>(`/api/lang/episode/${episodeId}`),
+  // La leçon de l'étape « leçon », relue en y entrant (sans attente).
+  feuilletonLesson: (runId: number) => getJSON<LessonState>(`/api/lang/run/${runId}/lesson`),
+  // L'expression écrite : envoyée, la séance continue ; corrigée en arrière-plan.
+  feuilletonWritingSubmit: (runId: number, text: string) =>
+    postJSON<WritingView>(`/api/lang/run/${runId}/writing`, { text }),
+  feuilletonWriting: (writingId: number) => getJSON<WritingView>(`/api/lang/writing/${writingId}`),
+  feuilletonWritingSeen: (writingId: number) => postJSON<{ ok: boolean }>(`/api/lang/writing/${writingId}/seen`, {}),
   feuilletonReport: (episodeId: number, line: number | null, token: number | null, kind: string, comment = "") =>
     postJSON<{ ok: boolean }>("/api/lang/report", { episode_id: episodeId, line, token, kind, comment }),
   feuilletonCompare: (original: string, typed: string) =>
@@ -482,7 +492,8 @@ export type PreferenceKey =
   | "text_size"
   | "updates_check"
   | "tour_done"
-  | "entry_sas_s";
+  | "entry_sas_s"
+  | "lang_pro_note_dismissed";
 export type Preferences = Record<PreferenceKey, string>;
 
 export interface PreferencesPayload {

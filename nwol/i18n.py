@@ -595,6 +595,14 @@ STRINGS: dict[str, dict[str, str]] = {
         # La question de ressenti de l'au revoir (R8) : l'intitulé et la
         # réponse sont enregistrés tels qu'affichés, comme les réflexions du
         # sas de sortie (nudge_metacog_profile).
+        "lang.writing.task.repondre": "Réponds à {speaker} : écris ce que tu lui dirais dans cette scène ({length}).",
+        "lang.writing.task.message": "Écris un court message à {speaker} pour lui répondre ({length}).",
+        "lang.writing.task.journal": "Tiens ton journal : raconte ta journée ({length}).",
+        "lang.writing.task.decrire": "Décris un personnage ou un lieu de l'épisode ({length}).",
+        "lang.writing.task.suite": "Imagine la suite de l'épisode ({length}).",
+        "lang.writing.task.use": "Emploie si tu peux : {words}.",
+        "lang.writing.length.words": "{min} à {max} mots",
+        "lang.writing.length.chars": "{min} à {max} caractères",
         "lang.feuilleton.feel.q1": "Comment était cet épisode pour toi ?",
         "lang.feuilleton.feel.q1.a": "Facile",
         "lang.feuilleton.feel.q1.b": "Juste bien",
@@ -1209,6 +1217,14 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "onboarding.doc_keywords": "processor, memory, storage, demo",
         # ── Languages, serial method (services/lang_runs.py) ───────────────
+        "lang.writing.task.repondre": "Answer {speaker}: write what you would say to them in this scene ({length}).",
+        "lang.writing.task.message": "Write a short message to {speaker} in reply ({length}).",
+        "lang.writing.task.journal": "Keep your diary: tell about your day ({length}).",
+        "lang.writing.task.decrire": "Describe a character or a place from the episode ({length}).",
+        "lang.writing.task.suite": "Imagine what happens next in the episode ({length}).",
+        "lang.writing.task.use": "Use them if you can: {words}.",
+        "lang.writing.length.words": "{min} to {max} words",
+        "lang.writing.length.chars": "{min} to {max} characters",
         "lang.feuilleton.feel.q1": "How was this episode for you?",
         "lang.feuilleton.feel.q1.a": "Easy",
         "lang.feuilleton.feel.q1.b": "Just right",
@@ -1256,6 +1272,15 @@ def t(key: str, **kwargs) -> str:
     Applies .format(**kwargs) when keyword arguments are provided.
     """
     val = STRINGS[_lang].get(key) or STRINGS["fr"].get(key, key)
+    return val.format(**kwargs) if kwargs else val
+
+
+def t_in(lang: str, key: str, **kwargs) -> str:
+    """Comme `t`, mais dans la langue `lang` plutôt que celle de l'interface :
+    ce qui s'adresse à un apprenant de langue suit SA langue d'explication,
+    figée dans son profil, même si l'interface a changé depuis."""
+    table = STRINGS.get(lang) or STRINGS["fr"]
+    val = table.get(key) or STRINGS["fr"].get(key, key)
     return val.format(**kwargs) if kwargs else val
 
 

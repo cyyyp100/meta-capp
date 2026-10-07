@@ -443,6 +443,8 @@ Meta-Capp **Pro** is a separate, hosted edition for people who want the same ped
 | Scanned / handwritten PDFs | ❌ | ✅ **OCR reconstruction** |
 | Semantic re-layout of messy documents | ❌ | ✅ |
 | Voice — talk to Clikoda, listen back | ❌ | ✅ **Speech** |
+| Languages | 5 languages, A1 → C1, reading and writing | 30 more, up to C2, listening and speaking |
+| Language episodes (story, lesson, written correction) | Written on your machine, a few minutes each, in the background | Generated much faster |
 | Works with zero GPU / low-end laptop | Degraded | ✅ |
 | Cognitive engine, gauges, flashcards | ✅ | ✅ |
 | Your data stays local | ✅ Always | Processing is remote |

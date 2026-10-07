@@ -3,13 +3,14 @@
 // Chaque vue reçoit son étape telle que le serveur l'a assemblée
 // (services/lang_runs.build_plan) et remonte ce que fait l'apprenant par le
 // tracker de séance. Aucune ne calcule de score : la lecture n'est jamais notée.
+// La lecture, la leçon et l'expression écrite ont leur fichier (Lecture.tsx,
+// Lecon.tsx, Expression.tsx) ; ici, les autres étapes et les aides partagées.
 import { useState } from "react";
 
 import { api } from "../../../api/client";
 import type {
   DiffOp,
   DueCard,
-  EpisodeNote,
   EpisodeView,
   Game,
   GameItem,
@@ -18,8 +19,8 @@ import type {
   RunStep,
 } from "../../../api/feuilleton";
 import { useT } from "../../../i18n";
-import { EpisodeText, type Pass, type TranslationMode } from "./EpisodeText";
-import { GameItemView, GameList } from "./Games";
+import { EpisodeText } from "./EpisodeText";
+import { GameList } from "./Games";
 import type { RunTracker } from "./useRunTracker";
 import { Card, chipBtn, ghostBtn, primaryBtn, StepTitle, Target } from "./ui";
 
@@ -31,11 +32,11 @@ export interface StepProps {
   onNext: (extra?: { signal?: string | null; feeling?: string | null }) => void;
 }
 
-function episodeOf(plan: RunPlan, ref: unknown): EpisodeView | undefined {
+export function episodeOf(plan: RunPlan, ref: unknown): EpisodeView | undefined {
   return ref === null || ref === undefined ? undefined : plan.episodes[String(ref)];
 }
 
-function NextButton({ onClick, label }: { onClick: () => void; label?: string }) {
+export function NextButton({ onClick, label }: { onClick: () => void; label?: string }) {
   const t = useT();
   return (
     <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
@@ -44,11 +45,11 @@ function NextButton({ onClick, label }: { onClick: () => void; label?: string })
   );
 }
 
-function answerFor(tracker: RunTracker) {
+export function answerFor(tracker: RunTracker) {
   return (item: GameItem, given: unknown, ms: number) => tracker.push({ type: "answer", item: item.ref, given, ms });
 }
 
-function revealFor(tracker: RunTracker, episode: EpisodeView, pass: string) {
+export function revealFor(tracker: RunTracker, episode: EpisodeView, pass: string) {
   return (line: number, token: number) => tracker.push({ type: "reveal", episode_id: episode.id, line, token, pass });
 }
 
@@ -143,7 +144,7 @@ export function RappelStep({ step, plan, tracker, onNext }: StepProps) {
       {episode && !step.long && (
         <>
           <p style={{ color: "var(--muted)", fontStyle: "italic" }}>{String(step.summary ?? episode.summary)}</p>
-          <EpisodeText episode={episode} pass="rappel" onReveal={revealFor(tracker, episode, "rappel")} />
+          <EpisodeText episode={episode} onReveal={revealFor(tracker, episode, "rappel")} />
         </>
       )}
       <NextButton onClick={() => onNext()} />
@@ -151,7 +152,7 @@ export function RappelStep({ step, plan, tracker, onNext }: StepProps) {
   );
 }
 
-function Understood({ onPick }: { onPick: (signal: string) => void }) {
+export function Understood({ onPick }: { onPick: (signal: string) => void }) {
   const t = useT();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
@@ -162,104 +163,6 @@ function Understood({ onPick }: { onPick: (signal: string) => void }) {
         </button>
       ))}
     </div>
-  );
-}
-
-export function EpisodePassStep({ step, plan, tracker, onNext }: StepProps) {
-  const t = useT();
-  const episode = episodeOf(plan, step.episode_ref)!;
-  const first = step.kind === "episode_p1";
-  const [allPinyin, setAllPinyin] = useState(false);
-  return (
-    <Card>
-      <StepTitle hint={first ? t("feuil.p1.hint") : t("feuil.p2.hint")}>
-        {first ? `${t("feuil.episode_n", { n: episode.n })} — ${episode.title}` : t("feuil.p2.title")}
-      </StepTitle>
-      {episode.kind === "respiration" && first && (
-        <p style={{ color: "var(--muted)", marginTop: -6 }}>{t("feuil.respiration")}</p>
-      )}
-      {episode.family === "hanzi" && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-          <button style={chipBtn(allPinyin)} onClick={() => setAllPinyin((v) => !v)}>{t("feuil.all_pinyin")}</button>
-        </div>
-      )}
-      <EpisodeText
-        episode={episode}
-        pass={first ? "p1" : "p2"}
-        translation={first ? ((step.translation as TranslationMode) ?? "toujours") : "none"}
-        onReveal={first ? undefined : revealFor(tracker, episode, "p2")}
-        showPinyinAll={allPinyin}
-      />
-      <Understood onPick={(signal) => onNext({ signal })} />
-    </Card>
-  );
-}
-
-export function NotesStep({ step, plan, onNext }: StepProps) {
-  const t = useT();
-  const episode = episodeOf(plan, step.episode_ref)!;
-  const notes = (step.notes as EpisodeNote[]) ?? [];
-  const [focus, setFocus] = useState<number | null>(null);
-  const marks: Record<number, { n: number; tokens: number[] }[]> = {};
-  notes.forEach((n) => {
-    (marks[n.line] ??= []).push({ n: n.n, tokens: n.tokens });
-  });
-  const focused = notes.find((n) => n.n === focus);
-  return (
-    <Card>
-      <StepTitle hint={t("feuil.notes.hint")}>{t("feuil.notes.title")}</StepTitle>
-      <EpisodeText
-        episode={episode}
-        pass="library"
-        noteMarks={marks}
-        highlights={focused ? [{ line: focused.line, tokens: focused.tokens }] : []}
-      />
-      <ol style={{ display: "grid", gap: 8, marginTop: 16, paddingInlineStart: 22 }}>
-        {notes.map((n) => (
-          <li key={n.n} value={n.n}>
-            <button
-              onClick={() => setFocus(n.n === focus ? null : n.n)}
-              style={{ ...ghostBtn, textAlign: "start", fontWeight: 400, width: "100%", borderColor: n.n === focus ? "var(--accent)" : undefined }}
-            >
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)" }}>
-                {t(`feuil.note_kind.${n.kind}`)}
-              </span>{" "}
-              {n.text}
-            </button>
-          </li>
-        ))}
-      </ol>
-      <NextButton onClick={() => onNext()} />
-    </Card>
-  );
-}
-
-export function PointStep({ step, plan, tracker, onNext }: StepProps) {
-  const t = useT();
-  const episode = episodeOf(plan, step.episode_ref)!;
-  const point = step.point as PointView;
-  const [observed, setObserved] = useState(false);
-  const items = (step.items as GameItem[]) ?? [];
-  return (
-    <Card>
-      <StepTitle hint={point.learner_goal}>{`${t("feuil.point.title")} : ${point.title}`}</StepTitle>
-      <p style={{ fontWeight: 600 }}>{point.observation}</p>
-      <EpisodeText episode={episode} pass="library" highlights={observed ? point.highlights : []}
-                   onlyLines={observed ? point.highlights.map((h) => h.line) : undefined} />
-      {!observed ? (
-        <button style={{ ...ghostBtn, marginTop: 10 }} onClick={() => setObserved(true)}>{t("feuil.point.show")}</button>
-      ) : (
-        <p style={{ marginTop: 12, lineHeight: 1.6 }}>{point.explanation}</p>
-      )}
-      {observed && items.length > 0 && (
-        <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
-          {items.map((item) => (
-            <GameItemView key={item.ref} item={item} episodes={plan.episodes} rtl={plan.rtl} onAnswer={answerFor(tracker)} />
-          ))}
-        </div>
-      )}
-      {observed && <NextButton onClick={() => onNext()} />}
-    </Card>
   );
 }
 
@@ -418,7 +321,7 @@ export function RelectureStep({ step, plan, tracker, onNext }: StepProps) {
       <StepTitle hint={t(`feuil.relecture.${String(step.why ?? "last")}`)}>
         {`${t("feuil.relecture.title")} — ${t("feuil.episode_n", { n: episode.n })}`}
       </StepTitle>
-      <EpisodeText episode={episode} pass="relecture" onReveal={revealFor(tracker, episode, "relecture")} />
+      <EpisodeText episode={episode} onReveal={revealFor(tracker, episode, "relecture")} />
       <NextButton onClick={() => onNext()} />
     </Card>
   );
@@ -433,7 +336,7 @@ export function JalonStep({ step, plan, tracker, onNext }: StepProps) {
   return (
     <Card>
       <StepTitle hint={t("feuil.jalon.hint")}>{t("feuil.jalon.title")}</StepTitle>
-      <EpisodeText episode={episode} pass="jalon" onReveal={(l, k) => { setTaps((n) => n + 1); reveal(l, k); }} />
+      <EpisodeText episode={episode} onReveal={(l, k) => { setTaps((n) => n + 1); reveal(l, k); }} />
       {!done ? (
         <NextButton label={t("feuil.jalon.done")} onClick={() => setDone(true)} />
       ) : (
@@ -467,9 +370,15 @@ export function RecapStep({ step, plan, tracker, onNext }: StepProps) {
             <div key={i} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               <div style={{ fontWeight: 700 }}>{p.title}</div>
               <div style={{ color: "var(--muted)", fontSize: 14 }}>{p.learner_goal}</div>
-              <p style={{ margin: "6px 0" }}>{p.explanation}</p>
+              {/* La règle de la leçon du point quand elle existe, sinon l'explication de l'épisode. */}
+              <p style={{ margin: "6px 0" }}>{p.rule || p.explanation}</p>
+              {p.remember && (
+                <p style={{ margin: "0 0 6px", padding: "6px 10px", borderRadius: "var(--radius-sm)", background: "var(--accent-soft)", fontSize: 14 }}>
+                  <strong>{t("feuil.lecon.remember")} :</strong> <bdi dir="auto">{p.remember}</bdi>
+                </p>
+              )}
               {episode && (
-                <EpisodeText episode={episode} pass="recap" highlights={p.highlights}
+                <EpisodeText episode={episode} highlights={p.highlights}
                              onlyLines={p.highlights.map((h) => h.line)} onReveal={revealFor(tracker, episode, "recap")} />
               )}
             </div>
@@ -536,14 +445,13 @@ export function AuRevoirStep({ step, plan, onNext }: StepProps) {
   const episode = take ? episodeOf(plan, take.episode_ref) : undefined;
   const feeling = step.feeling as { question: string; options: string[] } | undefined;
   const [picked, setPicked] = useState<string | null>(null);
-  const pass: Pass = "library";
   return (
     <Card>
       <StepTitle>{t("feuil.goodbye.title")}</StepTitle>
       {take && episode && (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>{t("feuil.goodbye.take")}</div>
-          <EpisodeText episode={episode} pass={pass} onlyLines={[take.line]} />
+          <EpisodeText episode={episode} onlyLines={[take.line]} />
           <div style={{ fontStyle: "italic", color: "var(--text-soft)" }}>{take.translation}</div>
         </div>
       )}

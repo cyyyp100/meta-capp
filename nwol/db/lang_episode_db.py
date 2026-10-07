@@ -316,6 +316,17 @@ def played_episodes(profile_id: int, *, limit: int = 20, before_n: int | None = 
     return [_decode(r, _EPISODE_DECODE) for r in get_connection().execute(sql, params).fetchall()]
 
 
+def played_lines(profile_id: int) -> list[str]:
+    """Texte de chaque réplique des épisodes joués : tout ce que l'apprenant a
+    déjà lu, dans l'ordre des épisodes."""
+    rows = get_connection().execute(
+        "SELECT lines_json FROM lang_episodes WHERE profile_id=? AND status='played' ORDER BY episode_n",
+        (profile_id,),
+    ).fetchall()
+    return [str(ln.get("text") or "") for r in rows for ln in _loads(r["lines_json"], []) or []
+            if isinstance(ln, dict)]
+
+
 def requeue_stuck_generations() -> int:
     """G20 : un épisode resté `generating` (application fermée pendant la
     génération) repasse `queued` au démarrage."""
@@ -445,26 +456,53 @@ def get_reveals(run_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def reveals_for_episode(profile_id: int, episode_id: int, pass_: str = "p2") -> list[dict]:
+def _in(values: Iterable[str]) -> tuple[str, list[str]]:
+    values = list(values)
+    return ", ".join("?" * len(values)), values
+
+
+def reveals_for_episode(profile_id: int, episode_id: int, passes: Iterable[str] = ("p2",)) -> list[dict]:
     """Taps d'un épisode, toutes séances confondues (jalons : première lecture)."""
+    marks, values = _in(passes)
     rows = get_connection().execute(
-        """SELECT e.*, r.started_at AS run_started_at FROM lang_reveal_events e
-           JOIN lang_runs r ON r.id = e.run_id
-           WHERE r.profile_id=? AND e.episode_id=? AND e.pass=? ORDER BY e.run_id""",
-        (profile_id, episode_id, pass_),
+        f"""SELECT e.*, r.started_at AS run_started_at FROM lang_reveal_events e
+            JOIN lang_runs r ON r.id = e.run_id
+            WHERE r.profile_id=? AND e.episode_id=? AND e.pass IN ({marks}) ORDER BY e.run_id""",
+        (profile_id, episode_id, *values),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
-def p2_reveal_counts(profile_id: int) -> dict[int, int]:
-    """Taps du passage 2 par épisode, toutes séances confondues."""
+def reveal_counts(profile_id: int, passes: Iterable[str]) -> dict[int, int]:
+    """Taps par épisode pendant les lectures `passes`, toutes séances confondues."""
+    marks, values = _in(passes)
     rows = get_connection().execute(
-        """SELECT e.episode_id AS eid, COUNT(*) AS n FROM lang_reveal_events e
-           JOIN lang_runs r ON r.id = e.run_id
-           WHERE r.profile_id=? AND e.pass='p2' GROUP BY e.episode_id""",
-        (profile_id,),
+        f"""SELECT e.episode_id AS eid, COUNT(*) AS n FROM lang_reveal_events e
+            JOIN lang_runs r ON r.id = e.run_id
+            WHERE r.profile_id=? AND e.pass IN ({marks}) GROUP BY e.episode_id""",
+        (profile_id, *values),
     ).fetchall()
     return {int(r["eid"]): int(r["n"]) for r in rows if r["eid"] is not None}
+
+
+def add_line_reveals(run_id: int, events: list[dict]) -> int:
+    """« Traduction montrée » d'une réplique ; une fois par (épisode, réplique, passe)."""
+    conn = get_connection()
+    with conn:
+        cur = conn.executemany(
+            """INSERT OR IGNORE INTO lang_line_reveals (run_id, episode_id, line_idx, pass, via)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(run_id, int(e["episode_id"]), int(e["line_idx"]), e.get("pass") or "lecture", e.get("via") or "line")
+             for e in events],
+        )
+    return int(cur.rowcount or 0)
+
+
+def get_line_reveals(run_id: int) -> list[dict]:
+    rows = get_connection().execute(
+        "SELECT * FROM lang_line_reveals WHERE run_id=? ORDER BY id", (run_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def upsert_attempt(run_id: int, step: str, game_kind: str, item_ref: str, *, expected: Any,
@@ -508,6 +546,95 @@ def get_second_wave_ratings(run_id: int) -> list[dict]:
         "SELECT * FROM lang_second_wave_ratings WHERE run_id=? ORDER BY id", (run_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Leçon d'un point (v40), partagée entre profils ────────────────────────────
+
+_LESSON_DECODE = {"lesson_json": None, "generation_json": {}}
+
+
+def get_point_lesson(language: str, point_id: str, explain_lang: str) -> dict | None:
+    row = get_connection().execute(
+        "SELECT * FROM lang_point_lessons WHERE language=? AND point_id=? AND explain_lang=?",
+        (language, point_id, explain_lang),
+    ).fetchone()
+    return _decode(row, _LESSON_DECODE)
+
+
+def save_point_lesson(language: str, point_id: str, explain_lang: str, *, status: str, lesson: dict | None,
+                      point_hash: str, model: str | None, attempts: int, generation: dict | None) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """INSERT INTO lang_point_lessons
+               (language, point_id, explain_lang, status, lesson_json, point_hash, model, attempts, generation_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(language, point_id, explain_lang) DO UPDATE SET
+                 status=excluded.status, lesson_json=excluded.lesson_json, point_hash=excluded.point_hash,
+                 model=excluded.model, attempts=excluded.attempts, generation_json=excluded.generation_json,
+                 updated_at=datetime('now')""",
+            (language, point_id, explain_lang, status, _dumps(lesson), point_hash, model, int(attempts),
+             _dumps(generation)),
+        )
+
+
+# ── Expression écrite (v40) ───────────────────────────────────────────────────
+
+_WRITING_JSON = {"task", "checks", "feedback", "generation"}
+_WRITING_FIELDS = _WRITING_JSON | {"text", "status", "corrected_at", "seen_at"}
+_WRITING_DECODE = {"task_json": {}, "checks_json": None, "feedback_json": None, "generation_json": {}}
+
+
+def create_writing(profile_id: int, run_id: int | None, episode_id: int | None, *, task: dict, text: str,
+                   checks: dict | None, status: str) -> int:
+    """Une expression écrite ; une seule par séance (index unique partiel) :
+    l'id de celle qui existe déjà est renvoyé, sans rien écraser."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO lang_writings (profile_id, run_id, episode_id, task_json, text, checks_json, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (profile_id, run_id, episode_id, _dumps(task), text, _dumps(checks), status),
+        )
+    if run_id is None:
+        row = conn.execute("SELECT id FROM lang_writings WHERE rowid=last_insert_rowid()").fetchone()
+    else:
+        row = conn.execute("SELECT id FROM lang_writings WHERE run_id=?", (run_id,)).fetchone()
+    return int(row["id"])
+
+
+def get_writing(writing_id: int) -> dict | None:
+    row = get_connection().execute("SELECT * FROM lang_writings WHERE id=?", (writing_id,)).fetchone()
+    return _decode(row, _WRITING_DECODE)
+
+
+def get_writing_for_run(run_id: int) -> dict | None:
+    row = get_connection().execute("SELECT * FROM lang_writings WHERE run_id=?", (run_id,)).fetchone()
+    return _decode(row, _WRITING_DECODE)
+
+
+def update_writing(writing_id: int, **fields) -> None:
+    _update("lang_writings", "id=?", (writing_id,), fields, _WRITING_FIELDS, _WRITING_JSON)
+
+
+def latest_unseen_writing(profile_id: int) -> dict | None:
+    """La dernière correction prête que l'apprenant n'a pas encore vue."""
+    row = get_connection().execute(
+        """SELECT * FROM lang_writings WHERE profile_id=? AND status='ready' AND seen_at IS NULL
+           ORDER BY id DESC LIMIT 1""",
+        (profile_id,),
+    ).fetchone()
+    return _decode(row, _WRITING_DECODE)
+
+
+def requeue_stuck_writings() -> list[int]:
+    """Une correction restée `correcting` (application fermée pendant l'appel)
+    repasse `pending` au démarrage ; renvoie les ids à relancer."""
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE lang_writings SET status='pending' WHERE status='correcting'")
+    rows = conn.execute("SELECT id FROM lang_writings WHERE status='pending' ORDER BY id").fetchall()
+    return [int(r["id"]) for r in rows]
 
 
 # ── Lexique (D12) ─────────────────────────────────────────────────────────────

@@ -38,24 +38,36 @@ def _start(client, mode=None):
     return client.post(f"/api/lang/{LANG}/run/start", json={"mode": mode} if mode else {}).json()
 
 
-def _play(client, run, *, answers="right", signal="compris", taps=0, finish=True, feeling=True):
-    """Joue une séance : chaque étape est ouverte, jouée, fermée, un lot par étape."""
+WRITTEN = "Hoy estoy muy bien en la plaza con Carmen y Pablo, y hay una fiesta mañana."
+
+
+def _play(client, run, *, answers="right", signal="compris", taps=0, translate=(), finish=True, feeling=True,
+          write=WRITTEN):
+    """Joue une séance : chaque étape est ouverte, jouée, fermée, un lot par étape.
+    À la lecture, `taps` mots touchés et les répliques `translate` traduites ;
+    à la leçon, ses items comme ceux du texte ; à l'expression, `write` envoyé."""
     rid = run["run_id"]
     ep = run["episodes"].get(str(run.get("episode_id"))) if run.get("episode_id") else None
     for step in run["steps"]:
         events = [{"type": "step", "step": step["key"], "started": True}]
-        if step["kind"] == "episode_p2" and ep:
+        if step["kind"] == "lecture" and ep:
             words = [(li, ti) for li, ln in enumerate(ep["lines"]) for ti, t in enumerate(ln["tokens"]) if t["w"]]
             for li, ti in words[:taps]:
-                events.append({"type": "reveal", "episode_id": ep["id"], "line": li, "token": ti, "pass": "p2"})
+                events.append({"type": "reveal", "episode_id": ep["id"], "line": li, "token": ti, "pass": "lecture"})
+            for li in translate:
+                events.append({"type": "line", "episode_id": ep["id"], "line": li, "pass": "lecture"})
         items = [it for g in step.get("games", []) for it in g["items"]] + step.get("items", [])
+        if step["kind"] == "lecon":
+            items += client.get(f"/api/lang/run/{rid}/lesson").json()["lesson_items"]
         for it in items:
             given = it.get("expected") if answers == "right" else ("__faux__" if answers == "wrong" else None)
             events.append({"type": "answer", "item": it["ref"], "given": given, "ms": 800})
         for line in step.get("lines", []) if step["kind"] == "deuxieme_vague" else []:
             events.append({"type": "rating", "episode_id": step["episode_ref"], "line": line["line"], "rating": "su"})
+        if step["kind"] == "expression" and write is not None:
+            client.post(f"/api/lang/run/{rid}/writing", json={"text": write})
         events.append({"type": "step", "step": step["key"], "ended": True, "active_s": 60,
-                       "signal": signal if step["kind"].startswith("episode") else None})
+                       "signal": signal if step["kind"] == "lecture" else None})
         client.post(f"/api/lang/run/{rid}/events", json={"events": events, "current_step": step["key"]})
     if not finish:
         return None
@@ -144,29 +156,36 @@ def test_an_episode_run_is_assembled_without_any_llm_call(client, fake, clock):
     run = _start(client)
     assert len(fake.CALLS) == calls, "une séance ne doit jamais attendre Clikoda"
     assert run["mode"] == "episode" and run["episode_n"] == 1
+    assert run["version"] == 2
     kinds = [s["kind"] for s in run["steps"]]
-    assert kinds == ["episode_p1", "episode_p2", "notes", "point", "jeux", "au_revoir"]
+    assert kinds == ["lecture", "lecon", "expression", "jeux", "au_revoir"]
+    assert [s["key"] for s in run["steps"] if s["essential"]] == ["lecture", "expression", "au_revoir"]
     ep = run["episodes"][str(run["episode_id"])]
     assert all("".join(t["text"] for t in ln["tokens"]) for ln in ep["lines"])
     assert any(t.get("g") is not None for ln in ep["lines"] for t in ln["tokens"])
-    point = next(s for s in run["steps"] if s["kind"] == "point")
-    assert point["point"]["title"] == "Saluer et se présenter" and len(point["items"]) == 3
+    lecture = run["steps"][0]
+    assert lecture["translate_all"] is True and lecture["notes"]  # palier A1 : « Tout traduire » proposé
+    lecon = next(s for s in run["steps"] if s["kind"] == "lecon")
+    assert lecon["point"]["title"] == "Saluer et se présenter" and len(lecon["items"]) == 3
+    assert lecon["lesson"]["rule"] and not lecon["lesson_pending"] and len(lecon["lesson_items"]) == 3
+    expression = next(s for s in run["steps"] if s["kind"] == "expression")
+    assert expression["task"]["prompt"] and expression["task"]["use_words"]
+    assert {k["char"] for g in expression["keyboard"]["groups"] for k in g["keys"]} >= {"ñ", "¿", "á"}
     games = next(s for s in run["steps"] if s["kind"] == "jeux")["games"]
-    assert len(games) == 2 and games[-1]["ease"] == min(g["ease"] for g in games)
+    assert len(games) == 3 and games[-1]["ease"] == min(g["ease"] for g in games)
     assert run["steps"][-1]["essential"] is True
 
 
-def test_next_episode_is_written_when_the_notes_step_starts(client, fake, clock):
+def test_next_episode_is_written_when_the_lesson_step_starts(client, fake, clock):
     _onboard(client)
     run = _start(client)
     rid = run["run_id"]
     client.post(f"/api/lang/run/{rid}/events", json={"events": [
-        {"type": "step", "step": "episode_p1", "ended": True, "active_s": 90},
-        {"type": "step", "step": "episode_p2", "ended": True, "active_s": 60, "signal": "compris"},
-    ], "current_step": "episode_p2"})
+        {"type": "step", "step": "lecture", "ended": True, "active_s": 150, "signal": "compris"},
+    ], "current_step": "lecture"})
     assert _episode(2) is None
-    client.post(f"/api/lang/run/{rid}/events", json={"events": [{"type": "step", "step": "notes", "started": True}],
-                                                     "current_step": "notes"})
+    client.post(f"/api/lang/run/{rid}/events", json={"events": [{"type": "step", "step": "lecon", "started": True}],
+                                                     "current_step": "lecon"})
     assert _episode(2)["status"] == "ready"
     assert _episode(1)["status"] == "played" and _profile()["episode_n"] == 1
     assert _episode(2)["program_point_id"] == "es.a1.ser_identidad"
@@ -177,8 +196,8 @@ def test_answers_are_regraded_by_the_service_and_unanswered_is_null(client, fake
 
     _onboard(client)
     run = _start(client)
-    point = next(s for s in run["steps"] if s["kind"] == "point")
-    first, second = point["items"][0], point["items"][1]
+    lecon = next(s for s in run["steps"] if s["kind"] == "lecon")
+    first, second = lecon["items"][0], lecon["items"][1]
     client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [
         {"type": "answer", "item": first["ref"], "given": "__faux__"},
         {"type": "answer", "item": second["ref"], "given": None},
@@ -387,28 +406,36 @@ def test_milestone_and_second_wave(client, fake, clock):
 def test_same_day_run_is_resumed_and_older_ones_abandoned(client, fake, clock):
     _onboard(client)
     run = _start(client)
-    client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [], "current_step": "episode_p2"})
+    client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [], "current_step": "lecon"})
     again = _start(client)
-    assert again["run_id"] == run["run_id"] and again["resumed"] and again["current_step"] == "episode_p2"
+    assert again["run_id"] == run["run_id"] and again["resumed"] and again["current_step"] == "lecon"
     clock["advance"]()
     fresh = _start(client)
     assert fresh["run_id"] != run["run_id"]
     assert client.get(f"/api/lang/run/{run['run_id']}").json()["status"] == "abandoned"
 
 
-def test_duration_cap_sends_the_learner_to_goodbye(client, fake, clock):
+def test_duration_cap_skips_to_the_next_essential_step(client, fake, clock):
+    """R24 : au plafond, les étapes non essentielles sautent ; l'expression écrite
+    et l'au revoir sont toujours joués, dans cet ordre."""
+    from config.settings import LANG_RUN_MAX_S
+
     _onboard(client)
     run = _start(client)
-    res = client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [
-        {"type": "step", "step": "episode_p1", "ended": True, "active_s": 1300}]}).json()
-    assert res["cap_reached"] and res["skip_to"] == "au_revoir"
+    events = f"/api/lang/run/{run['run_id']}/events"
+    res = client.post(events, json={"events": [
+        {"type": "step", "step": "lecture", "ended": True, "active_s": LANG_RUN_MAX_S + 100}]}).json()
+    assert res["cap_reached"] and res["skip_to"] == "expression"
+    res = client.post(events, json={"events": [{"type": "step", "step": "expression", "ended": True}]}).json()
+    assert res["skip_to"] == "au_revoir"
 
 
 def test_short_and_reread_modes_on_request(client, fake, clock):
     _onboard(client)
     court = _start(client, "court")
     assert court["mode"] == "court"
-    assert [s["kind"] for s in court["steps"]] == ["rappel", "episode_p1", "episode_p2", "point", "au_revoir"]
+    assert [s["kind"] for s in court["steps"]] == ["rappel", "lecture", "lecon", "au_revoir"]
+    assert court["steps"][2]["compact"] is True and court["pregen_step"] == "lecon"
     _play(client, court)
     clock["advance"]()
     relecture = _start(client, "relecture")
@@ -558,10 +585,14 @@ def test_an_english_interface_gets_an_english_feuilleton(client, fake, clock, en
     ep = run["episodes"][str(run["episode_id"])]
     assert ep["explain_lang"] == "en" and ep["lines"][0]["translation"] == "Hi, Pablo. How are you today?"
     assert any(g["translation"] == "hello" for g in ep["glossary"])
-    notes = next(s for s in run["steps"] if s["kind"] == "notes")["notes"]
+    notes = next(s for s in run["steps"] if s["kind"] == "lecture")["notes"]
     assert notes[0]["text"].startswith("Hola is used")
-    point = next(s for s in run["steps"] if s["kind"] == "point")["point"]
+    lecon = next(s for s in run["steps"] if s["kind"] == "lecon")
+    point = lecon["point"]
     assert point["title"] == "Greeting and introducing yourself" and point["learner_goal"].startswith("Can ")
+    assert lecon["lesson"]["rule"].startswith("Estar describes")  # leçon écrite en anglais pour lui
+    task = next(s for s in run["steps"] if s["kind"] == "expression")["task"]
+    assert task["explain_lang"] == "en" and "words" in task["prompt"]
     assert client.get(f"/api/lang/{LANG}/status").json()["program"]["point"] == "Greeting and introducing yourself"
     # La langue reste celle du feuilleton si l'interface change ensuite.
     client.post("/api/preferences/lang", json={"lang": "fr"})
@@ -677,3 +708,172 @@ def test_a_run_without_any_measure_counts_without_moving_the_profile(client, fak
     _onboard(client)
     assert int(ensure_profile()["sessions_count"]) == 1
     assert get_history() == []
+
+
+# ── Génération fiable, limites du modèle local ────────────────────────────────
+
+def test_a_reprise_respiration_starts_from_the_step_of_the_played_episode(client, fake, clock):
+    """Base de dev : l'épisode 3, décidé d'avance un cran plus haut, a été
+    redécidé en respiration par une reprise… en montant encore (3 → 4)."""
+    from db import lang_episode_db as store
+
+    _onboard(client)
+    _play(client, _start(client))
+    played_step = _episode(1)["ladder_step"]
+    store.update_episode(_episode(2)["id"], ladder_step=played_step + 1)
+    store.update_profile_fields(_profile()["id"], ladder_step=played_step + 1)
+    clock["advance"](10)
+    assert _start(client)["mode"] == "reprise"
+    assert _episode(2)["kind"] == "respiration" and _episode(2)["ladder_step"] == played_step
+    assert _profile()["ladder_step"] == played_step
+
+
+def test_feuilleton_cards_are_never_reimported_backwards(client):
+    """Les cartes du feuilleton ont le mot cible au recto : un profil recréé ne
+    les importe pas comme des cartes héritées (verso = mot cible)."""
+    _add_cards(2, due=True, prefix="du")
+    assert client.get(f"/api/lang/{LANG}/status").json()["words_seen"] == 0
+
+
+def test_status_names_the_local_model_and_when_to_mention_its_limits(client, fake, clock, monkeypatch):
+    from config.settings import OLLAMA_MODEL
+    from db import lang_episode_db as store
+    from llm import ollama_client
+
+    _onboard(client)
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["model"] == OLLAMA_MODEL and status["pro_hints"] == [] and status["generation_failures"] == 0
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err("panne"))
+    _play(client, _start(client))  # l'épisode 2 échoue une fois…
+    assert client.get(f"/api/lang/{LANG}/status").json()["pro_hints"] == []
+    # Un échec journalisé avant que le compte existe vaut un, ici comme au générateur.
+    failed = _episode(2)
+    legacy = {k: v for k, v in failed["generation"].items() if k != "failures"}
+    store.update_episode(failed["id"], generation=legacy)
+    assert legacy.get("error") and client.get(f"/api/lang/{LANG}/status").json()["generation_failures"] == 1
+    clock["advance"]()
+    _start(client)  # … et une deuxième à la séance suivante
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["generation_failures"] == 2 and status["pro_hints"] == ["generation"]
+    assert _episode(2)["generation"]["failures"] == 2
+    store.update_profile_fields(_profile()["id"], program_order=store.program_size(LANG))
+    assert "program_end" in client.get(f"/api/lang/{LANG}/status").json()["pro_hints"]
+
+
+def test_the_journal_says_what_was_estimated_and_repaired(client, fake, clock):
+    _onboard(client)
+    gen = _episode(1)["generation"]
+    assert gen["soft_accepted"] == [] and gen["lemma_repairs"] == [] and gen["failures"] == 0
+    assert gen["new_words_estimate"]["checked"] is False  # lexique vide : rien à contrôler
+    assert gen["new_words_estimate"]["estimate"] > 0
+
+
+def test_a_placed_learner_is_never_refused_for_new_words(client, fake, clock):
+    """Les deux profils placés de la base de dev : leur lexique ne dit rien de
+    ce qu'ils savent, le contrôle ne s'applique pas à eux."""
+    from db import lang_episode_db as store
+
+    items = client.get(f"/api/lang/{LANG}/placement").json()["items"]
+    keys = {it["id"]: it["answer"] for it in store.get_placement_items(LANG)}
+    client.post(f"/api/lang/{LANG}/placement/submit", json={"answers": {it["id"]: keys[it["id"]] for it in items[:5]}})
+    for i in range(80):
+        store.insert_lexeme(_profile()["id"], {"form": f"x{i}", "lemma": f"x{i}", "translation": "y"}, 1)
+    _play(client, _start(client))
+    gen = _episode(2)["generation"]
+    assert _episode(2)["status"] == "ready" and gen["new_words_estimate"]["checked"] is False
+
+
+# ── Une seule lecture, aide à la demande ──────────────────────────────────────
+
+def test_a_translated_line_counts_as_an_exposure_only(client, fake, clock):
+    """Une réplique dont la traduction a été montrée ne dit rien de ce que
+    l'apprenant lit seul : ses mots ne sont ni reconnus ni ratés."""
+    from db import lang_episode_db as store
+
+    _onboard(client)
+    run = _start(client)
+    ep = run["episodes"][str(run["episode_id"])]
+    _play(client, run, translate=range(len(ep["lines"])), answers=None)  # les jeux compteraient aussi
+    lexicon = store.get_lexicon(_profile()["id"])
+    assert lexicon and all(row["recognitions_ok"] == 0 and row["recognitions_ko"] == 0 for row in lexicon.values())
+    assert all(row["exposures"] >= 1 for row in lexicon.values())
+    clock["advance"]()
+    run = _start(client)
+    _play(client, run, answers=None)  # lue seule, la même lecture reconnaît ses mots
+    assert any(row["recognitions_ok"] for row in store.get_lexicon(_profile()["id"]).values())
+
+
+def test_translate_all_at_a1_is_never_a_hard_verdict(client, fake, clock):
+    """« Tout traduire » est une aide prévue au palier A1 : la séance suivante
+    n'est pas une respiration."""
+    _onboard(client)
+    run = _start(client)
+    ep = run["episodes"][str(run["episode_id"])]
+    _play(client, run, translate=range(len(ep["lines"])))
+    signals = client.get(f"/api/lang/run/{run['run_id']}").json()["signals"]
+    assert signals["translated_share"] == 1.0 and signals["reveal_rate"] is None and signals["tier_index"] == 0
+    assert _episode(2)["kind"] == "normal" and _episode(2)["params"]["verdict"] != "hard"
+
+
+def test_an_open_run_of_the_old_format_is_abandoned(client, fake, clock):
+    """Une séance ouverte aux passages 1 et 2 (plan v1) n'est pas reprise : le
+    front n'en a plus les vues. Elle est abandonnée et une neuve est bâtie."""
+    from db import lang_episode_db as store
+
+    _onboard(client)
+    run = _start(client)
+    old_plan = {**store.get_run(run["run_id"])["plan"]}
+    old_plan.pop("version")
+    store.update_run(run["run_id"], plan=old_plan, current_step="episode_p2")
+    fresh = _start(client)
+    assert fresh["run_id"] != run["run_id"] and not fresh["resumed"] and fresh["version"] == 2
+    assert client.get(f"/api/lang/run/{run['run_id']}").json()["status"] == "abandoned"
+
+
+# ── La leçon du point ─────────────────────────────────────────────────────────
+
+def test_a_lesson_written_after_assembly_is_served_when_its_step_starts(client, fake, clock, monkeypatch):
+    """Tout premier épisode : sa leçon n'est pas encore écrite quand la séance
+    s'assemble. L'étape la redemande en y entrant — sans attente — et ses items
+    rejoignent le plan, corrigés comme les autres."""
+    from db import lang_episode_db as store
+    from llm import ollama_client
+    from services import lang_point_lesson
+
+    monkeypatch.setattr(ollama_client, "generate_lang_point_lesson_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err("panne"))
+    _onboard(client)
+    assert _episode(1)["status"] == "ready"  # l'échec de la leçon ne touche jamais l'épisode
+    run = _start(client)
+    lecon = next(s for s in run["steps"] if s["kind"] == "lecon")
+    assert lecon["lesson_pending"] and lecon["lesson"] is None and lecon["lesson_source"] == "fallback"
+    assert lecon["items"]  # les items du texte, eux, sont là
+    rid = run["run_id"]
+    fallback = client.get(f"/api/lang/run/{rid}/lesson").json()
+    assert fallback == {"lesson": None, "lesson_source": "fallback", "lesson_pending": True, "lesson_items": []}
+    monkeypatch.setattr(ollama_client, "generate_lang_point_lesson_async", fake.fake_lesson)
+    point_id = _episode(1)["program_point_id"]
+    store.save_point_lesson(LANG, point_id, "fr", status="failed", lesson=None, point_hash="", model="m",
+                            attempts=0, generation={})
+    assert lang_point_lesson.ensure_point_lesson(LANG, point_id, "fr") == "ready"
+    served = client.get(f"/api/lang/run/{rid}/lesson").json()
+    assert served["lesson"]["rule"] and not served["lesson_pending"] and len(served["lesson_items"]) == 3
+    item = served["lesson_items"][0]
+    client.post(f"/api/lang/run/{rid}/events", json={"events": [
+        {"type": "answer", "item": item["ref"], "given": item["expected"]}]})
+    attempts = {a["item_ref"]: a for a in store.get_attempts(rid)}
+    assert attempts[item["ref"]]["correct"] == 1 and attempts[item["ref"]]["step"] == "lecon"
+
+
+def test_the_bilan_and_the_library_reuse_the_lesson(client, fake, clock):
+    _onboard(client)
+    for _ in range(6):
+        _play(client, _start(client))
+        clock["advance"]()
+    run = _start(client)
+    recap = next(s for s in run["steps"] if s["kind"] == "recap")
+    assert all(p.get("rule") and p.get("remember") for p in recap["points"])
+    library = client.get(f"/api/lang/{LANG}/library").json()
+    view = client.get(f"/api/lang/episode/{library[0]['id']}").json()
+    assert view["lesson"]["rule"] and view["lesson"]["examples"]

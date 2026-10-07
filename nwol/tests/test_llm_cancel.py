@@ -202,6 +202,9 @@ def test_every_language_task_has_a_priority():
     prio = ollama_client._TASK_PRIORITY
     assert prio["lang_correction"] < prio["lang_content_dialogue"]
     assert prio["lang_episode_text"] < prio["document_digest"]
+    # La correction d'une expression écrite est attendue à l'écran de fin : elle
+    # passe devant les épisodes en file ; une leçon cède le pas à tout épisode.
+    assert prio["lang_writing_feedback"] < prio["lang_episode_text"] < prio["lang_point_lesson"]
 
 
 def test_call_metrics_are_collected_per_task(monkeypatch, captured_queue):

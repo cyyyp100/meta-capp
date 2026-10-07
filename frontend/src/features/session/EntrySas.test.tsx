@@ -29,8 +29,8 @@ const card = (id: number): Flashcard => ({
 
 function preferences(entrySas: string): PreferencesPayload {
   return {
-    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: entrySas },
-    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: ["30", "60", "120"] },
+    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: entrySas, lang_pro_note_dismissed: "false" },
+    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: ["30", "60", "120"], lang_pro_note_dismissed: [] },
     lang: "fr",
     supported_langs: ["fr", "en"],
     user: { id: 1, name: "Élève" },

@@ -333,9 +333,10 @@ def build_game(kind: str, episode: dict, family: str, seed: int, prefix: str) ->
 
 def choose_games(episode: dict, family: str, seed: int, recent_kinds: list[list[str]],
                  exclude: tuple[str, ...] = POINT_KINDS) -> list[dict]:
-    """R6 + R22 : deux jeux, jamais ceux des LANG_GAMES_AVOID_LAST_RUNS séances
-    précédentes quand c'est possible, le dernier toujours parmi les plus faciles.
-    Les formes déjà jouées au point du jour (`exclude`) n'y reviennent pas."""
+    """R6 + R22 : LANG_GAMES_PER_RUN jeux, si possible aucun de ceux des
+    LANG_GAMES_AVOID_LAST_RUNS séances précédentes, du plus difficile au plus
+    facile — le dernier toujours parmi les plus faciles. Les formes déjà jouées
+    à l'entraînement de la leçon (`exclude`) n'y reviennent pas."""
     avoid = {k for kinds in recent_kinds[:LANG_GAMES_AVOID_LAST_RUNS] for k in kinds}
     rng = random.Random(seed)
     catalogue = [k for k, meta in GAMES.items() if family in meta["families"] and k not in exclude]
@@ -350,20 +351,24 @@ def choose_games(episode: dict, family: str, seed: int, recent_kinds: list[list[
     easiest = min(GAMES[k]["ease"] for k in built)
     easy = [k for k in fresh if GAMES[k]["ease"] == easiest] or [k for k in built if GAMES[k]["ease"] == easiest]
     last = rng.choice(sorted(easy))
-    first_pool = [k for k in fresh if k != last and GAMES[k]["ease"] >= GAMES[last]["ease"]] or \
-                 [k for k in built if k != last]
-    chosen = [rng.choice(sorted(first_pool))] if first_pool and LANG_GAMES_PER_RUN > 1 else []
-    return [built[k] for k in chosen] + [built[last]]
+    # Les autres : d'abord les jeux neufs, puis (s'il en manque) les récents.
+    neufs = sorted(k for k in fresh if k != last)
+    recents = sorted(k for k in built if k != last and k not in neufs)
+    rng.shuffle(neufs)
+    rng.shuffle(recents)
+    others = (neufs + recents)[: max(0, LANG_GAMES_PER_RUN - 1)]
+    others.sort(key=lambda k: -GAMES[k]["ease"])  # tri stable : le plus difficile d'abord
+    return [built[k] for k in others] + [built[last]]
 
 
-def point_micro_items(episode: dict, family: str, seed: int) -> list[dict]:
-    """R5 / G14 : trois micro-manipulations autour du point du jour — repérer une
-    forme dans le texte, puis choisir la bonne forme ; complétées par une
-    réplique à trous si le point manque d'exemples."""
+def point_micro_items(episode: dict, family: str, seed: int, prefix: str = "lecon") -> list[dict]:
+    """R5 / G14 : trois micro-manipulations autour du point, dans le texte de
+    l'épisode — repérer une forme dans le texte, puis choisir la bonne forme ;
+    complétées par une réplique à trous si le point manque d'exemples."""
     rng = random.Random(seed)
     items: list[dict] = []
     for kind in ("trouver_dans_le_texte", "bonne_forme", "completer_replique"):
-        game = build_game(kind, episode, family, rng.randint(0, 10**6), prefix="point")
+        game = build_game(kind, episode, family, rng.randint(0, 10**6), prefix=prefix)
         if not game:
             continue
         take = 1 if kind == "trouver_dans_le_texte" else LANG_POINT_MICRO_ITEMS - len(items)

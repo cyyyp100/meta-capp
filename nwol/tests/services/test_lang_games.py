@@ -61,14 +61,20 @@ def test_who_said_it_needs_a_dialogue():
     assert games.build_game("qui_a_dit", _episode("lettre"), "latin", 1, "p") is None
 
 
-def test_last_game_is_the_easiest_and_recent_games_are_avoided():
+def test_three_games_end_with_the_easiest_and_recent_games_are_avoided():
+    from config.settings import LANG_GAMES_PER_RUN
+
     ep = _episode()
     chosen = games.choose_games(ep, "latin", seed=3, recent_kinds=[])
-    assert len(chosen) == 2 and chosen[-1]["ease"] == 1
-    assert chosen[0]["ease"] >= chosen[1]["ease"]
+    assert len(chosen) == LANG_GAMES_PER_RUN == 3 and len({g["kind"] for g in chosen}) == 3
+    assert chosen[-1]["ease"] == 1
+    assert [g["ease"] for g in chosen] == sorted((g["ease"] for g in chosen), reverse=True)
+    # Quatre jeux latins hors micro-items : après une séance, il en reste un
+    # neuf — il est joué, complété par des jeux récents.
     avoid = [[g["kind"] for g in chosen]]
+    latin = {k for k, meta in games.GAMES.items() if "latin" in meta["families"] and k not in games.POINT_KINDS}
     again = games.choose_games(ep, "latin", seed=3, recent_kinds=avoid)
-    assert not {g["kind"] for g in again} & set(avoid[0]) or len(games.GAMES) < 4
+    assert len(again) == 3 and latin - set(avoid[0]) <= {g["kind"] for g in again}
 
 
 def test_variety_over_several_runs():
@@ -91,6 +97,7 @@ def test_seed_makes_games_reproducible():
 def test_point_micro_items_are_three():
     items = games.point_micro_items(_episode(), "latin", seed=5)
     assert len(items) == 3 and items[0]["kind"] == "trouver_dans_le_texte"
+    assert all(it["ref"].startswith("lecon.") for it in items)
 
 
 def test_ordering_game_keeps_logical_order_for_rtl():

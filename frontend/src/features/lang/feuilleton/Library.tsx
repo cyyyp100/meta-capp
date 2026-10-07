@@ -1,13 +1,17 @@
 // Library — Les épisodes déjà joués, en lecture libre et sans score (F12).
+//
+// Rien n'y est mesuré : ni taps, ni traductions montrées. Un épisode se relit
+// avec ses notes et la leçon de son point, quand elle est écrite.
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "../../../api/client";
 import { useT } from "../../../i18n";
 import { EpisodeText } from "./EpisodeText";
+import { LessonBody } from "./Lecon";
 import { Card, ghostBtn, StepTitle } from "./ui";
 
-export function Library({ language, onClose }: { language: string; onClose: () => void }) {
+export function Library({ language, rtl = false, onClose }: { language: string; rtl?: boolean; onClose: () => void }) {
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
   const { data: list } = useQuery({ queryKey: ["feuil", "library", language], queryFn: () => api.feuilletonLibrary(language) });
@@ -22,16 +26,16 @@ export function Library({ language, onClose }: { language: string; onClose: () =
       <Card>
         <button style={{ ...ghostBtn, marginBottom: 12 }} onClick={() => setOpen(null)}>{t("feuil.library.back")}</button>
         <StepTitle hint={episode.summary}>{`${t("feuil.episode_n", { n: episode.n })} — ${episode.title}`}</StepTitle>
-        <EpisodeText episode={episode} pass="p1" translation="masquable" />
-        {episode.notes.length > 0 && (
-          <ol style={{ marginTop: 16, paddingInlineStart: 22, display: "grid", gap: 6 }}>
-            {episode.notes.map((n) => <li key={n.n} value={n.n}>{n.text}</li>)}
-          </ol>
-        )}
+        <EpisodeText episode={episode} translation="toggle" notes={episode.notes} />
         {episode.point?.title && (
-          <p style={{ marginTop: 12 }}>
-            <strong>{episode.point.title}</strong> — {episode.point.explanation}
-          </p>
+          <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+            <strong>{`${t("feuil.lecon.title")} : ${episode.point.title}`}</strong>
+            {episode.lesson ? (
+              <LessonBody lesson={episode.lesson} rtl={rtl} />
+            ) : (
+              <p style={{ margin: "6px 0 0" }}>{episode.point.explanation}</p>
+            )}
+          </div>
         )}
       </Card>
     );

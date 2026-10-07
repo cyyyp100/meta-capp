@@ -205,6 +205,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 39)
         current = 39
 
+    if current < 40 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v40(conn)
+        _set_version(conn, 40)
+        current = 40
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1707,6 +1712,83 @@ def _migrate_to_v39(conn) -> None:
             if target is not None and target != name:
                 _merge_subject(conn, name, target)
     logger.info("Migration SQLite v39 terminée")
+
+
+def _migrate_to_v40(conn) -> None:
+    """Feuilleton : leçon du point, expression écrite, traductions montrées.
+
+    - `lang_point_lessons` : la leçon d'un point du programme, écrite par
+      Clikoda une fois par (langue, point, langue d'explication) et PARTAGÉE
+      entre profils ; `point_hash` est l'empreinte du point qu'elle explique —
+      un point réécrit dans nwol/data/lang/ fait réécrire sa leçon ;
+    - `lang_writings` : l'expression écrite d'une séance (une au plus, index
+      unique partiel sur `run_id`), corrigée en arrière-plan ; en cascade sur
+      le profil ;
+    - `lang_line_reveals` : « traduction montrée » d'une réplique pendant une
+      lecture (`via` : la réplique seule, ou « Tout traduire »). Une table à
+      part plutôt qu'un jeton -1 dans `lang_reveal_events` : en Python,
+      `tokens[-1]` désignerait le dernier mot de la réplique.
+
+    Tables neuves uniquement : rejouée, la migration ne change rien."""
+    logger.info("Migration SQLite v40 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_point_lessons (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   language        TEXT NOT NULL,
+                   point_id        TEXT NOT NULL,
+                   explain_lang    TEXT NOT NULL DEFAULT 'fr',
+                   status          TEXT NOT NULL DEFAULT 'ready',
+                   lesson_json     TEXT,
+                   point_hash      TEXT NOT NULL DEFAULT '',
+                   model           TEXT,
+                   attempts        INTEGER NOT NULL DEFAULT 0,
+                   generation_json TEXT,
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   updated_at      DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(language, point_id, explain_lang)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_writings (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   profile_id      INTEGER NOT NULL REFERENCES lang_profiles(id) ON DELETE CASCADE,
+                   run_id          INTEGER REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id      INTEGER REFERENCES lang_episodes(id) ON DELETE SET NULL,
+                   task_json       TEXT NOT NULL,
+                   text            TEXT NOT NULL DEFAULT '',
+                   checks_json     TEXT,
+                   status          TEXT NOT NULL DEFAULT 'pending',
+                   feedback_json   TEXT,
+                   generation_json TEXT,
+                   created_at      DATETIME DEFAULT (datetime('now')),
+                   corrected_at    DATETIME,
+                   seen_at         DATETIME
+               )"""
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_lang_writings_run ON lang_writings(run_id) "
+            "WHERE run_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_writings_profile ON lang_writings(profile_id, status)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_line_reveals (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   episode_id INTEGER NOT NULL REFERENCES lang_episodes(id) ON DELETE CASCADE,
+                   line_idx   INTEGER NOT NULL,
+                   pass       TEXT NOT NULL,
+                   via        TEXT NOT NULL DEFAULT 'line',
+                   at         DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(run_id, episode_id, line_idx, pass)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lang_line_reveals_run ON lang_line_reveals(run_id)"
+        )
+    logger.info("Migration SQLite v40 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

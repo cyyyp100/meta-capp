@@ -36,7 +36,6 @@ from config.settings import (
     LANG_LINES_SLACK,
     LANG_MAX_UNITS_PER_EPISODE,
     LANG_MAX_UNITS_PER_LINE,
-    LANG_NEW_WORDS_CHECK_MIN_LEXICON,
     LANG_NEW_WORDS_TOLERANCE,
     LANG_NOTE_MAX_CHARS,
     LANG_NOTES_PER_EPISODE,
@@ -44,6 +43,7 @@ from config.settings import (
     LANG_PREGEN_BUFFER,
     LANG_REPEAT_MAX_JACCARD,
     LANG_REPEAT_WINDOW,
+    LANG_SOFT_PROBLEM_RETRIES,
     LANG_SUMMARY_MAX_CHARS,
     LANG_TEASER_MAX_CHARS,
     LANG_TITLE_MAX_CHARS,
@@ -106,6 +106,20 @@ _LINGUISTIC_TRAITS = ("anglicisme", "jargon", "grammaire", "grammatical", "vocab
 
 class GenerationFailed(RuntimeError):
     pass
+
+
+class SoftProblem(str):
+    """Raison de refus « douce » : un défaut qui ne rend pas la sortie
+    inutilisable (trop de mots nouveaux, estimés). `_attempts(soft_ok=True)`
+    garde la meilleure tentative qui n'a que des problèmes doux ; `weight` dit
+    de combien elle dépasse (1 = juste à la limite), pour choisir entre deux."""
+
+    weight: float
+
+    def __new__(cls, text: str, weight: float = 1.0):
+        obj = super().__new__(cls, text)
+        obj.weight = float(weight)
+        return obj
 
 
 # ── Contexte d'une langue ─────────────────────────────────────────────────────
@@ -204,23 +218,47 @@ def _llm(fn, params: dict, log: list[dict], metrics: list[dict], task: str):
         return None
 
 
-def _attempts(task: str, fn, build_params, validate, log: list[dict], metrics: list[dict]):
+def _attempts(task: str, fn, build_params, validate, log: list[dict], metrics: list[dict], *,
+              soft_ok: bool = False):
     """Rejoue un appel jusqu'à LANG_GEN_MAX_ATTEMPTS_PER_CALL ; chaque refus
-    alimente le prompt suivant (`rejected`) et le journal (G10)."""
+    alimente le prompt suivant (`rejected`) et le journal (G10).
+
+    `soft_ok` : une tentative dont tous les problèmes sont doux (`SoftProblem`)
+    est gardée. Elle est relancée au plus LANG_SOFT_PROBLEM_RETRIES fois — le
+    modèle ne réduit pas ses mots nouveaux quand on le lui redemande —, puis la
+    meilleure (poids le plus faible) est acceptée et marquée `soft_accepted` au
+    journal. Une erreur dure échoue comme avant."""
     rejected = ""
+    best: tuple[float, object, dict] | None = None
+    soft_retries = 0
     for attempt in range(1, LANG_GEN_MAX_ATTEMPTS_PER_CALL + 1):
+        if best is not None:
+            if soft_retries >= LANG_SOFT_PROBLEM_RETRIES:
+                break
+            soft_retries += 1
         result = _llm(fn, build_params(rejected), log, metrics, task)
         if result is None:
             continue
         value, errors = validate(result)
-        entry = {"task": task, "attempt": attempt, "ok": not errors, "errors": errors[:8],
+        soft = bool(errors) and all(isinstance(e, SoftProblem) for e in errors)
+        entry = {"task": task, "attempt": attempt, "ok": not errors, "errors": [str(e) for e in errors[:8]],
                  "excerpt": _excerpt(result)}
+        if soft:
+            entry["soft"] = True
         if KEEP_RAW:
             entry["raw"] = result
         log.append(entry)
         if not errors:
             return value
+        if soft_ok and soft:
+            weight = sum(e.weight for e in errors)
+            if best is None or weight < best[0]:
+                best = (weight, value, entry)
         rejected = " ; ".join(errors[:5])
+    if best is not None:
+        best[2]["soft_accepted"] = True
+        logger.info("%s accepté malgré : %s", task, " ; ".join(best[2]["errors"]))
+        return best[1]
     raise GenerationFailed(f"{task} : {LANG_GEN_MAX_ATTEMPTS_PER_CALL} tentatives refusées")
 
 
@@ -425,12 +463,25 @@ def _arabic_problems(text: str, pausal: bool, lang: str = "fr") -> list[str]:
     return problems[:3]
 
 
-def _known(word: str, known: set[str]) -> bool:
+def _prefix_index(known: set[str]) -> dict[str, list[str]]:
+    """Mots connus regroupés par leurs quatre premières lettres : une forme
+    fléchie n'est rapprochée que d'un mot qui les partage (cf. `_known`)."""
+    index: dict[str, list[str]] = {}
+    for k in known:
+        if len(k) >= 4:
+            index.setdefault(k[:4], []).append(k)
+    return index
+
+
+def _known(word: str, known: set[str], index: dict[str, list[str]] | None = None) -> bool:
+    """Mot connu tel quel, ou forme fléchie d'un mot connu (même début, au plus
+    trois lettres de différence en fin de mot)."""
     if word in known:
         return True
     if len(word) < 4:
         return False
-    for k in known:
+    candidates = (index or {}).get(word[:4], []) if index is not None else known
+    for k in candidates:
         common = 0
         for a, b in zip(word, k):
             if a != b:
@@ -442,22 +493,29 @@ def _known(word: str, known: set[str]) -> bool:
 
 
 def estimate_new_words(language: str, lines: list[dict], ctx: dict) -> int:
-    """Mots (caractères pour le mandarin) du texte absents des acquis connus :
-    estimation au stade du texte, pour pouvoir rejouer CET appel (G4). Les mots
-    sont comparés par leur clé d'identité, accents compris : connaître « el »
-    ne rend pas « él » connu (§ 14, n° 4)."""
+    """Mots (caractères pour le mandarin) du texte que l'apprenant n'a jamais
+    rencontrés : estimation au stade du texte, pour pouvoir rejouer CET appel
+    (G4). Est connu un mot du lexique, et tout mot DÉJÀ LU dans un épisode joué
+    (`seen_forms`) — formes fléchies, mots courts et mots jamais glosés
+    compris ; en mandarin, les caractères vus ou lus (`read_chars`). Les
+    nombres ne sont pas des mots nouveaux. Les mots sont comparés par leur clé
+    d'identité, accents compris : connaître « el » ne rend pas « él » connu
+    (§ 14, n° 4)."""
     names = ctx.get("speakers") or set()
     if progress.family(language) == "hanzi":
-        seen = ctx.get("seen_chars") or set()
+        seen = set(ctx.get("seen_chars") or set()) | set(ctx.get("read_chars") or ())
         return len({c for ln in lines for c in mandarin.han_chars(ln["text"])} - seen)
-    known = ctx.get("lexicon_forms") or set()
+    known = set(ctx.get("lexicon_forms") or set()) | set(ctx.get("seen_forms") or set())
+    index = _prefix_index(known)
     fresh = set()
     for ln in lines:
         for w in words(ln["text"]):
+            if not any(c.isalpha() for c in w):
+                continue
             if fold(arabic.strip_harakat(w)) in names or w[:1].isupper() and fold(w) in names:
                 continue
             key = _match_key(language, w)
-            if not _known(key, known):
+            if not _known(key, known, index):
                 fresh.add(key)
     return len(fresh)
 
@@ -561,15 +619,21 @@ def validate_text(language: str, result: dict, ctx: dict) -> tuple[dict, list[st
             errors.append(_tr(lang, f"trop proche d'un épisode déjà écrit (« {title} ») : invente une autre situation",
                               f"too close to an episode already written (\"{title}\"): invent another situation"))
             break
-    if ctx.get("lexicon_size", 0) >= LANG_NEW_WORDS_CHECK_MIN_LEXICON:
-        new_max = params["new_words"][1]
-        if ctx.get("kind") == "respiration":
-            from config.settings import LANG_RESPIRATION_NEW_WORDS_FACTOR
-            new_max = max(1, round(new_max * LANG_RESPIRATION_NEW_WORDS_FACTOR))
+    # Mots nouveaux : toujours estimés (journal, banc), contrôlés seulement là
+    # où le lexique dit ce que l'apprenant sait (`check_new_words`, cf.
+    # progress.new_words_check_applies). Un dépassement est un problème DOUX.
+    if params.get("new_words"):
+        cap = progress.new_words_cap(params, ctx.get("kind"))
         fresh = estimate_new_words(language, lines, ctx)
-        if fresh > new_max * LANG_NEW_WORDS_TOLERANCE:
-            errors.append(_tr(lang, f"environ {fresh} mots nouveaux pour l'apprenant, {new_max} au plus : réemploie des mots déjà vus",
-                              f"about {fresh} new words for the learner, {new_max} at most: reuse words already seen"))
+        checked = bool(ctx.get("check_new_words"))
+        result["new_words_estimate"] = {"estimate": fresh, "cap": cap, "checked": checked}
+        allowed = cap * LANG_NEW_WORDS_TOLERANCE
+        if checked and fresh > allowed:
+            errors.append(SoftProblem(
+                _tr(lang, f"environ {fresh} {unit} nouveaux pour l'apprenant, {cap} au plus : réemploie des mots déjà vus",
+                    f"about {fresh} new {unit} for the learner, {cap} at most: reuse words already seen"),
+                weight=fresh / allowed,
+            ))
     return result, errors
 
 
@@ -609,11 +673,15 @@ def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[
     au plus LANG_GLOSSARY_MAX_ENTRIES du palier. Deux mots qui ne diffèrent que
     par un accent sont deux mots. Un mot au lexique sans la prononciation que
     Clikoda doit écrire (inscrit avant qu'on la lui demande) est redemandé : il
-    ne pourrait sinon jamais devenir une carte."""
+    ne pourrait sinon jamais devenir une carte. De même pour un mot inscrit avec
+    un lemme pollué (sa traduction prise pour lemme) : la nouvelle entrée sera
+    réparée par `check_glossary`."""
     names = ctx.get("speakers") or set()
     known = {}
     for row in (ctx.get("lexicon") or {}).values():
         if pron_from_clikoda(language) and not row.get("pron"):
+            continue
+        if progress.lexeme_polluted(language, row):
             continue
         known.setdefault(_match_key(language, row["form"]), row)
     tier = ctx["params"]["tier_index"]
@@ -650,11 +718,34 @@ def pron_from_clikoda(language: str) -> bool:
     return progress.family(language) == "latin"
 
 
+def _repaired_lemma(language: str, entry: dict) -> str:
+    """Le lemme d'une entrée dont Clikoda a écrit la traduction à sa place : la
+    forme du texte, en minuscules sauf un nom propre ou un nom allemand."""
+    form = entry["form"]
+    keep_case = (progress.family(language) != "latin" or (entry.get("pos") or "") == "nom propre"
+                 or (language == "allemand" and _is_common_noun(entry)))
+    return form if keep_case else form.lower()
+
+
+def _repair_lemmas(language: str, entries: list[dict]) -> list[dict]:
+    """Répare EN PLACE les lemmes pollués (cf. progress.lemma_polluted) plutôt
+    que de redemander le mot : un mot redemandé peut faire échouer l'épisode
+    (LANG_GLOSSARY_MAX_MISSING). Renvoie ce qui a été réparé, pour le journal."""
+    repaired = []
+    for e in entries:
+        if progress.lemma_polluted(language, e.get("form"), e.get("lemma"), e.get("translation")):
+            fixed = _repaired_lemma(language, e)
+            repaired.append({"form": e["form"], "was": e.get("lemma"), "lemma": fixed})
+            e["lemma"] = fixed
+    return repaired
+
+
 def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, requested: list[str]) -> dict:
     """G7, détaillé : `kept` (entrées valides, formes remplacées par le mot
     demandé), `missing` (mots demandés sans entrée valide), `errors` (raisons,
     dans la langue du prompt), `missing_error` (« il manque… », qui n'est pas
-    bloquant : le lot est relancé).
+    bloquant : le lot est relancé), `repaired` (lemmes pollués réparés : la
+    traduction écrite à la place du lemme devient la forme du texte).
 
     Allemand : un nom sans genre, ou dont le genre est contredit par un article
     sans ambiguïté du texte, est REFUSÉ seul — son mot redevient manquant et
@@ -717,8 +808,10 @@ def check_glossary(language: str, result: dict, lines: list[dict], ctx: dict, re
         key = _match_key(language, e["form"])
         if " " in key and key not in seen and any(f" {key} " in f" {j} " for j in joined):
             seen.add(key)
-            kept.append(e)
-    return {"kept": kept, "missing": missing, "errors": errors, "missing_error": missing_error}
+            kept.append(dict(e))
+    repaired = _repair_lemmas(language, kept)
+    return {"kept": kept, "missing": missing, "errors": errors, "missing_error": missing_error,
+            "repaired": repaired}
 
 
 def validate_glossary(language: str, result: dict, lines: list[dict], ctx: dict,
@@ -909,6 +1002,10 @@ def enrich_glossary(language: str, glossary: list[dict], lexicon: dict[str, dict
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 def _context(profile: dict, language: str, episode: dict, bible: dict) -> dict:
+    """Ce que les validateurs et le prompt du texte savent de l'apprenant :
+    lexique, mots et caractères déjà lus dans un épisode joué (`seen_forms`,
+    `read_chars`), mots connus pour le prompt, et si le contrôle des mots
+    nouveaux s'applique à lui (`check_new_words`)."""
     lexicon = store.get_lexicon(profile["id"])
     lexicon_forms = {_match_key(language, r["form"]) for r in lexicon.values()} | {
         _match_key(language, r["lemma"]) for r in lexicon.values()
@@ -918,13 +1015,24 @@ def _context(profile: dict, language: str, episode: dict, bible: dict) -> dict:
               if e["episode_n"] != episode["episode_n"]]
     from services.lang_scripts import HANZI_SCRIPT, seen_units
 
+    hanzi = progress.family(language) == "hanzi"
+    read = store.played_lines(profile["id"])
+    seen_forms = set() if hanzi else {_match_key(language, w) for text in read for w in words(text)}
+    # Dans l'ordre de lecture : les premiers lus passent d'abord au prompt.
+    read_chars = list(dict.fromkeys(c for text in read for c in mandarin.han_chars(text))) if hanzi else []
+    params = episode["params"]
     iraab = _iraab_introduced(profile, language)
     return {
-        "params": episode["params"], "kind": episode["kind"], "format": episode["format"],
+        "params": params, "kind": episode["kind"], "format": episode["format"],
         "speakers": _speaker_names(bible), "speaker_names": {c["name"] for c in bible.get("characters") or []},
         "lexicon": lexicon, "lexicon_forms": lexicon_forms, "lexicon_size": len(lexicon),
+        "seen_forms": seen_forms, "read_chars": read_chars,
+        "check_new_words": progress.new_words_check_applies(params, len(lexicon),
+                                                            progress.start_order_of(profile["id"])),
+        "known_words": progress.known_words_for_prompt(profile["id"], language, read_chars=read_chars,
+                                                       exclude=params.get("recycle") or []),
         "recent": recent, "pausal": not iraab, "explain_lang": explain_lang_of(profile),
-        "seen_chars": seen_units(profile["id"], HANZI_SCRIPT) if progress.family(language) == "hanzi" else set(),
+        "seen_chars": seen_units(profile["id"], HANZI_SCRIPT) if hanzi else set(),
     }
 
 
@@ -948,6 +1056,7 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
     started = time.monotonic()
     log: list[dict] = []
     metrics: list[dict] = []
+    failures = _previous_failures(episode)
     store.update_episode(episode["id"], status="generating")
     try:
         bible = ensure_bible(profile, language, log, metrics)
@@ -973,12 +1082,13 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
                 "constraints": progress.prompt_constraints(language, episode["params"], episode["kind"], lang),
                 "lines_target": round(sum(episode["params"]["lines"]) / 2),
                 "recycle": episode["params"].get("recycle") or [],
+                "known_words": ctx["known_words"], "known_chars": family == "hanzi",
                 "script_rules": pp.get("script_rules", ""), "line_schema": pp["line_schema"],
                 "rejected": rejected, "explain_lang": lang,
             }
 
         text = _attempts("text", llm.generate_lang_episode_text_async, text_params,
-                         lambda r: validate_text(language, r, ctx), log, metrics)
+                         lambda r: validate_text(language, r, ctx), log, metrics, soft_ok=True)
         lines = build_tokens(language, text["lines"])
         asked, known_entries = glossary_request(language, lines, ctx)
 
@@ -1010,18 +1120,52 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
             lines=lines, glossary=glossary, notes=notes_point["notes"], point=notes_point["point"], aids=aids,
             status="ready", ready_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             generation={"calls": log, "metrics": metrics, "duration_s": round(time.monotonic() - started, 1),
-                        "new_words": new_count, "beat": beat, "model": llm.OLLAMA_MODEL, "explain_lang": lang},
+                        "new_words": new_count, "beat": beat, "model": llm.OLLAMA_MODEL, "explain_lang": lang,
+                        **_journal_extras(log, text), "failures": failures},
         )
         logger.info("Épisode %s prêt (profil %s, %.0f s)", episode_n, profile_id, time.monotonic() - started)
-        return True
     except Exception as exc:
         logger.warning("Épisode %s non généré (profil %s) : %s", episode_n, profile_id, exc)
         store.update_episode(
             episode["id"], status="failed",
             generation={"calls": log, "metrics": metrics, "error": str(exc)[:300],
-                        "duration_s": round(time.monotonic() - started, 1)},
+                        "duration_s": round(time.monotonic() - started, 1), "model": llm.OLLAMA_MODEL,
+                        **_journal_extras(log, None), "failures": failures + 1},
         )
         return False
+    _write_point_lesson(language, episode.get("program_point_id"), explain_lang_of(profile))
+    return True
+
+
+def _write_point_lesson(language: str, point_id: str | None, explain_lang: str) -> None:
+    """La leçon du point de l'épisode, s'il n'en a pas encore : APRÈS que
+    l'épisode est prêt, dans le même thread de fond. Elle ne lève jamais et son
+    échec ne touche jamais l'épisode (services/lang_point_lesson.py)."""
+    from services.lang_point_lesson import ensure_point_lesson
+
+    status = ensure_point_lesson(language, point_id, explain_lang)
+    logger.debug("Leçon du point %s : %s", point_id, status)
+
+
+def _previous_failures(episode: dict) -> int:
+    """Échecs déjà subis par cet épisode : le journal est réécrit à chaque
+    tentative, le compte le suit. Un échec journalisé avant que le compte
+    existe vaut un."""
+    gen = episode.get("generation") or {}
+    if gen.get("failures") is not None:
+        return int(gen["failures"])
+    return 1 if gen.get("error") else 0
+
+
+def _journal_extras(log: list[dict], text: dict | None) -> dict:
+    """Ce que le journal d'un épisode dit de plus que ses appels : appels
+    acceptés malgré un problème doux, mots nouveaux estimés contre le plafond,
+    lemmes réparés."""
+    return {
+        "soft_accepted": [c["task"] for c in log if c.get("soft_accepted")],
+        "new_words_estimate": (text or {}).get("new_words_estimate"),
+        "lemma_repairs": [r for c in log for r in c.get("repaired") or []],
+    }
 
 
 def _glossary_in_chunks(language: str, lines: list[dict], ctx: dict, asked: list[str], pp: dict,
@@ -1054,6 +1198,8 @@ def _glossary_in_chunks(language: str, lines: list[dict], ctx: dict, asked: list
             refused = [e for e in check["errors"] if e != check["missing_error"]]
             entry = {"task": "glossary", "attempt": attempt, "ok": not remaining and not check["errors"],
                      "errors": check["errors"][:8], "excerpt": _excerpt(result)}
+            if check["repaired"]:
+                entry["repaired"] = check["repaired"]
             if KEEP_RAW:
                 entry["raw"] = result
             log.append(entry)

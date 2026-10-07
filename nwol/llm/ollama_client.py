@@ -139,6 +139,13 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_episode_glossary":    6,
     "lang_episode_glossary_pron": 6,
     "lang_episode_notes_point": 6,
+    # La leçon du point s'écrit APRÈS son épisode : elle cède le pas à tout
+    # épisode en file (6) — un épisode prêt compte plus qu'une leçon prête.
+    "lang_point_lesson":        7,
+    # La correction d'une expression écrite est attendue à l'écran de fin : elle
+    # passe devant les appels d'épisode en file, sans interrompre celui en cours
+    # (un seul worker, aucune préemption).
+    "lang_writing_feedback":    5,
     # Analyse hebdomadaire : usage interne, rien ne l'attend.
     "lang_weekly_analysis":     8,
     # Mesure du débit au démarrage (`calibrate_throughput`) : quelques secondes,
@@ -1237,11 +1244,14 @@ def _run_json_async(
     image_paths: list[str] | None = None,
     on_metrics=None,
     system_lang: str | None = None,
+    json_schema: dict | None = None,
 ) -> None:
     """`on_metrics(list[dict])`, s'il est fourni, reçoit les mesures de CHAQUE
     appel HTTP de la tâche (tentatives et réparations comprises), avant
     `on_success`/`on_error` — cf. `_record_call_metrics`. `system_lang` impose
-    la langue de la consigne système (sinon : celle de l'interface)."""
+    la langue de la consigne système (sinon : celle de l'interface).
+    `json_schema` contraint le décodage d'Ollama (sorties structurées) au lieu
+    du simple mode JSON — cf. `generate_lang_episode_glossary_async`."""
     task_options = OLLAMA_TASK_OPTIONS.get(label, OLLAMA_OPTIONS)
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
@@ -1265,7 +1275,8 @@ def _run_json_async(
         try:
             logger.info("Génération LLM %s lancée modèle=%s", label, model)
             try:
-                parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [], options=task_options)
+                parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [],
+                                        options=task_options, json_schema=json_schema)
             finally:
                 _flush_call_metrics(on_metrics)
                 _SYSTEM_LANG.value = None
@@ -1357,8 +1368,10 @@ def _generate_json(
     retries: int = 1,
     image_paths: list[str] | None = None,
     options: dict | None = None,
+    json_schema: dict | None = None,
 ) -> dict:
     attempts = retries + 1
+    json_format: bool | dict = json_schema or True
     # Échéance de la tâche ENTIÈRE : on ne rejoue pas au-delà du budget que
     # l'appelant synchrone attend (config.settings.task_wall_timeout_s), sinon
     # les tentatives suivantes travaillent pour un destinataire déjà parti.
@@ -1371,7 +1384,8 @@ def _generate_json(
     current_prompt = prompt
     for attempt in range(1, attempts + 1):
         try:
-            raw = _call_ollama(current_prompt, model, images=images, options=options, task=label)
+            raw = _call_ollama(current_prompt, model, images=images, options=options, format_json=json_format,
+                               task=label)
         except GenerationCancelled:
             raise  # ni repli texte, ni nouvelle tentative : plus personne n'attend
         except ModelOutOfMemory as exc:
@@ -1382,7 +1396,8 @@ def _generate_json(
                 logger.warning("Ollama a refusé les images jointes, repli texte seul: %s", exc)
                 images = []
                 try:
-                    raw = _call_ollama(current_prompt, model, images=[], options=options, task=label)
+                    raw = _call_ollama(current_prompt, model, images=[], options=options, format_json=json_format,
+                                       task=label)
                 except ModelOutOfMemory as text_exc:
                     last_error = text_exc
                     break
@@ -2442,7 +2457,8 @@ def _heuristic_subject(text: str) -> str:
     return "culture"
 
 
-def _call_ollama(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None, format_json: bool = True, task: str = "") -> str:
+def _call_ollama(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None,
+                 format_json: bool | dict = True, task: str = "") -> str:
     """Point d'étranglement de TOUTES les générations synchrones : délègue au
     fournisseur actif (services/llm_provider — Ollama local). `task` = label de
     la tâche (observabilité locale, jamais de contenu)."""
@@ -2451,7 +2467,8 @@ def _call_ollama(prompt: str, model: str, images: list[str] | None = None, optio
     return generate(prompt, model=model, images=images, options=options, format_json=format_json, task=task)
 
 
-def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None, format_json: bool = True, task: str = "") -> str:
+def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, options: dict | None = None,
+                      format_json: bool | dict = True, task: str = "") -> str:
     """Implémentation HTTP brute vers Ollama local (appelée par llm_provider).
 
     Le timeout socket est dérivé du budget de `task` (`settings.task_timeout_s`) :
@@ -2469,7 +2486,9 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     if format_json:
-        payload_data["format"] = "json"
+        # Un schéma JSON (sorties structurées d'Ollama, ≥ 0.5 — tout Ollama qui
+        # fait tourner gemma4) contraint le décodage lui-même ; sinon, mode JSON.
+        payload_data["format"] = format_json if isinstance(format_json, dict) else "json"
 
     if images:
         payload_data["images"] = images
@@ -2863,14 +2882,19 @@ def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metr
 
 def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
     """`params["pron"]` (langues latines) : chaque entrée porte aussi sa
-    prononciation, d'où un budget de sortie plus large."""
+    prononciation, d'où un budget de sortie plus large.
+
+    Le nombre d'entrées est imposé au DÉCODAGE (schéma JSON, une entrée par mot
+    demandé) : en simple mode JSON, gemma4:e4b refermait la liste après une
+    seule entrée — à chaque appel, sur certains textes (banc du 2026-10-07)."""
     from llm.prompts import build_lang_episode_glossary_prompt
-    from llm.schema_json import parse_lang_episode_glossary
+    from llm.schema_json import lang_episode_glossary_schema, parse_lang_episode_glossary
     label = "lang_episode_glossary_pron" if params.get("pron") else "lang_episode_glossary"
     return _run_json_async(
         label, build_lang_episode_glossary_prompt(params), parse_lang_episode_glossary,
         on_success, on_error, model, on_metrics=on_metrics,
         system_lang=params.get("explain_lang"),
+        json_schema=lang_episode_glossary_schema(len(params.get("words") or []), bool(params.get("pron"))),
     )
 
 
@@ -2880,6 +2904,26 @@ def generate_lang_episode_notes_point_async(params: dict, on_success, on_error, 
     return _run_json_async(
         "lang_episode_notes_point", build_lang_episode_notes_point_prompt(params),
         parse_lang_episode_notes_point, on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_point_lesson_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_point_lesson_prompt
+    from llm.schema_json import parse_lang_point_lesson
+    return _run_json_async(
+        "lang_point_lesson", build_lang_point_lesson_prompt(params), parse_lang_point_lesson,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
+def generate_lang_writing_feedback_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_writing_feedback_prompt
+    from llm.schema_json import parse_lang_writing_feedback
+    return _run_json_async(
+        "lang_writing_feedback", build_lang_writing_feedback_prompt(params), parse_lang_writing_feedback,
+        on_success, on_error, model, on_metrics=on_metrics,
         system_lang=params.get("explain_lang"),
     )
 

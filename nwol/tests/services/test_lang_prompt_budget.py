@@ -10,6 +10,7 @@ import pytest
 from config.settings import (
     LANG_EXPLANATION_MAX_CHARS,
     LANG_GLOSSARY_MAX_ENTRIES,
+    LANG_KNOWN_WORDS_PROMPT_TOKENS,
     LANG_MAX_UNITS_PER_EPISODE,
     LANG_MAX_UNITS_PER_LINE,
     LANG_NOTE_MAX_CHARS,
@@ -46,6 +47,9 @@ def _line(family: str) -> tuple[str, str]:
 
 
 LINE = {family: _line(family) for family in ("latin", "hanzi", "arabe")}
+# Mots connus de l'apprenant au plafond de leur budget, dans chaque écriture.
+KNOWN = {family: prompts.fit_word_list([word] * 5000, LANG_KNOWN_WORDS_PROMPT_TOKENS)
+         for family, word in (("latin", "palabra"), ("hanzi", "我"), ("arabe", "كِتَابُهُ"))}
 REJECTED = "; ".join(["réplique 12 : vocalisation incomplète : chaque consonne doit porter sa voyelle"] * 5)
 
 
@@ -88,9 +92,11 @@ def test_episode_text_prompt_fits(family, lang):
         "constraints": "entre 18 et 24 répliques ; longueur des répliques libre, phrases naturelles ; "
                        "au plus 16 mots nouveaux pour l'apprenant ; le reste doit être très courant.",
         "recycle": ["palabra"] * 10, "script_rules": LONG_FR[:400], "lines_target": 24,
+        "known_words": KNOWN[family], "known_chars": family == "hanzi",
         "line_schema": '{"speaker": "prénom", "text": "réplique", "tokens": ["mot"], "translation": "traduction"}',
         "rejected": REJECTED,
     })
+    assert KNOWN[family][0] in prompt
     _check("lang_episode_text_hanzi" if family == "hanzi" else "lang_episode_text", prompt, lang)
 
 
@@ -149,3 +155,59 @@ def test_estimator_is_pessimistic_on_known_counts():
     # quatre caractères par token ; l'estimateur doit rester au-dessus.
     text = "Le chat de la voisine dort sur le canapé depuis ce matin. " * 20
     assert estimate_prompt_tokens(text) >= len(text) / 4
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_point_lesson_prompt_fits(lang):
+    from config.settings import (
+        LANG_LESSON_EXAMPLES,
+        LANG_LESSON_FORMS_MAX,
+        LANG_LESSON_PITFALLS,
+        LANG_LESSON_REMEMBER_MAX_CHARS,
+        LANG_LESSON_RULE_MAX_CHARS,
+        LANG_LESSON_USES,
+    )
+
+    point = _longest_point_fields()
+    prompt = prompts.build_lang_point_lesson_prompt({
+        "language_label": "arabe littéraire", "cefr": "B2", "point_title": point["title"],
+        "learner_goal": LONG_FR[:200], "point_notice": point["notice"], "point_seed": point["explanation_seed"],
+        "register": LONG_FR[:400], "writing_rules": LONG_FR[:300],
+        "rule_max": LANG_LESSON_RULE_MAX_CHARS, "remember_max": LANG_LESSON_REMEMBER_MAX_CHARS,
+        "forms_rows": LANG_LESSON_FORMS_MAX[0], "forms_cols": LANG_LESSON_FORMS_MAX[1],
+        "uses_min": LANG_LESSON_USES[0], "uses_max": LANG_LESSON_USES[1], "pitfalls_max": LANG_LESSON_PITFALLS[1],
+        "examples_min": LANG_LESSON_EXAMPLES[0], "examples_max": LANG_LESSON_EXAMPLES[1],
+        "rejected": REJECTED, "explain_lang": lang,
+    })
+    _check("lang_point_lesson", prompt, lang)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
+def test_writing_feedback_prompt_fits(family, lang):
+    from config.settings import LANG_WRITING_ERROR_TYPES, LANG_WRITING_MAX_CHARS
+
+    # Le texte le plus long qu'accepte l'envoi, dans l'écriture la plus coûteuse.
+    text = {"latin": "palabra ", "hanzi": "我", "arabe": "كِتَابُهُ "}[family] * LANG_WRITING_MAX_CHARS
+    prompt = prompts.build_lang_writing_feedback_prompt({
+        "language_label": "arabe littéraire", "cefr": "B2", "task": LONG_FR[:240] + " " + LONG_FR[:120],
+        "text": text[:LANG_WRITING_MAX_CHARS], "writing_rules": LONG_FR[:300], "errors_max": 3,
+        "error_types": list(LANG_WRITING_ERROR_TYPES), "rejected": REJECTED, "explain_lang": lang,
+    })
+    _check("lang_writing_feedback", prompt, lang)
+
+
+def test_lesson_and_feedback_prompts_carry_no_target_word():
+    """Squelettes sans aucun mot de la langue cible : un petit modèle recopie les
+    exemples d'une consigne (mesuré au banc). Seules les données du point en ont."""
+    from config.settings import LANG_WRITING_ERROR_TYPES
+
+    common = {"language_label": "espagnol", "cefr": "A1", "point_title": "T", "learner_goal": "G",
+              "point_notice": "N", "point_seed": "S", "rule_max": 600, "remember_max": 180, "forms_rows": 8,
+              "forms_cols": 4, "uses_min": 1, "uses_max": 4, "pitfalls_max": 3, "examples_min": 2,
+              "examples_max": 4, "task": "T", "text": "X", "errors_max": 3,
+              "error_types": list(LANG_WRITING_ERROR_TYPES)}
+    for lang in LANGS:
+        for build in (prompts.build_lang_point_lesson_prompt, prompts.build_lang_writing_feedback_prompt):
+            text = build({**common, "explain_lang": lang})
+            assert not any(word in text.split() for word in ("estar", "ser", "soy", "estoy", "hola"))

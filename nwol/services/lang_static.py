@@ -6,7 +6,10 @@
 #
 #   program/<langue>.json      le programme A1 → C1 (un point = une notion)
 #   placement/<langue>.json    le test de niveau, clés écrites à la main
-#   onboarding/<langue>.json   phrases de survie, aperçu de l'écriture, bible par défaut
+#   onboarding/<langue>.json   phrases de survie, aperçu de l'écriture, bible par défaut,
+#                              clavier de l'expression écrite (`keyboard`, facultatif)
+#   lessons/<langue>.json      leçons des points écrites à la main (facultatif ; lues
+#                              avant celles que Clikoda écrit, cf. services/lang_point_lesson.py)
 #   helpers/faux_amis_<langue>.json
 #   scripts/*.json             registres d'écriture (lettres arabes, sons et clés du mandarin)
 #
@@ -32,6 +35,7 @@ from config.settings import (
     LANG_CEFR_ORDER,
     LANG_EXPLAIN_LANGUAGES,
     LANG_PILOT_LANGUAGES,
+    LANG_SCRIPT_FAMILY,
 )
 
 logger = logging.getLogger("services.lang_static")
@@ -265,6 +269,105 @@ def validate_onboarding(data, language: str) -> list[str]:
             errors.append("default_bible_en : au moins trois personnages (prompt_params_en présent)")
         if isinstance(data.get("script_preview"), dict) and not isinstance(data.get("script_preview_en"), dict):
             errors.append("script_preview_en requis (prompt_params_en présent)")
+    if "keyboard" in data:
+        errors += [f"keyboard : {e}" for e in _keyboard_problems(data.get("keyboard"), language)]
+    return errors
+
+
+KEYBOARD_LAYOUTS = ("keys", "registry", "ime")
+
+
+def _keyboard_problems(keyboard, language: str) -> list[str]:
+    """Clavier de l'expression écrite : des touches (un caractère NFC chacune,
+    sans doublon), le registre de l'écriture (arabe), ou la méthode de saisie
+    du système (mandarin, aucune touche à dessiner)."""
+    if not isinstance(keyboard, dict):
+        return ["pas un objet"]
+    layout = keyboard.get("layout") or "keys"
+    if layout not in KEYBOARD_LAYOUTS:
+        return [f"disposition inconnue {layout!r}"]
+    family = LANG_SCRIPT_FAMILY.get(language, "latin")
+    if layout == "registry":
+        return [] if family == "arabe" and script_registry("arabic").get("letters") else \
+            ["« registry » demande le registre d'une écriture (arabe)"]
+    if layout == "ime":
+        return [] if family == "hanzi" else ["« ime » réservé aux écritures sans clavier de touches (mandarin)"]
+    keys = keyboard.get("keys")
+    if not isinstance(keys, list) or not keys:
+        return ["« keys » : liste de touches non vide requise"]
+    problems = []
+    for key in keys:
+        if not isinstance(key, str) or len(key) != 1 or unicodedata.normalize("NFC", key) != key:
+            problems.append(f"touche {key!r} : un seul caractère, en NFC")
+    if len(set(keys)) != len(keys):
+        problems.append("touches en double")
+    return problems
+
+
+def _key(char: str, combining: bool = False) -> dict:
+    """Une touche : le caractère inséré, et son étiquette — une voyelle brève
+    s'affiche sur un cercle pointillé (U+25CC), seule elle serait invisible."""
+    return {"char": char, "label": f"\u25cc{char}" if combining else char}
+
+
+def writing_keyboard(language: str) -> dict | None:
+    """Clavier de l'expression écrite, tel que le front le dessine. Aucun pour
+    une langue sans `keyboard` (l'anglais) ; pour le mandarin, la méthode de
+    saisie du système ; pour l'arabe, bâti depuis scripts/arabic.json : les 28
+    lettres, les porteurs de hamza, les 8 voyelles brèves, ة ى آ ء et la
+    ponctuation arabe."""
+    keyboard = onboarding(language).get("keyboard")
+    if not isinstance(keyboard, dict) or _keyboard_problems(keyboard, language):
+        return None
+    layout = keyboard.get("layout") or "keys"
+    if layout == "ime":
+        return {"layout": "ime", "rtl": False, "groups": []}
+    if layout == "keys":
+        return {"layout": "keys", "rtl": False, "groups": [{"name": "letters", "keys": [_key(c) for c in keyboard["keys"]]}]}
+    registry = script_registry("arabic")
+    marks = registry.get("marks") or []
+    hamza = next((m for m in marks if m.get("id") == "ar.s.hamza"), {})
+    return {"layout": "keys", "rtl": True, "groups": [
+        {"name": "letters", "keys": [_key(letter["char"]) for letter in registry.get("letters") or []]},
+        {"name": "hamza", "keys": [_key(c) for c in hamza.get("supports") or [] if c != hamza.get("char")]},
+        {"name": "vowels", "keys": [_key(m["char"], combining=True) for m in marks if m.get("kind") == "voyelle"]},
+        {"name": "other", "keys": [_key(m["char"]) for m in marks if m.get("kind") == "lettre" and m is not hamza]
+                                  + ([_key(hamza["char"])] if hamza.get("char") else [])},
+        {"name": "punctuation", "keys": [_key(c) for c in ("،", "؛", "؟")]},
+    ]}
+
+
+def lessons_file(language: str) -> dict:
+    """Leçons écrites à la main pour une langue (`lessons/<langue>.json`), {} sans fichier."""
+    return load_json("lessons", f"{language}.json") or {}
+
+
+def validate_lessons_file(data, language: str, program_ids: set[str]) -> list[str]:
+    """Un fichier de leçons écrites à la main : chaque leçon vise un point du
+    programme et passe les mêmes règles qu'une leçon écrite par Clikoda
+    (`lang_point_lesson.validate_lesson`), en français et, si elle est donnée,
+    dans sa version anglaise (`lesson_en`)."""
+    from services.lang_point_lesson import lesson_pausal, validate_lesson
+
+    if not isinstance(data, dict) or data.get("language") != language:
+        return ["fichier absent ou language incorrect"]
+    lessons = data.get("lessons")
+    if not isinstance(lessons, dict) or not lessons:
+        return ["aucune leçon"]
+    errors: list[str] = []
+    for point_id, entry in lessons.items():
+        if point_id not in program_ids:
+            errors.append(f"leçon {point_id} : point hors programme")
+            continue
+        if not isinstance(entry, dict) or not isinstance(entry.get("lesson"), dict):
+            errors.append(f"leçon {point_id} : « lesson » requis")
+            continue
+        pausal = lesson_pausal(language, point_id)
+        for field, explain_lang in (("lesson", "fr"), ("lesson_en", "en")):
+            if field not in entry:
+                continue
+            _cleaned, problems = validate_lesson(language, entry[field], explain_lang, pausal=pausal)
+            errors += [f"leçon {point_id} ({explain_lang}) : {p}" for p in problems]
     return errors
 
 

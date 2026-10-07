@@ -99,11 +99,11 @@ def fresh_lang_db(tmp_path, monkeypatch):
     db.close_connection()
 
 
-def _add(profile, n, kind="normal", point="es.a1.saludos", params=None):
+def _add(profile, n, kind="normal", point="es.a1.saludos", params=None, step=0):
     from db import lang_episode_db as store
 
     return store.create_episode(profile["id"], n, kind=kind, program_point_id=point, format="dialogue",
-                                ladder_step=0, params=params or {})
+                                ladder_step=step, params=params or {})
 
 
 def test_normal_episode_takes_the_next_point(profile):
@@ -116,7 +116,7 @@ def test_normal_episode_takes_the_next_point(profile):
 def test_hard_episode_breathes_on_the_same_point_and_steps_down(profile):
     from db import lang_episode_db as store
 
-    _add(profile, 1)
+    _add(profile, 1, step=2)
     current = store.get_episode_by_n(profile["id"], 1)
     decision = progress.next_episode_decision({**profile, "program_order": 1, "ladder_step": 2}, "espagnol",
                                               current=current, signals={"reveal_rate": 30.0}, episode_n=2)
@@ -141,12 +141,12 @@ def test_two_easy_episodes_in_a_row_step_up_by_one(profile):
     from db import lang_episode_db as store
 
     easy = {"reveal_rate": 0.5, "understood": "compris", "games_rate": 1.0}
-    _add(profile, 1, params={"easy_streak": 0})
+    _add(profile, 1, params={"easy_streak": 0}, step=1)
     first = progress.next_episode_decision({**profile, "program_order": 1, "ladder_step": 1}, "espagnol",
                                            current=store.get_episode_by_n(profile["id"], 1), signals=easy,
                                            episode_n=2)
     assert first["ladder_step"] == 1 and first["params"]["easy_streak"] == 1
-    _add(profile, 2, params=first["params"])
+    _add(profile, 2, params=first["params"], step=first["ladder_step"])
     second = progress.next_episode_decision({**profile, "program_order": 2, "ladder_step": 1}, "espagnol",
                                             current=store.get_episode_by_n(profile["id"], 2), signals=easy,
                                             episode_n=3)
@@ -188,3 +188,123 @@ def test_point_introduced_never_goes_back(profile):
     again = store.decode_profile(get_lang_profile_by_id(profile["id"]))
     assert again["program_order"] == order
     assert store.get_level_history(profile["id"])[-1]["source"] == "progression"
+
+
+def test_the_step_starts_from_the_played_episode_not_the_profile(profile):
+    """Une respiration imposée par une reprise redécide un épisode déjà réservé :
+    le cran du profil a déjà avancé avec lui. Elle part du cran de l'épisode
+    joué, sinon elle montait d'un cran (3 → 4, base de dev)."""
+    from db import lang_episode_db as store
+
+    _add(profile, 1, step=3)
+    current = store.get_episode_by_n(profile["id"], 1)
+    decision = progress.next_episode_decision(
+        {**profile, "program_order": 1, "ladder_step": 4, "force_respiration": 1}, "espagnol",
+        current=current, signals=None, episode_n=2)
+    assert decision["kind"] == "respiration" and decision["ladder_step"] == 3
+
+
+def test_new_words_cap_is_shared_by_prompt_and_validator():
+    from config.settings import LANG_RESPIRATION_NEW_WORDS_FACTOR
+
+    params = progress.ladder_params("espagnol", 0)
+    cap = params["new_words"][1]
+    assert progress.new_words_cap(params, "normal") == cap
+    assert progress.new_words_cap(params, "respiration") == max(1, round(cap * LANG_RESPIRATION_NEW_WORDS_FACTOR))
+    assert f"au plus {progress.new_words_cap(params, 'respiration')} mots nouveaux" in \
+        progress.prompt_constraints("espagnol", params, "respiration")
+
+
+@pytest.mark.parametrize("tier,lexicon,start,expected", [
+    (0, 60, 1, True),
+    (1, 500, 1, True),
+    (2, 500, 1, False),   # B1 : le lexique ne dit plus ce qu'il sait
+    (0, 59, 1, False),    # lexique pas encore amorcé
+    (0, 500, 23, False),  # placé par le test de niveau
+])
+def test_new_words_check_applies_only_where_the_lexicon_is_meaningful(tier, lexicon, start, expected):
+    assert progress.new_words_check_applies({"tier_index": tier}, lexicon, start) is expected
+
+
+def test_start_order_is_the_last_placement(profile):
+    from db import lang_episode_db as store
+
+    assert progress.start_order_of(profile["id"]) == 1  # aucun historique : parti du début
+    store.add_level_history(profile["id"], "A1", 1, "placement")
+    store.add_level_history(profile["id"], "A1", 23, "placement")
+    store.add_level_history(profile["id"], "A2", 40, "progression")
+    assert progress.start_order_of(profile["id"]) == 23
+
+
+@pytest.mark.parametrize("language,form,lemma,translation,expected", [
+    ("anglais", "demographic", "démographie", "démographie", True),
+    ("anglais", "quantifying", "quantifier", "quantifier", True),
+    ("anglais", "restaurants", "restaurant", "restaurant", False),  # un vrai lemme
+    ("anglais", "local", "local", "local", False),                  # mot transparent
+    ("espagnol", "hablo", "hablar", "parler", False),
+    ("mandarin", "你好", "bonjour", "bonjour", True),                 # hors écriture cible
+    ("mandarin", "你好", "你好", "bonjour", False),
+    ("arabe", "كِتَابٌ", "livre", "livre", True),
+    ("arabe", "كِتَابٌ", "كِتَاب", "livre", False),
+])
+def test_polluted_lemmas(language, form, lemma, translation, expected):
+    assert progress.lemma_polluted(language, form, lemma, translation) is expected
+
+
+def test_polluted_lexemes_are_never_recycled_nor_known(profile):
+    from db import lang_episode_db as store
+
+    store.insert_lexeme(profile["id"], {"form": "ciudad", "lemma": "ciudad", "translation": "ville"}, 1)
+    store.insert_lexeme(profile["id"], {"form": "demografía", "lemma": "démographie",
+                                        "translation": "démographie"}, 1)
+    assert progress.recycle_words(profile["id"], "espagnol", 10) == ["ciudad"]
+    assert progress.known_words_for_prompt(profile["id"], "espagnol") == ["ciudad"]
+
+
+def test_known_words_put_acquired_lemmas_first_and_fit_the_budget(profile):
+    from config.settings import LANG_KNOWN_WORDS_PROMPT_TOKENS
+    from db import lang_episode_db as store
+    from llm.prompts import estimate_prompt_tokens
+
+    for i in range(400):
+        store.insert_lexeme(profile["id"], {"form": f"palabra{i}", "lemma": f"palabra{i}", "translation": "x"}, 1)
+    acquired = store.get_lexeme(profile["id"], "palabra399")
+    store.update_lexeme(acquired["id"], acquired_at="2026-09-01 10:00:00")
+    known = progress.known_words_for_prompt(profile["id"], "espagnol", exclude=["palabra0"])
+    assert known[0] == "palabra399" and "palabra0" not in known
+    assert 0 < len(known) < 400
+    assert estimate_prompt_tokens(", ".join(known)) <= LANG_KNOWN_WORDS_PROMPT_TOKENS
+
+
+def test_the_end_of_the_programme_is_noted(profile):
+    last = progress.program("espagnol")[-1]["order"]
+    assert not progress.program_ended("espagnol", last - 1)
+    assert progress.program_ended("espagnol", last)
+    decision = progress.next_episode_decision({**profile, "program_order": last}, "espagnol",
+                                              current=None, signals=None, episode_n=1)
+    assert decision["params"]["program_end"] is True
+
+
+@pytest.mark.parametrize("signals,expected", [
+    # « Tout traduire » en A1 : une aide prévue, jamais un échec — mais pas « facile » non plus.
+    ({"translated_share": 1.0, "tier_index": 0, "reveal_rate": None, "understood": "compris"}, "ok"),
+    ({"translated_share": 1.0, "tier_index": 1, "reveal_rate": 1.0, "understood": "compris"}, "ok"),
+    # 90 % traduit en B1 : le texte était trop dur.
+    ({"translated_share": 0.9, "tier_index": 2, "reveal_rate": 1.0, "understood": "compris"}, "hard"),
+    ({"translated_share": 0.6, "tier_index": 3, "reveal_rate": 1.0, "understood": "compris"}, "hard"),
+    # « Facile » demande d'être resté sous le seuil du palier.
+    ({"translated_share": 0.3, "tier_index": 0, "reveal_rate": 1.0, "understood": "compris"}, "easy"),
+    ({"translated_share": 0.4, "tier_index": 2, "reveal_rate": 1.0, "understood": "compris"}, "ok"),
+    # D'anciens signaux (sans part traduite) se classent comme avant.
+    ({"reveal_rate": 1.0, "understood": "compris"}, "easy"),
+])
+def test_translated_share_is_judged_by_tier(signals, expected):
+    assert progress.classify(signals) == expected
+
+
+def test_a_known_false_positive_of_the_lemma_repair_is_documented():
+    """Un infinitif espagnol qui s'écrit comme l'infinitif français ressemble à
+    une traduction prise pour lemme (architecture/18 § 14, rév. 4) : la règle le
+    répare en sa forme. Ce test fixe ce comportement assumé."""
+    assert progress.lemma_polluted("espagnol", "viene", "venir", "venir") is True
+    assert progress.lemma_polluted("espagnol", "venir", "venir", "venir") is False

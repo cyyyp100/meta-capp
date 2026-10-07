@@ -108,18 +108,31 @@
   "comic_springs": "Greta's schedule that nobody follows; Jonas's songs; Frau Schulze's stories; Mehmet's delays.",
   "register_notes": "Present-day standard German, everyday conversations in the neighbourhood."
  },
+ "keyboard": {
+  "keys": [
+   "ä",
+   "ö",
+   "ü",
+   "ß",
+   "Ä",
+   "Ö",
+   "Ü"
+  ]
+ },
  "prompt_params": {
   "language_label": "allemand",
   "register": "Registre : allemand standard d'Allemagne d'aujourd'hui, situations de la vie quotidienne.",
   "script_rules": "Écris en allemand standard, avec les trémas (ä, ö, ü), le ß et une majuscule à tous les noms.",
   "line_schema": "{\"speaker\": \"prénom\", \"text\": \"réplique en allemand\", \"translation\": \"traduction française\"}",
-  "form_rule": "Pour un nom, le lemme est au nominatif singulier SANS article et le genre (m, f ou n) est obligatoire."
+  "form_rule": "Pour un nom, le lemme est au nominatif singulier SANS article et le genre (m, f ou n) est obligatoire.",
+  "writing_rules": "Écris en allemand standard, avec les trémas, le ß et une majuscule à tous les noms."
  },
  "prompt_params_en": {
   "language_label": "German",
   "register": "Register: present-day standard German from Germany, everyday situations.",
   "script_rules": "Write in standard German, with umlauts (ä, ö, ü), ß and a capital letter on every noun.",
   "line_schema": "{\"speaker\": \"first name\", \"text\": \"line in German\", \"translation\": \"English translation\"}",
-  "form_rule": "For a noun, the lemma is the nominative singular WITHOUT article and the gender (m, f or n) is required."
+  "form_rule": "For a noun, the lemma is the nominative singular WITHOUT article and the gender (m, f or n) is required.",
+  "writing_rules": "Write standard German, with umlauts, ß and a capital letter on every noun."
  }
 }

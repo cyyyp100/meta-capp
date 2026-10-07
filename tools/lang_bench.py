@@ -15,6 +15,17 @@ notes en anglais) ; les fichiers prennent alors le suffixe `_en`.
 
     python tools/lang_bench.py --language espagnol --episodes 20 --out bench/
 
+`--sequential` banc au contraire des points CONSÉCUTIFS, comme un vrai
+apprenant : chaque épisode est décidé depuis le précédent puis joué, si bien
+que le lexique grandit et que le contrôle des mots nouveaux finit par jouer (un
+banc dispersé part toujours d'un lexique vide). `--start-order N` commence au
+point N ; `--placed` y fait arriver l'apprenant par le test de niveau (le
+contrôle ne s'applique alors plus à lui). Un épisode refusé est retenté une
+fois, comme à la séance suivante ; s'il échoue encore, le banc s'arrête là.
+
+    python tools/lang_bench.py --language espagnol --sequential --episodes 12
+    python tools/lang_bench.py --language espagnol --sequential --start-order 23 --placed
+
 La porte V18 (épisode complet plus court qu'une séance) est calculée sur la
 durée médiane d'un épisode prêt, comparée à LANG_RUN_TARGET_S.
 """
@@ -95,6 +106,89 @@ def run(language: str, count: int, out: Path, interests: list[str], explain: str
     return _report(language, results, out, stem)
 
 
+def run_sequential(language: str, count: int, out: Path, interests: list[str], explain: str = "fr",
+                   start_order: int = 1, placed: bool = False, retries: int = 1) -> dict:
+    """Points consécutifs à partir de `start_order`, chaque épisode joué
+    (`lang_runs._mark_played`) : le lexique grandit comme chez un apprenant."""
+    from db import lang_episode_db as store
+    from services import lang_episodes as episodes
+    from services import lang_progress as progress
+    from services import lang_runs
+
+    episodes.RUN_IN_BACKGROUND = False
+    episodes.KEEP_RAW = True
+    profile = lang_runs.ensure_feuilleton(language)
+    start = max(1, int(start_order))
+    store.update_profile_fields(profile["id"], interests=interests, onboarding_done=1, explain_lang=explain,
+                                program_order=start - 1, ladder_step=progress.target_step(language, start),
+                                placement_done=int(placed))
+    # Le point de départ du parcours, tel que l'écrit l'onboarding (1) ou le
+    # test de niveau (`--placed`) : c'est lui qui décide du contrôle des mots nouveaux.
+    progress.record_level({**profile, "program_order": start}, language, start if placed else 1, "placement")
+    stem = f"bench_{language}_seq{start}" + ("_placed" if placed else "") + ("_en" if explain == "en" else "")
+    results = []
+    for n in range(1, count + 1):
+        profile = lang_runs._profile(profile["id"])
+        current = store.get_episode_by_n(profile["id"], n - 1) if n > 1 else None
+        started = time.monotonic()
+        for _attempt in range(1 + max(0, retries)):
+            episodes.schedule_episode(profile, language, n, current=current, signals=None)
+            episode = store.get_episode_by_n(profile["id"], n)
+            if episode["status"] == "ready":
+                break
+        ok = episode["status"] == "ready"
+        if ok:
+            lang_runs._mark_played(profile, language, episode)
+            episode = store.get_episode_by_n(profile["id"], n)
+        elapsed = time.monotonic() - started
+        point = store.get_point(language, episode["program_point_id"] or "") or {}
+        results.append({"n": n, "point": episode["program_point_id"], "cefr": point.get("cefr"), "ok": ok,
+                        "seconds": round(elapsed, 1), "episode": episode,
+                        "lexicon": len(store.get_lexicon(profile["id"]))})
+        print(f"[{n}/{count}] {episode['program_point_id'] or '-':<40} {'OK ' if ok else 'ÉCHEC'} {elapsed:6.1f} s"
+              f"  lexique {results[-1]['lexicon']}", flush=True)
+        if not ok:
+            break  # l'apprenant resterait sur cet épisode : la suite n'a pas de sens
+    return _report(language, results, out, stem)
+
+
+def _lesson_stats(language: str, results: list[dict]) -> dict:
+    from db import lang_episode_db as store
+
+    rows = []
+    for r in results:
+        if not r["ok"] or not r["episode"].get("program_point_id"):
+            continue
+        explain = (r["episode"].get("generation") or {}).get("explain_lang") or "fr"
+        row = store.get_point_lesson(language, r["episode"]["program_point_id"], explain)
+        if row:
+            rows.append({"point": row["point_id"], "status": row["status"], "attempts": row["attempts"],
+                         "seconds": (row.get("generation") or {}).get("duration_s"),
+                         "errors": [e for c in (row.get("generation") or {}).get("calls") or []
+                                    for e in c.get("errors") or []][:6]})
+    seconds = [x["seconds"] for x in rows if x["seconds"] is not None]
+    return {"written": len(rows), "ready": sum(x["status"] == "ready" for x in rows),
+            "median_s": statistics.median(seconds) if seconds else None, "max_s": max(seconds) if seconds else None,
+            "rows": rows}
+
+
+def _reliability_line(gen: dict) -> str:
+    """Mots nouveaux estimés contre le plafond, acceptation douce, lemmes
+    réparés, échecs subis : une ligne par épisode du rapport lisible."""
+    estimate = gen.get("new_words_estimate") or {}
+    if not estimate:
+        return ""
+    parts = [f"Mots nouveaux estimés : {estimate.get('estimate')} (plafond {estimate.get('cap')}, "
+             f"contrôlé : {'oui' if estimate.get('checked') else 'non'})"]
+    if gen.get("soft_accepted"):
+        parts.append("accepté malgré un problème doux : " + ", ".join(gen["soft_accepted"]))
+    if gen.get("lemma_repairs"):
+        parts.append("lemmes réparés : " + ", ".join(f"{r['form']} ({r['was']})" for r in gen["lemma_repairs"]))
+    if gen.get("failures"):
+        parts.append(f"échecs avant : {gen['failures']}")
+    return " ; ".join(parts)
+
+
 def _report(language: str, results: list[dict], out: Path, stem: str) -> dict:
     from config.settings import LANG_RUN_TARGET_S
 
@@ -106,8 +200,8 @@ def _report(language: str, results: list[dict], out: Path, stem: str) -> dict:
         if not tc:
             continue
         by_task[task] = {
-            "attempts": len(tc), "accepted": sum(1 for c in tc if c.get("ok")),
-            "first_try_rate": None,
+            "attempts": len(tc), "accepted": sum(1 for c in tc if c.get("ok") or c.get("soft_accepted")),
+            "soft_accepted": sum(1 for c in tc if c.get("soft_accepted")),
         }
     reasons = Counter(e.split(" : ")[0][:70] for c in calls for e in c.get("errors") or [])
     durations = [r["seconds"] for r in results if r["ok"]]
@@ -128,6 +222,16 @@ def _report(language: str, results: list[dict], out: Path, stem: str) -> dict:
                               for k in per_call},
         "suspect_rate": round(suspects / tokens, 4) if tokens else None,
         "gate_v18_under_run_target": bool(durations) and statistics.median(durations) < LANG_RUN_TARGET_S,
+        # Génération fiable : ce qui a été accepté malgré un problème doux, les mots
+        # nouveaux estimés contre leur plafond, les lemmes réparés, les échecs.
+        "new_words": [{"n": r["n"], **((r["episode"].get("generation") or {}).get("new_words_estimate") or {}),
+                       "soft_accepted": (r["episode"].get("generation") or {}).get("soft_accepted") or [],
+                       "lexicon": r.get("lexicon")} for r in results],
+        "lemma_repairs": [rep for r in results for rep in (r["episode"].get("generation") or {}).get("lemma_repairs") or []],
+        "failures": sum(int((r["episode"].get("generation") or {}).get("failures") or 0) for r in results),
+        # Leçon du point, écrite après chaque épisode prêt : acceptée ou non, et
+        # le temps qu'elle ajoute au thread de génération.
+        "lessons": _lesson_stats(language, results),
     }
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{stem}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -143,6 +247,9 @@ def _report(language: str, results: list[dict], out: Path, stem: str) -> dict:
                     lines.append(f"- {c['task']} : {'; '.join(c['errors'])}")
             lines.append("")
             continue
+        reliability = _reliability_line(ep.get("generation") or {})
+        if reliability:
+            lines.append(reliability + "\n")
         for ln in ep.get("lines") or []:
             lines.append(f"- **{ln['speaker']}** : {ln['text']}  \n  _{ln['translation']}_")
         lines.append("\n**Glossaire** : " + ", ".join(f"{g['form']} = {g['translation']}" for g in ep.get("glossary") or []))
@@ -171,11 +278,20 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=None, help="base jetable (défaut : fichier temporaire)")
     parser.add_argument("--explain", choices=("fr", "en"), default="fr",
                         help="langue d'explication du profil (ce qu'écrit Clikoda pour l'apprenant)")
+    parser.add_argument("--sequential", action="store_true",
+                        help="points consécutifs, chaque épisode joué (le lexique grandit)")
+    parser.add_argument("--start-order", type=int, default=1, help="--sequential : premier point du programme")
+    parser.add_argument("--placed", action="store_true",
+                        help="--sequential : l'apprenant arrive au point de départ par le test de niveau")
     args = parser.parse_args()
     db_path = args.db or Path(tempfile.mkdtemp(prefix="lang-bench-")) / "bench.db"
     _setup_db(db_path)
-    report = run(args.language, args.episodes, args.out, [s.strip() for s in args.interests.split(",") if s.strip()],
-                 args.explain)
+    interests = [s.strip() for s in args.interests.split(",") if s.strip()]
+    if args.sequential:
+        report = run_sequential(args.language, args.episodes, args.out, interests, args.explain,
+                                args.start_order, args.placed)
+    else:
+        report = run(args.language, args.episodes, args.out, interests, args.explain)
     print(json.dumps(report, ensure_ascii=False, indent=1))
 
 

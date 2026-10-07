@@ -102,14 +102,36 @@ def test_repetition_is_rejected(real):
     assert any("trop proche" in e for e in errors)
 
 
-def test_new_words_are_checked_once_the_lexicon_is_primed(clean):
-    ctx = _ctx(clean, lexicon_size=500, lexicon_forms={"hola"})
-    _, errors = ep.validate_text("espagnol", clean["text"], ctx)
-    assert any("mots nouveaux" in e for e in errors)
+def test_too_many_new_words_is_a_soft_problem(clean):
+    """Le dépassement est estimé : c'est un problème DOUX, que `_attempts`
+    accepte en dernier recours, jamais une raison de faire échouer l'épisode."""
+    ctx = _ctx(clean, lexicon_size=500, lexicon_forms={"hola"}, check_new_words=True)
+    value, errors = ep.validate_text("espagnol", clean["text"], ctx)
+    soft = [e for e in errors if "mots nouveaux" in e]
+    assert soft and all(isinstance(e, ep.SoftProblem) and e.weight > 1 for e in soft)
+    assert value["new_words_estimate"]["checked"] is True
+    assert value["new_words_estimate"]["estimate"] > value["new_words_estimate"]["cap"]
     from services.lang_text import words
     known = {fold(w) for ln in clean["text"]["lines"] for w in words(ln["text"])}
-    _, errors = ep.validate_text("espagnol", clean["text"], _ctx(clean, lexicon_size=500, lexicon_forms=known))
+    _, errors = ep.validate_text("espagnol", clean["text"], _ctx(clean, lexicon_forms=known, check_new_words=True))
     assert not any("mots nouveaux" in e for e in errors)
+
+
+def test_new_words_are_only_checked_when_the_context_says_so(clean):
+    value, errors = ep.validate_text("espagnol", clean["text"], _ctx(clean, lexicon_size=500, lexicon_forms={"hola"}))
+    assert not any("mots nouveaux" in e for e in errors)
+    assert value["new_words_estimate"]["checked"] is False  # estimé quand même, pour le journal
+
+
+def test_words_already_read_are_known(clean):
+    """Une forme fléchie, un mot court ou un mot jamais glosé, déjà LU dans un
+    épisode joué, n'est pas nouveau ; un nombre non plus."""
+    text = {"lines": [{"speaker": "Ana", "text": "Tiene 25 años y él come.", "translation": "x"}]}
+    ctx = {"speakers": set(), "lexicon_forms": {"tener"}}
+    assert ep.estimate_new_words("espagnol", text["lines"], ctx) == 5  # tiene, años, y, él, come
+    ctx["seen_forms"] = {ep._match_key("espagnol", w) for w in ("tiene", "y", "él", "comemos")}
+    assert ep.estimate_new_words("espagnol", text["lines"], ctx) == 1  # años
+    assert ep.estimate_new_words("mandarin", [{"text": "你好吗"}], {"seen_chars": {"你"}, "read_chars": ["好"]}) == 1
 
 
 def test_mandarin_tokens_and_simplified_characters():
@@ -531,3 +553,90 @@ def test_transparent_words_compare_with_the_explanation_language():
     assert not is_transparent("perro", "the dog", "en")
     # Les faux-amis sont écrits pour un francophone : rien pour un anglophone.
     assert faux_ami("espagnol", "embarazada", "fr") and faux_ami("espagnol", "embarazada", "en") is None
+
+
+# ── Problèmes doux : la meilleure tentative est acceptée (génération fiable) ──
+
+def _scripted(outputs):
+    """Faux Clikoda qui rend `outputs` dans l'ordre ; garde chaque `rejected` reçu."""
+    rejected = []
+
+    def fn(params, ok, err, on_metrics=None, model=None):
+        rejected.append(params["rejected"])
+        ok(outputs[min(len(rejected) - 1, len(outputs) - 1)])
+
+    return fn, rejected
+
+
+def _soft_or_hard(result):
+    if result.get("hard"):
+        return result, ["2 répliques au lieu de 6 à 8", ep.SoftProblem("trop de mots nouveaux", 3.0)]
+    return result, [ep.SoftProblem(f"environ {result['fresh']} mots nouveaux", weight=result["fresh"] / 10)]
+
+
+def test_the_best_soft_attempt_is_accepted_after_one_retry():
+    from config.settings import LANG_SOFT_PROBLEM_RETRIES
+
+    fn, rejected = _scripted([{"fresh": 30}, {"fresh": 12}, {"fresh": 5}])
+    log = []
+    value = ep._attempts("text", fn, lambda rej: {"rejected": rej}, _soft_or_hard, log, [], soft_ok=True)
+    assert value == {"fresh": 12}  # la moins mauvaise des deux tentatives jouées
+    assert len(rejected) == 1 + LANG_SOFT_PROBLEM_RETRIES  # pas de troisième appel pour un problème doux
+    assert rejected[1] == "environ 30 mots nouveaux"
+    assert [bool(c.get("soft_accepted")) for c in log] == [False, True] and all(c["soft"] for c in log)
+
+
+def test_a_soft_attempt_survives_a_later_hard_error():
+    fn, rejected = _scripted([{"hard": True}, {"fresh": 20}, {"hard": True}])
+    log = []
+    assert ep._attempts("text", fn, lambda rej: {"rejected": rej}, _soft_or_hard, log, [], soft_ok=True) == {"fresh": 20}
+    assert len(rejected) == 3 and log[1]["soft_accepted"] is True
+
+
+def test_a_hard_error_is_still_fatal():
+    fn, rejected = _scripted([{"hard": True}])
+    with pytest.raises(ep.GenerationFailed):
+        ep._attempts("text", fn, lambda rej: {"rejected": rej}, _soft_or_hard, [], [], soft_ok=True)
+    assert len(rejected) == 3
+
+
+def test_soft_problems_are_fatal_where_they_are_not_allowed():
+    """Notes et glossaire restent stricts : `soft_ok` n'est donné qu'au texte."""
+    fn, rejected = _scripted([{"fresh": 30}])
+    with pytest.raises(ep.GenerationFailed):
+        ep._attempts("notes_point", fn, lambda rej: {"rejected": rej}, _soft_or_hard, [], [])
+    assert len(rejected) == 3
+
+
+# ── Lemmes pollués : réparés, pas redemandés ──────────────────────────────────
+
+def _en_lines(text):
+    return ep.build_tokens("anglais", [{"speaker": "Ann", "text": text, "translation": "x"}])
+
+
+def test_a_polluted_lemma_is_repaired_not_asked_again():
+    """Base de dev : le glossaire anglais avait pris des traductions françaises
+    pour lemmes (« démographie »), qui revenaient ensuite dans les mots à
+    réemployer. Le lemme devient la forme du texte ; « restaurants » →
+    « restaurant » est un vrai lemme et ne bouge pas."""
+    lines = _en_lines("Demographic data and the restaurants.")
+    ctx = {"params": progress.ladder_params("anglais", 0), "speakers": set(), "lexicon": {}}
+    entries = [
+        {"form": "Demographic", "lemma": "démographie", "translation": "démographie", "pos": "nom", "gender": None,
+         "pron": "x"},
+        {"form": "restaurants", "lemma": "restaurant", "translation": "restaurant", "pos": "nom", "gender": None,
+         "pron": "x"},
+    ]
+    check = ep.check_glossary("anglais", {"entries": entries}, lines, ctx, ["Demographic", "restaurants"])
+    assert check["missing"] == [] and check["errors"] == []
+    assert {e["form"]: e["lemma"] for e in check["kept"]} == {"Demographic": "demographic", "restaurants": "restaurant"}
+    assert check["repaired"] == [{"form": "Demographic", "was": "démographie", "lemma": "demographic"}]
+
+
+def test_a_polluted_lexicon_line_is_glossed_again():
+    lines = _en_lines("Demographic data.")
+    lexicon = {"démographie": {"form": "demographic", "lemma": "démographie", "translation": "démographie",
+                               "pos": "nom", "gender": None, "pron": "x"}}
+    asked, known = ep.glossary_request("anglais", lines, {"params": progress.ladder_params("anglais", 0),
+                                                          "speakers": set(), "lexicon": lexicon})
+    assert "Demographic" in asked and not known

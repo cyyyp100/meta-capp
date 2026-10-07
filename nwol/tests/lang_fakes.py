@@ -188,15 +188,57 @@ def fake_notes(params, ok, err, on_metrics=None, model=None):
     })
 
 
+def fake_lesson(params, ok, err, on_metrics=None, model=None):
+    """Une leçon valide sur ser / estar, dans la langue d'explication du prompt."""
+    CALLS.append("lesson")
+    PROMPTS.append({**params, "task": "lesson"})
+    en = _en(params)
+    ok({
+        "rule": ("Estar describes a passing state; ser describes identity." if en
+                 else "Estar dit un état passager ; ser dit l'identité."),
+        "forms": {"columns": ["", "ser", "estar"],
+                  "rows": [["yo", "soy", "estoy"], ["tú", "eres", "estás"], ["él", "es", "está"]]},
+        "uses": [{"use": "A passing state" if en else "Un état passager", "example": "Estoy bien.",
+                  "translation": "I'm fine." if en else "Je vais bien."}],
+        "pitfalls": [{"wrong": "Soy cansado.", "right": "Estoy cansado.",
+                      "why": "Tiredness is a state." if en else "La fatigue est un état."}],
+        "examples": [
+            {"text": "Hoy la plaza está muy tranquila.",
+             "translation": "Today the square is very quiet." if en else "Aujourd'hui la place est très calme."},
+            {"text": "Carmen siempre sabe todo del barrio.",
+             "translation": "Carmen always knows everything." if en else "Carmen sait toujours tout du quartier."},
+        ],
+        "remember": "A state: estar." if en else "Un état : estar.",
+    })
+
+
+def fake_writing_feedback(params, ok, err, on_metrics=None, model=None):
+    """Une correction valide : une erreur sur le premier mot du texte (recopié
+    tel quel, corrigé par un « ! » — une correction qui recopierait l'original
+    serait écartée), le texte rendu corrigé."""
+    CALLS.append("writing")
+    PROMPTS.append({**params, "task": "writing"})
+    text = params["text"]
+    first = text.split()[0] if text.split() else text
+    en = _en(params)
+    ok({"verdict": "partial",
+        "errors": [{"original": first, "correction": f"{first}!", "error_type": "orthographe",
+                    "explanation": "An exclamation mark is missing." if en else "Il manque un point d'exclamation."}],
+        "corrected": text, "praise": "Well done." if en else "Bien joué."})
+
+
 def install(monkeypatch):
     """Remplace les appels Clikoda du feuilleton et joue la génération inline."""
     from llm import ollama_client
-    from services import lang_activity, lang_episodes
+    from services import lang_activity, lang_episodes, lang_writing
 
     CALLS.clear()
     PROMPTS.clear()
     monkeypatch.setattr(lang_episodes, "RUN_IN_BACKGROUND", False)
     monkeypatch.setattr(lang_activity, "RUN_IN_BACKGROUND", False)
+    monkeypatch.setattr(lang_writing, "RUN_IN_BACKGROUND", False)
+    monkeypatch.setattr(ollama_client, "generate_lang_point_lesson_async", fake_lesson)
+    monkeypatch.setattr(ollama_client, "generate_lang_writing_feedback_async", fake_writing_feedback)
     monkeypatch.setattr(ollama_client, "generate_lang_story_bible_async", fake_bible)
     monkeypatch.setattr(ollama_client, "generate_lang_story_arc_async", fake_arc)
     monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async", fake_text)

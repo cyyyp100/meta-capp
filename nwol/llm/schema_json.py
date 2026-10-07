@@ -2113,6 +2113,23 @@ def _glossary_entry(item) -> dict | None:
     }
 
 
+def lang_episode_glossary_schema(words: int, pron: bool) -> dict:
+    """Schéma des sorties structurées d'Ollama pour le glossaire : EXACTEMENT
+    une entrée par mot demandé (cinq chaînes, six avec la prononciation), au
+    plus cinq expressions. Le décodage ne peut plus refermer la liste trop tôt ;
+    le contenu reste jugé par `lang_episodes.check_glossary`."""
+    width = 6 if pron else 5
+    entry = {"type": "array", "items": {"type": "string"}, "minItems": width, "maxItems": width}
+    return {
+        "type": "object",
+        "properties": {
+            "entries": {"type": "array", "items": entry, "minItems": int(words), "maxItems": int(words)},
+            "expressions": {"type": "array", "items": entry, "maxItems": 5},
+        },
+        "required": ["entries", "expressions"],
+    }
+
+
 def parse_lang_episode_glossary(raw: str | dict) -> dict | None:
     data = _load_json(raw)
     if isinstance(data, list):
@@ -2173,3 +2190,105 @@ def parse_lang_weekly_analysis(raw: str | dict) -> dict | None:
         "tone": tone if tone in _LANG_TONES else "encourager",
         "suggestion": _str(data.get("suggestion")),
     }
+
+
+# ── Leçon d'un point (services/lang_point_lesson.py) ──────────────────────────
+# Structure seulement : les bornes, l'écriture cible et la langue d'explication
+# sont vérifiées ensuite par `lang_point_lesson.validate_lesson`, qui dit
+# POURQUOI une leçon est refusée.
+
+def _lesson_forms(value) -> dict | None:
+    """Tableau de formes : {"columns": [...], "rows": [[...]]}, ou une liste de
+    lignes dont la première est l'en-tête. Lignes complétées à la largeur de
+    l'en-tête ; un tableau vide vaut None (il est facultatif)."""
+    if isinstance(value, list) and value and all(isinstance(r, (list, tuple)) for r in value):
+        value = {"columns": value[0], "rows": value[1:]}
+    if not isinstance(value, dict):
+        return None
+    columns = [_str(c) for c in value.get("columns") or value.get("headers") or [] if not isinstance(c, (list, dict))]
+    rows = []
+    for row in value.get("rows") or []:
+        if isinstance(row, (list, tuple)):
+            cells = [_str(c) for c in row]
+            if any(cells):
+                rows.append(cells)
+    width = max([len(columns)] + [len(r) for r in rows]) if (columns or rows) else 0
+    if not rows or width < 2:
+        return None
+    columns = (columns + [""] * width)[:width]
+    return {"columns": columns, "rows": [(r + [""] * width)[:width] for r in rows]}
+
+
+def parse_lang_point_lesson(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    rule = _str(data.get("rule"))
+    uses = []
+    for u in data.get("uses") or []:
+        if isinstance(u, dict) and _str(u.get("use")):
+            uses.append({"use": _str(u.get("use")), "example": _str(u.get("example")),
+                         "translation": _str(u.get("translation"))})
+    pitfalls = []
+    for p in data.get("pitfalls") or []:
+        if isinstance(p, dict) and _str(p.get("wrong")) and _str(p.get("right")):
+            pitfalls.append({"wrong": _str(p.get("wrong")), "right": _str(p.get("right")), "why": _str(p.get("why"))})
+    examples = []
+    for e in data.get("examples") or []:
+        if isinstance(e, dict) and _str(e.get("text")):
+            examples.append({"text": _str(e.get("text")), "translation": _str(e.get("translation"))})
+    if not rule or not examples:
+        return None
+    return {"rule": rule, "forms": _lesson_forms(data.get("forms")), "uses": uses, "pitfalls": pitfalls,
+            "examples": examples, "remember": _str(data.get("remember"))}
+
+
+# ── Correction d'une expression écrite (services/lang_writing.py) ─────────────
+
+_WRITING_VERDICTS = {
+    "correct": "correct", "juste": "correct", "partial": "partial", "partiel": "partial",
+    "partiellement correct": "partial", "partially correct": "partial", "incorrect": "incorrect",
+    "faux": "incorrect", "wrong": "incorrect",
+}
+# Le vocabulaire des erreurs est celui de la correction héritée
+# (config.settings.LANG_WRITING_ERROR_TYPES). Un prompt anglais les nomme en
+# anglais (WRITING_ERROR_TYPES_EN) ; ses réponses sont ramenées ici aux valeurs
+# canoniques, avec les variantes qu'un petit modèle écrit à leur place.
+WRITING_ERROR_TYPES_EN = {
+    "genre": "gender", "accord": "agreement", "conjugaison": "conjugation", "ordre des mots": "word order",
+    "préposition": "preposition", "faux-ami": "false friend", "orthographe": "spelling",
+    "registre": "register", "vocabulaire": "vocabulary",
+}
+_WRITING_ERROR_SYNONYMS = {en: fr for fr, en in WRITING_ERROR_TYPES_EN.items()} | {
+    "verb form": "conjugaison", "tense": "conjugaison", "ordre": "ordre des mots", "faux ami": "faux-ami",
+    "orthography": "orthographe", "accent": "orthographe", "accents": "orthographe",
+    "word choice": "vocabulaire", "lexique": "vocabulaire",
+}
+
+
+def parse_lang_writing_feedback(raw: str | dict) -> dict | None:
+    from config.settings import LANG_WRITING_ERROR_TYPES
+
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    verdict = _WRITING_VERDICTS.get(_str(data.get("verdict")).lower())
+    errors = []
+    for e in data.get("errors") or data.get("corrections") or []:
+        if not isinstance(e, dict):
+            continue
+        original = _str(e.get("original"))
+        correction = _str(e.get("correction", e.get("corrected")))
+        if not original or not correction:
+            continue
+        kind = _str(e.get("error_type")).lower()
+        kind = _WRITING_ERROR_SYNONYMS.get(kind, kind)
+        errors.append({
+            "original": original, "correction": correction,
+            "error_type": kind if kind in LANG_WRITING_ERROR_TYPES else "vocabulaire",
+            "explanation": _str(e.get("explanation", e.get("reason"))),
+        })
+    corrected = _str(data.get("corrected"))
+    if verdict is None or not corrected:
+        return None
+    return {"verdict": verdict, "errors": errors, "corrected": corrected, "praise": _str(data.get("praise"))}

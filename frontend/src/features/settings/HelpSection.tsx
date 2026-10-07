@@ -14,10 +14,8 @@ import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "./SettingsPrimitives";
 
+import { PROJECT_PAGE } from "../../config/links";
 import { useT } from "../../i18n";
-
-/** Page publique du projet. En dur, comme toutes les URL sortantes de l'app. */
-const PROJECT_PAGE = "https://github.com/cyyyp100/meta-capp";
 
 export function HelpSection({ focusAbout = false }: { focusAbout?: boolean }) {
   const t = useT();

@@ -4,7 +4,13 @@
 // s'improvise ici, et rien n'attend Clikoda — l'épisode du jour existe déjà, le
 // suivant s'écrit pendant qu'on lit celui-ci. La barre de progression compte
 // des étapes, jamais des secondes (pas de compte à rebours). Si le serveur
-// signale le plafond de durée, on saute directement à l'au revoir (R24).
+// signale le plafond de durée, on saute à l'étape essentielle qu'il désigne
+// (`skip_to` : la lecture, l'expression écrite, puis l'au revoir — R24).
+//
+// Une séance « épisode » : [rappel] · lecture · leçon · expression écrite ·
+// jeux · [2e vague] · [jalon] · au revoir. Le serveur abandonne une séance
+// ouverte d'un ancien format (passages 1 et 2, notes, point du jour) : aucune
+// de ces vues n'existe plus ici.
 //
 // Rituels : le sas d'entrée — le même qu'avant un PDF, avec les cartes de la
 // langue pour révision éclair — précède chaque séance, AVANT que son plan ne soit construit — les
@@ -19,6 +25,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { RunCompletion, RunPlan } from "../api/feuilleton";
 import { EndScreen } from "../features/lang/feuilleton/EndScreen";
+import { ExpressionStep } from "../features/lang/feuilleton/Expression";
+import { LeconStep } from "../features/lang/feuilleton/Lecon";
+import { LectureStep } from "../features/lang/feuilleton/Lecture";
 import { Onboarding } from "../features/lang/feuilleton/Onboarding";
 import {
   AccueilStep,
@@ -26,12 +35,9 @@ import {
   CartesStep,
   ControleStep,
   EcritureStep,
-  EpisodePassStep,
   JalonStep,
   JeuxStep,
-  NotesStep,
   PhrasesStep,
-  PointStep,
   RappelStep,
   RecapStep,
   RelectureStep,
@@ -51,10 +57,9 @@ const VIEWS: Record<string, (p: StepProps) => JSX.Element> = {
   phrases: PhrasesStep,
   ecriture: EcritureStep,
   rappel: RappelStep,
-  episode_p1: EpisodePassStep,
-  episode_p2: EpisodePassStep,
-  notes: NotesStep,
-  point: PointStep,
+  lecture: LectureStep,
+  lecon: LeconStep,
+  expression: ExpressionStep,
   jeux: JeuxStep,
   deuxieme_vague: SecondWaveStep,
   jalon: JalonStep,
@@ -126,12 +131,12 @@ export function LangEpisode() {
     let target = index + 1;
     const res = await tracker.advance(current.key, plan.steps[target].key, { signal: extra?.signal });
     if (res?.cap_reached) {
-      // Plafond atteint : les étapes restantes non essentielles sont sautées,
-      // l'au revoir est toujours joué.
+      // Plafond atteint : les étapes non essentielles sont sautées, jusqu'à la
+      // première étape essentielle pas encore faite que désigne le serveur.
       endReason.current = "plafond";
-      const goodbye = plan.steps.findIndex((s) => s.kind === "au_revoir");
-      if (goodbye > target) {
-        target = goodbye;
+      const goal = res.skip_to ? plan.steps.findIndex((s) => s.key === res.skip_to) : -1;
+      if (goal > target) {
+        target = goal;
         await tracker.advance(null, plan.steps[target].key);
       }
     }
@@ -191,7 +196,7 @@ export function LangEpisode() {
         })()}
         {phase === "end" && (
           result ? (
-            <EndScreen result={result} language={language!} onClose={() => setPhase("rest")} />
+            <EndScreen result={result} language={language!} rtl={!!plan?.rtl} onClose={() => setPhase("rest")} />
           ) : (
             <button style={ghostBtn} onClick={() => setPhase("rest")}>{t("feuil.end.close")}</button>
           )

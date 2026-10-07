@@ -3,18 +3,24 @@
 // Le serveur a déjà décidé ce que l'apprenant voit encore (services/lang_runs.
 // display_episode) : pinyin des seuls caractères non acquis (M4), niveau de
 // vocalisation arabe et translittération sous les lettres non acquises (A6).
-// Ici, on rend et on remonte les taps. Un tap sur un mot ouvre sa bulle
-// (traduction, prononciation calculée, genre, faux-ami, « signaler ») et compte
-// comme une révélation ; au passage 1 la traduction suit le palier.
-import { useState } from "react";
+// Ici, on rend et on remonte deux gestes, distincts :
+//   * un tap sur un mot ouvre sa bulle (traduction, prononciation calculée,
+//     genre, faux-ami, « signaler ») et compte comme une révélation ;
+//   * « voir la traduction » d'une réplique (ou « Tout traduire ») envoie UN
+//     événement par réplique montrée : une réplique traduite ne dit plus rien
+//     de ce que l'apprenant lit seul.
+// Le mode de traduction ne dépend plus d'une « passe » : `none` (aucune),
+// `lines` (réplique par réplique), `all` (toutes affichées), `toggle` (réplique
+// par réplique, plus « Tout traduire »). La marque d'une note est un bouton à
+// part, à côté du mot : elle ouvre la note sous sa réplique sans compter de tap.
+import { useRef, useState } from "react";
 
 import { api } from "../../../api/client";
-import type { EpisodeView, EpToken, GlossEntry } from "../../../api/feuilleton";
+import type { EpisodeNote, EpisodeView, EpToken, GlossEntry } from "../../../api/feuilleton";
 import { useT } from "../../../i18n";
 import { ghostBtn, Target } from "./ui";
 
-export type Pass = "p1" | "p2" | "relecture" | "rappel" | "jalon" | "recap" | "library";
-export type TranslationMode = "toujours" | "masquable" | "masquee_p2" | "tap" | "none";
+export type TranslationMode = "none" | "lines" | "all" | "toggle";
 
 const TONE_COLOR: Record<number, string> = {
   1: "var(--tone-1)",
@@ -25,23 +31,27 @@ const TONE_COLOR: Record<number, string> = {
 };
 const GENDER_COLOR: Record<string, string> = { m: "var(--gender-m)", f: "var(--gender-f)", n: "var(--gender-n)" };
 
+const smallBtn = { ...ghostBtn, minHeight: 32, padding: "4px 10px", fontSize: 12 };
+
 export function EpisodeText({
   episode,
-  pass,
   translation = "none",
   onReveal,
+  onLineShown,
   highlights,
-  noteMarks,
+  notes,
   onlyLines,
   showPinyinAll,
   toneColors = true,
 }: {
   episode: EpisodeView;
-  pass: Pass;
   translation?: TranslationMode;
+  /** Tap sur un mot (révélation). */
   onReveal?: (line: number, token: number) => void;
+  /** Traduction d'une réplique montrée : une fois par réplique, `all` pour « Tout traduire ». */
+  onLineShown?: (line: number, all: boolean) => void;
   highlights?: { line: number; tokens: number[] }[];
-  noteMarks?: Record<number, { n: number; tokens: number[] }[]>;
+  notes?: EpisodeNote[];
   onlyLines?: number[];
   showPinyinAll?: boolean;
   toneColors?: boolean;
@@ -49,53 +59,84 @@ export function EpisodeText({
   const t = useT();
   const rtl = episode.dir === "rtl";
   const [open, setOpen] = useState<{ line: number; token: number } | null>(null);
-  const [hideAll, setHideAll] = useState(false);
-  const [shownLines, setShownLines] = useState<Set<number>>(new Set());
-  const lit = new Set((highlights ?? []).flatMap((h) => h.tokens.map((ti) => `${h.line}:${ti}`)));
-  const translationVisible = (li: number) => {
-    if (pass !== "p1") return false;
-    if (translation === "toujours") return true;
-    if (translation === "masquable" || translation === "masquee_p2") return !hideAll;
-    return shownLines.has(li);
-  };
+  // Répliques ouvertes une à une ; « Tout traduire » est un état à part, qu'on
+  // peut refermer. Chaque réplique n'est signalée qu'une fois au serveur.
+  const [shown, setShown] = useState<Set<number>>(new Set());
+  const [allShown, setAllShown] = useState(false);
+  const reported = useRef<Set<number>>(new Set());
+  const [openNote, setOpenNote] = useState<number | null>(null);
+  const focused = notes?.find((n) => n.n === openNote);
+  const lit = new Set(
+    [...(highlights ?? []), ...(focused ? [{ line: focused.line, tokens: focused.tokens }] : [])].flatMap((h) =>
+      h.tokens.map((ti) => `${h.line}:${ti}`),
+    ),
+  );
+  const visible = (li: number) =>
+    translation === "all" || (translation !== "none" && (shown.has(li) || (translation === "toggle" && allShown)));
 
   function tap(li: number, ti: number) {
     setOpen((cur) => (cur && cur.line === li && cur.token === ti ? null : { line: li, token: ti }));
     onReveal?.(li, ti);
   }
 
+  function report(li: number, all: boolean) {
+    if (reported.current.has(li)) return;
+    reported.current.add(li);
+    onLineShown?.(li, all);
+  }
+
+  function showLine(li: number) {
+    setShown((s) => new Set(s).add(li));
+    report(li, false);
+  }
+
+  function toggleAll() {
+    if (!allShown) {
+      episode.lines.forEach((_, li) => {
+        if (!onlyLines || onlyLines.includes(li)) report(li, true);
+      });
+    }
+    setAllShown((v) => !v);
+  }
+
   return (
     <div>
-      {pass === "p1" && (translation === "masquable" || translation === "masquee_p2") && (
+      {translation === "toggle" && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-          <button style={ghostBtn} onClick={() => setHideAll((v) => !v)}>
-            {hideAll ? t("feuil.show_translation") : t("feuil.hide_translation")}
+          <button style={ghostBtn} onClick={toggleAll} aria-pressed={allShown}>
+            {allShown ? t("feuil.lecture.hide_all") : t("feuil.lecture.translate_all")}
           </button>
         </div>
       )}
       <div style={{ display: "grid", gap: 14 }}>
         {episode.lines.map((ln, li) => {
           if (onlyLines && !onlyLines.includes(li)) return null;
-          const marks = noteMarks?.[li] ?? [];
+          const lineNotes = (notes ?? []).filter((n) => n.line === li);
           return (
             <div key={li}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 2 }}>{ln.speaker}</div>
               <div dir={rtl ? "rtl" : "ltr"} style={{ fontSize: rtl ? 26 : episode.family === "hanzi" ? 24 : 19, lineHeight: rtl ? 2.1 : episode.family === "hanzi" ? 2.2 : 1.7 }}>
-                {ln.tokens.map((tok, ti) => (
-                  <Token
-                    key={ti}
-                    tok={tok}
-                    gloss={tok.g !== undefined && tok.g !== null ? episode.glossary[tok.g] : undefined}
-                    lit={lit.has(`${li}:${ti}`)}
-                    mark={marks.find((m) => m.tokens[m.tokens.length - 1] === ti)?.n}
-                    active={!!open && open.line === li && open.token === ti}
-                    rtl={rtl}
-                    showPinyinAll={showPinyinAll}
-                    toneColors={toneColors && episode.tone_colors}
-                    genderColors={episode.gender_colors}
-                    onTap={() => tap(li, ti)}
-                  />
-                ))}
+                {ln.tokens.map((tok, ti) => {
+                  const marks = lineNotes.filter((n) => n.tokens[n.tokens.length - 1] === ti);
+                  return (
+                    <span key={ti}>
+                      <Token
+                        tok={tok}
+                        gloss={tok.g !== undefined && tok.g !== null ? episode.glossary[tok.g] : undefined}
+                        lit={lit.has(`${li}:${ti}`)}
+                        active={!!open && open.line === li && open.token === ti}
+                        rtl={rtl}
+                        showPinyinAll={showPinyinAll}
+                        toneColors={toneColors && episode.tone_colors}
+                        genderColors={episode.gender_colors}
+                        onTap={() => tap(li, ti)}
+                      />
+                      {marks.map((m) => (
+                        <NoteMark key={m.n} n={m.n} active={openNote === m.n} onToggle={() => setOpenNote((cur) => (cur === m.n ? null : m.n))} />
+                      ))}
+                    </span>
+                  );
+                })}
               </div>
               {open && open.line === li && (
                 <Bubble
@@ -111,15 +152,20 @@ export function EpisodeText({
                   onClose={() => setOpen(null)}
                 />
               )}
-              {pass === "p1" && translation === "tap" && !shownLines.has(li) && (
-                <button
-                  style={{ ...ghostBtn, minHeight: 32, padding: "4px 10px", fontSize: 12, marginTop: 4 }}
-                  onClick={() => setShownLines((s) => new Set(s).add(li))}
-                >
+              {focused && focused.line === li && (
+                <div role="note" style={{ margin: "6px 0 2px", padding: "8px 12px", borderInlineStart: "3px solid var(--accent)", background: "var(--surface-soft)", borderRadius: "var(--radius-sm)", fontSize: 14 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)" }}>
+                    {t(`feuil.note_kind.${focused.kind}`)}
+                  </span>{" "}
+                  {focused.text}
+                </div>
+              )}
+              {(translation === "lines" || translation === "toggle") && !visible(li) && (
+                <button style={{ ...smallBtn, marginTop: 4 }} onClick={() => showLine(li)}>
                   {t("feuil.reveal_line")}
                 </button>
               )}
-              {translationVisible(li) && (
+              {visible(li) && (
                 <div style={{ color: "var(--text-soft)", fontStyle: "italic", marginTop: 2 }}>{ln.translation}</div>
               )}
             </div>
@@ -130,11 +176,38 @@ export function EpisodeText({
   );
 }
 
+/** La marque d'une note : un bouton à part, jamais un tap de mot. */
+function NoteMark({ n, active, onToggle }: { n: number; active: boolean; onToggle: () => void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={active}
+      aria-label={t("feuil.note.open", { n })}
+      style={{
+        border: "none",
+        background: active ? "var(--accent-soft)" : "transparent",
+        color: "var(--accent-ink)",
+        fontWeight: 700,
+        fontSize: "0.55em",
+        verticalAlign: "super",
+        padding: "0 3px",
+        marginInlineStart: 1,
+        borderRadius: 4,
+        cursor: "pointer",
+        minWidth: 18,
+      }}
+    >
+      {n}
+    </button>
+  );
+}
+
 function Token({
   tok,
   gloss,
   lit,
-  mark,
   active,
   rtl,
   showPinyinAll,
@@ -145,7 +218,6 @@ function Token({
   tok: EpToken;
   gloss?: GlossEntry;
   lit: boolean;
-  mark?: number;
   active: boolean;
   rtl: boolean;
   showPinyinAll?: boolean;
@@ -195,9 +267,6 @@ function Token({
   return (
     <button type="button" onClick={onTap} style={base} aria-label={tok.text}>
       {body}
-      {mark !== undefined && (
-        <sup style={{ color: "var(--accent-ink)", fontWeight: 700, fontSize: "0.55em", marginInlineStart: 1 }}>{mark}</sup>
-      )}
     </button>
   );
 }

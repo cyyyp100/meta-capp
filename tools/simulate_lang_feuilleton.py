@@ -86,21 +86,33 @@ def _synthetic_episode(profile_id: int, episode_n: int) -> bool:
 
 
 def _play(client_run, run: dict, learner: dict, rng: random.Random) -> dict:
-    from services import lang_runs
+    """Joue une séance comme l'apprenant `learner` : taps à la lecture (passe
+    `lecture`) et aux relectures, réponses aux items de la leçon et des jeux,
+    une expression écrite. Au plafond de durée, la séance suit `skip_to` : la
+    première étape essentielle pas encore faite (R24)."""
+    from services import lang_runs, lang_writing
 
     stats = {"cards": 0}
-    for step in run["steps"]:
+    steps = run["steps"]
+    index = 0
+    while index < len(steps):
+        step = steps[index]
         events = [{"type": "step", "step": step["key"], "started": True}]
-        if step["kind"] in ("episode_p2", "relecture", "rappel", "jalon") and step.get("episode_ref"):
+        if step["kind"] in ("lecture", "relecture", "rappel", "jalon") and step.get("episode_ref"):
             shown = run["episodes"][str(step["episode_ref"])]
             for li, ln in enumerate(shown["lines"]):
                 for ti, tok in enumerate(ln["tokens"]):
                     if tok["w"] and rng.random() < learner["tap_rate"]:
                         events.append({"type": "reveal", "episode_id": shown["id"], "line": li, "token": ti,
-                                       "pass": {"episode_p2": "p2"}.get(step["kind"], step["kind"])})
-        for item in [it for g in step.get("games", []) for it in g["items"]] + step.get("items", []):
+                                       "pass": step["kind"]})
+        items = [it for g in step.get("games", []) for it in g["items"]] + step.get("items", [])
+        if step["kind"] == "lecon":
+            items += lang_runs.run_lesson(run["run_id"])["lesson_items"]
+        for item in items:
             given = item.get("expected") if rng.random() < learner["right"] else "__faux__"
             events.append({"type": "answer", "item": item["ref"], "given": given})
+        if step["kind"] == "expression":
+            lang_writing.submit(run["run_id"], "Una frase escrita por el alumno sobre el episodio de hoy.")
         if step["kind"] == "deuxieme_vague":
             for line in step["lines"]:
                 events.append({"type": "rating", "episode_id": step["episode_ref"], "line": line["line"],
@@ -110,10 +122,14 @@ def _play(client_run, run: dict, learner: dict, rng: random.Random) -> dict:
             events.append({"type": "card", "card_id": card["id"],
                            "verdict": "correct" if rng.random() < learner["right"] else "incorrect"})
         events.append({"type": "step", "step": step["key"], "ended": True, "active_s": step["budget_s"],
-                       "signal": learner["signal"] if step["kind"].startswith("episode") else None})
+                       "signal": learner["signal"] if step["kind"] == "lecture" else None})
         res = lang_runs.record_events(run["run_id"], events, step["key"])
+        index += 1
         if res.get("cap_reached"):
-            break
+            target = next((i for i, s in enumerate(steps) if s["key"] == res.get("skip_to")), None)
+            if target is None:
+                break
+            index = max(index, target)
     feeling = next((s["feeling"]["options"][0] for s in run["steps"] if s["kind"] == "au_revoir"), None)
     lang_runs.complete_run(run["run_id"], "fini", feeling)
     return stats
@@ -124,7 +140,7 @@ def simulate(language: str, days: int, learner_kind: str, seed: int = 0, db_path
     from config.settings import LANG_DUE_CARDS_CAP, LANG_LADDER_MAX_STEP_PER_EPISODE
     from db import lang_episode_db as store
     from db.schema import initialize_schema
-    from services import lang_activity, lang_episodes, lang_progress, lang_runs
+    from services import lang_activity, lang_episodes, lang_progress, lang_runs, lang_writing
     from services import session as metacog
 
     db.close_connection()
@@ -139,11 +155,16 @@ def simulate(language: str, days: int, learner_kind: str, seed: int = 0, db_path
 
     saved = (lang_episodes.generate_episode, lang_episodes.RUN_IN_BACKGROUND, lang_activity.study_date,
              lang_activity.RUN_IN_BACKGROUND, metacog.nudge_metacog_profile,
-             ollama_client.generate_lang_weekly_analysis_async)
+             ollama_client.generate_lang_weekly_analysis_async, lang_writing.RUN_IN_BACKGROUND,
+             ollama_client.generate_lang_writing_feedback_async)
     lang_episodes.generate_episode = _synthetic_episode
-    # Aucun appel au vrai Clikoda : l'analyse hebdomadaire répond un ton fixe.
+    # Aucun appel au vrai Clikoda : l'analyse hebdomadaire répond un ton fixe,
+    # la correction d'une expression écrite rend le texte tel quel.
     ollama_client.generate_lang_weekly_analysis_async = lambda params, ok, err, on_metrics=None, model=None: ok(
         {"observations": ["Simulation."], "tone": "encourager", "suggestion": ""})
+    ollama_client.generate_lang_writing_feedback_async = lambda params, ok, err, on_metrics=None, model=None: ok(
+        {"verdict": "partial", "errors": [], "corrected": params["text"], "praise": ""})
+    lang_writing.RUN_IN_BACKGROUND = False
     lang_episodes.RUN_IN_BACKGROUND = False
     lang_activity.RUN_IN_BACKGROUND = False
     lang_activity.study_date = lambda dt=None: today["d"].isoformat()
@@ -220,7 +241,8 @@ def simulate(language: str, days: int, learner_kind: str, seed: int = 0, db_path
     finally:
         (lang_episodes.generate_episode, lang_episodes.RUN_IN_BACKGROUND, lang_activity.study_date,
          lang_activity.RUN_IN_BACKGROUND, metacog.nudge_metacog_profile,
-         ollama_client.generate_lang_weekly_analysis_async) = saved
+         ollama_client.generate_lang_weekly_analysis_async, lang_writing.RUN_IN_BACKGROUND,
+         ollama_client.generate_lang_writing_feedback_async) = saved
         db.close_connection()
         db.DB_PATH = previous_db
 

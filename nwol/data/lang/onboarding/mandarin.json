@@ -191,18 +191,23 @@
   "comic_springs": "王阿姨's unsolicited advice; 小林 who never looks up from his phone; 陈老师's lost bets; 美美 who always delivers the wrong order.",
   "register_notes": "Present-day standard Mandarin (putonghua): neighbourhood conversations, phone messages and small notices at the teahouse."
  },
+ "keyboard": {
+  "layout": "ime"
+ },
  "prompt_params": {
   "language_label": "chinois mandarin",
   "register": "Registre : mandarin standard de Chine continentale d'aujourd'hui (putonghua), situations de la vie quotidienne. Les prénoms s'écrivent uniquement en caractères chinois, sans pinyin.",
   "script_rules": "Écris UNIQUEMENT en caractères chinois SIMPLIFIÉS, avec la ponctuation chinoise (，。？！、：“”). JAMAIS de pinyin ni de lettres latines dans \"text\" ; écris de préférence les nombres en caractères (三点, 二十块). Découpe chaque réplique en mots dans \"tokens\" : un jeton = un mot (你好, 朋友, 喜欢) ou un signe de ponctuation ; les jetons mis bout à bout redonnent EXACTEMENT \"text\", sans espace.",
   "line_schema": "{\"speaker\": \"nom\", \"text\": \"réplique en caractères simplifiés\", \"tokens\": [\"mot\", \"mot\", \"。\"], \"translation\": \"traduction française\"}",
-  "form_rule": "Pour un mot chinois, le lemme est le mot lui-même, en caractères simplifiés, sans pinyin ; le genre est toujours une chaîne vide."
+  "form_rule": "Pour un mot chinois, le lemme est le mot lui-même, en caractères simplifiés, sans pinyin ; le genre est toujours une chaîne vide.",
+  "writing_rules": "Écris le chinois UNIQUEMENT en caractères simplifiés, avec la ponctuation chinoise ; jamais de pinyin ni de lettre latine."
  },
  "prompt_params_en": {
   "language_label": "Mandarin Chinese",
   "register": "Register: present-day standard Mandarin of mainland China (putonghua), everyday situations. First names are written in Chinese characters only, without pinyin.",
   "script_rules": "Write ONLY in SIMPLIFIED Chinese characters, with Chinese punctuation (，。？！、：“”). NEVER any pinyin or Latin letters in \"text\"; preferably write numbers in characters (三点, 二十块). Split each line into words in \"tokens\": one token = one word (你好, 朋友, 喜欢) or one punctuation mark; the tokens put end to end give back EXACTLY \"text\", without spaces.",
   "line_schema": "{\"speaker\": \"name\", \"text\": \"line in simplified characters\", \"tokens\": [\"word\", \"word\", \"。\"], \"translation\": \"English translation\"}",
-  "form_rule": "For a Chinese word, the lemma is the word itself, in simplified characters, without pinyin; the gender is always an empty string."
+  "form_rule": "For a Chinese word, the lemma is the word itself, in simplified characters, without pinyin; the gender is always an empty string.",
+  "writing_rules": "Write Chinese ONLY in simplified characters, with Chinese punctuation; never any pinyin or Latin letter."
  }
 }
