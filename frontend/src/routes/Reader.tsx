@@ -1381,7 +1381,7 @@ export function Reader() {
       />
 
       {data && !entered && (
-        <EntrySas docId={id} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
+        <EntrySas source={{ kind: "document", docId: id }} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
       )}
 
       {pause && !exit && <PauseSas pause={pause} onResume={resumeReading} onEnd={handleEnd} />}

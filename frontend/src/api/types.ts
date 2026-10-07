@@ -10,13 +10,25 @@ export interface CriterionEntry {
   delta: number;
 }
 
+// Une matière de l'apprenant (nwol/services/subjects.py) : une discipline, née
+// d'un document importé, ou une langue, née d'une séance faite dans cette langue.
+export type SubjectKind = "discipline" | "language";
+
 export interface SubjectEntry {
   subject: string;
-  level: number;
+  kind: SubjectKind;
+  // Drapeau d'une langue (celui de la page Langues), "" pour une discipline.
+  flag: string;
+  // Maîtrise mesurée en quiz ; null pour une langue qu'aucun quiz n'a mesurée.
+  level: number | null;
   history: number[];
   delta: number;
   updates: number;
-  recommendation: Recommendation;
+  recommendation: Recommendation | null;
+  // Langues seulement : séances terminées dans cette langue (module Langues et
+  // lectures), et niveau CECR du module — null si la langue n'y a pas été jouée.
+  sessions?: number;
+  cefr?: string | null;
 }
 
 export interface MetacogOverview {
@@ -174,9 +186,12 @@ export interface QuizSignals {
   creativity_signals: Record<string, boolean | number>;
 }
 
-// Matière disponible pour le quiz (avec son effectif de questions stockées).
+// Matière du sélecteur de quiz : une matière de l'apprenant — la même liste que
+// le profil —, avec son nombre de questions jouables (0 : pas encore jouable).
 export interface QuizSubject {
   subject: string;
+  kind: SubjectKind;
+  flag: string;
   count: number;
 }
 

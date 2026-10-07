@@ -128,6 +128,22 @@ def count_sessions(user_id: int = DEFAULT_USER_ID) -> int:
     return int(row["n"]) if row else 0
 
 
+def finished_sessions_by_subject(user_id: int = DEFAULT_USER_ID) -> dict[str, int]:
+    """Séances de lecture TERMINÉES, par matière du document lu (telle
+    qu'enregistrée). Un document sans matière n'y compte pas."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT d.subject, COUNT(*) AS finished
+           FROM reading_sessions rs
+           JOIN documents d ON d.id = rs.document_id
+           WHERE rs.user_id = ? AND rs.ended_at IS NOT NULL
+             AND TRIM(COALESCE(d.subject, '')) <> ''
+           GROUP BY d.subject""",
+        (user_id,),
+    ).fetchall()
+    return {row["subject"]: int(row["finished"]) for row in rows}
+
+
 def reading_ranks(user_id: int = DEFAULT_USER_ID) -> dict[int, int]:
     """Rang de chaque session PARMI les lectures de son document : {id: n}.
 

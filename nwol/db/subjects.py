@@ -10,33 +10,8 @@ logger = logging.getLogger("DB.subjects")
 
 SUBJECT_REALTIME_UPDATE_WEIGHT = 0.08
 
-SUBJECT_LABELS: dict[str, str] = {
-    "mathématiques": "Mathématiques",
-    "physique": "Physique",
-    "chimie": "Chimie",
-    "biologie": "Biologie",
-    "sciences": "Sciences",
-    "informatique": "Informatique",
-    "technologie": "Technologie",
-    "histoire": "Histoire",
-    "géographie": "Géographie",
-    "français": "Français",
-    "philosophie": "Philosophie",
-    "littérature": "Littérature",
-    "langues": "Langues",
-    "économie": "Économie",
-    "sciences-sociales": "Sciences sociales",
-    "droit": "Droit",
-    "gestion": "Gestion",
-    "psychologie": "Psychologie",
-    "sociologie": "Sociologie",
-    "arts": "Arts",
-    "musique": "Musique",
-    "médecine": "Médecine",
-    "sport": "Sport",
-    "religion": "Religion",
-    "culture": "Culture générale",
-}
+# Les clés de matière (et leurs libellés) sont dans config/subjects.py ; ce module
+# ne fait que lire et écrire les niveaux.
 
 
 def ensure_subject(user_id: int, subject: str) -> dict:

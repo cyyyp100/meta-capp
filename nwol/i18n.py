@@ -584,7 +584,6 @@ STRINGS: dict[str, dict[str, str]] = {
         # générée par le LLM : la carte doit être complète immédiatement et
         # hors ligne, et son texte fait partie de ce qu'on montre.
         "onboarding.doc_title": "Comprendre son ordinateur (démonstration)",
-        "onboarding.doc_subject": "Informatique",
         "onboarding.doc_summary": (
             "Extrait de démonstration fourni avec Meta-Capp : le chapitre matériel "
             "d'un rapport d'informatique — processeur, mémoire vive, stockage. Il "
@@ -1202,7 +1201,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "library.relink_unreadable": "This file cannot be read.",
         # ── Guided tour: the borrowed document ────────────────────────────
         "onboarding.doc_title": "Understanding your computer (demo)",
-        "onboarding.doc_subject": "Computer science",
         "onboarding.doc_summary": (
             "Demo excerpt shipped with Meta-Capp: the hardware chapter of a "
             "computer science report — processor, memory, storage. It exists to "

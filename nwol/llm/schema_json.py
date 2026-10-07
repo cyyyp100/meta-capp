@@ -11,6 +11,13 @@ from typing import Any
 
 from config import question_types
 from config.settings import DOCUMENT_SUMMARY_MAX_CHARS
+from config.subjects import (
+    FALLBACK_SUBJECT,
+    canonical_subject,
+    detect_language,
+    is_generic_language,
+    subject_token,
+)
 from core.math_text import repair_common_inline_math_artifacts
 from i18n import t
 from metacog.reflection import normalize_meta_cognition_questions
@@ -1168,113 +1175,6 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-_KNOWN_SUBJECTS: frozenset[str] = frozenset({
-    "mathématiques", "physique", "chimie", "biologie", "sciences",
-    "informatique", "technologie", "histoire", "géographie", "français",
-    "philosophie", "littérature", "langues", "économie", "sciences-sociales",
-    "droit", "gestion", "psychologie", "sociologie", "arts",
-    "musique", "médecine", "sport", "religion", "culture",
-})
-
-# Les clés sont normalisées (minuscule, sans accent, séparateur "_") par
-# `_normalize_subject_token` avant lookup ; on utilise donc ici cette forme.
-_SUBJECT_ALIASES: dict[str, str] = {
-    "math": "mathématiques",
-    "maths": "mathématiques",
-    "mathematics": "mathématiques",
-    "mathematiques": "mathématiques",
-    "algebre": "mathématiques",
-    "analyse": "mathématiques",
-    "geometrie": "mathématiques",
-    "statistiques": "mathématiques",
-    "physique": "physique",
-    "physics": "physique",
-    "mecanique": "physique",
-    "chimie": "chimie",
-    "chemistry": "chimie",
-    "biologie": "biologie",
-    "biology": "biologie",
-    "svt": "biologie",
-    "science": "sciences",
-    "sciences": "sciences",
-    "informatique": "informatique",
-    "informatics": "informatique",
-    "computing": "informatique",
-    "computer_science": "informatique",
-    "programmation": "informatique",
-    "technologie": "technologie",
-    "technology": "technologie",
-    "ingenierie": "technologie",
-    "engineering": "technologie",
-    "history": "histoire",
-    "histoire": "histoire",
-    "geography": "géographie",
-    "geographie": "géographie",
-    "french": "français",
-    "francais": "français",
-    "philosophie": "philosophie",
-    "philosophy": "philosophie",
-    "litterature": "littérature",
-    "literature": "littérature",
-    "langues": "langues",
-    "langue": "langues",
-    "languages": "langues",
-    "language": "langues",
-    "anglais": "langues",
-    "english": "langues",
-    "espagnol": "langues",
-    "allemand": "langues",
-    "economie": "économie",
-    "economics": "économie",
-    "eco": "économie",
-    "ses": "économie",
-    "sciences_sociales": "sciences-sociales",
-    "social_sciences": "sciences-sociales",
-    "sciences_humaines": "sciences-sociales",
-    "droit": "droit",
-    "law": "droit",
-    "gestion": "gestion",
-    "management": "gestion",
-    "comptabilite": "gestion",
-    "psychologie": "psychologie",
-    "psychology": "psychologie",
-    "sociologie": "sociologie",
-    "sociology": "sociologie",
-    "arts": "arts",
-    "art": "arts",
-    "art_plastique": "arts",
-    "arts_plastiques": "arts",
-    "musique": "musique",
-    "music": "musique",
-    "medecine": "médecine",
-    "medicine": "médecine",
-    "sante": "médecine",
-    "health": "médecine",
-    "sport": "sport",
-    "sports": "sport",
-    "eps": "sport",
-    "religion": "religion",
-    "theologie": "religion",
-    "theology": "religion",
-    "culture": "culture",
-    "general": "culture",
-    "général": "culture",
-    "generale": "culture",
-    "culture_generale": "culture",
-}
-
-
-def parse_subject_detection(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return {"subject": "culture"}
-    subject = _normalize_subject_token(data.get("subject", data.get("matiere", data.get("matière", ""))))
-    subject = _SUBJECT_ALIASES.get(subject, subject)
-    if subject in _KNOWN_SUBJECTS:
-        return {"subject": subject}
-    return {"subject": "culture"}
-
-
 def parse_document_digest(raw: str | dict) -> dict | None:
     """Fiche d'un document : {"subject", "summary", "keywords"}.
 
@@ -1285,7 +1185,6 @@ def parse_document_digest(raw: str | dict) -> dict | None:
     data = _load_json(raw)
     if not isinstance(data, dict):
         data = {}
-    subject = (parse_subject_detection(data) or {}).get("subject") or "culture"
     summary_raw = _coerce_text(
         data.get("summary", data.get("resume", data.get("résumé", "")))
     ) or ""
@@ -1295,6 +1194,15 @@ def parse_document_digest(raw: str | dict) -> dict | None:
             data.get("mots_cles", data.get("mots-clés", data.get("tags", []))),
         )
     )
+    # La matière : une clé du vocabulaire (config/subjects.py) ; alias et noms de
+    # langue (« maths », « English ») y sont ramenés.
+    raw_subject = data.get("subject", data.get("matiere", data.get("matière", "")))
+    subject = canonical_subject(raw_subject)
+    if subject is None and is_generic_language(raw_subject):
+        # « langues » n'est plus une matière : la langue est souvent nommée dans
+        # le résumé ou les mots-clés que le modèle vient d'écrire.
+        subject = detect_language(" ".join([summary_raw, *keywords_raw]))
+    subject = subject or FALLBACK_SUBJECT
     return {
         "subject": subject,
         "summary": _clean_document_summary(summary_raw),
@@ -1330,15 +1238,6 @@ def _clean_document_summary(text: str) -> str:
     cut = clean[:DOCUMENT_SUMMARY_MAX_CHARS]
     space = cut.rfind(" ")
     return (cut[:space] if space > 40 else cut).rstrip(" ,;:") + "…"
-
-
-def _normalize_subject_token(value: Any) -> str:
-    text = str(value or "").lower().strip()
-    normalized = unicodedata.normalize("NFKD", text)
-    without_accents = "".join(
-        char for char in normalized if not unicodedata.combining(char)
-    )
-    return re.sub(r"[^a-z0-9]+", "_", without_accents).strip("_")
 
 
 def parse_brainstorm_search_decision(raw: str | dict) -> dict | None:
@@ -2073,7 +1972,7 @@ LANG_CONTENT_PARSERS: dict = {
 def _normalize_curiosity_tone(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    token = _normalize_subject_token(value)
+    token = subject_token(value)
     aliases = {
         "calme": "calm",
         "calm": "calm",

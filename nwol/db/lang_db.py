@@ -41,6 +41,27 @@ def get_all_lang_profiles(user_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def completed_sessions_by_language(user_id: int) -> dict[str, int]:
+    """Séances de langue TERMINÉES, par langue : épisodes du feuilleton menés au
+    bout, leçons du flux hérité complétées, et sessions libres de ce flux (celles
+    d'une leçon sont ses exercices, la leçon compte déjà). Une langue seulement
+    ouverte a un profil, pas de séance : elle n'apparaît pas."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT p.language,
+                  (SELECT COUNT(*) FROM lang_runs r
+                    WHERE r.profile_id = p.id AND r.status = 'completed')
+                + (SELECT COUNT(*) FROM lang_lessons l
+                    WHERE l.profile_id = p.id AND l.status = 'completed')
+                + (SELECT COUNT(*) FROM lang_sessions s
+                    WHERE s.profile_id = p.id AND s.lesson_id IS NULL) AS completed
+           FROM lang_profiles p
+           WHERE p.user_id = ?""",
+        (user_id,),
+    ).fetchall()
+    return {row["language"]: int(row["completed"]) for row in rows if row["completed"]}
+
+
 def update_lang_profile(
     profile_id: int,
     *,

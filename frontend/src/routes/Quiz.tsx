@@ -32,8 +32,8 @@ import { renderMathToHtml } from "../features/reader/renderMath";
 import { WhyButton } from "../features/science/WhyButton";
 import { formatDuration } from "../features/session/duration";
 import { useT } from "../i18n";
-// Code de matière (tel que stocké en base) -> clé i18n du libellé affiché.
-import { SUBJECT_I18N_KEYS as SUBJ_LABEL_KEY } from "../features/stats/labels";
+// Code de matière (tel que stocké en base) -> libellé traduit.
+import { subjectName as translatedSubject } from "../features/stats/labels";
 
 /**
  * Ce qu'une question rapporte à la session. Le verdict vient du serveur pour une
@@ -171,20 +171,22 @@ export function Quiz() {
 
   /** Libellé affiché d'une matière (code stocké en base → nom traduit). */
   function subjectName(code: string): string {
-    const key = SUBJ_LABEL_KEY[code];
-    return key ? t(key) : code;
+    return translatedSubject(t, code);
   }
 
+  // Les matières de l'apprenant — celles de son profil, pas un catalogue commun.
+  // Une matière sans question jouable (document importé, pas encore lu) reste
+  // visible mais n'est pas proposée.
   const subjectOptions = useMemo(() => {
-    const avail = subjectsQuery.data ?? [];
-    const total = avail.reduce((s, x) => s + x.count, 0);
+    const own = subjectsQuery.data ?? [];
+    const total = own.reduce((s, x) => s + x.count, 0);
     return [
-      { code: "", label: `${t("subj.all")} (${total})` },
-      ...avail.map((x) => {
-        const key = SUBJ_LABEL_KEY[x.subject];
-        const name = key ? t(key) : x.subject;
-        return { code: x.subject, label: `${name} (${x.count})` };
-      }),
+      { code: "", label: `${t("subj.all")} (${total})`, disabled: false },
+      ...own.map((x) => ({
+        code: x.subject,
+        label: `${x.flag ? `${x.flag} ` : ""}${translatedSubject(t, x.subject)} (${x.count})`,
+        disabled: x.count === 0,
+      })),
     ];
   }, [subjectsQuery.data, t]);
 
@@ -346,12 +348,15 @@ export function Quiz() {
                   </SelectTrigger>
                   <SelectContent>
                     {subjectOptions.map((option) => (
-                      <SelectItem key={option.code} value={option.code}>
+                      <SelectItem key={option.code} value={option.code} disabled={option.disabled}>
                         {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {subjectsQuery.data?.length === 0 && (
+                  <p className="m-0 mt-2 text-xs text-muted-foreground">{t("quiz.no_subjects")}</p>
+                )}
               </Field>
 
               {/* La précision vient APRÈS la matière : elle affine dedans (ou dans
@@ -466,7 +471,7 @@ export function Quiz() {
           <div style={{ maxWidth: 360, margin: "16px auto", display: "grid", gap: 8, textAlign: "left" }}>
             {Object.entries(byCat).map(([cat, r]) => (
               <div key={cat} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                <span style={{ color: "var(--text-soft)" }}>{cat}</span>
+                <span style={{ color: "var(--text-soft)" }}>{subjectName(cat)}</span>
                 <span style={{ fontWeight: 700, color: r.correct === r.total ? "var(--success)" : "var(--warning)" }}>
                   {formatScore(r.correct)}/{r.total}
                 </span>

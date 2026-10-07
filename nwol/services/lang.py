@@ -21,6 +21,7 @@ from config.settings import (
     LATIN_SCRIPT,
     SCRIPTS,
     TONAL_LANGUAGES,
+    WARMUP_MAX_CARDS,
     task_wall_timeout_s,
 )
 from db.lang_db import (
@@ -30,7 +31,6 @@ from db.lang_db import (
     complete_lang_lesson,
     create_lang_lesson,
     find_lang_flashcard_id,
-    get_all_lang_profiles,
     get_curriculum,
     get_due_flashcards_for_language,
     get_exercises_cache,
@@ -95,7 +95,6 @@ __all__ = [
     "script_is_tonal",
     "writing_to_passive",
     "get_language_profile",
-    "lang_stats_overview",
     "generate_lesson",
     "generate_session",
     "complete_session",
@@ -224,33 +223,6 @@ def get_language_profile(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
         "tonal": script_is_tonal(language),
         "script_kind": meta.get("kind"),
     }
-
-
-def lang_stats_overview(user_id: int = DEFAULT_USER_ID) -> list[dict]:
-    """Vue par langue pour la page profil : une entrée par langue étudiée.
-
-    Renvoie le score global 0–100 (moyenne des séances), le niveau CEFR, le nombre
-    de séances et la décomposition par compétence. N'inclut que les langues déjà
-    jouées (au moins un exercice ou une séance), pour éviter d'afficher des langues
-    vierges. Déterministe, jamais de LLM.
-    """
-    labels = {lang["code"]: lang for lang in LANGUAGES}
-    overview: list[dict] = []
-    for profile in get_all_lang_profiles(user_id):
-        progress = get_lang_progress(profile["id"])
-        if not progress.get("total_sessions") and not progress.get("total_lessons"):
-            continue
-        meta = labels.get(profile["language"], {})
-        overview.append({
-            "language": profile["language"],
-            "label": meta.get("label", profile["language"]),
-            "flag": meta.get("flag", ""),
-            "level": profile.get("level") or "A1",
-            "global_score": round(float(progress.get("avg_score") or 0.0), 1),
-            "total_lessons": progress.get("total_lessons", 0),
-            "skills": get_skill_scores(profile["id"]),
-        })
-    return overview
 
 
 def _ensure_profile(user_id: int, language: str) -> dict:
@@ -772,7 +744,7 @@ def _record_lesson_practice(
 
 # ── Rituel de séance (SAS entrée/sortie, calqué sur le flux PDF) ───────────────
 
-def lang_warmup_cards(language: str, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:
+def lang_warmup_cards(language: str, limit: int = WARMUP_MAX_CARDS, user_id: int = DEFAULT_USER_ID) -> list[dict]:
     """Cartes de warm-up pour le SAS d'entrée d'une séance de langue.
 
     Cartes dues d'abord (pont SR), complétées par les cartes récentes de la langue

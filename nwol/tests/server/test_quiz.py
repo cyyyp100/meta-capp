@@ -2,6 +2,8 @@
 # correction des réponses rédigées + analyse/conseil de cours.
 from __future__ import annotations
 
+from subject_helpers import complete_language_session, import_document, own
+
 
 def _seed_subject_questions(
     subject: str = "physique",
@@ -53,12 +55,69 @@ def _fail_distractors(context, on_success, on_error, model=None):
 
 
 def test_quiz_subjects_lists_available(client):
-    """GET /quiz/subjects ne liste que les matières ayant des questions, avec l'effectif."""
+    """GET /quiz/subjects liste les matières de l'apprenant, avec l'effectif."""
     _seed_subject_questions("physique")
     resp = client.get("/api/quiz/subjects")
     assert resp.status_code == 200
     subjects = {row["subject"]: row["count"] for row in resp.json()}
-    assert subjects.get("physique") == 2
+    assert subjects == {"physique": 2}
+
+
+def test_quiz_subjects_are_the_learner_subjects(client):
+    """Le sélecteur propose les matières de l'apprenant — celles de son profil —,
+    pas celles du catalogue : une base neuve n'en a aucune, et deux apprenants
+    n'ont pas les mêmes."""
+    assert client.get("/api/quiz/subjects").json() == []
+
+    # Un document importé, pas encore lu : la matière existe, sans question à jouer.
+    import_document("physique")
+    assert client.get("/api/quiz/subjects").json() == [
+        {"subject": "physique", "kind": "discipline", "flag": "", "count": 0},
+    ]
+    # Une matière du catalogue devient jouable dès qu'elle est à l'apprenant.
+    import_document("histoire")
+    subjects = {row["subject"]: row for row in client.get("/api/quiz/subjects").json()}
+    assert set(subjects) == {"physique", "histoire"}
+    assert subjects["histoire"]["count"] >= 10
+
+    # La même liste, dans le même ordre, que les cartes du profil.
+    profile = [s["subject"] for s in client.get("/api/stats/overview").json()["subjects"]]
+    assert [row["subject"] for row in client.get("/api/quiz/subjects").json()] == profile
+
+
+def test_a_language_is_a_quiz_subject_once_practised(client):
+    """Une langue seulement ouverte n'est pas une matière ; après une séance, elle
+    l'est, avec son drapeau et le vocabulaire du catalogue."""
+    complete_language_session("anglais", status="in_progress")
+    assert client.get("/api/quiz/subjects").json() == []
+
+    complete_language_session("anglais")
+    assert client.get("/api/quiz/subjects").json() == [
+        {"subject": "anglais", "kind": "language", "flag": "🇬🇧", "count": 10},
+    ]
+
+
+def test_the_catalogue_never_hands_out_a_subject(client, monkeypatch):
+    """Le catalogue complète les matières de l'apprenant ; il ne lui en donne pas.
+
+    Il servait jadis tout son contenu à une base neuve, et chaque réponse créait
+    la matière dans le profil : tout le monde finissait avec Histoire et
+    Géographie."""
+    monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    import_document("physique")
+
+    assert client.get("/api/quiz/questions", params={"n": 5}).json() == []
+    assert client.get("/api/quiz/questions", params={"n": 5, "interleaved": "true"}).json() == []
+    assert client.get("/api/quiz/questions", params={"subject": "géographie"}).json() == []
+
+
+def test_an_answer_in_an_unknown_category_creates_no_subject(client):
+    """Seule une matière du vocabulaire a un niveau ; une variante d'écriture
+    rejoint sa clé."""
+    body = client.post("/api/quiz/answer", json={"category": "sous-marinologie", "correct": True}).json()
+    assert body["updated"] is False
+    body = client.post("/api/quiz/answer", json={"category": "Maths", "correct": True}).json()
+    assert body["category"] == "mathématiques"
 
 
 def test_quiz_questions_build_mcq(client, monkeypatch):
@@ -509,8 +568,9 @@ def test_answer_keeps_the_partial_verdict(client):
 # ── Réglages de session : sujet libre + longueur ────────────────────────────
 
 def test_quiz_completes_with_the_static_catalogue(client, monkeypatch):
-    """Sans aucune lecture en base, une session reste jouable (catalogue statique)."""
+    """Une matière importée mais pas encore lue se joue déjà : le catalogue la complète."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    own("géographie")
 
     quiz = client.get("/api/quiz/questions", params={"n": 5, "subject": "géographie"}).json()
     assert len(quiz) == 5
@@ -521,16 +581,18 @@ def test_quiz_completes_with_the_static_catalogue(client, monkeypatch):
 
 def test_static_catalogue_covers_the_three_families(client):
     """Géographie, histoire et vocabulaire anglais : au moins dix questions chacun."""
+    own("géographie", "histoire", "anglais")
     subjects = {row["subject"]: row["count"] for row in client.get("/api/quiz/subjects").json()}
     assert subjects.get("géographie", 0) >= 10
     assert subjects.get("histoire", 0) >= 10
-    assert subjects.get("langues", 0) >= 10
+    assert subjects.get("anglais", 0) >= 10
 
 
 def test_static_ids_never_collide_with_reading_ids(client, monkeypatch):
     """Deux réservoirs numérotés depuis 1 : sans décalage, une session mixte dupliquait un id."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
     _seed_subject_questions("physique")
+    own("histoire")
 
     quiz = client.get("/api/quiz/questions", params={"n": 8}).json()
     ids = [q["id"] for q in quiz]
@@ -541,6 +603,7 @@ def test_static_ids_never_collide_with_reading_ids(client, monkeypatch):
 def test_quiz_length_follows_the_requested_count(client, monkeypatch):
     """La longueur de session est celle demandée par l'apprenant."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    own("géographie", "histoire")
 
     assert len(client.get("/api/quiz/questions", params={"n": 3}).json()) == 3
     assert len(client.get("/api/quiz/questions", params={"n": 12}).json()) == 12
@@ -549,6 +612,7 @@ def test_quiz_length_follows_the_requested_count(client, monkeypatch):
 def test_quiz_length_is_clamped_to_the_server_bounds(client, monkeypatch):
     """Le serveur borne : l'UI ne peut pas réclamer 999 questions."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    own("géographie", "histoire", "anglais")
     options = client.get("/api/quiz/options").json()
 
     quiz = client.get("/api/quiz/questions", params={"n": 999}).json()
@@ -563,6 +627,7 @@ def test_quiz_length_is_clamped_to_the_server_bounds(client, monkeypatch):
 def test_topic_filters_the_static_catalogue(client, monkeypatch):
     """Un mot suffit à donner un sujet de session."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    own("géographie")
 
     quiz = client.get("/api/quiz/questions", params={"topic": "capitale", "n": 5}).json()
     assert len(quiz) == 5
@@ -634,13 +699,14 @@ def test_interleaved_alternates_between_domains(client, monkeypatch):
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
     _seed_subject_questions("physique")
     _seed_subject_questions("histoire")
+    own("géographie")
 
     quiz = client.get("/api/quiz/questions", params={"n": 6, "interleaved": "true"}).json()
     assert len(quiz) == 6
     categories = [q["category"] for q in quiz]
     assert len(set(categories)) > 1
-    # Le catalogue statique couvre à lui seul plusieurs domaines : il y a toujours
-    # de quoi alterner, donc aucun doublon consécutif n'est excusable ici.
+    # Trois matières, dont deux étoffées par le catalogue : il y a de quoi
+    # alterner, donc aucun doublon consécutif n'est excusable ici.
     assert all(a != b for a, b in zip(categories, categories[1:]))
 
 
@@ -648,6 +714,7 @@ def test_interleaved_ignores_subject_and_topic(client, monkeypatch):
     """L'exclusivité est une règle serveur, pas seulement un grisage d'UI."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
     _seed_subject_questions("physique")
+    own("géographie")
 
     quiz = client.get(
         "/api/quiz/questions",
@@ -661,6 +728,7 @@ def test_interleaved_ignores_subject_and_topic(client, monkeypatch):
 def test_interleaved_honours_the_requested_length(client, monkeypatch):
     """Le nombre de questions reste le seul réglage disponible dans ce mode."""
     monkeypatch.setattr("services.quiz.generate_quiz_distractors_async", _fake_distractors)
+    own("géographie", "histoire")
 
     assert len(client.get(
         "/api/quiz/questions", params={"n": 5, "interleaved": "true"},

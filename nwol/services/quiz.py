@@ -19,6 +19,7 @@ from config.settings import (
     QUIZ_SEARCH_MAX_TERMS,
     QUIZ_SEARCH_POOL,
 )
+from config.subjects import canonical_subject
 from db.documents import get_document
 from db.metacog import CRITERIA
 from db.practice_sessions import (
@@ -32,13 +33,14 @@ from db.questions import get_question
 from db.quiz_exposures import get_exposures, record_exposures
 from db.quiz_questions import (
     STATIC_ID_OFFSET,
+    count_quiz_questions,
     get_quiz_base_questions,
-    get_quiz_subjects,
     get_static_quiz_questions,
 )
 from db.subjects import get_all_subjects, update_subject_from_answer
 from db.user import DEFAULT_USER_ID
 from services import practice, selection
+from services.subjects import describe, owned_subjects
 from llm.ollama_client import (
     evaluate_answer_async,
     generate_quiz_distractors_async,
@@ -88,8 +90,17 @@ def clamp_quiz_length(n) -> int:
 
 
 def list_subjects(user_id: int = DEFAULT_USER_ID) -> list[dict]:
-    """Matières disponibles pour le quiz (avec effectif), pour le sélecteur."""
-    return get_quiz_subjects(user_id)
+    """Les matières du sélecteur : celles de l'apprenant, exactement celles de son
+    profil (`services.subjects`), chacune avec son nombre de questions jouables.
+
+    Une matière encore sans question (document importé mais pas encore lu) reste
+    listée avec `count = 0` : l'UI la montre sans la proposer, plutôt que de
+    laisser croire qu'elle n'existe pas."""
+    counts = count_quiz_questions()
+    return [
+        {**describe(subject), "count": counts.get(subject, 0)}
+        for subject in owned_subjects(user_id)
+    ]
 
 
 def build_quiz(
@@ -113,8 +124,10 @@ def build_quiz(
     tranchée ici, et pas seulement grisée dans l'UI.
 
     Les questions de lecture passent d'abord ; le catalogue statique complète
-    jusqu'à ``n`` — sinon une base neuve, ou un thème sans document importé,
-    n'aurait aucun quiz à jouer.
+    jusqu'à ``n`` — sinon une matière dont aucun document n'a encore été lu
+    n'aurait aucun quiz à jouer. Le catalogue ne sert QUE les matières de
+    l'apprenant (`services.subjects.owned_subjects`) : il complète ses matières,
+    il ne lui en donne pas de nouvelles.
 
     **Dans tous les modes, on charge un VIVIER (`QUIZ_SEARCH_POOL`) puis on tire
     dedans** (:func:`_pick`). Prendre la tête d'une liste bornée par ``count``
@@ -124,11 +137,12 @@ def build_quiz(
     (`db.quiz_exposures`) pour amortir leur retour au tour suivant.
     """
     count = clamp_quiz_length(n)
+    owned = owned_subjects(user_id)
     if interleaved:
         # L'alternance se décide EN PYTHON, donc on charge un lot borné au lieu de
         # laisser le LIMIT SQL trancher avant. Le catalogue statique entre dans le
-        # vivier — il couvre à lui seul plusieurs domaines, ce qui rend l'alternance
-        # possible même quand un seul document a été importé.
+        # vivier, pour les matières de l'apprenant : il les étoffe, ce qui rend
+        # l'alternance possible même quand une matière n'a qu'un document lu.
         # Le tirage pondéré passe AVANT la répartition par domaine (sinon la même
         # tête de paquet ouvre toutes les sessions entrelacées) et sépare lecture
         # et catalogue : `_interleave_by_category` conserve l'ordre reçu à
@@ -136,7 +150,7 @@ def build_quiz(
         # devant le catalogue de secours.
         pool = _weighted_order(
             get_quiz_base_questions(user_id, QUIZ_SEARCH_POOL, None, shuffle=True), [], user_id,
-        ) + _weighted_order(get_static_quiz_questions(QUIZ_SEARCH_POOL), [], user_id)
+        ) + _weighted_order(get_static_quiz_questions(QUIZ_SEARCH_POOL, subjects=owned), [], user_id)
         return _served(_assemble_quiz(_interleave_by_category(pool, count)), user_id)
 
     terms = _topic_terms(topic)
@@ -147,7 +161,7 @@ def build_quiz(
     if len(base) < count:
         missing = count - len(base)
         base.extend(_pick(
-            _rank_by_topic(get_static_quiz_questions(QUIZ_SEARCH_POOL, subject), terms),
+            _rank_by_topic(get_static_quiz_questions(QUIZ_SEARCH_POOL, subject, owned), terms),
             terms, missing, user_id,
         ))
     if not base:
@@ -290,11 +304,14 @@ def submit_answer(
     graded = (verdict or "").strip().lower()
     if graded not in VERDICTS:
         graded = "correct" if correct else "incorrect"
-    result = {"updated": bool(category), "verdict": graded}
-    if not category:
+    # Seule une matière du vocabulaire (config/subjects.py) a un niveau : une
+    # catégorie inconnue n'en crée pas une de plus.
+    subject = canonical_subject(category)
+    result = {"updated": bool(subject), "verdict": graded}
+    if not subject:
         return result
-    result["category"] = category
-    result["level"] = update_subject_from_answer(user_id, category, bool(correct))
+    result["category"] = subject
+    result["level"] = update_subject_from_answer(user_id, subject, bool(correct))
     return result
 
 

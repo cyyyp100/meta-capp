@@ -16,7 +16,6 @@ from services.lang import (
     get_language_profile,
     get_lesson_exercise,
     lang_lesson_analysis,
-    lang_stats_overview,
     lang_warmup_cards,
     list_languages,
     placement_skip,
@@ -81,16 +80,10 @@ def profile(language: str) -> dict:
     return get_language_profile(language)
 
 
-@router.get("/stats")
-def stats() -> list[dict]:
-    """Vue par langue (score global + niveau + compétences) pour la page profil."""
-    return lang_stats_overview()
-
-
 @router.get("/warmup-cards")
 def warmup_cards(language: str) -> list[dict]:
-    """Cartes du warm-up (SAS d'entrée) filtrées par langue. Langue du pilote :
-    cartes dues seulement, plafonnées (E10, P13)."""
+    """Cartes du warm-up (SAS d'entrée) filtrées par langue, `WARMUP_MAX_CARDS`
+    au plus : dues d'abord, puis récentes (E10)."""
     if lang_runs.is_pilot(language):
         return lang_runs.warmup_cards(language)
     return lang_warmup_cards(language)
@@ -195,6 +188,8 @@ class PlacementAnswersBody(BaseModel):
 
 class RunStartBody(BaseModel):
     mode: str | None = None
+    # Cartes révisées au sas d'entrée (E10) ; le service les borne lui-même.
+    warmup: int = 0
 
 
 class RunEventsBody(BaseModel):
@@ -253,7 +248,7 @@ def feuilleton_placement_submit(language: str, body: PlacementAnswersBody) -> di
 def feuilleton_run_start(language: str, body: RunStartBody) -> dict:
     """E3 : plan complet de la séance (mode facultatif : court, relecture)."""
     mode = body.mode if body.mode in ("court", "relecture") else None
-    return _call(lang_runs.start_run, language, mode)
+    return _call(lang_runs.start_run, language, mode, body.warmup)
 
 
 @router.get("/run/{run_id}")

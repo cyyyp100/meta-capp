@@ -448,19 +448,66 @@ def test_library_episode_view_report_and_compare(client, fake, clock):
     assert {"op": "missing", "text": "muy"} in diff["ops"]
 
 
-def test_warmup_cards_are_capped_and_only_due(client, fake, clock):
-    from config.settings import LANG_DUE_CARDS_CAP
+def _add_cards(n, *, due, prefix, language=LANG):
+    """`n` cartes de la langue, déjà dues (hier) ou à revoir dans dix jours."""
     from db import get_connection
 
-    _onboard(client)
+    when = "datetime('now', '-1 day')" if due else "datetime('now', '+10 days')"
     conn = get_connection()
     with conn:
-        for i in range(LANG_DUE_CARDS_CAP + 5):
+        for i in range(n):
             conn.execute("INSERT INTO flashcards (user_id, front, back, language, source, dedup_key, due_at) "
-                         "VALUES (1, ?, 'x', ?, 'lang_feuilleton', ?, datetime('now', '-1 day'))",
-                         (f"mot{i}", LANG, f"k{i}"))
-    cards = client.get("/api/lang/warmup-cards", params={"language": LANG}).json()
-    assert len(cards) == LANG_DUE_CARDS_CAP
+                         f"VALUES (1, ?, 'x', ?, 'lang_feuilleton', ?, {when})",
+                         (f"{prefix}{i}", language, f"{prefix}{i}"))
+
+
+def _warmup_fronts(client):
+    return [c["front"] for c in client.get("/api/lang/warmup-cards", params={"language": LANG}).json()]
+
+
+def test_warmup_cards_are_capped_due_first_and_of_the_language(client, fake, clock):
+    from config.settings import WARMUP_MAX_CARDS
+
+    _onboard(client)
+    _add_cards(WARMUP_MAX_CARDS + 3, due=True, prefix="du")
+    _add_cards(3, due=False, prefix="nv")  # plus récentes, mais pas dues
+    _add_cards(3, due=True, prefix="it", language="italien")
+    assert _warmup_fronts(client) == [f"du{i}" for i in range(WARMUP_MAX_CARDS)]
+
+
+def test_warmup_cards_fall_back_on_recent_cards(client, fake, clock):
+    """Peu de cartes dues : les plus récentes complètent, pour qu'il y ait un warm-up."""
+    from config.settings import WARMUP_MAX_CARDS
+
+    _onboard(client)
+    _add_cards(2, due=True, prefix="du")
+    _add_cards(WARMUP_MAX_CARDS, due=False, prefix="nv")
+    fronts = _warmup_fronts(client)
+    assert len(fronts) == WARMUP_MAX_CARDS == len(set(fronts))
+    assert fronts[:2] == ["du0", "du1"] and all(f.startswith("nv") for f in fronts[2:])
+
+
+def test_warmup_skips_the_cards_of_todays_open_run(client, fake, clock):
+    """Reprise d'une séance du jour : son étape `cartes` les révisera, pas le sas."""
+    _onboard(client)
+    _add_cards(4, due=True, prefix="du")
+    _add_cards(2, due=False, prefix="nv")
+    run = _start(client, "relecture")
+    planned = {c["front"] for s in run["steps"] for c in s.get("cards") or []}
+    assert planned == {f"du{i}" for i in range(4)}
+    assert sorted(_warmup_fronts(client)) == ["nv0", "nv1"]
+
+
+def test_warmup_cards_count_against_the_run_cap(client, fake, clock):
+    """P13 : le plafond de cartes vaut pour la séance entière, sas d'entrée compris
+    (le compte envoyé par le client est borné à WARMUP_MAX_CARDS)."""
+    from config.settings import LANG_DUE_CARDS_CAP, WARMUP_MAX_CARDS
+
+    _onboard(client)
+    _add_cards(LANG_DUE_CARDS_CAP + 5, due=True, prefix="du")
+    run = client.post(f"/api/lang/{LANG}/run/start", json={"mode": "relecture", "warmup": 99}).json()
+    cartes = next(s for s in run["steps"] if s["kind"] == "cartes")
+    assert len(cartes["cards"]) == LANG_DUE_CARDS_CAP - WARMUP_MAX_CARDS
 
 
 def test_generation_is_single_flight_and_requeued_at_startup(client, fake):

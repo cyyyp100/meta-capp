@@ -36,38 +36,9 @@ export function criterionLabel(key: string): string {
   return CRITERION_LABELS[key] ?? key;
 }
 
-// Libellés d'affichage des matières (miroir de db.subjects.SUBJECT_LABELS).
-export const SUBJECT_LABELS: Record<string, string> = {
-  "mathématiques": "Mathématiques",
-  "physique": "Physique",
-  "chimie": "Chimie",
-  "biologie": "Biologie",
-  "sciences": "Sciences",
-  "informatique": "Informatique",
-  "technologie": "Technologie",
-  "histoire": "Histoire",
-  "géographie": "Géographie",
-  "français": "Français",
-  "philosophie": "Philosophie",
-  "littérature": "Littérature",
-  "langues": "Langues",
-  "économie": "Économie",
-  "sciences-sociales": "Sciences sociales",
-  "droit": "Droit",
-  "gestion": "Gestion",
-  "psychologie": "Psychologie",
-  "sociologie": "Sociologie",
-  "arts": "Arts",
-  "musique": "Musique",
-  "médecine": "Médecine",
-  "sport": "Sport",
-  "religion": "Religion",
-  "culture": "Culture générale",
-};
-
-// Clé i18n du libellé d'une matière (code stocké en base). Le quiz et « Ma
-// progression » nomment les matières par elle ; `SUBJECT_LABELS` reste le
-// repli des écrans pas encore traduits.
+// Clé i18n du libellé de chaque matière, par sa clé en base. Miroir du
+// vocabulaire nwol/config/subjects.py — disciplines, puis une matière par langue
+// (mêmes codes que le module Langues) — vérifié par nwol/tests/test_subjects.py.
 export const SUBJECT_I18N_KEYS: Record<string, string> = {
   "mathématiques": "subj.math",
   "physique": "subj.physics",
@@ -81,7 +52,6 @@ export const SUBJECT_I18N_KEYS: Record<string, string> = {
   "français": "subj.french",
   "philosophie": "subj.philosophy",
   "littérature": "subj.literature",
-  "langues": "subj.languages",
   "économie": "subj.economics",
   "sciences-sociales": "subj.social",
   "droit": "subj.law",
@@ -94,16 +64,36 @@ export const SUBJECT_I18N_KEYS: Record<string, string> = {
   "sport": "subj.sport",
   "religion": "subj.religion",
   "culture": "subj.culture",
+  "anglais": "subj.english",
+  "espagnol": "subj.spanish",
+  "allemand": "subj.german",
+  "italien": "subj.italian",
+  "portugais": "subj.portuguese",
+  "néerlandais": "subj.dutch",
+  "polonais": "subj.polish",
+  "suédois": "subj.swedish",
+  "turc": "subj.turkish",
+  "roumain": "subj.romanian",
+  "indonésien": "subj.indonesian",
+  "vietnamien": "subj.vietnamese",
+  "russe": "subj.russian",
+  "grec": "subj.greek",
+  "coréen": "subj.korean",
+  "mandarin": "subj.mandarin",
+  "japonais": "subj.japanese",
+  "arabe": "subj.arabic",
+  "hébreu": "subj.hebrew",
+  "hindi": "subj.hindi",
+  "thaï": "subj.thai",
+  // Plus une matière depuis qu'il y en a une par langue (migration v39), mais
+  // les quiz joués avant la nomment encore dans « Ma progression ».
+  "langues": "subj.languages",
 };
 
-/** Libellé traduit d'une matière, ou son libellé français à défaut de clé. */
+/** Libellé traduit d'une matière ; sa clé, capitalisée, si elle est inconnue. */
 export function subjectName(t: (key: string) => string, code: string): string {
   const key = SUBJECT_I18N_KEYS[code];
-  return key ? t(key) : subjectLabel(code);
-}
-
-export function subjectLabel(subject: string): string {
-  return SUBJECT_LABELS[subject] ?? subject.charAt(0).toUpperCase() + subject.slice(1);
+  return key ? t(key) : code.charAt(0).toUpperCase() + code.slice(1);
 }
 
 // Couleur selon le score (miroir de score_color côté Tk).

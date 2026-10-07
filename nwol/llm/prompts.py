@@ -18,6 +18,7 @@ from config.settings import (
     SCRIPTS,
     TONAL_LANGUAGES,
 )
+from config.subjects import DISCIPLINES, LANGUAGE_SUBJECTS
 
 
 def _t(fr: str, en: str) -> str:
@@ -1879,14 +1880,10 @@ def _format_chunk_context(previous_context: str, next_context: str) -> str:
     return "\n" + "\n\n".join(parts)
 
 
-# Liste canonique des matières attribuables à un document (miroir de
-# db.subjects.SUBJECT_LABELS et llm.schema_json._KNOWN_SUBJECTS).
-SUBJECT_KEYS = (
-    "mathématiques, physique, chimie, biologie, sciences, informatique, "
-    "technologie, histoire, géographie, français, philosophie, littérature, "
-    "langues, économie, sciences-sociales, droit, gestion, psychologie, "
-    "sociologie, arts, musique, médecine, sport, religion, culture"
-)
+# Matières attribuables à un document : le vocabulaire de config/subjects.py,
+# jamais recopié ici. Les langues sont listées à part, avec leur règle.
+SUBJECT_KEYS = ", ".join(DISCIPLINES)
+LANGUAGE_SUBJECT_KEYS = ", ".join(LANGUAGE_SUBJECTS)
 
 
 def build_document_digest_prompt(doc_title: str, excerpt: str) -> str:
@@ -1897,6 +1894,7 @@ def build_document_digest_prompt(doc_title: str, excerpt: str) -> str:
     l'interface.
     """
     subjects = SUBJECT_KEYS
+    languages = LANGUAGE_SUBJECT_KEYS
     safe_excerpt = (excerpt or "").strip()[:DOCUMENT_DIGEST_PROMPT_CHARS]
     if _i18n.current_lang() == "en":
         return f"""You are indexing a study document for a personal library.
@@ -1917,6 +1915,9 @@ this format:
 
 Constraints:
 - "subject" MUST be exactly one of: {subjects}
+  or, for a document meant to LEARN a foreign language (its grammar, vocabulary,
+  pronunciation or exercises), that language, exactly one of: {languages}
+  A document merely WRITTEN in a language takes the subject of what it is about.
   Pick the most SPECIFIC one. If unsure, pick "culture".
 - "summary": ONE sentence of 12 to 30 words, 200 characters maximum, saying what
   the document CONTAINS (topic and scope). Plain descriptive English.
@@ -1946,6 +1947,10 @@ dans ce format :
 
 Contraintes :
 - "subject" DOIT être exactement l'une de : {subjects}
+  ou, pour un document qui sert à APPRENDRE une langue étrangère (sa grammaire,
+  son vocabulaire, sa prononciation, ses exercices), cette langue, exactement
+  l'une de : {languages}
+  Un document simplement RÉDIGÉ dans une langue prend la matière de son contenu.
   Choisis la plus SPÉCIFIQUE (par ex. "physique" plutôt que "sciences").
   Si tu hésites, choisis "culture".
 - "summary" : UNE phrase de 12 à 30 mots, 200 caractères maximum, qui dit ce que

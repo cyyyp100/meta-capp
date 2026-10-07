@@ -6,9 +6,13 @@
 // des étapes, jamais des secondes (pas de compte à rebours). Si le serveur
 // signale le plafond de durée, on saute directement à l'au revoir (R24).
 //
-// Rituels (F14) : le sas d'entrée de l'ancien flux est remplacé par l'étape de
-// rappel, le sas de sortie par la question unique de l'au revoir ; le sas de
-// repos reste inchangé.
+// Rituels : le sas d'entrée — le même qu'avant un PDF, avec les cartes de la
+// langue pour révision éclair — précède chaque séance, AVANT que son plan ne soit construit — les
+// cartes qu'il fait réviser ne sont plus dues, et la séance ne les ressert pas.
+// Il n'y en a pas au premier accès : l'onboarding (et son test de niveau) en
+// tient lieu, et une langue neuve n'a encore aucune carte. Le rappel reste la
+// première étape du plan, l'au revoir et son bilan font le sas de sortie, le
+// sas de repos suit.
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -36,10 +40,11 @@ import {
 } from "../features/lang/feuilleton/Steps";
 import { ghostBtn } from "../features/lang/feuilleton/ui";
 import { useRunTracker } from "../features/lang/feuilleton/useRunTracker";
+import { EntrySas } from "../features/session/EntrySas";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
 import { useT } from "../i18n";
 
-type Phase = "onboarding" | "loading" | "run" | "end" | "rest" | "error";
+type Phase = "onboarding" | "entry" | "loading" | "run" | "end" | "rest" | "error";
 
 const VIEWS: Record<string, (p: StepProps) => JSX.Element> = {
   accueil: AccueilStep,
@@ -66,7 +71,7 @@ export function LangEpisode() {
   const { state } = useLocation();
   const nav = (state ?? {}) as { language?: string; label?: string; rtl?: boolean; mode?: "court" | "relecture"; onboarding?: boolean };
   const language = nav.language;
-  const [phase, setPhase] = useState<Phase>(nav.onboarding ? "onboarding" : "loading");
+  const [phase, setPhase] = useState<Phase>(nav.onboarding ? "onboarding" : "entry");
   const [plan, setPlan] = useState<RunPlan | null>(null);
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<RunCompletion | null>(null);
@@ -74,13 +79,11 @@ export function LangEpisode() {
   const tracker = useRunTracker(plan?.run_id ?? null, plan?.idle_cutoff_s ?? 90);
   const started = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
+  // Cartes révisées au sas d'entrée : le serveur les décompte du plafond de la séance.
+  const warmedUp = useRef(0);
 
   useEffect(() => {
-    if (!language) {
-      navigate("/lang");
-      return;
-    }
-    if (!nav.onboarding) void start(nav.mode);
+    if (!language) navigate("/lang");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
@@ -95,7 +98,7 @@ export function LangEpisode() {
   async function start(mode?: "court" | "relecture") {
     setPhase("loading");
     try {
-      const p = await api.feuilletonRunStart(language!, mode);
+      const p = await api.feuilletonRunStart(language!, mode, warmedUp.current);
       // Séance du jour reprise à l'étape atteinte (R2).
       const resumeAt = p.resumed && p.current_step ? Math.max(0, p.steps.findIndex((s) => s.key === p.current_step)) : 0;
       started.current = false;
@@ -143,6 +146,22 @@ export function LangEpisode() {
   }
 
   if (phase === "rest") return <PostExitRestSas onDone={() => navigate("/lang")} skipKey="post_exit_rest.skip_lang" />;
+
+  if (phase === "entry" && language) {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "var(--bg)" }}>
+        <EntrySas
+          source={{ kind: "language", language }}
+          title={nav.label ?? language}
+          onStart={(timings) => {
+            warmedUp.current = timings.length;
+            void start(nav.mode);
+          }}
+          onLeave={() => navigate("/lang")}
+        />
+      </div>
+    );
+  }
 
   return (
     <div ref={scroller} style={{ position: "fixed", inset: 0, background: "var(--bg)", overflowY: "auto" }}>

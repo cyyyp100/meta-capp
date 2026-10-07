@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stop on one side lowers attention. The end-of-session debrief comments on it.
 - **The entry airlock's length is a setting** (Settings ▸ Reading): 30 s to 5 min,
   1 min by default.
+- **Language sessions open with the entry airlock again** — the same one as before
+  a PDF, whose length follows the same setting — followed by a quick review of at
+  most five flashcards of the language you are studying: due ones first, then the
+  most recent. Those cards count toward the session's card limit
+  and are not served again later in the session. Your first visit to a language
+  (introduction and placement test) has no airlock.
 - **Quizzes and language sessions move your gauges.** Like a reading session, each
   quiz and each language session now draws its own gauge curve: quiz answers (with
   their response time), language games, second-wave self-ratings, "understood?"
@@ -75,11 +81,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When Ollama cannot load the model for lack of memory, the reader says so in
   plain words instead of answering with a generic fallback, and the call is no
   longer retried.
+- **One subject per language.** The single "Languages" subject is gone: English,
+  Spanish, German, Mandarin… are each a subject of their own, with the language
+  module's flag and CEFR level on the profile. A language becomes one of your
+  subjects after your first session in it — opening it in Languages is not enough.
+  A course meant to learn a language is filed under that language when imported; a
+  document merely written in a language keeps the subject of its content. Your
+  "Languages" mastery, which came from the built-in English vocabulary questions,
+  is now English.
+- **Your subjects are your own, and the quiz offers exactly them.** The profile and
+  the quiz's subject picker show the same list: the subjects of the documents in
+  your library (Clikoda files each one when it is imported), the languages you have
+  practised, and any subject you have already been measured in. A subject without
+  a playable question yet is shown greyed out. The built-in question catalogue now
+  only rounds out these subjects: it no longer adds History or Geography to every
+  profile, so a fresh install has no quiz until a document is imported and read.
+  A subject whose last document was deleted, and in which nothing was measured,
+  leaves the profile.
 
 ### Fixed
 
 - Reflections written at the end of a language lesson, and the feeling picked at the
   end of an episode, were silently dropped; they are now kept with their session.
+- Languages studied with episodes never appeared on the profile: only lessons of
+  the older flow were counted.
+- Subjects were shown untranslated: the profile always in French, the library cards
+  and the quiz results under their raw key. The demo document no longer creates a
+  subject of its own ("Computer science" next to "informatique").
 - A quiz no longer moves your retention twice (once per answer, then again at the
   end): it moves your profile once, when the quiz ends — or when you leave it.
 - In My progress, "N criteria moved" only counts criteria that actually moved.

@@ -29,7 +29,9 @@ def borrow_demo() -> dict:
     document = ensure_demo_document(
         lang=i18n.current_lang(),
         title=i18n.t("onboarding.doc_title"),
-        subject=i18n.t("onboarding.doc_subject"),
+        # Une CLÉ de matière (config/subjects.py), traduite par l'interface comme
+        # celle de tout document — pas un libellé, qui ferait une matière à part.
+        subject="informatique",
         summary=i18n.t("onboarding.doc_summary"),
         keywords=keywords,
     )

@@ -300,8 +300,9 @@ export const api = {
     getJSON<{ items: PlacementItemView[] }>(`/api/lang/${encodeURIComponent(language)}/placement`),
   feuilletonPlacementSubmit: (language: string, answers: Record<string, number>) =>
     postJSON<PlacementOutcome>(`/api/lang/${encodeURIComponent(language)}/placement/submit`, { answers }),
-  feuilletonRunStart: (language: string, mode?: "court" | "relecture") =>
-    postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, mode ? { mode } : {}),
+  // `warmup` : cartes révisées au sas d'entrée, décomptées du plafond de cartes de la séance.
+  feuilletonRunStart: (language: string, mode?: "court" | "relecture", warmup = 0) =>
+    postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, { ...(mode ? { mode } : {}), warmup }),
   feuilletonRun: (runId: number) => getJSON<RunPlan>(`/api/lang/run/${runId}`),
   feuilletonEvents: (runId: number, events: RunEvent[], currentStep: string | null) =>
     postJSON<EventsResult>(`/api/lang/run/${runId}/events`, { events, current_step: currentStep }),
@@ -327,7 +328,6 @@ export const api = {
       script_kind?: string;
     }>(`/api/lang/profile?language=${encodeURIComponent(language)}`),
   // Vue par langue pour la page profil (score global + niveau + compétences).
-  langStats: () => getJSON<LangStatEntry[]>("/api/lang/stats"),
   languageLesson: (language: string) =>
     postJSON<LangLesson>("/api/lang/lesson", { language }),
   // Séquenceur adaptatif : décide + génère UNE session juste-à-temps.
@@ -942,16 +942,6 @@ export interface LangLessonExerciseResp {
 
 // Score moyen 0–100 + nombre d'exercices par compétence (analyse poussée).
 export type LangSkills = Record<string, { score: number; count: number }>;
-
-export interface LangStatEntry {
-  language: string;
-  label: string;
-  flag: string;
-  level: string;
-  global_score: number;
-  total_lessons: number;
-  skills: LangSkills;
-}
 
 export interface LangLessonAnalysis {
   analysis: string;

@@ -200,6 +200,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 38)
         current = 38
 
+    if current < 39 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v39(conn)
+        _set_version(conn, 39)
+        current = 39
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1648,3 +1653,90 @@ def _migrate_to_v38(conn) -> None:
             "ON session_reflections(practice_session_id)"
         )
     logger.info("Migration SQLite v38 terminée")
+
+
+def _migrate_to_v39(conn) -> None:
+    """Une matière par langue : l'ancienne matière « langues » est répartie, et
+    toute matière enregistrée prend sa clé canonique (config/subjects.py).
+
+    - `quiz_static_questions` : le vocabulaire anglais du catalogue passe de
+      « langues » à « anglais » — c'était tout ce que la catégorie contenait ;
+    - `documents.subject` : une valeur écrite autrement que sa clé (« Informatique »
+      ou « Computer science », le libellé que recevait le document de
+      démonstration) prend la clé ; un document « langues » prend la langue que
+      nomment son nom, son résumé ou ses mots-clés, « culture » à défaut ;
+    - `subject_profile` / `subject_history` : idem, et la maîtrise « langues »
+      passe à « anglais » — le catalogue, seule source commune à toutes les
+      bases, n'en posait pas d'autre. Deux lignes qui se rejoignent fusionnent.
+
+    L'historique des séances (`practice_sessions`, `quiz_session_answers`) garde
+    « langues » : c'est ce qui a été joué ce jour-là. Rejouable : une base déjà
+    canonique ne change pas."""
+    from config.subjects import (
+        FALLBACK_SUBJECT,
+        canonical_subject,
+        detect_language,
+        is_generic_language,
+    )
+
+    logger.info("Migration SQLite v39 démarrée")
+    with conn:
+        conn.execute(
+            "UPDATE quiz_static_questions SET category = 'anglais' WHERE category = 'langues'"
+        )
+        for row in conn.execute(
+            "SELECT id, filename, subject, auto_summary, keywords FROM documents "
+            "WHERE TRIM(COALESCE(subject, '')) <> ''"
+        ).fetchall():
+            target = canonical_subject(row["subject"])
+            if target is None and is_generic_language(row["subject"]):
+                target = detect_language(" ".join(
+                    str(row[key] or "") for key in ("filename", "auto_summary", "keywords")
+                ))
+            target = target or FALLBACK_SUBJECT
+            if target != row["subject"]:
+                conn.execute("UPDATE documents SET subject = ? WHERE id = ?", (target, row["id"]))
+
+        names = {
+            r["subject"] for r in conn.execute(
+                "SELECT subject FROM subject_profile UNION SELECT subject FROM subject_history"
+            ).fetchall()
+        }
+        for name in names:
+            target = "anglais" if is_generic_language(name) else canonical_subject(name)
+            if target is not None and target != name:
+                _merge_subject(conn, name, target)
+    logger.info("Migration SQLite v39 terminée")
+
+
+def _merge_subject(conn, old: str, new: str) -> None:
+    """Renomme la matière `old` en `new` (niveaux et historique). Si l'apprenant
+    a déjà `new`, les deux lignes fusionnent : effectifs additionnés, niveau
+    moyen pondéré par le nombre de questions de chacune."""
+    conn.execute("UPDATE subject_history SET subject = ? WHERE subject = ?", (new, old))
+    for row in conn.execute("SELECT * FROM subject_profile WHERE subject = ?", (old,)).fetchall():
+        kept = conn.execute(
+            "SELECT * FROM subject_profile WHERE user_id = ? AND subject = ?", (row["user_id"], new),
+        ).fetchone()
+        if kept is None:
+            conn.execute(
+                "UPDATE subject_profile SET subject = ? WHERE user_id = ? AND subject = ?",
+                (new, row["user_id"], old),
+            )
+            continue
+        moved, stayed = int(row["questions_count"] or 0), int(kept["questions_count"] or 0)
+        level = (
+            (float(row["level"]) * moved + float(kept["level"]) * stayed) / (moved + stayed)
+            if moved + stayed else float(kept["level"])
+        )
+        conn.execute(
+            """UPDATE subject_profile
+               SET level = ?, questions_count = questions_count + ?,
+                   correct_count = correct_count + ?,
+                   updated_at = MAX(COALESCE(updated_at, ''), COALESCE(?, ''))
+               WHERE user_id = ? AND subject = ?""",
+            (level, moved, int(row["correct_count"] or 0), row["updated_at"], row["user_id"], new),
+        )
+        conn.execute(
+            "DELETE FROM subject_profile WHERE user_id = ? AND subject = ?", (row["user_id"], old),
+        )

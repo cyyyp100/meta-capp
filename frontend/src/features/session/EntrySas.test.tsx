@@ -50,7 +50,7 @@ function renderSas(onStart = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <EntrySas docId={3} title="Segmentation 3D" onStart={onStart} />
+      <EntrySas source={{ kind: "document", docId: 3 }} title="Segmentation 3D" onStart={onStart} />
     </QueryClientProvider>,
   );
   return onStart;

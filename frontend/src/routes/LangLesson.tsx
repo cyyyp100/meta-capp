@@ -11,9 +11,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { LangExercise, LangLessonSlot, LangSessionContent } from "../api/client";
 import { KindBody } from "../features/lang/SessionView";
-import { LangEntrySas } from "../features/lang/LangEntrySas";
 import { LangExitSas } from "../features/lang/LangExitSas";
 import { PlacementFlow } from "../features/lang/PlacementFlow";
+import { EntrySas } from "../features/session/EntrySas";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
 import { useT } from "../i18n";
 
@@ -232,7 +232,7 @@ export function LangLesson() {
   if (phase === "entry") {
     return (
       <div style={{ position: "fixed", inset: 0, background: "var(--bg)" }}>
-        <LangEntrySas language={language!} label={label} theme={lesson?.theme ?? ""} onStart={() => setSasDone(true)} />
+        <EntrySas source={{ kind: "language", language: language!, theme: lesson?.theme }} title={label} onStart={() => setSasDone(true)} />
       </div>
     );
   }

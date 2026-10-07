@@ -30,6 +30,7 @@ import {
 import { pageImageUrl } from "../../api/client";
 import type { DocumentSummary } from "../../api/types";
 import { useLangStore, useT } from "../../i18n";
+import { subjectName } from "../stats/labels";
 import { DOC_MIME } from "./dnd";
 import type { FlatFolder } from "./folderTree";
 import { useLibraryUi } from "./useLibraryUi";
@@ -222,7 +223,7 @@ export function DocumentCard({
         )}
         <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
           {t("home.pages", { n: doc.page_count })}
-          {doc.subject ? ` · ${doc.subject}` : ""}
+          {doc.subject ? ` · ${subjectName(t, doc.subject)}` : ""}
         </div>
         {folderName && (
           <div style={{ color: "var(--muted-light)", fontSize: 11, marginTop: 3 }}>

@@ -566,7 +566,7 @@ LANG_SCRIPT_ACQUIRED_MIN_EPISODES = 2
 LANG_ABSENCE_TIERS: tuple[tuple[int | None, str], ...] = (
     (2, "normal"), (6, "rappel_long"), (20, "reprise"), (None, "reprise_controle"),
 )
-LANG_DUE_CARDS_CAP = 15                 # cartes dues servies par séance, les plus anciennes d'abord
+LANG_DUE_CARDS_CAP = 15                 # cartes dues servies par séance (warm-up du sas compris), les plus anciennes d'abord
 
 # C8 — jour d'étude (décompte par langue, backend seulement, jamais affiché en série).
 LANG_STUDY_DAY_CUTOFF_HOUR = 4
@@ -726,7 +726,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 38
+DB_SCHEMA_VERSION = 39
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -814,7 +814,8 @@ ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives e
 #               la confronter au verso) -> la trace en mémoire est fragile ;
 #   * drifted : au-delà de la lecture + WARMUP_DRIFT_S -> l'élève n'est plus là ;
 #   * steady  : entre les deux, aucun effet.
-# Lues uniquement par services/warmup.py.
+# Lues uniquement par services/warmup.py — sauf WARMUP_MAX_CARDS, qui borne
+# aussi le tirage des cartes du sas d'une séance de langue (services/lang*.py).
 WARMUP_MAX_CARDS = 5
 WARMUP_SKIM_MS_PER_WORD = 100        # ≈ 600 mots/min : plus vite, on ne lit pas, on clique
 WARMUP_READ_MS_PER_WORD = 250        # ≈ 240 mots/min : lecture attentive

@@ -182,3 +182,72 @@ def test_v38_adds_practice_sessions_without_touching_reading_history(fresh_db, m
         assert "practice_session_id" in columns
     row = conn.execute("SELECT * FROM metacog_history").fetchone()
     assert row["value_after"] == 60 and row["practice_session_id"] is None
+
+
+# ── v39 : une matière par langue ─────────────────────────────────────────────
+
+def test_v39_spreads_the_old_languages_subject(fresh_db, monkeypatch):
+    """« langues » disparaît : le vocabulaire anglais du catalogue et la maîtrise
+    qu'il a mesurée passent à « anglais », un document de langue prend la langue
+    qu'il nomme, et toute matière écrite autrement que sa clé la rejoint —
+    fusion comprise. Rejouée, la migration ne change plus rien."""
+    from db import get_connection, migrations
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 38)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+        conn.execute(
+            "INSERT INTO quiz_static_questions (question, answer, category) "
+            "VALUES ('Que signifie « to borrow » ?', 'Emprunter', 'langues')"
+        )
+        for path, filename, subject, summary in (
+            ("/tmp/a.pdf", "Spanish_basics.pdf", "langues", ""),
+            ("/tmp/b.pdf", "notes.pdf", "langues", "Des notes."),
+            ("/tmp/c.pdf", "demo.pdf", "Informatique", ""),
+            ("/tmp/d.pdf", "demo-en.pdf", "Computer science", ""),
+            ("/tmp/e.pdf", "cours.pdf", "physique", ""),
+        ):
+            conn.execute(
+                "INSERT INTO documents (path, filename, page_count, subject, auto_summary) "
+                "VALUES (?, ?, 1, ?, ?)",
+                (path, filename, subject, summary),
+            )
+        conn.executemany(
+            "INSERT INTO subject_profile (user_id, subject, level, questions_count, correct_count) "
+            "VALUES (1, ?, ?, ?, ?)",
+            [("langues", 75.0, 12, 9), ("Informatique", 40.0, 2, 1), ("informatique", 80.0, 2, 2)],
+        )
+        conn.executemany(
+            "INSERT INTO subject_history (user_id, subject, value_before, value_after, source) "
+            "VALUES (1, ?, 50, 60, 'quiz')",
+            [("langues",), ("langues",), ("Informatique",)],
+        )
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 39)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)
+    assert _schema_version(conn) == 39
+
+    assert [r["category"] for r in conn.execute("SELECT category FROM quiz_static_questions")] == ["anglais"]
+    subjects = dict(conn.execute("SELECT filename, subject FROM documents").fetchall())
+    assert subjects == {
+        "Spanish_basics.pdf": "espagnol",
+        "notes.pdf": "culture",
+        "demo.pdf": "informatique",
+        "demo-en.pdf": "informatique",
+        "cours.pdf": "physique",
+    }
+    profile = {r["subject"]: r for r in conn.execute("SELECT * FROM subject_profile")}
+    assert set(profile) == {"anglais", "informatique"}
+    assert profile["anglais"]["level"] == 75.0 and profile["anglais"]["questions_count"] == 12
+    # Fusion : effectifs additionnés, niveau pondéré par les questions.
+    assert profile["informatique"]["questions_count"] == 4
+    assert profile["informatique"]["correct_count"] == 3
+    assert profile["informatique"]["level"] == 60.0
+    history = [r["subject"] for r in conn.execute("SELECT subject FROM subject_history ORDER BY id")]
+    assert history == ["anglais", "anglais", "informatique"]

@@ -29,6 +29,7 @@ from config.settings import (
     task_timeout_s,
     task_wall_timeout_s,
 )
+from config.subjects import detect_language
 from i18n import current_lang, t
 from llm import throughput
 from llm.prompts import (
@@ -2421,10 +2422,13 @@ def _heuristic_subject(text: str) -> str:
         return "géographie"
     if re.search(r"\b(littérature|litterature|roman|poésie|poesie|récit|recit|narration|auteur|œuvre|oeuvre|fiction)\b", lower):
         return "littérature"
+    # Une matière par langue : nommer une langue étrangère l'emporte sur les
+    # repères génériques de « français » (« grammaire anglaise » est de l'anglais).
+    language = detect_language(lower)
+    if language:
+        return language
     if re.search(r"\b(grammaire|conjugaison|orthographe|texte|français|francais|vocabulaire|syntaxe|dictée|dictee)\b", lower):
         return "français"
-    if re.search(r"\b(langue|anglais|english|espagnol|allemand|italien|traduction|vocabulary|grammar)\b", lower):
-        return "langues"
     if re.search(r"\b(art|peinture|sculpture|dessin|architecture|esthétique|esthetique|artiste|tableau)\b", lower):
         return "arts"
     if re.search(r"\b(musique|music|harmonie|mélodie|melodie|rythme|partition|instrument|note de musique|gamme)\b", lower):

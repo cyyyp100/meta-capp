@@ -15,9 +15,10 @@ import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
 import { WarmUp, type WarmUpTiming } from "./WarmUp";
 
-// SAS d'entrée : accroche de curiosité (LLM, 1 min par défaut, passable à mi-course
-// et au plus tard après 30 s) PUIS warm-up de 5 cartes sélectionnées par
-// pertinence (clic-only), avant de démarrer la lecture.
+// SAS d'entrée : mise en condition (1 min par défaut, passable à mi-course et au
+// plus tard après 30 s) PUIS warm-up de 5 cartes au plus (clic-only), avant de
+// démarrer la lecture d'un PDF ou une séance de langue. Un seul rituel pour les
+// deux : seuls changent l'accroche et le tirage des cartes (`EntrySource`).
 //
 // À la fin du compte à rebours, le sas ATTEND : c'est l'élève qui décide quand
 // passer aux cartes. La durée est un réglage (`entry_sas_s`, Réglages ▸ Lecture).
@@ -38,19 +39,35 @@ const DEMO_SECONDS = 8;
 const RING_RADIUS = 46;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
+/**
+ * Ce qu'on s'apprête à ouvrir.
+ *   * un document : accroche de curiosité (LLM) et cartes choisies par
+ *     pertinence (dues + récence × matière) ;
+ *   * une langue : cartes de cette langue (dues, puis récentes), et pour
+ *     accroche le thème de la séance quand il est connu — pas d'appel LLM.
+ */
+export type EntrySource =
+  | { kind: "document"; docId: number }
+  | { kind: "language"; language: string; theme?: string };
+
+const COPY = {
+  document: { label: "entry.label", text: "entry.text", leave: "entry.back_library", leaveHint: "entry.back_library_hint" },
+  language: { label: "lang.entry_label", text: "lang.entry_text", leave: "feuil.back", leaveHint: "lang.entry_back_hint" },
+} as const;
+
 export function EntrySas({
-  docId,
+  source,
   title,
   onStart,
   onLeave,
   demo = false,
 }: {
-  docId: number;
+  source: EntrySource;
   title: string;
   /** Sas franchi. `warmup` : le rythme de la révision éclair, vide sans carte. */
   onStart: (warmup: WarmUpTiming[]) => void;
   /**
-   * « ← Bibliothèque » : on a ouvert le mauvais document. Le sas est le SEUL
+   * « ← Bibliothèque » (« ← Langues ») : on a ouvert le mauvais document. Le sas est le SEUL
    * moment où ce retour a un sens — rien n'a encore été lu, rien ne doit être
    * compté. Absent en démonstration : la visite tient le fil.
    */
@@ -90,20 +107,23 @@ export function EntrySas({
   // l'interface, et une accroche mise en cache en anglais ne doit pas resservir
   // après un passage au français.
   const lang = useLangStore((s) => s.lang);
+  const docId = source.kind === "document" ? source.docId : null;
   const { data: hook } = useQuery({
     queryKey: ["hook", docId, lang],
-    queryFn: () => api.docHook(docId, 1),
+    queryFn: () => api.docHook(docId as number, 1),
     staleTime: Infinity,
-    enabled: !demo,
+    enabled: !demo && docId !== null,
   });
-  // Warm-up : 5 cartes sélectionnées par pertinence (dues + récence × matière).
+  // Warm-up : 5 cartes au plus, tirées pour ce document ou pour cette langue.
   const { data: cards } = useQuery({
-    queryKey: ["session-start", docId],
-    queryFn: () => api.sessionStartCards(docId),
+    queryKey: source.kind === "document" ? ["session-start", source.docId] : ["lang-warmup", source.language],
+    queryFn: () => (source.kind === "document" ? api.sessionStartCards(source.docId) : api.langWarmupCards(source.language)),
     staleTime: Infinity,
     enabled: !demo,
   });
-  const hookText = demo ? t("demo.entry_hook") : hook?.hook;
+  const hookText = demo ? t("demo.entry_hook") : source.kind === "document" ? hook?.hook : source.theme;
+  const copy = COPY[source.kind];
+  const leave = onLeave && !demo ? <LeaveButton onLeave={onLeave} label={t(copy.leave)} hint={t(copy.leaveHint)} /> : null;
 
   // Les cartes du warm-up : celles de la répétition espacée, ou les deux cartes
   // écrites d'avance de la visite.
@@ -147,7 +167,7 @@ export function EntrySas({
     if (demo) return <WarmUp cards={demoCards} onDone={onStart} demo />;
     if (!cards) {
       return (
-        <SasOverlay contained corner={onLeave && !demo ? <LeaveButton onLeave={onLeave} /> : null}>
+        <SasOverlay contained corner={leave}>
           <div className="text-muted-foreground italic">{t("common.loading")}</div>
         </SasOverlay>
       );
@@ -159,7 +179,7 @@ export function EntrySas({
   return (
     // Le retour n'attend pas les 30 s : se tromper de document est précisément
     // le cas où l'on ne veut pas ralentir.
-    <SasOverlay contained corner={onLeave && !demo ? <LeaveButton onLeave={onLeave} /> : null}>
+    <SasOverlay contained corner={leave}>
       <motion.div
         // La visite éclaire ce panneau ENTIER. L'ancre était sur le titre :
         // la découpe ne montrait que deux lignes, et le rituel qu'on venait
@@ -172,10 +192,10 @@ export function EntrySas({
         transition={{ duration: 0.5, ease: [0.33, 1, 0.68, 1] }}
       >
         <div className="mb-3 text-[13px] font-bold tracking-[1px] text-brand-ink uppercase">
-          {t("entry.label")}
+          {t(copy.label)}
         </div>
         <h2 className="m-0 mb-2.5 font-serif text-2xl font-bold text-foreground">{title}</h2>
-        <p className="leading-relaxed text-text-soft">{t("entry.text")}</p>
+        <p className="leading-relaxed text-text-soft">{t(copy.text)}</p>
         <div className="mt-3">
           <WhyButton whyKey="entry" />
         </div>
@@ -244,16 +264,16 @@ export function EntrySas({
 }
 
 /**
- * « ← Bibliothèque », dans le coin HAUT-GAUCHE du voile (`SasOverlay.corner`)
- * — là où l'on attend un retour (barre du lecteur, navigateur), et hors du
- * panneau central, qui ne parle que du rituel. Posé sous « Continuer », il se
- * lisait comme une seconde issue du sas ; ici c'est une sortie, à sa place.
+ * « ← Bibliothèque » (ou « ← Langues »), dans le coin HAUT-GAUCHE du voile
+ * (`SasOverlay.corner`) — là où l'on attend un retour (barre du lecteur,
+ * navigateur), et hors du panneau central, qui ne parle que du rituel. Posé
+ * sous « Continuer », il se lisait comme une seconde issue du sas ; ici c'est
+ * une sortie, à sa place.
  */
-function LeaveButton({ onLeave }: { onLeave: () => void }) {
-  const t = useT();
+function LeaveButton({ onLeave, label, hint }: { onLeave: () => void; label: string; hint: string }) {
   return (
-    <Button variant="ghost" size="sm" onClick={onLeave} title={t("entry.back_library_hint")}>
-      {t("entry.back_library")}
+    <Button variant="ghost" size="sm" onClick={onLeave} title={hint}>
+      {label}
     </Button>
   );
 }

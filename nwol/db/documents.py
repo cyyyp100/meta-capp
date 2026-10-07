@@ -175,6 +175,16 @@ def get_document_subject(doc_id: int) -> str | None:
     return row["subject"] if row else None
 
 
+def list_document_subjects() -> list[str]:
+    """Matières des documents de la bibliothèque, sans doublon, telles
+    qu'enregistrées. Un document dont la fiche n'est pas encore écrite n'en a pas."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT subject FROM documents WHERE TRIM(COALESCE(subject, '')) <> ''"
+    ).fetchall()
+    return [row["subject"] for row in rows]
+
+
 def update_document_digest(
     doc_id: int,
     subject: str | None,

@@ -6,13 +6,14 @@
 # web demain) mappe ces catégories vers des libellés traduits et des couleurs.
 from __future__ import annotations
 
+from config.subjects import canonical_subject, is_language
 from db.metacog import CRITERIA, ensure_profile, get_history_by_criterion
-from db.subjects import SUBJECT_LABELS, get_all_subjects, get_subject_history_by_subject
+from db.subjects import get_all_subjects, get_subject_history_by_subject
 from db.user import get_default_user
+from services.subjects import describe, language_practice, owned_subjects
 
 __all__ = [
     "CRITERIA",
-    "SUBJECT_LABELS",
     "get_metacog_overview",
     "trend_category",
     "subject_recommendation",
@@ -33,9 +34,16 @@ def get_metacog_overview(user_id: int | None = None) -> dict:
         "global_score": float,        # 0..100
         "trend": {"category", "delta"},
         "criteria": [{"key", "value", "history": [float], "delta"} ...],
-        "subjects": [{"subject", "level", "history": [float], "delta",
-                      "updates", "recommendation"} ...],
+        "subjects": [{"subject", "kind", "flag", "level", "history": [float],
+                      "delta", "updates", "recommendation",
+                      # langues seulement :
+                      "cefr", "sessions"} ...],
       }
+
+    `subjects` est la liste de l'apprenant (`services.subjects.owned_subjects`),
+    la même que celle du quiz. Une langue jamais jouée en quiz n'a pas de
+    maîtrise mesurée : `level` et `recommendation` y valent None, sa carte montre
+    son niveau CECR et ses séances.
     """
     user = get_default_user()
     uid = user["id"] if user_id is None else user_id
@@ -59,24 +67,29 @@ def get_metacog_overview(user_id: int | None = None) -> dict:
     global_score = sum(c["value"] for c in criteria) / max(1, len(criteria))
     trend_delta = _global_trend_delta(criteria)
 
+    rows = {canonical_subject(row.get("subject")): row for row in subject_rows}
+    practice = language_practice(uid)
     subjects: list[dict] = []
-    for row in subject_rows:
-        subject = row.get("subject")
-        if not subject:
-            continue
-        level = _clamp(float(row.get("level", 50.0)))
-        hist = _history_values(subject_history.get(subject) or [])
-        if not hist:
-            hist = [level]
-        delta = _last_delta(hist)
-        subjects.append({
-            "subject": subject,
-            "level": level,
-            "history": hist,
-            "delta": delta,
-            "updates": len(hist),
-            "recommendation": subject_recommendation(level, delta),
-        })
+    for subject in owned_subjects(uid):
+        row = rows.get(subject) or {}
+        entry = describe(subject)
+        measured = int(row.get("questions_count") or 0) > 0
+        if is_language(subject) and not measured:
+            # Rien n'a été mesuré en quiz : pas de 50 de façade.
+            entry.update(level=None, history=[], delta=0.0, updates=0, recommendation=None)
+        else:
+            level = _clamp(float(row.get("level", 50.0)))
+            hist = _history_values(subject_history.get(row.get("subject") or subject) or [])
+            if not hist:
+                hist = [level]
+            delta = _last_delta(hist)
+            entry.update(
+                level=level, history=hist, delta=delta, updates=len(hist),
+                recommendation=subject_recommendation(level, delta),
+            )
+        if is_language(subject):
+            entry.update(practice.get(subject) or {"sessions": 0, "cefr": None})
+        subjects.append(entry)
 
     return {
         "user": {"id": user["id"], "name": user["name"]},

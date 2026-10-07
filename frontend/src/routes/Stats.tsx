@@ -3,10 +3,11 @@ import { ArrowRight, LineChart } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api/client";
+import type { SubjectEntry } from "../api/types";
 import { Card } from "../components/Card";
 import { EvolutionPanel } from "../features/stats/EvolutionPanel";
 import { RadarPanel } from "../features/stats/RadarPanel";
-import { scoreColor, scoreInk, subjectLabel } from "../features/stats/labels";
+import { scoreColor, scoreInk, subjectName } from "../features/stats/labels";
 import { useT } from "../i18n";
 
 export function Stats() {
@@ -15,8 +16,6 @@ export function Stats() {
     queryKey: ["stats", "overview"],
     queryFn: api.statsOverview,
   });
-  const { data: langStats } = useQuery({ queryKey: ["lang", "stats"], queryFn: api.langStats });
-  const languages = langStats ?? [];
 
   const del = (d: number) => (d > 2 ? `+${Math.round(d)}` : d < -2 ? `${Math.round(d)}` : t("trend.stable"));
 
@@ -146,52 +145,17 @@ export function Stats() {
         <ArrowRight className="size-4.5 shrink-0" style={{ color: "var(--muted)" }} aria-hidden />
       </Link>
 
-      {/* Matières — les langues étudiées (score global 0–100 + niveau CEFR)
-          y ont leur carte, à la suite des matières lues : c'en sont aussi. */}
+      {/* Matières — celles de l'apprenant (nwol/services/subjects.py), les mêmes
+          que le sélecteur du quiz : une par document importé, une par langue
+          pratiquée. */}
       <Card>
         <SectionTitle>{t("stats.by_subject")}</SectionTitle>
-        {data.subjects.length === 0 && languages.length === 0 ? (
+        {data.subjects.length === 0 ? (
           <div style={{ color: "var(--muted)", fontStyle: "italic" }}>{t("stats.no_subjects")}</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
             {data.subjects.map((s) => (
-              <Card key={s.subject} soft>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 700 }}>{subjectLabel(s.subject)}</span>
-                  <span style={{ color: scoreInk(s.level), fontSize: 18, fontWeight: 700 }}>
-                    {Math.round(s.level)}
-                  </span>
-                </div>
-                <div style={{ margin: "8px 0" }}>
-                  <Bar value={s.level} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
-                  <span>{t("stats.updates", { n: s.updates })}</span>
-                  <span style={{ color: scoreInk(s.level), fontWeight: 700 }}>
-                    {t(`rec.${s.recommendation}`)}
-                  </span>
-                </div>
-              </Card>
-            ))}
-            {languages.map((l) => (
-              <Card key={`lang-${l.language}`} soft>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 700 }}>
-                    <span style={{ marginRight: 8 }}>{l.flag}</span>
-                    {l.label}
-                  </span>
-                  <span style={{ color: scoreInk(l.global_score), fontSize: 18, fontWeight: 700 }}>
-                    {Math.round(l.global_score)}
-                  </span>
-                </div>
-                <div style={{ margin: "8px 0" }}>
-                  <Bar value={l.global_score} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
-                  <span>{t("lang.lessons")} · {l.total_lessons}</span>
-                  <span style={{ fontWeight: 700, color: "var(--accent-ink)" }}>{l.level}</span>
-                </div>
-              </Card>
+              <SubjectCard key={s.subject} subject={s} />
             ))}
           </div>
         )}
@@ -204,6 +168,68 @@ export function Stats() {
     </div>
   );
 }
+
+/**
+ * Une matière du profil. Une langue porte son drapeau, son niveau CECR et ses
+ * séances ; tant qu'aucun quiz ne l'a mesurée, elle n'a pas de maîtrise — sa
+ * carte le dit au lieu d'afficher un 50 de façade.
+ */
+function SubjectCard({ subject: s }: { subject: SubjectEntry }) {
+  const t = useT();
+  const language = s.kind === "language";
+  const level = s.level;
+  const cefr = language && s.cefr ? s.cefr : null;
+  return (
+    <Card soft>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          {s.flag ? <span aria-hidden>{s.flag}</span> : null}
+          {subjectName(t, s.subject)}
+          {cefr && level !== null ? (
+            <span title={t("lang.level")} style={cefrChip}>
+              {cefr}
+            </span>
+          ) : null}
+        </span>
+        {level !== null ? (
+          <span style={{ color: scoreInk(level), fontSize: 18, fontWeight: 700 }}>{Math.round(level)}</span>
+        ) : cefr ? (
+          <span title={t("lang.level")} style={{ color: "var(--accent-ink)", fontSize: 18, fontWeight: 700 }}>
+            {cefr}
+          </span>
+        ) : null}
+      </div>
+      <div style={{ margin: "8px 0" }}>
+        {level !== null ? (
+          <Bar value={level} />
+        ) : (
+          <div style={{ fontSize: 12, lineHeight: "10px", color: "var(--muted)", fontStyle: "italic" }}>
+            {t("stats.no_quiz_yet")}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
+        <span>
+          {language ? t("stats.lang_sessions", { n: s.sessions ?? 0 }) : t("stats.updates", { n: s.updates })}
+          {language && level !== null ? ` · ${t("stats.updates", { n: s.updates })}` : null}
+        </span>
+        {level !== null && s.recommendation ? (
+          <span style={{ color: scoreInk(level), fontWeight: 700 }}>{t(`rec.${s.recommendation}`)}</span>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+/** Niveau CECR d'une langue, à côté de son nom quand la maîtrise occupe la place du chiffre. */
+const cefrChip: React.CSSProperties = {
+  padding: "1px 8px",
+  borderRadius: 999,
+  background: "var(--accent-soft)",
+  color: "var(--accent-ink)",
+  fontSize: 11,
+  fontWeight: 700,
+};
 
 /** Le lien vers les sources scientifiques, sous le score global. */
 const scienceLink: React.CSSProperties = {

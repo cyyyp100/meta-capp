@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 
 from config import question_types
+from config.subjects import FALLBACK_SUBJECT, canonical_subject
 from db import get_connection
 
 logger = logging.getLogger("DB.quiz")
@@ -367,75 +369,75 @@ _STATIC_QUESTIONS: list[dict] = [
         "category": "histoire",
         "difficulty": 3,
     },
-    # ── Langues : vocabulaire anglais (dont quelques faux amis) ───────────
+    # ── Anglais : vocabulaire (dont quelques faux amis) ────────────────────
     {
         "question": "Que signifie le mot anglais « to achieve » ?",
         "choices": ["Accomplir", "Échouer", "Hériter", "Éviter"],
         "answer": "Accomplir",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 1,
     },
     {
         "question": "Que signifie le mot anglais « to borrow » ?",
         "choices": ["Emprunter", "Prêter", "Acheter", "Rendre"],
         "answer": "Emprunter",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
     {
         "question": "Que signifie le mot anglais « to gather » ?",
         "choices": ["Rassembler", "Disperser", "Oublier", "Réparer"],
         "answer": "Rassembler",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
     {
         "question": "Que signifie l'adjectif anglais « harmful » ?",
         "choices": ["Nuisible", "Utile", "Inoffensif", "Agréable"],
         "answer": "Nuisible",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
     {
         "question": "Que signifie l'adverbe anglais « actually » ?",
         "choices": ["En réalité", "Actuellement", "Activement", "Éventuellement"],
         "answer": "En réalité",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
     {
         "question": "Que signifie l'adverbe anglais « eventually » ?",
         "choices": ["Finalement", "Éventuellement", "Rarement", "Immédiatement"],
         "answer": "Finalement",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 3,
     },
     {
         "question": "Que signifie le verbe anglais « to attend » ?",
         "choices": ["Assister à", "Attendre", "Prétendre", "Tenter"],
         "answer": "Assister à",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
     {
         "question": "Que signifie le mot anglais « a library » ?",
         "choices": ["Une bibliothèque", "Une librairie", "Un magasin", "Un laboratoire"],
         "answer": "Une bibliothèque",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 1,
     },
     {
         "question": "Que signifie le mot anglais « weather » ?",
         "choices": ["Le temps qu'il fait", "Le temps qui passe", "Une tempête", "Un rassemblement"],
         "answer": "Le temps qu'il fait",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 1,
     },
     {
         "question": "Que signifie le verbe anglais « to spend » ?",
         "choices": ["Dépenser (ou passer du temps)", "Économiser", "Suspendre", "Envoyer"],
         "answer": "Dépenser (ou passer du temps)",
-        "category": "langues",
+        "category": "anglais",
         "difficulty": 2,
     },
 ]
@@ -656,7 +658,7 @@ def get_quiz_base_questions(
             "choices": choices,
             "answer": answer or "",
             "question_type": qtype,
-            "category": row_subject or "culture",
+            "category": canonical_subject(row_subject) or FALLBACK_SUBJECT,
             "document": document_title or None,
             "document_id": document_id,
             "chapter_title": chapter_title or None,
@@ -675,27 +677,44 @@ def get_quiz_base_questions(
     return results
 
 
-def get_static_quiz_questions(n: int = 10, subject: str | None = None) -> list[dict]:
+def get_static_quiz_questions(
+    n: int = 10,
+    subject: str | None = None,
+    subjects: Iterable[str] | None = None,
+) -> list[dict]:
     """Questions du catalogue statique, au format d'une question de session de quiz.
 
-    Complément — et non remplacement — des questions de lecture : une base neuve,
-    ou un thème dont aucun document n'a encore été lu, doit quand même pouvoir
-    lancer un quiz. Tirage aléatoire pour ne pas resservir le même bloc.
+    Complément — et non remplacement — des questions de lecture : une matière
+    dont aucun document n'a encore été lu doit quand même pouvoir lancer un quiz.
+    Tirage aléatoire pour ne pas resservir le même bloc.
+
+    ``subjects`` borne le tirage aux matières de l'apprenant
+    (`services.subjects.owned_subjects`) : le catalogue complète ses matières, il
+    ne lui en donne pas de nouvelles. Vide : rien.
     """
     if n <= 0:
         return []
-    conn = get_connection()
-    sql = """SELECT id, question, choices_json, answer, category
-             FROM quiz_static_questions
-             {where}
-             ORDER BY RANDOM()
-             LIMIT ?"""
+    clauses: list[str] = []
+    params: list = []
     if subject:
-        rows = conn.execute(
-            sql.format(where="WHERE LOWER(category) = LOWER(?)"), (subject, n),
-        ).fetchall()
-    else:
-        rows = conn.execute(sql.format(where=""), (n,)).fetchall()
+        clauses.append("LOWER(category) = LOWER(?)")
+        params.append(subject)
+    if subjects is not None:
+        allowed = sorted({str(s).lower() for s in subjects if s})
+        if not allowed:
+            return []
+        clauses.append(f"LOWER(category) IN ({', '.join('?' for _ in allowed)})")
+        params.extend(allowed)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT id, question, choices_json, answer, category
+            FROM quiz_static_questions
+            {where}
+            ORDER BY RANDOM()
+            LIMIT ?""",
+        (*params, n),
+    ).fetchall()
 
     results: list[dict] = []
     for qid, question, choices_json, answer, category in rows:
@@ -713,7 +732,7 @@ def get_static_quiz_questions(n: int = 10, subject: str | None = None) -> list[d
             # Le catalogue est écrit en QCM : le type le dit, pour que l'UI
             # affiche le bon badge et le bon widget de réponse.
             "question_type": "qcm" if choices else "open",
-            "category": (category or "culture").lower(),
+            "category": canonical_subject(category) or FALLBACK_SUBJECT,
             "document": None,
             "document_id": None,
             "chapter_title": None,
@@ -724,40 +743,45 @@ def get_static_quiz_questions(n: int = 10, subject: str | None = None) -> list[d
     return results
 
 
-def get_quiz_subjects(user_id: int = 1) -> list[dict]:
-    """Matières ayant des questions exploitables pour le quiz (lecture + catalogue).
+def count_quiz_questions() -> dict[str, int]:
+    """Questions jouables en quiz, par matière (clé canonique).
 
-    Renvoie ``[{"subject": str, "count": int}]`` trié par effectif décroissant,
-    pour ne proposer dans le sélecteur que des thèmes réellement disponibles. Le
-    catalogue statique est compté avec les lectures parce que la session le
-    complète (cf. :func:`get_static_quiz_questions`) : l'omettre affichait un
-    sélecteur vide sur une base neuve, alors qu'un quiz était jouable.
+    Les questions de lecture comptent sous la matière de leur document, le
+    catalogue statique sous sa catégorie ; les types que le quiz ne pose jamais
+    (réflexifs) et les énoncés inutilisables hors lecture n'y sont pas. Ce n'est
+    PAS la liste des matières proposées — ce sont celles de l'apprenant
+    (`services.subjects`) —, c'est l'effectif affiché à côté de chacune.
     """
     conn = get_connection()
+    excluded = question_types.quiz_excluded_keys()
+    where_type = ""
+    if excluded:
+        where_type = f"AND COALESCE(q.question_type, '') NOT IN ({', '.join('?' for _ in excluded)})"
     rows = conn.execute(
-        """
-        SELECT LOWER(COALESCE(d.subject, '')) AS subject,
-               q.question, q.source_context
+        f"""
+        SELECT d.subject, q.question, q.source_context
         FROM questions q
-        LEFT JOIN documents d ON d.id = q.document_id
+        JOIN documents d ON d.id = q.document_id
         WHERE q.scope_type = 'page'
           AND TRIM(COALESCE(q.question, '')) <> ''
           AND TRIM(COALESCE(d.subject, '')) <> ''
+          {where_type}
         """,
+        tuple(excluded),
     ).fetchall()
     counts: dict[str, int] = {}
-    for subject, question, source_context in rows:
-        if _is_unusable_for_quiz(question, source_context):
+    for raw_subject, question, source_context in rows:
+        subject = canonical_subject(raw_subject)
+        if subject is None or _is_unusable_for_quiz(question, source_context):
             continue
         counts[subject] = counts.get(subject, 0) + 1
     for category, count in conn.execute(
-        """SELECT LOWER(category), COUNT(*)
+        """SELECT category, COUNT(*)
            FROM quiz_static_questions
            WHERE TRIM(COALESCE(category, '')) <> ''
-           GROUP BY LOWER(category)""",
+           GROUP BY category""",
     ).fetchall():
-        counts[category] = counts.get(category, 0) + int(count)
-    return [
-        {"subject": subject, "count": count}
-        for subject, count in sorted(counts.items(), key=lambda kv: -kv[1])
-    ]
+        subject = canonical_subject(category)
+        if subject is not None:
+            counts[subject] = counts.get(subject, 0) + int(count)
+    return counts

@@ -20,6 +20,7 @@ from datetime import datetime
 from config.settings import (
     LANG_BILAN_EVERY,
     LANG_DE_GENDER_COLORS,
+    LANG_DUE_CARDS_CAP,
     LANG_ESSENTIAL_STEPS,
     LANG_GAME_TARGET_GAUGES,
     LANG_IDLE_CUTOFF_S,
@@ -43,9 +44,15 @@ from config.settings import (
     LANG_TRANSPARENT_FLAG_UNTIL_EPISODE,
     LANG_UNDERSTOOD_TARGET_GAUGES,
     LANG_ZH_TONE_COLORS,
+    WARMUP_MAX_CARDS,
 )
 from db import lang_episode_db as store
-from db.lang_db import get_lang_profile_by_id, get_or_create_lang_profile, update_lang_profile
+from db.lang_db import (
+    get_lang_profile_by_id,
+    get_or_create_lang_profile,
+    get_recent_flashcards_for_language,
+    update_lang_profile,
+)
 from db.practice_sessions import update_practice_details
 from db.user import DEFAULT_USER_ID
 from i18n import t
@@ -543,16 +550,19 @@ def _phrases_view(language: str, explain_lang: str = "fr") -> list[dict]:
     return out
 
 
-def _cards_view(profile: dict, language: str) -> list[dict]:
+def _card_view(c: dict) -> dict:
     from services.flashcards import with_pronunciation_side
 
-    return [with_pronunciation_side({"id": c["id"], "front": c["front"], "back": c["back"],
-                                     "pronunciation": c.get("pronunciation"), "source": c.get("source")})
-            for c in progress.due_cards(profile, language)]
+    return with_pronunciation_side({"id": c["id"], "front": c["front"], "back": c["back"],
+                                    "pronunciation": c.get("pronunciation"), "source": c.get("source")})
+
+
+def _cards_view(profile: dict, language: str, cap: int = LANG_DUE_CARDS_CAP) -> list[dict]:
+    return [_card_view(c) for c in progress.due_cards(profile, language, cap)]
 
 
 def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed: int,
-               absence_days: int | None) -> dict:
+               absence_days: int | None, cards_cap: int = LANG_DUE_CARDS_CAP) -> dict:
     fam = _family(language)
     lang = _explain(profile)
     plan: dict = {
@@ -668,7 +678,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         register_items("jeux", micro_all)
         if micro_all:
             steps.append(_step("jeux", games=[{"kind": "bonne_forme", "ease": 2, "items": micro_all}]))
-        cards = _cards_view(profile, language)
+        cards = _cards_view(profile, language, cards_cap)
         if cards:
             steps.append(_step("cartes", cards=cards))
         steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
@@ -685,7 +695,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
             add_reading("relecture_1", last, "relecture")
         # Le plafond de cartes dues (P13) vaut pour la séance entière : un
         # contrôle sur cartes les prend sur la même pile.
-        cards = _cards_view(profile, language)
+        cards = _cards_view(profile, language, cards_cap)
         if tier == "reprise_controle":
             controle = _controle_step(profile, language, plan, add_episode, register_items, run_seed, cards)
             steps.append(controle)
@@ -711,7 +721,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         add_reading(key, ep, "relecture")
     if not chosen:
         steps.append(_step("phrases", phrases=_phrases_view(language, lang), waiting=True))
-    cards = _cards_view(profile, language)
+    cards = _cards_view(profile, language, cards_cap)
     if cards:
         steps.append(_step("cartes", cards=cards))
     steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
@@ -744,10 +754,13 @@ def _controle_step(profile, language, plan, add_episode, register_items, seed, c
 
 # ── Cycle de vie d'une séance (E3-E6) ─────────────────────────────────────────
 
-def start_run(language: str, mode: str | None = None) -> dict:
+def start_run(language: str, mode: str | None = None, warmup: int = 0) -> dict:
     """E3 : plan complet de la séance, immédiatement (aucune attente de Clikoda).
     Une séance du jour restée ouverte est reprise à l'étape atteinte (R2) ;
-    celles des jours précédents passent `abandoned`."""
+    celles des jours précédents passent `abandoned`.
+
+    `warmup` : cartes révisées au sas d'entrée, juste avant (E10). Elles
+    entament le plafond de cartes de la séance (P13), qui la couvre entière."""
     profile = ensure_feuilleton(language)
     today = activity.study_date()
     for run in store.open_runs(profile["id"]):
@@ -770,7 +783,9 @@ def start_run(language: str, mode: str | None = None) -> dict:
     # l'autre, mais reproductible.
     run_id = store.create_run(profile["id"], mode=chosen, plan={}, episode_id=None, second_wave_episode_id=None,
                               absence_days=days, study_date=today)
-    plan = build_plan(profile, language, chosen, info, run_seed=run_id, absence_days=days)
+    warmed_up = max(0, min(int(warmup or 0), WARMUP_MAX_CARDS))
+    plan = build_plan(profile, language, chosen, info, run_seed=run_id, absence_days=days,
+                      cards_cap=LANG_DUE_CARDS_CAP - warmed_up)
     store.update_run(run_id, plan=plan, episode_id=plan.get("episode_id"),
                      second_wave_episode_id=plan.get("second_wave_episode_id"))
     activity.record(profile["id"], today, first_start_local=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -1245,9 +1260,35 @@ def report(episode_id: int, line_idx: int | None, token_idx: int | None, kind: s
 
 
 def warmup_cards(language: str) -> list[dict]:
-    """E10 : cartes dues de la langue, plafonnées (P13)."""
+    """E10 : la révision éclair du sas d'entrée — `WARMUP_MAX_CARDS` cartes de la
+    langue au plus : les dues d'abord (les plus anciennes), complétées par les
+    plus récentes pour qu'il y ait un warm-up même quand rien n'est dû.
+
+    Les cartes au plan d'une séance du jour restée ouverte en sont exclues : la
+    reprise les fera réviser à son étape `cartes`, pas deux fois."""
     profile = ensure_feuilleton(language)
-    return _cards_view(profile, language)
+    planned = _planned_card_ids(profile)
+    cards: list[dict] = []
+    seen = set(planned)
+    candidates = (progress.due_cards(profile, language, WARMUP_MAX_CARDS + len(planned))
+                  + get_recent_flashcards_for_language(profile["id"], language,
+                                                       limit=WARMUP_MAX_CARDS + len(planned)))
+    for c in candidates:
+        if c["id"] not in seen:
+            seen.add(c["id"])
+            cards.append(_card_view(c))
+        if len(cards) >= WARMUP_MAX_CARDS:
+            break
+    return cards
+
+
+def _planned_card_ids(profile: dict) -> set[int]:
+    """Cartes déjà au plan de la séance du jour restée ouverte (`cartes`, `controle`)."""
+    today = activity.study_date()
+    return {int(c["id"])
+            for run in store.open_runs(profile["id"]) if run.get("study_date") == today
+            for step in (run.get("plan") or {}).get("steps", [])
+            for c in step.get("cards") or [] if c.get("id")}
 
 
 def compare_retranslation(original: str, typed: str) -> dict:
