@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 import lang_fakes
-from config.settings import LANG_PILOT_LANGUAGES
+from config.settings import LANG_FEELING_META_STEP, LANG_PILOT_LANGUAGES
 
 LANG = "espagnol"
 
@@ -280,6 +280,7 @@ def test_feeling_answer_joins_the_metacognitive_profile(client, fake, clock, mon
     args, kwargs = calls[-1]
     assert kwargs["session_id"] is None and kwargs["practice_session_id"] is not None
     assert kwargs["measures"] > 0 and kwargs["measure_meta"] is False
+    assert kwargs["meta_delta"] == LANG_FEELING_META_STEP
     assert kwargs["questions"][0].endswith("?") or kwargs["questions"][0].endswith("…")
     assert args[2][0] in ("Juste bien", "Un peu", "Le point du jour", "Pareil", "Moyenne", "En cours")
 
@@ -783,6 +784,7 @@ def test_a_run_without_feeling_still_counts_as_a_study_day(client, fake, clock, 
     _play(client, _start(client), feeling=False)
     args, kwargs = calls[-1]
     assert args[2] == [] and kwargs["questions"] == []
+    assert kwargs["meta_delta"] == -LANG_FEELING_META_STEP
 
 
 def test_the_common_streak_moves_without_a_feeling(client, fake, clock):
@@ -835,14 +837,55 @@ def test_wrong_answers_and_not_understood_lower_the_run_gauges(client, fake, clo
     assert gauges["series"]["context_comprehension"][-1]["value"] < gauges["seed"]["context_comprehension"]
 
 
-def test_a_run_without_any_measure_counts_without_moving_the_profile(client, fake, clock):
+def test_a_run_without_any_measure_moves_only_the_metacognition(client, fake, clock):
     """La séance zéro ne joue aucun jeu et ne lit aucun épisode : elle compte (la
-    série, le nombre de séances), elle ne déplace rien — un silence ne se note pas."""
-    from db.metacog import ensure_profile, get_history
+    série, le nombre de séances) et ne déplace rien de ce qu'elle n'a pas
+    mesuré — un silence ne se note pas. Seule sa question de ressenti, répondue,
+    a mesuré quelque chose : la métacognition."""
+    from db.metacog import ensure_profile
+
+    before = ensure_profile()
+    _onboard(client)
+    after = ensure_profile()
+    assert int(after["sessions_count"]) == 1
+    assert float(after["meta_cognition"]) > float(before["meta_cognition"])
+    for criterion in ("attention", "context_comprehension", "retention", "curiosity", "creativity"):
+        assert float(after[criterion]) == float(before[criterion])
+
+
+def _meta_moved_by_last_run(client, *, feeling):
+    from db.metacog import ensure_profile
 
     _onboard(client)
-    assert int(ensure_profile()["sessions_count"]) == 1
-    assert get_history() == []
+    run = _start(client)
+    before = float(ensure_profile()["meta_cognition"])
+    _play(client, run, feeling=feeling)
+    return float(ensure_profile()["meta_cognition"]) - before
+
+
+def test_answering_the_last_question_raises_the_metacognition(client, fake, clock):
+    """La dernière question est une question de métacognition : y répondre avant
+    « Terminer » fait monter la jauge, légèrement (une part α du pas)."""
+    moved = _meta_moved_by_last_run(client, feeling=True)
+    assert 0 < moved <= LANG_FEELING_META_STEP
+
+
+def test_skipping_the_last_question_lowers_the_metacognition(client, fake, clock):
+    moved = _meta_moved_by_last_run(client, feeling=False)
+    assert -LANG_FEELING_META_STEP <= moved < 0
+
+
+def test_a_run_left_before_the_last_question_does_not_touch_the_metacognition(client, fake, clock, monkeypatch):
+    """Quittée en cours, la séance n'a jamais posé la question : ni bonus ni malus."""
+    from services import session
+
+    calls = []
+    monkeypatch.setattr(session, "nudge_metacog_profile", lambda *a, **k: calls.append((a, k)))
+    _onboard(client)
+    run = _start(client)
+    _play(client, run, finish=False)
+    client.post(f"/api/lang/run/{run['run_id']}/complete", json={"end_reason": "quitte"})
+    assert calls[-1][1]["meta_delta"] is None
 
 
 # ── Génération fiable, limites du modèle local ────────────────────────────────

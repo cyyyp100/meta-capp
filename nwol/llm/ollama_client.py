@@ -2988,6 +2988,7 @@ def answer_brainstorm_async(
         user_message=context.get("user_message") or "",
         sources=context.get("sources") or [],
         scope=context.get("scope"),
+        languages_checked=bool(context.get("languages_checked")),
     )
     return _run_text_async("brainstorm_answer", prompt, on_success, on_error, model)
 

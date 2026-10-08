@@ -18,17 +18,20 @@ from __future__ import annotations
 import logging
 import random
 import threading
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from config.settings import (
     LANG_BILAN_EVERY,
     LANG_DE_GENDER_COLORS,
     LANG_DUE_CARDS_CAP,
     LANG_ESSENTIAL_STEPS,
+    LANG_FEELING_META_STEP,
     LANG_GAME_TARGET_GAUGES,
     LANG_GEN_FAILURES_PRO_HINT,
     LANG_IDLE_CUTOFF_S,
     LANG_MILESTONES_EPISODE_1,
+    LANG_OVERVIEW_RECENT_RUNS,
+    LANG_OVERVIEW_SCAN_RUNS,
     LANG_PILOT_LANGUAGES,
     LANG_PREGEN_TRIGGER_STEP,
     LANG_RECAP_LONG_EPISODES,
@@ -1097,7 +1100,7 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         "writing": _writing_summary(run_id),
     }
     practice_id, measured = _record_practice(run_id, plan, profile, gained)
-    _nudge(profile, run, plan, feeling, practice_id=practice_id, measures=measured)
+    _nudge(profile, run, plan, feeling, reason, practice_id=practice_id, measures=measured)
     return gained
 
 
@@ -1208,6 +1211,7 @@ def _nudge(
     run: dict,
     plan: dict,
     feeling: str | None,
+    end_reason: str = "fini",
     *,
     practice_id: int | None = None,
     measures: int = 0,
@@ -1219,8 +1223,13 @@ def _nudge(
     Ses jauges, rejouées par `_record_practice` depuis les jeux, la deuxième vague
     et le « compris », font glisser le profil à hauteur de ses mesures ; une
     séance sans aucune mesure (relecture pure) compte sans rien déplacer. Le
-    ressenti est gardé sur la séance mais n'est pas noté : c'est un choix parmi
-    trois, pas une réflexion écrite (`measure_meta=False`).
+    ressenti est gardé sur la séance mais n'est pas noté par Clikoda : c'est un
+    choix parmi trois, pas une réflexion écrite (`measure_meta=False`).
+
+    C'est pourtant la question de métacognition de la séance : y avoir répondu
+    avant « Terminer » fait monter légèrement la métacognition, l'avoir laissée
+    sans réponse la fait descendre d'autant (`LANG_FEELING_META_STEP`). Une
+    séance quittée avant d'arriver à la question (`quitte`) ne déplace rien.
 
     En tâche de fond : la finalisation commune réécrit l'analyse générale de
     l'apprenant avec Clikoda, et une séance n'attend jamais Clikoda (P-1)."""
@@ -1236,6 +1245,9 @@ def _nudge(
                "success_rate": round(success * 100) if success is not None else 0}
     user_id = int(profile.get("user_id") or DEFAULT_USER_ID)
     measured = int(measures) if practice_id is not None else 0
+    meta_delta = None
+    if question_key and end_reason != "quitte":
+        meta_delta = LANG_FEELING_META_STEP if answered else -LANG_FEELING_META_STEP
 
     def _job() -> None:
         try:
@@ -1244,6 +1256,7 @@ def _nudge(
             nudge_metacog_profile(
                 user_id, 0.0, responses, metrics, session_id=None, questions=questions,
                 measures=measured, practice_session_id=practice_id, measure_meta=False, kind="lang",
+                meta_delta=meta_delta,
             )
         except Exception:  # pragma: no cover - la clôture ne casse jamais sur le profil
             logger.debug("Nudge métacognitif (feuilleton) ignoré", exc_info=True)
@@ -1340,6 +1353,57 @@ def upcoming_episodes(user_id: int = DEFAULT_USER_ID) -> list[dict]:
             "status": upcoming["status"] if upcoming else None,
             "generating": episodes.is_generating(row["id"], n),
             "relecture_due": _relecture_due(row),
+        })
+    return out
+
+
+_MEASURED_SIGNALS = ("reveal_rate", "understood", "games_rate", "second_wave_rate")
+
+
+def learner_overview(user_id: int = DEFAULT_USER_ID) -> list[dict]:
+    """Où en est l'apprenant dans chaque langue commencée (onboarding passé),
+    en chiffres que d'autres calculent déjà : niveau (`progress.current_cefr`),
+    lexique, épisodes joués, régularité (`activity.weekly_aggregates`,
+    aujourd'hui compris) et difficulté des dernières séances telle que le
+    moteur la juge (`progress.classify`). Lecture seule, comme
+    `upcoming_episodes` : aucun profil créé, rien relancé.
+
+    C'est ce que le brainstorming consulte pour répondre à « quelle langue
+    travailler ? » (services/brainstorm_search.language_sources)."""
+    # `weekly_aggregates` s'arrête la veille du jour qu'on lui donne.
+    tomorrow = (date.fromisoformat(activity.study_date()) + timedelta(days=1)).isoformat()
+    out = []
+    for row in get_all_lang_profiles(user_id):
+        language = row["language"]
+        if row.get("flow") != "feuilleton" or not is_pilot(language) or not row.get("onboarding_done"):
+            continue
+        profile_id = int(row["id"])
+        order = int(row.get("program_order") or 0)
+        lexicon = store.lexicon_counts(profile_id)
+        weekly = activity.weekly_aggregates(profile_id, tomorrow)
+        difficulty = {"easy": 0, "ok": 0, "hard": 0}
+        judged = 0
+        for run in store.recent_runs(profile_id, limit=LANG_OVERVIEW_SCAN_RUNS):
+            signals = (run.get("plan") or {}).get("signals") or {}
+            # Une séance sans rien de mesuré (relecture) ne dit rien de la
+            # difficulté. On regarde les signaux, pas un drapeau : les plans v1
+            # disaient `p2_done` là où les v2 disent `reading_done`.
+            if not any(signals.get(k) is not None for k in _MEASURED_SIGNALS):
+                continue
+            difficulty[progress.classify(signals)] += 1
+            judged += 1
+            if judged >= LANG_OVERVIEW_RECENT_RUNS:
+                break
+        out.append({
+            "language": language,
+            "level": progress.current_cefr(language, order),
+            "program_order": order, "program_size": store.program_size(language),
+            "episodes_played": store.count_played(profile_id),
+            "words_seen": lexicon["seen"], "words_acquired": lexicon["acquired"],
+            "study_days_7": weekly["study_days_7"], "study_days_28": weekly["study_days_28"],
+            "mean_minutes": weekly["mean_minutes"],
+            "days_since": activity.absence_days(profile_id),
+            "recent_difficulty": difficulty,
         })
     return out
 

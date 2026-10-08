@@ -1241,14 +1241,20 @@ def _clean_document_summary(text: str) -> str:
 
 
 def parse_brainstorm_search_decision(raw: str | dict) -> dict | None:
-    """Décision de recherche du brainstorming : {"search": bool, "queries": [str]}.
+    """Décision de recherche du brainstorming :
+    {"search": bool, "queries": [str], "languages": bool}.
+
+    ``languages`` (consulter le module Langues) ne dépend pas des requêtes : le
+    portrait des langues se lit sans mots-clés.
 
     Tolérant : en cas d'échec, on renvoie un repli « pas de recherche » plutôt que
     None, pour que la conversation continue sans bloquer.
     """
     data = _load_json(raw)
     if not isinstance(data, dict):
-        return {"search": False, "queries": []}
+        return {"search": False, "queries": [], "languages": False}
+    # Strict : un « "false" » en chaîne ne doit pas valoir oui.
+    languages = str(data.get("languages")).lower() == "true"
     search = bool(data.get("search"))
     queries_raw = data.get("queries") or []
     if isinstance(queries_raw, str):
@@ -1261,7 +1267,7 @@ def parse_brainstorm_search_decision(raw: str | dict) -> dict | None:
     queries = queries[:3]
     if not queries:
         search = False
-    return {"search": search, "queries": queries}
+    return {"search": search, "queries": queries, "languages": languages}
 
 
 # ── Parsers module langue ──────────────────────────────────────────────────────

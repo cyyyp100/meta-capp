@@ -751,7 +751,9 @@ export interface StudyStreak {
 }
 
 export interface BrainstormSource {
-  source_type: "highlight" | "qa" | "flashcard" | "document" | "mistake";
+  source_type: "highlight" | "qa" | "flashcard" | "document" | "mistake" | "language";
+  /** Code de la langue (fiche `language`) : le portrait du module Langues. */
+  language?: string;
   doc_id?: number | null;
   doc_title?: string | null;
   page?: number | null;

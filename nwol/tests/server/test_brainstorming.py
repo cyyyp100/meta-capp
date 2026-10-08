@@ -694,3 +694,170 @@ def test_ws_on_unknown_discussion_is_closed(client):
         with client.websocket_connect("/api/brainstorming/999/stream") as ws:
             ws.receive_json()
     assert closed.value.code == 4404
+
+
+# ── Module Langues ────────────────────────────────────────────────────────────
+
+def _start_language(language: str, *, words: int = 0, acquired: int = 0, studied_today: bool = False) -> int:
+    """Une langue COMMENCÉE (onboarding passé), avec un lexique et, au besoin,
+    un jour d'étude compté aujourd'hui."""
+    from db import lang_episode_db as store
+    from services import lang_activity as activity
+    from services.lang_runs import ensure_feuilleton
+
+    pid = ensure_feuilleton(language)["id"]
+    store.update_profile_fields(pid, onboarding_done=1, program_order=24)
+    for i in range(words):
+        lexeme = store.insert_lexeme(pid, {"lemma": f"mot{i}"}, 1)
+        if i < acquired:
+            store.update_lexeme(lexeme, acquired_at="2026-10-01 10:00:00")
+    if studied_today:
+        activity.record(pid, activity.study_date(), runs_completed=1)
+    return pid
+
+
+def _completed_run(pid: int, signals: dict) -> None:
+    from db import lang_episode_db as store
+    from services import lang_activity as activity
+
+    run_id = store.create_run(
+        pid, mode="episode", plan={"signals": signals}, episode_id=None,
+        second_wave_episode_id=None, absence_days=None, study_date=activity.study_date(),
+    )
+    store.update_run(run_id, status="completed")
+
+
+def test_language_sources_cover_started_languages_only(client):
+    from i18n import t
+    from services.brainstorm_search import language_sources
+    from services.lang_progress import current_cefr
+    from services.lang_runs import ensure_feuilleton
+
+    _start_language("espagnol", words=5, acquired=2, studied_today=True)
+    ensure_feuilleton("allemand")  # ouverte depuis la page Langues, jamais commencée
+
+    sources = language_sources()
+    assert [s["language"] for s in sources] == ["espagnol"]
+    source = sources[0]
+    assert source["source_type"] == "language" and source["doc_title"] == "Espagnol"
+    snippet = source["snippet"]
+    assert t("brainstorm.lang.level", level=current_cefr("espagnol", 24)) in snippet
+    assert t("brainstorm.lang.words", seen=5, acquired=2) in snippet
+    assert t("brainstorm.lang.last_today") in snippet
+    assert t("brainstorm.lang.days", d7=1, d28=1) in snippet
+
+
+def test_learner_overview_judges_recent_sessions_like_the_engine(client):
+    """La difficulté des dernières séances est celle de `lang_progress.classify` ;
+    une séance où rien n'a été mesuré (relecture) ne dit rien et n'est pas
+    comptée. Un plan v1 (`p2_done`, pas `reading_done`) compte comme un v2."""
+    from services.lang_runs import learner_overview
+
+    pid = _start_language("espagnol")
+    _completed_run(pid, {"reading_done": True, "understood": "pas_compris"})
+    _completed_run(pid, {"p2_done": True, "understood": "compris", "reveal_rate": 0.0, "games_rate": 1.0})
+    _completed_run(pid, {"reading_done": False, "reveal_rate": None, "understood": None, "games_rate": None})
+
+    (entry,) = learner_overview()
+    assert entry["recent_difficulty"] == {"easy": 1, "ok": 0, "hard": 1}
+    assert entry["days_since"] is None  # aucun jour d'étude compté
+
+
+def test_learner_overview_looks_past_a_run_of_rereadings(client):
+    """Après une absence, les relectures s'enchaînent : la difficulté se lit sur
+    les dernières séances MESURÉES, pas sur les dernières tout court."""
+    from config.settings import LANG_OVERVIEW_RECENT_RUNS
+    from services.lang_runs import learner_overview
+
+    pid = _start_language("espagnol")
+    _completed_run(pid, {"understood": "pas_compris"})
+    for _ in range(LANG_OVERVIEW_RECENT_RUNS):
+        _completed_run(pid, {"reveal_rate": None, "understood": None})
+
+    (entry,) = learner_overview()
+    assert entry["recent_difficulty"] == {"easy": 0, "ok": 0, "hard": 1}
+
+
+def _decide_languages(history, user_message, on_success, on_error, model=None, **_):
+    on_success({"search": False, "queries": [], "languages": True})
+
+
+def test_language_question_reads_the_language_portrait(client, monkeypatch):
+    import services.brainstorm as svc
+
+    _start_language("espagnol", words=3)
+    captured: dict = {}
+
+    def _answer(context, on_success, on_error, model=None):
+        captured.update(context)
+        on_success("ok")
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide_languages)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    did = client.post("/api/brainstorming", json={"title": "Langues"}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Quelle langue prioriser ?"})
+        events = []
+        while not events or events[-1]["type"] != "answer":
+            events.append(ws.receive_json())
+
+    assert "scanning" in [e["type"] for e in events]
+    assert captured["languages_checked"] is True
+    assert [s["source_type"] for s in captured["sources"]] == ["language"]
+    assert events[-1]["sources"][0]["language"] == "espagnol"
+    # Archivée avec la réponse : la fiche se relit en rouvrant la discussion.
+    detail = client.get(f"/api/brainstorming/{did}/messages").json()
+    assert detail["messages"][-1]["sources"][0]["language"] == "espagnol"
+
+
+def test_linked_discussion_does_not_read_the_languages(client, monkeypatch):
+    """Le portrait des langues n'appartient à aucun dossier : une discussion liée
+    ne le consulte pas, même si la décision le demande."""
+    import services.brainstorm as svc
+
+    _start_language("espagnol", words=3)
+    folder = _folder(client, "Cours")
+    captured: dict = {}
+
+    def _answer(context, on_success, on_error, model=None):
+        captured.update(context)
+        on_success("ok")
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide_languages)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    did = client.post("/api/brainstorming", json={"title": "Cours", "folder_id": folder}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Quelle langue prioriser ?"})
+        while ws.receive_json()["type"] != "answer":
+            pass
+
+    assert captured["sources"] == [] and captured["languages_checked"] is False
+
+
+def test_decision_parser_reads_languages_strictly():
+    from llm.schema_json import parse_brainstorm_search_decision as parse
+
+    assert parse('{"search": false, "queries": [], "languages": true}')["languages"] is True
+    assert parse('{"search": true, "queries": ["x"], "languages": "false"}')["languages"] is False
+    assert parse('{"search": true, "queries": ["x"]}')["languages"] is False
+    assert parse("pas du json") == {"search": False, "queries": [], "languages": False}
+
+
+def test_answer_prompt_frames_the_language_entries():
+    from llm.prompts import build_brainstorm_answer_prompt
+
+    source = {"source_type": "language", "language": "espagnol", "doc_title": "Espagnol",
+              "snippet": "niveau A1 · mots rencontrés : 3, dont acquis : 0"}
+    with_entry = build_brainstorm_answer_prompt("", [], "question", [source], languages_checked=True)
+    assert "Langue — Espagnol : « niveau A1" in with_entry
+    assert "CALCULÉ" in with_entry
+    # Consulté sans rien de commencé : dit, pas inventé.
+    nothing = build_brainstorm_answer_prompt("", [], "question", [], languages_checked=True)
+    assert "aucune langue commencée" in nothing
+    # Pas consulté : ni consigne ni mention.
+    plain = build_brainstorm_answer_prompt("", [], "question", [])
+    assert "CALCULÉ" not in plain and "aucune langue commencée" not in plain

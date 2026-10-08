@@ -3862,15 +3862,24 @@ def _brainstorm_history_block(history: list[dict] | None, max_turns: int = 8) ->
     return "\n".join(lines) if lines else _t("(début de la discussion)", "(start of discussion)")
 
 
-def _brainstorm_sources_block(sources: list[dict] | None) -> str:
+def _brainstorm_sources_block(sources: list[dict] | None, languages_checked: bool = False) -> str:
+    no_language = languages_checked and not any(
+        s.get("source_type") == "language" for s in (sources or [])
+    )
+    note = (
+        _t("(Module Langues consulté : aucune langue commencée dans l'app.)",
+           "(Languages module checked: no language started in the app.)")
+        if no_language else ""
+    )
     if not sources:
-        return _t("(aucun résultat dans la base)", "(no results in the database)")
+        return note or _t("(aucun résultat dans la base)", "(no results in the database)")
     label = {
         "highlight": _t("Surlignage", "Highlight"),
         "qa": _t("Échange passé", "Past exchange"),
         "flashcard": "Flashcard",
         "document": "Document",
         "mistake": _t("Erreur passée", "Past mistake"),
+        "language": _t("Langue", "Language"),
     }
     lines: list[str] = []
     for i, s in enumerate(sources, 1):
@@ -3884,6 +3893,8 @@ def _brainstorm_sources_block(sources: list[dict] | None) -> str:
                 loc += _t(f", p.{page}", f", p.{page}")
         snippet = str(s.get("snippet") or "").strip()
         lines.append(f"[{i}] {kind}{loc} : « {snippet} »")
+    if note:
+        lines.append(note)
     return "\n".join(lines)
 
 
@@ -3914,7 +3925,7 @@ def build_brainstorm_search_decide_prompt(
 ) -> str:
     """Décision JSON courte : faut-il fouiller la base de l'utilisateur, et avec quels mots-clés."""
     hist = _brainstorm_history_block(history, max_turns=4)
-    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses, erreurs passées).", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers, past mistakes).")}
+    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses, erreurs passées) et à sa progression dans le module Langues de l'app.", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers, past mistakes) and to their progress in the app's Languages module.")}
 {_brainstorm_scope_block(scope)}{_t("Décide s'il serait utile de chercher dans cette base AVANT de répondre au dernier message.", "Decide whether searching that database BEFORE answering the last message would help.")}
 
 {_t("Contexte récent", "Recent context")} :
@@ -3924,11 +3935,12 @@ def build_brainstorm_search_decide_prompt(
 {(user_message or "")[:600]}
 
 {_t("Réponds UNIQUEMENT en JSON, sans markdown", "Respond ONLY in JSON, no markdown")} :
-{{"search": true, "queries": ["{_t("mots-clés ciblés", "targeted keywords")}", "..."]}}
+{{"search": true, "queries": ["{_t("mots-clés ciblés", "targeted keywords")}", "..."], "languages": false}}
 
 {_t("Règles", "Rules")} :
 - search=true {_t("seulement si le sujet peut faire écho à ce que l'utilisateur a déjà lu/noté", "only if the topic may echo something the user has already read/noted")}.
-- {_t("1 à 3 requêtes courtes (mots-clés), pas de phrases. Si search=false, queries=[].", "1 to 3 short keyword queries, not sentences. If search=false, queries=[].")}"""
+- {_t("1 à 3 requêtes courtes (mots-clés), pas de phrases. Si search=false, queries=[].", "1 to 3 short keyword queries, not sentences. If search=false, queries=[].")}
+- languages=true {_t("si le message porte sur SON apprentissage des langues dans l'app (quelle langue travailler ou prioriser, son niveau, ses progrès, son rythme, son vocabulaire) : la réponse recevra alors l'état chiffré de chaque langue qu'il étudie. Indépendant de search ; false sinon.", "if the message is about THEIR language learning in the app (which language to work on or prioritise, their level, progress, pace, vocabulary): the reply will then receive the computed state of each language they study. Independent of search; false otherwise.")}"""
 
 
 def build_brainstorm_answer_prompt(
@@ -3937,11 +3949,24 @@ def build_brainstorm_answer_prompt(
     user_message: str,
     sources: list[dict] | None,
     scope: dict | None = None,
+    languages_checked: bool = False,
 ) -> str:
-    """Réponse conversationnelle (texte libre) : mémoire de la discussion + sources DB citées."""
+    """Réponse conversationnelle (texte libre) : mémoire de la discussion + sources DB citées.
+
+    ``languages_checked`` : le module Langues a été consulté (cf.
+    services/brainstorm_search.language_sources) — ses fiches ont alors leur
+    propre consigne, et leur absence se dit au lieu de s'inventer."""
     summary_block = (summary or "").strip() or _t("(aucun, discussion récente)", "(none, recent discussion)")
     hist = _brainstorm_history_block(history)
-    src = _brainstorm_sources_block(sources)
+    src = _brainstorm_sources_block(sources, languages_checked)
+    language_rule = (
+        "\n- " + _t(
+            "Les fiches « Langue » sont l'état CALCULÉ par l'app de son apprentissage de chaque langue (niveau, avancée dans le programme, régularité, mots acquis, difficulté des dernières séances). Pour une question sur ses langues, fonde ta réponse sur ces chiffres : compare les langues entre elles, dis ce qu'ils montrent, puis propose. N'invente aucun chiffre, ni aucune langue absente des fiches ; si aucune langue n'est commencée, dis-le simplement.",
+            "The \"Language\" entries are the app's COMPUTED state of their learning in each language (level, position in the programme, regularity, words acquired, difficulty of recent sessions). For a question about their languages, ground your reply in these figures: compare the languages, say what they show, then suggest. Never invent a figure or a language missing from the entries; if no language has been started, just say so.",
+        )
+        if languages_checked
+        else ""
+    )
     return f"""{_t("Tu es Clikoda, partenaire de brainstorming de l'utilisateur dans MetaC-App. Tu discutes librement, comme un assistant conversationnel, mais tu as un atout : l'accès à la base personnelle de l'utilisateur.", "You are Clikoda, the user's brainstorming partner in MetaC-App. You chat freely, like a conversational assistant, but with an edge: access to the user's personal database.")}
 {_brainstorm_scope_block(scope)}
 {_t("Mémoire de la discussion (résumé des échanges précédents)", "Discussion memory (summary of earlier exchanges)")} :
@@ -3950,7 +3975,7 @@ def build_brainstorm_answer_prompt(
 {_t("Messages récents", "Recent messages")} :
 {hist}
 
-{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R, erreurs passées)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A, past mistakes)")} :
+{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R, erreurs passées, progression en langues)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A, past mistakes, language progress)")} :
 {src}
 
 {_t("Nouveau message de l'utilisateur", "User's new message")} :
@@ -3962,7 +3987,7 @@ def build_brainstorm_answer_prompt(
 {_t("Consignes", "Guidelines")} :
 - {_t("Quand un extrait ci-dessus est pertinent, mentionne-le NATURELLEMENT : « on en a déjà croisé l'idée dans <document> » ou « tu avais surligné ce passage : … ». Ne cite JAMAIS un extrait absent de la liste.", "When an excerpt above is relevant, mention it NATURALLY: 'we already touched on this in <document>' or 'you highlighted this passage: …'. NEVER cite an excerpt that is not in the list.")}
 - {_t("Ne cite pas tous les extraits : garde ceux qui servent vraiment ton propos. Deux bien exploités valent mieux que six énumérés.", "Do not cite every excerpt: keep the ones that actually serve your point. Two well used beat six listed.")}
-- {_t("Si la base n'apporte rien, réponds normalement avec tes connaissances, sans le signaler.", "If the database adds nothing, just answer normally from your knowledge, without pointing it out.")}
+- {_t("Si la base n'apporte rien, réponds normalement avec tes connaissances, sans le signaler.", "If the database adds nothing, just answer normally from your knowledge, without pointing it out.")}{language_rule}
 - {_t("Si la discussion a déjà abordé le sujet, prends un ANGLE NEUF plutôt que de redire ce qui a été dit : creuse, nuance, ou déplace la question.", "If the discussion already covered the topic, take a NEW ANGLE instead of restating what was said: dig deeper, qualify it, or shift the question.")}
 - {_t("Sois un vrai partenaire de réflexion : propose des angles, des questions, des pistes, pas seulement un résumé.", "Be a real thinking partner: offer angles, questions, leads — not just a summary.")}
 - {_t("Reste concis et vivant ; structure si utile, mais évite les pavés.", "Stay concise and lively; structure when useful, but avoid walls of text.")}"""

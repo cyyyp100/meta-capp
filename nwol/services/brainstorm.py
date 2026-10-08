@@ -3,8 +3,10 @@
 # Chat libre avec Clikoda, avec mémoire par discussion ET accès à la base de
 # l'utilisateur. Le flux d'un message (non bloquant, à callbacks, comme
 # services/assistant.py) :
-#   1. décision LLM : faut-il chercher dans la base + mots-clés ?
-#   2. si oui : recherche multi-tables -> extraits (sources)
+#   1. décision LLM : faut-il chercher dans la base + mots-clés ? consulter
+#      le module Langues ?
+#   2. si oui : portrait de chaque langue commencée + recherche multi-tables
+#      -> sources
 #   3. réponse LLM (texte libre) avec résumé + historique récent + sources
 #   4. persistance best-effort (message user puis assistant)
 #   5. résumé glissant régénéré quand l'historique s'allonge
@@ -212,13 +214,16 @@ def _handle_claimed(
     except Exception:  # best-effort : la réponse prime sur son archivage
         logger.debug("Persistance du message utilisateur ignorée", exc_info=True)
 
-    def _answer(sources: list[dict]) -> None:
+    def _answer(sources: list[dict], languages_checked: bool = False) -> None:
         context = {
             "summary": summary,
             "history": history,
             "user_message": user_message,
             "sources": sources,
             "scope": scope,
+            # Le module Langues a été consulté, même s'il n'a rien rendu : le
+            # prompt peut alors dire « aucune langue commencée » sans l'inventer.
+            "languages_checked": languages_checked,
         }
 
         def _on_text(text: str) -> None:
@@ -237,40 +242,31 @@ def _handle_claimed(
             on_error(t("brainstorm.failed"))
 
     def _on_decision(decision: dict) -> None:
-        queries = (decision or {}).get("queries") or []
-        if not ((decision or {}).get("search") and queries):
+        decision = decision or {}
+        queries = decision.get("queries") or []
+        search = bool(decision.get("search") and queries)
+        # Le portrait des langues n'appartient à aucun dossier : une discussion
+        # liée n'y a pas accès, pas plus qu'aux flashcards libres (cf.
+        # brainstorm_search._scope_sql).
+        languages = bool(decision.get("languages")) and scope is None
+        if not (search or languages):
             _answer([])
             return
         if on_scanning:
             on_scanning(True)
-        sources: list[dict] = []
+        portraits: list[dict] = []
+        excerpts: list[dict] = []
         try:
-            # Extraits DÉJÀ CITÉS dans cette discussion : amortis, pas exclus. Sans
-            # cela, la même poignée de surlignages revenait tour après tour, et
-            # deux fois la même question rendait la même réponse aux mêmes sources.
-            already_cited = _cited_keys(discussion_id)
-            seen: set = set()
-            for q in queries:
-                remaining = MAX_SOURCES - len(sources)
-                if remaining <= 0:
-                    break
-                for item in brainstorm_search.search_user_db(
-                    q, limit=remaining, damp_keys=already_cited | seen,
-                    folder_ids=scope["folder_ids"] if scope else None,
-                ):
-                    key = brainstorm_search.source_key(item)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    sources.append(item)
-                    if len(sources) >= MAX_SOURCES:
-                        break
+            if languages:
+                portraits = brainstorm_search.language_sources()
+            if search:
+                excerpts = _search_excerpts(discussion_id, queries, scope)
         except Exception as exc:  # pragma: no cover - best-effort
             logger.debug("Recherche base échouée : %s", exc)
         finally:
             if on_scanning:
                 on_scanning(False)
-        _answer(sources)
+        _answer(portraits + excerpts, languages_checked=languages)
 
     def _on_decide_error(msg: str) -> None:
         # La décision de recherche a échoué : on répond quand même, sans RAG.
@@ -280,6 +276,34 @@ def _handle_claimed(
     decide_brainstorm_search_async(
         history, user_message, _on_decision, _on_decide_error, scope=scope,
     )
+
+
+def _search_excerpts(discussion_id: int, queries: list[str], scope: dict | None) -> list[dict]:
+    """Extraits de la base pour les requêtes décidées, ``MAX_SOURCES`` au plus.
+
+    Extraits DÉJÀ CITÉS dans cette discussion : amortis, pas exclus. Sans cela,
+    la même poignée de surlignages revenait tour après tour, et deux fois la
+    même question rendait la même réponse aux mêmes sources.
+    """
+    already_cited = _cited_keys(discussion_id)
+    seen: set = set()
+    sources: list[dict] = []
+    for q in queries:
+        remaining = MAX_SOURCES - len(sources)
+        if remaining <= 0:
+            break
+        for item in brainstorm_search.search_user_db(
+            q, limit=remaining, damp_keys=already_cited | seen,
+            folder_ids=scope["folder_ids"] if scope else None,
+        ):
+            key = brainstorm_search.source_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(item)
+            if len(sources) >= MAX_SOURCES:
+                break
+    return sources
 
 
 def _title_from_message(text: str) -> str:

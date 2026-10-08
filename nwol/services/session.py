@@ -543,6 +543,7 @@ def nudge_metacog_profile(
     practice_session_id: int | None = None,
     measure_meta: bool = True,
     kind: str | None = None,
+    meta_delta: float | None = None,
 ) -> dict:
     """Finalisation métacognitive partagée : lecture, quiz, séance de langue.
 
@@ -564,7 +565,11 @@ def nudge_metacog_profile(
     Une séance de pratique ne se finalise qu'UNE fois (`finalized_at`) : un quiz
     quitté puis clos, une clôture renvoyée, ne font pas glisser le profil deux fois.
     `measure_meta=False` : les réponses sont gardées sans être notées (le ressenti
-    à choix du feuilleton n'est pas une réflexion écrite).
+    à choix du feuilleton n'est pas une réflexion écrite). `meta_delta` : la
+    métacognition de la séance vaut alors le profil + ce pas, sans LLM — le
+    feuilleton le donne selon que son ressenti a eu une réponse ou non. C'est une
+    mesure à part entière : elle déplace la métacognition même quand rien
+    d'autre n'a été mesuré, d'une part α, sans prorata du nombre de mesures.
 
     **Une séance pèse selon sa catégorie** (`PROFILE_SESSION_KIND_WEIGHT`) : une
     lecture et une séance de langue font apprendre, un quiz vérifie ce qui a été
@@ -603,7 +608,22 @@ def nudge_metacog_profile(
     if measures is None:
         measures = _session_measures(session_id, metrics or {})
 
+    practice = (
+        _safe(lambda: get_practice_session(int(practice_session_id)), None)
+        if practice_session_id is not None else None
+    )
+    kind_weight = _kind_weight(kind or _session_kind(session_id, practice))
+
     if measures == 0:
+        if meta_delta is not None:
+            # Seule la question de métacognition a mesuré la séance : elle seule bouge.
+            meta_target = clamp_gauge(profile_gauges["meta_cognition"] + float(meta_delta))
+            updated = update_profile(
+                user_id, {"meta_cognition": meta_target}, session_id,
+                confidence={"meta_cognition": kind_weight}, practice_session_id=practice_session_id,
+            )
+            _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
+            return {c: float(updated.get(c, 50.0)) for c in CRITERIA}
         # Rien n'a été mesuré : la session a eu lieu (elle compte), mais elle n'a
         # aucune raison de déplacer le profil.
         logger.info("Session %s finalisée sans aucune mesure : profil inchangé", session_id)
@@ -612,14 +632,17 @@ def nudge_metacog_profile(
         return {}
 
     confidence = compute_confidence(measures)
-    practice = (
-        _safe(lambda: get_practice_session(int(practice_session_id)), None)
-        if practice_session_id is not None else None
-    )
-    kind_weight = _kind_weight(kind or _session_kind(session_id, practice))
     # La métacognition se mesure ici, et nulle part ailleurs : sur ce que
-    # l'étudiant écrit dans le sas de sortie.
-    meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges) if measure_meta else None
+    # l'étudiant écrit dans le sas de sortie — ou, sans rien d'écrit à noter, sur
+    # le fait qu'il ait répondu à la question qui la sollicite (`meta_delta`).
+    meta_weight = confidence * kind_weight
+    if meta_delta is not None:
+        meta_score = clamp_gauge(profile_gauges["meta_cognition"] + float(meta_delta))
+        meta_weight = kind_weight
+    elif measure_meta:
+        meta_score = _measure_meta_cognition(pairs, metrics, profile_gauges)
+    else:
+        meta_score = None
     if meta_score is not None and session_id is not None:
         # Une révision éclair cliquée sans lire a déjà coûté de la métacognition
         # à la jauge live ; la note du sas de sortie REMPLACE cette jauge, elle
@@ -644,7 +667,7 @@ def nudge_metacog_profile(
         if meta_score is not None:
             session_score["meta_cognition"] = meta_score
             if isinstance(weights, dict):
-                weights["meta_cognition"] = confidence * kind_weight
+                weights["meta_cognition"] = meta_weight
         updated = update_profile(
             user_id, session_score, session_id,
             confidence=weights, practice_session_id=practice_session_id,

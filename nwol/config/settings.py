@@ -722,6 +722,12 @@ LANG_TRANSPARENT_FLAG_UNTIL_EPISODE = 15
 # de reprise). La montrer à l'apprenant est une décision ouverte (plan § 19.1).
 LANG_WEEKLY_ANALYSIS_VISIBLE = False
 LANG_WEEKLY_WINDOWS_DAYS = (7, 28)
+# Portrait d'une langue lu par le brainstorming (`lang_runs.learner_overview`) :
+# dernières séances MESURÉES dont la difficulté (`lang_progress.classify`) est
+# résumée, cherchées parmi les N dernières terminées (les relectures, sans
+# mesure, s'enchaînent après une absence).
+LANG_OVERVIEW_RECENT_RUNS = 5
+LANG_OVERVIEW_SCAN_RUNS = 20
 
 # Vitesse de lecture progressive par défaut (ms/caractère), servie par
 # db.user.get_user_speed quand l'utilisateur n'en a pas choisi une.
@@ -978,6 +984,14 @@ LANG_SECOND_WAVE_TARGET_GAUGES: tuple[str, ...] = ("retention",)
 LANG_WRITING_TARGET_GAUGES: tuple[str, ...] = ("retention", "context_comprehension")
 # Le « compris / à peu près / pas compris » qui ferme un passage de lecture.
 LANG_UNDERSTOOD_TARGET_GAUGES: tuple[str, ...] = ("context_comprehension",)
+# La dernière question d'une séance (le ressenti de « au revoir ») est une
+# question de métacognition : y répondre avant « Terminer », c'est s'observer
+# apprendre ; la laisser sans réponse, c'est s'en dispenser. Choix parmi trois,
+# elle n'est pas notée par Clikoda : la métacognition de la séance vaut le
+# profil ± ce pas, et le profil n'en parcourt que sa part α (adaptative,
+# `metacog.profile.compute_alpha`) — un léger mouvement, jamais un saut.
+# Une séance quittée avant la question ne déplace rien.
+LANG_FEELING_META_STEP = 10.0
 LANG_SKILL_TARGET_GAUGES: dict[str, tuple[str, ...]] = {
     "comprehension_orale": ("context_comprehension", "attention"),
     "comprehension_ecrite": ("context_comprehension",),

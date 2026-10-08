@@ -7,6 +7,7 @@ import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { MathText } from "../../components/MathText";
 import { useT } from "../../i18n";
 import { renderMathToHtml } from "../reader/renderMath";
+import { subjectName } from "../stats/labels";
 import { FolderScopePicker } from "./FolderScopePicker";
 
 interface ChatMessage {
@@ -29,6 +30,7 @@ const SOURCE_ICON: Record<BrainstormSource["source_type"], string> = {
   flashcard: "🗂",
   document: "📄",
   mistake: "❌",
+  language: "🌐",
 };
 
 export function ChatPanel({
@@ -221,23 +223,28 @@ export function ChatPanel({
 }
 
 function Sources({ sources, label }: { sources: BrainstormSource[]; label: string }) {
+  const t = useT();
   return (
     <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--muted)" }}>📎 {label}</div>
-      {sources.map((s, i) => (
-        <div key={i} style={sourceItem}>
-          <span>{SOURCE_ICON[s.source_type] || "•"}</span>
-          <span>
-            {s.doc_title && (
-              <strong style={{ color: "var(--text-soft)" }}>
-                {s.doc_title}
-                {s.page ? `, p.${s.page}` : ""} —{" "}
-              </strong>
-            )}
-            <MathText text={s.snippet} style={{ color: "var(--muted)" }} />
-          </span>
-        </div>
-      ))}
+      {sources.map((s, i) => {
+        // Une fiche de langue porte son code : nommée dans la langue de l'interface.
+        const title = s.source_type === "language" && s.language ? subjectName(t, s.language) : s.doc_title;
+        return (
+          <div key={i} style={sourceItem}>
+            <span>{SOURCE_ICON[s.source_type] || "•"}</span>
+            <span>
+              {title && (
+                <strong style={{ color: "var(--text-soft)" }}>
+                  {title}
+                  {s.page ? `, p.${s.page}` : ""} —{" "}
+                </strong>
+              )}
+              <MathText text={s.snippet} style={{ color: "var(--muted)" }} />
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

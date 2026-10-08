@@ -4,7 +4,8 @@
 # langage naturel décidée par le LLM, on fouille les contenus de l'utilisateur
 # (PDFs importés, surlignages, flashcards, anciennes Q&R, réponses fausses ou
 # partielles) et on renvoie des extraits normalisés que le prompt et l'UI peuvent
-# citer.
+# citer. À côté, et sans mots-clés : le portrait de l'apprenant dans chaque
+# langue du module Langues (`language_sources`).
 #
 # Une discussion liée à un dossier de la bibliothèque restreint TOUTES les
 # sources aux documents de ce dossier et de ses sous-dossiers (`folder_ids`, cf.
@@ -41,6 +42,7 @@ from config.settings import (
 )
 from db import get_connection
 from db.user import DEFAULT_USER_ID
+from i18n import t
 from services import selection
 from utils.text import fold
 
@@ -399,6 +401,63 @@ def _search_mistakes(terms: list[str], user_id: int, folder_ids: set[int] | None
             "_age_days": selection.age_days(r["answered_at"]),
         })
     return out
+
+
+def language_sources(user_id: int = DEFAULT_USER_ID) -> list[dict]:
+    """L'état de l'apprenant dans chaque langue commencée, une source par langue
+    (`lang_runs.learner_overview`).
+
+    Ce ne sont pas des extraits : pas de mots-clés, ni tirage ni amortissement,
+    et rien ne compte dans le plafond des extraits. Une question comme « quelle
+    langue prioriser ? » ne touche aucun mot d'une table ; elle demande le
+    portrait entier, pour comparer. Le snippet suit la langue de l'interface :
+    il est montré tel quel sous la réponse, et c'est aussi lui que lit le prompt.
+    """
+    from services.lang import LANGUAGES
+    from services.lang_runs import learner_overview
+
+    labels = {lang["code"]: lang["label"] for lang in LANGUAGES}
+    try:
+        return [
+            {
+                "source_type": "language",
+                "language": entry["language"],
+                "doc_id": None,
+                "doc_title": labels.get(entry["language"]) or entry["language"].capitalize(),
+                "page": None,
+                "snippet": _language_snippet(entry),
+            }
+            for entry in learner_overview(user_id)
+        ]
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("Portrait des langues indisponible : %s", exc)
+        return []
+
+
+def _language_snippet(entry: dict) -> str:
+    parts = [t("brainstorm.lang.level", level=entry["level"])]
+    if entry.get("program_size"):
+        parts.append(t("brainstorm.lang.program", order=entry["program_order"], size=entry["program_size"]))
+    days = entry.get("days_since")
+    if days is None:
+        parts.append(t("brainstorm.lang.no_study_day"))
+    elif days == 0:
+        parts.append(t("brainstorm.lang.last_today"))
+    else:
+        parts.append(t("brainstorm.lang.last_days", n=days))
+    parts.append(t("brainstorm.lang.days", d7=entry["study_days_7"], d28=entry["study_days_28"]))
+    if entry.get("mean_minutes"):
+        parts.append(t("brainstorm.lang.minutes", m=max(1, round(entry["mean_minutes"]))))
+    parts.append(t("brainstorm.lang.episodes", n=entry["episodes_played"]))
+    parts.append(t("brainstorm.lang.words", seen=entry["words_seen"], acquired=entry["words_acquired"]))
+    difficulty = entry.get("recent_difficulty") or {}
+    detail = ", ".join(
+        f"{t(f'brainstorm.lang.{kind}')} ×{difficulty[kind]}"
+        for kind in ("easy", "ok", "hard") if difficulty.get(kind)
+    )
+    if detail:
+        parts.append(t("brainstorm.lang.difficulty", detail=detail))
+    return " · ".join(parts)
 
 
 def _search_documents(terms: list[str], folder_ids: set[int] | None) -> list[dict]:
