@@ -41,8 +41,9 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
  * Ce qu'on s'apprête à ouvrir.
- *   * un document : accroche de curiosité (LLM) et cartes choisies par
- *     pertinence (dues + récence × matière) ;
+ *   * un document : accroche de curiosité (LLM) et cartes de sa matière
+ *     d'abord (dues, puis tirage récence × déjà vue), complétées par les
+ *     autres disciplines — jamais par une autre langue ;
  *   * une langue : cartes de cette langue (dues, puis récentes), et pour
  *     accroche le thème de la séance quand il est connu — pas d'appel LLM.
  */

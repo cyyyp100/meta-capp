@@ -17,7 +17,8 @@ import { FeuilletonHome } from "./FeuilletonHome";
 function status(extra: Partial<FeuilletonStatus> = {}): FeuilletonStatus {
   return {
     language: "espagnol", flow: "feuilleton", family: "latin", explain_lang: "fr", onboarding_done: true,
-    episode_n: 2, next_episode: 3, next_status: "ready", generating: false, bilan_due: false, level: "A1",
+    episode_n: 2, next_episode: 3, next_status: "ready", generating: false, bilan_due: false, relecture_due: false,
+    level: "A1",
     program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3, episodes_played: 2,
     open_run: null, has_placement: true, model: "gemma4:e4b", generation_failures: 0, pro_hints: [],
     unseen_writing: null, ...extra,
@@ -64,6 +65,7 @@ describe("FeuilletonHome", () => {
     vi.spyOn(api, "setPreferences").mockImplementation(async (patch) => ({
       ...preferences(patch.lang_pro_note_dismissed ? "true" : "false"),
     }));
+    vi.spyOn(api, "feuilletonEnsureNext").mockResolvedValue({ relaunched: [], generating: false });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -96,6 +98,74 @@ describe("FeuilletonHome", () => {
     expect(await screen.findByText(/peine à écrire cet épisode|struggling to write/i)).toBeInTheDocument();
     expect(screen.getByText(/tout le programme|whole programme/i)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /version pro|pro edition/i })).toHaveLength(2);
+  });
+
+  it("montre pourquoi « Séance courte » et « Bibliothèque » sont inactives", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(
+      status({ next_status: "failed", episodes_played: 0, episode_n: 0, next_episode: 1 }),
+    );
+    await renderHome();
+    const short = await screen.findByRole("button", { name: /séance courte|short session/i });
+    const library = screen.getByRole("button", { name: /^bibliothèque$|^library$/i });
+    for (const button of [short, library]) {
+      expect(button).toBeDisabled();
+      // Lisiblement inactif : atténué, et le curseur le dit.
+      expect(button).toHaveStyle({ opacity: "0.45", cursor: "not-allowed" });
+    }
+    expect(short).toHaveAttribute("title", expect.stringMatching(/épisode 1 est écrit|episode 1 is written/i));
+    expect(library).toHaveAttribute("title", expect.stringMatching(/premier épisode|first episode/i));
+  });
+
+  it("laisse « Séance courte » et « Bibliothèque » actives quand l'épisode est prêt", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status());
+    await renderHome();
+    const short = await screen.findByRole("button", { name: /séance courte|short session/i });
+    expect(short).toBeEnabled();
+    expect(short).not.toHaveAttribute("title");
+    expect(short).toHaveStyle({ cursor: "pointer" });
+  });
+
+  it("après plus de 3 jours sans séance, propose la relecture et dit que l'épisode prêt attend", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status({ relecture_due: true }));
+    await renderHome();
+    expect(await screen.findByRole("button", { name: /relire avant l'épisode 3|re-read before episode 3/i })).toBeInTheDocument();
+    expect(screen.getByText(/l'épisode 3 est prêt : il t'attend|episode 3 is ready: it waits/i)).toBeInTheDocument();
+    // La séance courte jouerait l'épisode : elle attend la relecture, et le dit.
+    const short = screen.getByRole("button", { name: /séance courte|short session/i });
+    expect(short).toBeDisabled();
+    expect(short).toHaveAttribute("title", expect.stringMatching(/après la relecture|after the re-read/i));
+    expect(screen.getByRole("button", { name: /juste relire|just re-read/i })).toBeEnabled();
+  });
+
+  it("une séance du jour restée ouverte passe avant la relecture imposée", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status({ relecture_due: true, open_run: 12 }));
+    await renderHome();
+    expect(await screen.findByRole("button", { name: /reprendre la séance|resume the session/i })).toBeInTheDocument();
+    expect(screen.queryByText(/on relit d'abord|we re-read first/i)).toBeNull();
+  });
+
+  it("relance une fois l'épisode suivant qui ne s'écrit pas", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status({ next_status: "failed", generation_failures: 1 }));
+    await renderHome();
+    await screen.findByText("Espagnol");
+    expect(api.feuilletonEnsureNext).toHaveBeenCalledTimes(1);
+    expect(api.feuilletonEnsureNext).toHaveBeenCalledWith("espagnol");
+  });
+
+  it("ne relance rien quand l'épisode est prêt ou déjà en cours d'écriture", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    const statusSpy = vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status());
+    await renderHome();
+    await screen.findByText("Espagnol");
+    statusSpy.mockResolvedValue(status({ next_status: "generating", generating: true }));
+    await renderHome();
+    expect(await screen.findByText(/en train de s'écrire|being written/i)).toBeInTheDocument();
+    expect(api.feuilletonEnsureNext).not.toHaveBeenCalled();
   });
 
   it("annonce une correction arrivée après la séance, la montre, puis la marque vue", async () => {

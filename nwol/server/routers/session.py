@@ -22,7 +22,8 @@ class StartBody(BaseModel):
 
 
 class EndBody(BaseModel):
-    pages_read: int | None = None
+    # Pas de `pages_read` : le compte des pages lues est écrit par le socket du
+    # lecteur, qui mesure le temps par page (services/session_memory.pages_read).
     duration_s: int | None = None
 
 
@@ -41,7 +42,7 @@ def start(body: StartBody) -> dict:
 
 @router.post("/{session_id}/end")
 def end(session_id: int, body: EndBody) -> dict:
-    return end_session(session_id, pages_read=body.pages_read, duration_s=body.duration_s)
+    return end_session(session_id, duration_s=body.duration_s)
 
 
 @router.post("/{session_id}/abandon")

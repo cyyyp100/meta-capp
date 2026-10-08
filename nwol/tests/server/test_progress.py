@@ -13,6 +13,19 @@ def _import_doc(client, tmp_path, make_pdf):
     return client.post("/api/library/import", json={"path": path}).json()["id"]
 
 
+def _read_pages(session_id: int, dwell: dict[int, float]) -> None:
+    """Ce qu'écrit le socket du lecteur pendant la séance : le temps par page,
+    et le compte des pages LUES (au moins PAGE_READ_MIN_DWELL_S)."""
+    from config.settings import PAGE_READ_MIN_DWELL_S
+    from db.page_dwell import save_page_dwell
+    from db.sessions import update_session_progress
+
+    save_page_dwell(session_id, dwell, {page: 1 for page in dwell})
+    update_session_progress(
+        session_id, pages_read=sum(1 for seconds in dwell.values() if seconds >= PAGE_READ_MIN_DWELL_S),
+    )
+
+
 def test_timeline_is_empty_on_a_fresh_database(client):
     body = client.get("/api/progress/sessions").json()
     assert body["sessions"] == []
@@ -22,7 +35,8 @@ def test_timeline_is_empty_on_a_fresh_database(client):
 def test_a_finished_session_appears_with_its_reflections(client, tmp_path, make_pdf):
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 3, "duration_s": 420})
+    _read_pages(sid, {1: 2.0, 2: 12.5, 3: 40.0, 4: 6.0})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 420})
     client.post(f"/api/session/{sid}/finalize", json={
         "responses": ["J'ai compris le théorème central.", ""],
         "questions": ["Qu'as-tu compris ?", "Quel point reste flou ?"],
@@ -40,6 +54,8 @@ def test_a_finished_session_appears_with_its_reflections(client, tmp_path, make_
     answers = [r["answer"] for r in detail["reflections"]]
     assert "J'ai compris le théorème central." in answers
     assert detail["metrics"]["pages_read"] == 3
+    # « Où tu as ralenti » : les pages lues seulement, pas celle qu'on a traversée.
+    assert [row["page"] for row in detail["page_dwell"]] == [2, 3, 4]
 
 
 def test_gauges_left_at_their_seed_are_not_reported_as_measured(client, tmp_path, make_pdf):
@@ -52,7 +68,7 @@ def test_gauges_left_at_their_seed_are_not_reported_as_measured(client, tmp_path
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
     record_gauges(sid, {"attention": 40.0, "curiosity": 40.0}, t=0.0)
     record_gauges(sid, {"attention": 72.0, "curiosity": 40.0}, t=60.0)
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 60})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 60})
 
     gauges = client.get(f"/api/progress/session/{sid}").json()["gauges"]
     assert gauges["measured"] == ["attention"]
@@ -73,7 +89,7 @@ def test_pauses_are_listed_and_summed_but_kept_out_of_reading_time(client, tmp_p
                      "attention_at_start": 35.0, "ended_by": "resume"})
     save_pause(sid, {"started_at": "2026-09-23T10:20:00", "page": 4, "duration_s": 120.0,
                      "source": "manual", "ended_by": "resume"})
-    metrics = client.post(f"/api/session/{sid}/end", json={"pages_read": 4, "duration_s": 900}).json()
+    metrics = client.post(f"/api/session/{sid}/end", json={"duration_s": 900}).json()
     assert metrics["duration_s"] == 900
     assert metrics["pauses"] == 2
     assert metrics["pause_s"] == 420
@@ -98,7 +114,8 @@ def test_weekly_recap_counts_only_finished_sessions(client, tmp_path, make_pdf):
     assert client.get("/api/progress/weekly").json()["sessions"] == 0
 
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 2, "duration_s": 300})
+    _read_pages(sid, {1: 30.0, 2: 45.0})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 300})
     client.post(f"/api/session/{sid}/finalize", json={"responses": ["r"], "questions": ["q ?"]})
 
     recap = client.get("/api/progress/weekly").json()
@@ -118,11 +135,11 @@ def test_sessions_are_named_after_their_document_and_reading_number(client, tmp_
     }).json()["id"]
 
     first = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{first}/end", json={"pages_read": 1, "duration_s": 60})
+    client.post(f"/api/session/{first}/end", json={"duration_s": 60})
     elsewhere = client.post("/api/session/start", json={"doc_id": other}).json()["session_id"]
-    client.post(f"/api/session/{elsewhere}/end", json={"pages_read": 1, "duration_s": 60})
+    client.post(f"/api/session/{elsewhere}/end", json={"duration_s": 60})
     second = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{second}/end", json={"pages_read": 1, "duration_s": 60})
+    client.post(f"/api/session/{second}/end", json={"duration_s": 60})
 
     rows = {r["session_id"]: r for r in client.get("/api/progress/sessions").json()["sessions"]}
     assert rows[first]["document_title"] == "progress.pdf"
@@ -153,7 +170,7 @@ def _quiz(client, verdicts=("correct", "correct", "incorrect")) -> int:
 def test_quiz_sessions_join_the_timeline_under_their_own_category(client, tmp_path, make_pdf):
     doc_id = _import_doc(client, tmp_path, make_pdf)
     reading = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{reading}/end", json={"pages_read": 1, "duration_s": 60})
+    client.post(f"/api/session/{reading}/end", json={"duration_s": 60})
     quiz = _quiz(client)
 
     body = client.get("/api/progress/sessions").json()

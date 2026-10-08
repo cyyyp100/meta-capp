@@ -16,7 +16,7 @@ import { useState } from "react";
 import { api } from "../../../api/client";
 import type { PlacementItemView, PlacementOutcome } from "../../../api/feuilleton";
 import { useT } from "../../../i18n";
-import { Card, chipBtn, ghostBtn, primaryBtn, StepTitle, Target } from "./ui";
+import { btnStyle, Card, chipBtn, ghostBtn, primaryBtn, StepTitle, Target } from "./ui";
 
 const INTERESTS = ["cuisine", "voyages", "cinema", "sport", "musique", "nature", "histoire", "technologie", "art", "famille"];
 
@@ -187,7 +187,11 @@ function PlacementResult({
             : t("feuil.placement.writing")}
       </p>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button style={primaryBtn} disabled={next !== "ready" && next !== "failed"} onClick={onStart}>
+        <button
+          style={btnStyle(primaryBtn, next !== "ready" && next !== "failed")}
+          disabled={next !== "ready" && next !== "failed"}
+          onClick={onStart}
+        >
           {next === "failed" ? t("feuil.placement.go_anyway") : t("feuil.placement.go")}
         </button>
       </div>

@@ -71,11 +71,16 @@ def update_session_progress(
     pages_read: int | None = None,
     chapters_completed: list | None = None,
 ) -> None:
+    """Progression d'une séance en cours.
+
+    `pages_read` ne fait que croître : deux écrivains se croisent (le tick du
+    socket du lecteur, et `/end` qui lit le compte exact au même moment), et une
+    écriture partie plus tôt ne doit pas effacer une valeur plus récente."""
     updates = []
     params: list = []
     if pages_read is not None:
-        updates.append("pages_read=?")
-        params.append(pages_read)
+        updates.append("pages_read=MAX(COALESCE(pages_read, 0), ?)")
+        params.append(int(pages_read))
     if chapters_completed is not None:
         updates.append("chapters_completed=?")
         params.append(json.dumps(chapters_completed, ensure_ascii=False))

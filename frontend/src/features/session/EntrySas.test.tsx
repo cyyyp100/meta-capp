@@ -121,6 +121,15 @@ describe("WarmUp", () => {
     }
   });
 
+  it("rend les formules d'une carte", async () => {
+    const math = { ...card(7), front: "Que vaut $x^2$ en $x = 3$ ?", back: "$$9$$" };
+    const { container } = render(<WarmUp cards={[math]} onDone={vi.fn()} />);
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container.textContent).not.toContain("$");
+    await act(async () => screen.getByText(/Que vaut/).click());
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+  });
+
   it("ne remonte rien en démonstration", async () => {
     const onDone = vi.fn();
     render(<WarmUp cards={[card(-1)]} onDone={onDone} demo />);

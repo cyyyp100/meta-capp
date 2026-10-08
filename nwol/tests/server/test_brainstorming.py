@@ -342,6 +342,26 @@ def test_title_from_message_cuts_on_a_word():
     assert len(_title_from_message("x" * 200)) == 60
 
 
+def test_snippet_is_never_cut_inside_a_formula():
+    """Un extrait coupé au milieu de `$…$` laissait un dollar orphelin, et la
+    source s'affichait en LaTeX brut : la coupe recule avant la formule."""
+    from services.brainstorm_search import _MAX_SNIPPET, _truncate
+
+    head = "mot " * ((_MAX_SNIPPET - 12) // 4)
+    text = head + "$\\frac{a}{b} + \\sqrt{c}$ et la suite du texte."
+    cut = _truncate(text)
+    assert cut.endswith("…") and "$" not in cut
+    assert len(cut) <= _MAX_SNIPPET
+    # Sans formule, ou une formule entière avant la coupe : coupe ordinaire.
+    plain = _truncate("x" * (_MAX_SNIPPET + 50))
+    assert len(plain) == _MAX_SNIPPET
+    whole = _truncate("Soit $u_n$ une suite. " + "y" * _MAX_SNIPPET)
+    assert whole.startswith("Soit $u_n$ une suite.") and len(whole) == _MAX_SNIPPET
+    # Les montants ne sont pas des formules.
+    money = _truncate("Le pain coûte 5$ et le vin 10$. " + "z" * _MAX_SNIPPET)
+    assert len(money) == _MAX_SNIPPET
+
+
 # ── Épinglage ─────────────────────────────────────────────────────────────────
 
 def test_pin_limit_and_order(client):

@@ -1,6 +1,5 @@
-import katex from "katex";
-
 import type { ReaderBlock } from "../../api/types";
+import { renderTex, splitMath } from "./renderMath";
 
 /**
  * Ancrage TEXTE sur pages reconstruites (édition cloud) : les citations de
@@ -9,8 +8,9 @@ import type { ReaderBlock } from "../../api/types";
  * `search_page` (PDFium) qui n'a plus de sens sur un DOM reconstruit.
  *
  * `renderMarkedText` : même contrat de sécurité que renderMathToHtml (tout est
- * échappé, seuls les segments $...$ deviennent du KaTeX), plus l'injection de
- * <mark data-hl> autour des correspondances dans les segments NON-math.
+ * échappé, seules les formules de `splitMath` deviennent du KaTeX), plus
+ * l'injection de <mark data-hl> autour des correspondances dans les segments
+ * NON-math.
  */
 
 export interface TextMark {
@@ -111,23 +111,13 @@ export function escapeAttr(s: string): string {
 }
 
 /**
- * Rend `text` (échappé + math $...$ en KaTeX) avec les `marks` surlignés dans
+ * Rend `text` (échappé + formules en KaTeX) avec les `marks` surlignés dans
  * les segments non-math. Une correspondance qui chevauche une formule n'est
  * marquée que sur sa partie textuelle (limitation assumée).
  */
 export function renderMarkedText(text: string, marks: TextMark[]): string {
-  const parts = text.split(/(\$[^$\n]+\$)/g);
-  return parts
-    .map((part) => {
-      if (part.length >= 2 && part.startsWith("$") && part.endsWith("$")) {
-        try {
-          return katex.renderToString(part.slice(1, -1), { throwOnError: false });
-        } catch {
-          return escapeHtml(part);
-        }
-      }
-      return markSegment(part, marks);
-    })
+  return splitMath(text)
+    .map((segment) => (segment.kind === "text" ? markSegment(segment.value, marks) : renderTex(segment)))
     .join("");
 }
 

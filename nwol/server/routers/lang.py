@@ -229,10 +229,24 @@ def _call(fn, *args, **kwargs):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/upcoming")
+def feuilleton_upcoming() -> list[dict]:
+    """L'épisode suivant de chaque langue ouverte (prêt, en écriture…), en
+    lecture seule : l'annonce « épisode prêt » et les pastilles de la page Langues."""
+    return lang_runs.upcoming_episodes()
+
+
 @router.get("/{language}/status")
 def feuilleton_status(language: str) -> dict:
     """E9 : écran d'accueil d'une langue (épisode prêt, génération, niveau)."""
     return _call(lang_runs.language_status, language)
+
+
+@router.post("/{language}/next/ensure")
+def feuilleton_next_ensure(language: str) -> dict:
+    """L'épisode suivant n'est ni prêt ni en cours d'écriture : il repart (même
+    règle qu'au démarrage). Le GET `status` reste en lecture seule."""
+    return _call(lang_runs.ensure_next, language)
 
 
 @router.post("/{language}/onboarding")

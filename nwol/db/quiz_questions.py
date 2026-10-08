@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from config import question_types
 from config.subjects import FALLBACK_SUBJECT, canonical_subject
 from db import get_connection
+from utils.text import document_reference
 
 logger = logging.getLogger("DB.quiz")
 
@@ -18,25 +19,15 @@ _GENERIC_QUESTION_FRAGMENTS: tuple[str, ...] = (
     "appliquerais-tu la relation",
 )
 
-# Phrases qui référencent un contexte de lecture absent dans le quiz
-_CONTEXT_REF_PHRASES: tuple[str, ...] = (
-    "selon le passage",
-    "d'après le passage",
-    "dans ce passage",
-    "dans le passage",
-    "selon ce texte",
-    "d'après ce texte",
-    "d'après le paragraphe",
-    "dans ce paragraphe",
-    "selon le texte",
-)
-
 
 def _is_unusable_for_quiz(question_text: str, source_context: str | None = None) -> bool:
     t = (question_text or "").lower()
     if any(frag in t for frag in _GENERIC_QUESTION_FRAGMENTS):
         return True
-    if not (source_context or "").strip() and any(phrase in t for phrase in _CONTEXT_REF_PHRASES):
+    # Une question qui renvoie au document (« selon le passage », « according to
+    # the text », « Table 3.5 ») sans le contexte de lecture qui l'accompagne :
+    # le quiz la servirait seule. Patrons partagés avec les cartes (utils/text).
+    if not (source_context or "").strip() and document_reference(question_text):
         return True
     return False
 

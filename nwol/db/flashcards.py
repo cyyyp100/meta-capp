@@ -204,114 +204,55 @@ def get_flashcards(
     return [_decode_flashcard(row) for row in rows]
 
 
-def get_session_start_cards(
+def get_session_start_pool(
     user_id: int = DEFAULT_USER_ID,
-    n: int = 5,
-    doc_id: int | None = None,
+    subject: str | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
-    """Cartes d'échauffement du sas d'entrée : les dues d'abord, puis un tirage pondéré.
+    """Vivier du sas d'entrée : les cartes candidates, avec leur matière.
 
-    Le tirage évite trois pièges, tous présents dans la version d'origine :
+    La politique (paliers, dues, tirage) vit dans
+    `services.flashcards.session_start_cards` ; ici, seulement la requête.
 
-    - un ``LIMIT 60`` sur ``created_at DESC`` rendait toute carte hors des 60 plus
-      récentes DÉFINITIVEMENT inatteignable en échauffement ;
-    - une demi-vie de récence de 7 jours éteignait le stock d'avant-hier, si bien
-      que l'échauffement ne montrait plus que les dernières cartes créées ;
-    - `random.choices` tirait AVEC remise, et chaque collision était réparée en
-      rebouchant dans l'ordre de récence — ce qui ramenait sournoisement le
-      tirage vers ce qu'il était censé éviter.
-
-    L'amortissement s'appuie sur ``last_reviewed``, que l'échauffement écrit
-    lui-même (le composant WarmUp appelle `/review` sur chaque carte montrée) :
-    le signal « déjà vue à la session précédente » existait déjà, il n'était pas lu.
+    - `card_subject` : la matière du document de la carte, sinon celle qu'il
+      avait quand il a été supprimé (`flashcards.subject`), sinon la langue d'une
+      carte de langue — le code de langue EST la clé de matière
+      (config/subjects.py) ;
+    - une carte d'une AUTRE langue que `subject` n'entre jamais : la révision
+      d'un cours d'informatique ne se complète pas avec du turc. Matière
+      inconnue (fiche du document pas encore écrite) : aucune langue ;
+    - `is_due` : échéance de répétition espacée passée ;
+    - tri (même matière, dues, récentes) puis `LIMIT FLASHCARD_POOL` : un stock
+      énorme garde dans le vivier tout ce que le sas servira d'abord. Le plafond
+      remplace un `LIMIT 60` qui rendait toute carte hors des 60 plus récentes
+      définitivement inatteignable.
     """
-    from config.settings import (
-        FLASHCARD_POOL,
-        FLASHCARD_RECENCY_FLOOR,
-        FLASHCARD_RECENCY_HALF_LIFE_DAYS,
-        FLASHCARD_REVIEW_COOLDOWN_DAYS,
-        FLASHCARD_REVIEW_FLOOR,
-        FLASHCARD_SUBJECT_BONUS,
-    )
-    from db.documents import get_document_subject
-    from services import selection
+    from config.settings import FLASHCARD_POOL
+    from config.subjects import LANGUAGE_SUBJECTS
 
-    # Les cartes dues (répétition espacée) passent en priorité absolue. `doc_id`
-    # n'est VOLONTAIREMENT pas transmis : une carte due l'est quel que soit le
-    # document ouvert, et la filtrer par document repousserait indéfiniment la
-    # révision d'une notion d'un autre cours. Le bonus de sujet plus bas suffit à
-    # orienter le reste de l'échauffement.
-    due_cards = get_due_flashcards(user_id, limit=n)
-    if len(due_cards) >= n:
-        logger.info("Sas d'entrée : %d cartes dues sélectionnées", n)
-        return due_cards[:n]
-    due_ids = {card["id"] for card in due_cards}
-
+    other_languages = [code for code in LANGUAGE_SUBJECTS if code != subject]
+    placeholders = ", ".join("?" for _ in other_languages)
     conn = get_connection()
     rows = conn.execute(
-        """SELECT flashcards.*,
-                  documents.filename AS document_title,
-                  documents.subject  AS document_subject,
-                  chapters.title     AS chapter_title
-           FROM flashcards
-           LEFT JOIN documents ON documents.id = flashcards.document_id
-           LEFT JOIN chapters  ON chapters.id  = flashcards.chapter_id
-           WHERE flashcards.user_id = ?
-           ORDER BY flashcards.created_at DESC
+        f"""SELECT * FROM (
+               SELECT flashcards.*,
+                      documents.filename AS document_title,
+                      chapters.title     AS chapter_title,
+                      COALESCE(documents.subject, flashcards.subject, flashcards.language)
+                                         AS card_subject,
+                      (flashcards.due_at IS NOT NULL
+                       AND flashcards.due_at <= datetime('now', 'localtime')) AS is_due
+               FROM flashcards
+               LEFT JOIN documents ON documents.id = flashcards.document_id
+               LEFT JOIN chapters  ON chapters.id  = flashcards.chapter_id
+               WHERE flashcards.user_id = ?
+           )
+           WHERE card_subject IS NULL OR card_subject NOT IN ({placeholders})
+           ORDER BY (card_subject = ?) DESC, is_due DESC, created_at DESC, id DESC
            LIMIT ?""",
-        (user_id, FLASHCARD_POOL),
+        (user_id, *other_languages, subject, limit or FLASHCARD_POOL),
     ).fetchall()
-
-    if not rows:
-        logger.info("Sas d'entrée : aucune flashcard disponible")
-        return due_cards
-
-    session_subject = get_document_subject(doc_id) if doc_id else None
-    logger.info("Sas d'entrée : sujet session=%s, %d candidats", session_subject or "—", len(rows))
-
-    cards: list[dict] = []
-    weights: list[float] = []
-    for row in rows:
-        card = _decode_flashcard(row)
-        if card["id"] in due_ids:
-            continue
-        # Fraîcheur bornée : le matériel récent garde un avantage, sans écraser
-        # le reste du stock.
-        recency = max(
-            FLASHCARD_RECENCY_FLOOR,
-            selection.decay(
-                selection.age_days(card.get("created_at")),
-                FLASHCARD_RECENCY_HALF_LIFE_DAYS,
-            ),
-        )
-        card_subject = card.get("document_subject") or ""
-        bonus = (
-            FLASHCARD_SUBJECT_BONUS
-            if (session_subject and card_subject == session_subject)
-            else 1.0
-        )
-        seen = selection.cooldown(
-            card.get("last_reviewed"), FLASHCARD_REVIEW_COOLDOWN_DAYS, FLASHCARD_REVIEW_FLOOR,
-        )
-        weight = recency * bonus * seen
-        logger.debug(
-            "  carte id=%s sujet=%s recency=%.3f bonus=%.1f vue=%.3f poids=%.3f | %s",
-            card["id"], card_subject or "—", recency, bonus, seen, weight,
-            (card.get("front") or "")[:60],
-        )
-        cards.append(card)
-        weights.append(weight)
-
-    if not cards:
-        return due_cards
-    # Sans remise : plus de doublon à réparer, donc plus de rebouchage biaisé.
-    result = selection.weighted_sample(cards, weights, n - len(due_cards))
-    for card in result:
-        logger.info(
-            "  → carte id=%s sujet=%s | %s",
-            card["id"], card.get("document_subject") or "—", (card.get("front") or "")[:60],
-        )
-    return due_cards + result
+    return [_decode_flashcard(row) for row in rows]
 
 
 def get_existing_tags(user_id: int = DEFAULT_USER_ID, limit: int = 100) -> list[str]:

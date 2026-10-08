@@ -210,6 +210,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 40)
         current = 40
 
+    if current < 41 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v41(conn)
+        _set_version(conn, 41)
+        current = 41
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1789,6 +1794,46 @@ def _migrate_to_v40(conn) -> None:
             "CREATE INDEX IF NOT EXISTS idx_lang_line_reveals_run ON lang_line_reveals(run_id)"
         )
     logger.info("Migration SQLite v40 terminée")
+
+
+def _migrate_to_v41(conn) -> None:
+    """Flashcards : la matière survit au document, et plus de carte automatique
+    qui renvoie au document.
+
+    - `flashcards.subject` : la matière du document, copiée sur ses cartes au
+      moment où il est supprimé (`db/documents.delete_document`). Jusqu'ici une
+      carte dont le document avait disparu (`document_id = NULL`) n'avait plus de
+      matière, et le sas d'entrée ne savait plus à quel cours elle appartenait ;
+    - les cartes AUTOMATIQUES (`source = 'auto'`) dont le recto ou le verso renvoie
+      au document (« according to the text », « Based on Table 3.5 », « mentionnés
+      dans le texte », cf. `utils.text.document_reference`) sont supprimées : le
+      sas les sert sans le document, l'élève ne peut que deviner. Une carte
+      manuelle reste — l'élève l'a voulue telle quelle. Les deux tables qui
+      pointent vers `flashcards` (`lang_lexicon`, `session_warmup_cards`) sont en
+      `ON DELETE SET NULL`.
+
+    Rejouable : la colonne n'est ajoutée qu'une fois, et une base purgée n'a plus
+    de carte à supprimer."""
+    from utils.text import document_reference
+
+    logger.info("Migration SQLite v41 démarrée")
+    with conn:
+        _ensure_column(conn, "flashcards", "subject", "TEXT")
+        doomed = []
+        for row in conn.execute(
+            "SELECT id, front, back FROM flashcards WHERE source = 'auto'"
+        ).fetchall():
+            reference = document_reference(row["front"]) or document_reference(row["back"])
+            if reference:
+                doomed.append(int(row["id"]))
+                logger.info("Carte automatique id=%s : renvoi au document « %s »", row["id"], reference)
+        if doomed:
+            conn.executemany("DELETE FROM flashcards WHERE id = ?", [(card_id,) for card_id in doomed])
+            logger.info(
+                "Migration v41 : %d carte(s) automatique(s) qui renvoient au document "
+                "supprimée(s) : ids=%s", len(doomed), doomed,
+            )
+    logger.info("Migration SQLite v41 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

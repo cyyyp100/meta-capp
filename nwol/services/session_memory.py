@@ -5,8 +5,11 @@
 # l'assistant, réponses aux questions pédagogiques, difficultés détectées.
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
+
+from config.settings import PAGE_READ_MIN_DWELL_S
 
 
 @dataclass
@@ -23,6 +26,10 @@ class SessionMemory:
     # 0.0 tant que rien n'a été observé : la stagnation retombe alors sur le
     # seul temps passé sur la page.
     _last_interaction: float = 0.0
+    # Sas d'entrée franchi (`start_reading`) : avant, rien n'est une lecture.
+    _reading_started: bool = False
+    # Pause en cours (`pause`) : l'horloge de la page est figée jusqu'à `skip`.
+    _paused_at: float | None = None
 
     # ------------------------------------------------------------------
     # Événements
@@ -39,6 +46,24 @@ class SessionMemory:
         self.visits_by_page[page] = self.visits_by_page.get(page, 0) + 1
         self.dwell_by_page.setdefault(page, 0.0)
 
+    def start_reading(self, now: float | None = None) -> None:
+        """Le sas d'entrée est franchi : la lecture commence ici.
+
+        Le socket du lecteur est ouvert dès le sas, page 1 à l'écran : le temps
+        de la mise en condition et des cartes y comptait comme une lecture de la
+        page 1. Temps et visites accumulés jusque-là sont oubliés, et la page à
+        l'écran repart de zéro. Idempotente : seul le premier appel compte."""
+        if self._reading_started:
+            return
+        self._reading_started = True
+        now = time.monotonic() if now is None else now
+        self.dwell_by_page.clear()
+        self.visits_by_page.clear()
+        if self._current_page is not None:
+            self._entered_at = now
+            self.visits_by_page[self._current_page] = 1
+            self.dwell_by_page[self._current_page] = 0.0
+
     def on_interaction(self, now: float | None = None) -> None:
         """Le lecteur a bougé (scroll, souris, clavier) : l'étudiant est là.
 
@@ -47,6 +72,13 @@ class SessionMemory:
         plusieurs minutes. Sans ce signal, la dérive passive les prenait pour du
         décrochage."""
         self._last_interaction = time.monotonic() if now is None else now
+
+    def pause(self, now: float | None = None) -> None:
+        """Une pause commence : le temps de la page s'arrête là. Lu pendant la
+        pause (une séance terminée depuis l'écran de pause), le compte des pages
+        lues ne gagne rien ; `skip` la retire ensuite de l'horloge."""
+        if self._paused_at is None:
+            self._paused_at = time.monotonic() if now is None else now
 
     def skip(self, seconds: float) -> None:
         """Retire une pause de l'horloge : ni dwell, ni stagnation ne la comptent.
@@ -58,6 +90,7 @@ class SessionMemory:
         self._entered_at += seconds
         if self._last_interaction:
             self._last_interaction += seconds
+        self._paused_at = None
 
     def on_user_question(self, page: int, question: str = "") -> None:
         self.questions_by_page[page] = self.questions_by_page.get(page, 0) + 1
@@ -89,11 +122,10 @@ class SessionMemory:
     # Lectures (politique d'intervention / synthèse)
     # ------------------------------------------------------------------
     def current_dwell(self, now: float | None = None) -> float:
-        """Secondes passées sur la page dominante actuelle."""
+        """Secondes passées sur la page dominante actuelle (pause en cours exclue)."""
         if self._current_page is None:
             return 0.0
-        now = time.monotonic() if now is None else now
-        return max(0.0, now - self._entered_at)
+        return max(0.0, self._clock(now) - self._entered_at)
 
     def stagnant_since(self, now: float | None = None) -> float:
         """Secondes d'immobilité réelle : sur la même page ET sans interaction.
@@ -113,7 +145,24 @@ class SessionMemory:
         return self.questions_by_page.get(page, 0)
 
     def pages_seen(self) -> set[int]:
+        """Pages VISITÉES, ne serait-ce qu'une fraction de seconde."""
         return set(self.dwell_by_page)
+
+    def pages_read(self, now: float | None = None) -> set[int]:
+        """Pages LUES : au moins `PAGE_READ_MIN_DWELL_S` cumulées dans la séance,
+        temps en cours de la page à l'écran compris, pauses exclues (`pause`,
+        `skip`).
+
+        Défiler vingt pages pour en trouver une n'en lit qu'une. Rien n'est lu
+        avant `start_reading` : le sas n'est pas une lecture."""
+        if not self._reading_started:
+            return set()
+        # Copie d'abord : le ticker et `/end` lisent la mémoire hors de la boucle
+        # asyncio qui la fait vivre.
+        dwell = dict(self.dwell_by_page)
+        if self._current_page is not None:
+            dwell[self._current_page] = dwell.get(self._current_page, 0.0) + self.current_dwell(now)
+        return {page for page, seconds in dwell.items() if seconds >= PAGE_READ_MIN_DWELL_S}
 
     def answers_count(self) -> int:
         return len(self.answers)
@@ -144,10 +193,47 @@ class SessionMemory:
             "difficulties": list(self.difficulties[-10:]),
         }
 
+    def _clock(self, now: float | None) -> float:
+        """L'instant de lecture : maintenant, ou le début de la pause en cours."""
+        now = time.monotonic() if now is None else now
+        return min(now, self._paused_at) if self._paused_at is not None else now
+
     def _flush_dwell(self, now: float) -> None:
+        now = self._clock(now)
         if self._current_page is not None:
             elapsed = max(0.0, now - self._entered_at)
             self.dwell_by_page[self._current_page] = (
                 self.dwell_by_page.get(self._current_page, 0.0) + elapsed
             )
             self._entered_at = now
+
+
+# ── Lectures en cours ────────────────────────────────────────────────────────
+#
+# `POST /session/{id}/end` part pendant que le socket du lecteur vit encore : il
+# lit ici le compte EXACT des pages lues de la séance, au lieu de celui du
+# dernier tick (jusqu'à 5 s de retard — une page lue juste avant « Terminer »
+# manquait à l'écran de fin). Le serveur reste le seul à compter.
+_LIVE: dict[int, SessionMemory] = {}
+_LIVE_LOCK = threading.Lock()
+
+
+def track(session_id: int, memory: SessionMemory) -> None:
+    """Le socket du lecteur suit la séance `session_id` avec cette mémoire."""
+    with _LIVE_LOCK:
+        _LIVE[int(session_id)] = memory
+
+
+def untrack(session_id: int, memory: SessionMemory) -> None:
+    """Le socket se ferme. Sans effet si un autre socket a repris la séance."""
+    with _LIVE_LOCK:
+        if _LIVE.get(int(session_id)) is memory:
+            del _LIVE[int(session_id)]
+
+
+def live_pages_read(session_id: int) -> int | None:
+    """Pages lues à l'instant par la séance en cours, None si aucun lecteur ne
+    la suit."""
+    with _LIVE_LOCK:
+        memory = _LIVE.get(int(session_id))
+    return None if memory is None else len(memory.pages_read())

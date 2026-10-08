@@ -336,6 +336,24 @@ def requeue_stuck_generations() -> int:
     return int(cur.rowcount or 0)
 
 
+def pending_episodes(profile_id: int | None = None) -> list[dict]:
+    """Épisodes réservés et jamais écrits : `queued` (pas encore lancé, ou
+    interrompu puis remis en file) ou `failed`, au-delà du dernier épisode joué
+    de leur profil (`episode_n`). Chacun porte la langue de son profil, du plus
+    ancien au plus récent."""
+    sql = (
+        "SELECT e.*, p.language AS language FROM lang_episodes e "
+        "JOIN lang_profiles p ON p.id = e.profile_id "
+        "WHERE e.status IN ('queued', 'failed') AND e.episode_n > COALESCE(p.episode_n, 0)"
+    )
+    params: list = []
+    if profile_id is not None:
+        sql += " AND e.profile_id = ?"
+        params.append(int(profile_id))
+    sql += " ORDER BY e.profile_id, e.episode_n"
+    return [_decode(r, _EPISODE_DECODE) for r in get_connection().execute(sql, params).fetchall()]
+
+
 # ── Séances (D7-D11) ──────────────────────────────────────────────────────────
 
 _RUN_FIELDS = {

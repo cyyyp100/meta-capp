@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import { FeuilletonHome } from "../features/lang/feuilleton/FeuilletonHome";
+import { useUpcomingEpisodes } from "../features/lang/feuilleton/useUpcomingEpisodes";
 import { SKILL_ORDER } from "../features/lang/skills";
 import { scoreColor, scoreInk } from "../features/stats/labels";
 import { useT } from "../i18n";
@@ -11,9 +12,21 @@ import { useT } from "../i18n";
 export function Lang() {
   const t = useT();
   const navigate = useNavigate();
-  const [selected, setSelected] = useState<string | null>(null);
+  const location = useLocation();
+  // L'annonce « épisode prêt » mène ici avec sa langue : elle s'ouvre d'emblée,
+  // la page fût-elle déjà affichée (une nouvelle entrée d'historique).
+  const requested = (location.state as { language?: string } | null)?.language ?? null;
+  const [selected, setSelected] = useState<string | null>(requested);
+  const [entry, setEntry] = useState(location.key);
+  if (entry !== location.key) {
+    setEntry(location.key);
+    if (requested) setSelected(requested);
+  }
 
   const { data: languages } = useQuery({ queryKey: ["lang", "languages"], queryFn: api.languages });
+  // Un épisode écrit et pas encore joué : « en attente », en haut à droite de sa carte.
+  const { data: upcoming } = useUpcomingEpisodes();
+  const pending = new Map((upcoming ?? []).filter((e) => e.status === "ready").map((e) => [e.language, e.episode_n]));
   const selectedLang = languages?.find((l) => l.code === selected);
   // Langue du pilote : accueil du feuilleton ; les autres gardent le flux hérité (K8).
   const feuilleton = selectedLang?.flow === "feuilleton";
@@ -76,6 +89,7 @@ export function Lang() {
             <button
               onClick={() => setSelected(l.code)}
               style={{
+                position: "relative",
                 padding: "20px 12px",
                 borderRadius: "var(--radius-md)",
                 border: `1px solid ${selected === l.code ? "var(--accent)" : "var(--border)"}`,
@@ -85,6 +99,9 @@ export function Lang() {
                 boxShadow: "var(--shadow-sm)",
               }}
             >
+              {pending.has(l.code) && (
+                <PendingBadge hint={t("lang.pending_hint", { n: pending.get(l.code) as number })}>{t("lang.pending")}</PendingBadge>
+              )}
               <div style={{ fontSize: 34 }}>{l.flag}</div>
               <div style={{ fontWeight: 600, marginTop: 6, color: "var(--text)" }}>{l.label}</div>
             </button>
@@ -132,6 +149,30 @@ export function Lang() {
         ))}
       </div>
     </div>
+  );
+}
+
+/** Pastille de notification (le remplissage ambre, cf. tokens.css) : un épisode
+ *  écrit attend d'être joué ; l'infobulle dit lequel. */
+function PendingBadge({ hint, children }: { hint: string; children: string }) {
+  return (
+    <span
+      title={hint}
+      style={{
+        position: "absolute",
+        top: 8,
+        right: 8,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: "var(--accent)",
+        color: "var(--on-accent)",
+        fontSize: 11,
+        fontWeight: 700,
+        lineHeight: "16px",
+      }}
+    >
+      {children}
+    </span>
   );
 }
 

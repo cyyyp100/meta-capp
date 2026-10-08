@@ -795,21 +795,22 @@ def build_evaluation_prompt(
     _verdict_rule_fr, _verdict_rule_en = _eval_objective_verdict_rule(objective_verdict)
     if not question_types.flashcard_eligible(question_type):
         _flashcard_constraint = _t(
-            "- flashcard DOIT être null : les questions de type métacognitif et d'anticipation "
-            "ne génèrent jamais de flashcard.",
-            "- flashcard MUST be null: metacognitive and anticipation question types never generate a flashcard.",
+            "- flashcard DOIT être null : ce type de question ne génère jamais de flashcard.",
+            "- flashcard MUST be null: this question type never generates a flashcard.",
         )
         _flashcard_example = "null"
     else:
         _flashcard_constraint = _t(
-            "- flashcard : fournis TOUJOURS une flashcard. "
+            "- flashcard : fournis une flashcard seulement si elle se comprend et se répond sans "
+            "le document ; sinon null. "
             "front doit être une question autonome, compréhensible sans avoir lu le document : "
             "si la question fait référence au passage ('selon le passage', 'd'après ce texte'…), "
             "remplace cette référence par le concept ou la donnée précise tirée du paragraphe — "
             "intègre le contexte dans la logique même de la question, pas en préambule. "
             "Exemple : 'Selon le passage, qu\\'est-ce qu\\'une suite ?' → 'Donne la définition d\\'une suite numérique $u_n$.' "
             "back doit être la réponse attendue concise, fidèle à expected_answer.",
-            "- flashcard: ALWAYS provide a flashcard. "
+            "- flashcard: provide a flashcard only if it can be understood and answered without "
+            "the document; otherwise null. "
             "front must be a standalone question, understandable without having read the document: "
             "if the question references the passage ('according to the passage', 'based on this text'…), "
             "replace that reference with the precise concept or data from the paragraph — "

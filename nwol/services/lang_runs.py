@@ -55,6 +55,7 @@ from config.settings import (
 )
 from db import lang_episode_db as store
 from db.lang_db import (
+    get_all_lang_profiles,
     get_lang_profile_by_id,
     get_or_create_lang_profile,
     get_recent_flashcards_for_language,
@@ -93,6 +94,9 @@ _UNDERSTOOD_VERDICT = {"compris": "correct", "a_peu_pres": "partial", "pas_compr
 _RATING_VERDICT = {"su": "correct", "a_peu_pres": "partial", "pas_su": "incorrect"}
 EPISODE_MODES = ("episode", "court")
 MODES = ("zero", "episode", "bilan", "reprise", "relecture", "court", "jalon")
+# Paliers d'absence (C7) après lesquels le prochain épisode à écrire est une
+# respiration ; en deçà (`rappel_long`), la reprise ne fait que relire.
+RESPIRATION_TIERS = ("reprise", "reprise_controle")
 # Format du plan. Une séance ouverte d'un autre format (passages 1 et 2, notes,
 # point du jour) est abandonnée au démarrage et remplacée : le front ne garde
 # aucune de ses vues.
@@ -457,7 +461,10 @@ def _bilan_due(profile: dict) -> bool:
 def choose_mode(profile: dict, language: str, *, requested: str | None, absence_days: int | None) -> tuple[str, dict]:
     """R1, par ordre de priorité : onboarding -> reprise (absence) -> bilan ->
     épisode prêt -> relecture (et la génération part). L'apprenant peut
-    toujours demander une séance courte ou « juste relire »."""
+    toujours demander « juste relire », et une séance courte tant qu'aucune
+    relecture n'est imposée : passé 3 jours d'absence (C7), la séance est une
+    reprise sans nouvel épisode — la séance courte aussi —, et l'épisode prêt
+    attend la séance suivante."""
     if not profile.get("onboarding_done"):
         return "zero", {}
     tier = activity.absence_tier(absence_days)
@@ -466,16 +473,16 @@ def choose_mode(profile: dict, language: str, *, requested: str | None, absence_
     ready = ready if ready and ready["status"] == "ready" else None
     if requested == "relecture":
         return "relecture", {"requested": True}
-    if requested == "court":
+    if requested == "court" and not activity.relecture_due(absence_days):
         return ("court", {"episode": ready, "requested": True}) if ready else ("relecture", {"fallback": "court"})
     if profile.get("replay_queue"):
         return "relecture", {"queued": True}
-    if tier in ("reprise", "reprise_controle"):
+    if activity.relecture_due(absence_days):
         return "reprise", {"tier": tier}
     if _bilan_due(profile):
         return "bilan", {}
     if ready:
-        return "episode", {"episode": ready, "long_recall": tier == "rappel_long"}
+        return "episode", {"episode": ready}
     return "relecture", {"fallback": "episode_not_ready"}
 
 
@@ -649,14 +656,6 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         prev = store.get_episode_by_n(profile["id"], ep["episode_n"] - 1) if ep["episode_n"] > 1 else None
         if mode == "court":
             steps.append(_step("rappel", teaser_only=True, teaser=(prev or {}).get("teaser", ""), episode_ref=None))
-        elif info.get("long_recall"):
-            recent = store.played_episodes(profile["id"], limit=LANG_RECAP_LONG_EPISODES)
-            steps.append(_step("rappel", long=True, summaries=[e["summary"] for e in reversed(recent)],
-                               episode_ref=None))
-            for i, (old, why) in enumerate(_relecture_choice(profile, set()), start=1):
-                key = f"relecture_{i}"
-                steps.append(_step(key, "relecture", episode_ref=add_episode(old), why=why))
-                add_reading(key, old, "relecture")
         elif prev and prev["status"] == "played":
             steps.append(_step("rappel", episode_ref=add_episode(prev), summary=prev["summary"], long=False))
             add_reading("rappel", prev, "rappel")
@@ -734,7 +733,10 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
     if mode == "reprise":
         tier = info.get("tier")
         recent = store.played_episodes(profile["id"], limit=LANG_RECAP_LONG_EPISODES)
-        steps.append(_step("accueil", variant="reprise", absence_days=absence_days))
+        # L'épisode déjà prêt ne se joue pas aujourd'hui : l'accueil dit qu'il attend.
+        kept = store.get_episode_by_n(profile["id"], int(profile.get("episode_n") or 0) + 1)
+        steps.append(_step("accueil", variant="reprise", absence_days=absence_days,
+                           kept_episode=kept["episode_n"] if kept and kept["status"] == "ready" else None))
         if recent:
             steps.append(_step("recap", summaries=[e["summary"] for e in reversed(recent)], points=[]))
             last = recent[0]
@@ -825,7 +827,10 @@ def start_run(language: str, mode: str | None = None, warmup: int = 0) -> dict:
     if chosen == "bilan":
         _start_bilan_generation(profile, language)
     if chosen == "reprise":
-        _prepare_respiration(profile, language)
+        if info.get("tier") in RESPIRATION_TIERS:
+            _prepare_respiration(profile, language)
+        # L'épisode à jouer à la séance suivante : s'il manque ou a échoué, il part.
+        _ensure_next_generation(_profile(profile["id"]), language)
     activity.maybe_trigger_weekly(profile, language, today)
     # R6 : la graine des jeux est l'id de la séance — variété d'une séance à
     # l'autre, mais reproductible.
@@ -848,12 +853,14 @@ def _start_bilan_generation(profile: dict, language: str) -> None:
 
 
 def _prepare_respiration(profile: dict, language: str) -> None:
-    """§ 14.2 : après une reprise, l'épisode suivant est une respiration. Un
-    épisode normal déjà écrit d'avance est réécrit comme tel."""
+    """§ 14.2 : après une reprise, le prochain épisode à écrire est une
+    respiration. Un épisode normal réservé mais pas encore écrit est redécidé
+    comme tel ; un épisode déjà prêt est gardé (C7) — il se joue à la séance
+    suivante, et la respiration ira à celui d'après."""
     store.update_profile_fields(profile["id"], force_respiration=1)
     n = int(profile.get("episode_n") or 0) + 1
     upcoming = store.get_episode_by_n(profile["id"], n)
-    if upcoming and upcoming["kind"] == "normal" and upcoming["status"] in ("ready", "failed", "queued"):
+    if upcoming and upcoming["kind"] == "normal" and upcoming["status"] in ("failed", "queued"):
         current = store.get_episode_by_n(profile["id"], n - 1)
         refreshed = _profile(profile["id"])
         decision = progress.next_episode_decision(refreshed, language, current=current, signals=None, episode_n=n)
@@ -1298,6 +1305,7 @@ def language_status(language: str) -> dict:
         "next_status": upcoming["status"] if upcoming else None,
         "generating": episodes.is_generating(profile["id"]),
         "bilan_due": _bilan_due(profile),
+        "relecture_due": _relecture_due(profile),
         "level": progress.current_cefr(language, order), "explain_lang": _explain(profile),
         "program": {"order": order, "size": store.program_size(language),
                     "point": localized(point, "title", _explain(profile)) if point else ""},
@@ -1306,6 +1314,34 @@ def language_status(language: str) -> dict:
         "open_run": open_run["id"] if open_run else None,
         "has_placement": bool(store.get_placement_items(language)),
     }
+
+
+def _relecture_due(profile: dict) -> bool:
+    """C7 : la prochaine séance de cette langue est une relecture imposée par
+    l'absence ; l'épisode prêt attend la suivante."""
+    return bool(profile.get("onboarding_done")) and activity.relecture_due(activity.absence_days(profile["id"]))
+
+
+def upcoming_episodes(user_id: int = DEFAULT_USER_ID) -> list[dict]:
+    """L'épisode suivant de chaque langue ouverte au feuilleton : son numéro,
+    son état (`ready` : écrit, en attente de passage), s'il s'écrit en ce
+    moment, et si une relecture passe avant lui. Lecture seule — aucun profil
+    créé, rien de relancé. Le front y lit l'annonce « épisode prêt », sur
+    toutes les pages, et la pastille de chaque langue sur la page Langues."""
+    out = []
+    for row in get_all_lang_profiles(user_id):
+        language = row["language"]
+        if row.get("flow") != "feuilleton" or not is_pilot(language) or unavailable_reason(language):
+            continue
+        n = int(row.get("episode_n") or 0) + 1
+        upcoming = store.get_episode_by_n(row["id"], n)
+        out.append({
+            "language": language, "episode_n": n,
+            "status": upcoming["status"] if upcoming else None,
+            "generating": episodes.is_generating(row["id"], n),
+            "relecture_due": _relecture_due(row),
+        })
+    return out
 
 
 def generation_failures(upcoming: dict | None) -> int:
@@ -1436,8 +1472,31 @@ def compare_retranslation(original: str, typed: str) -> dict:
     return {"ops": word_diff(original or "", typed or "")}
 
 
+def ensure_next(language: str) -> dict:
+    """L'accueil d'une langue s'ouvre sur un épisode suivant ni prêt ni en
+    cours d'écriture : il repart, selon la règle du démarrage
+    (`episodes.relaunch_pending`, pour ce profil). Le GET `status` reste en
+    lecture seule ; c'est cet appel, explicite, qui relance. Idempotent."""
+    if is_pilot(language) and unavailable_reason(language):
+        return {"relaunched": [], "generating": False}
+    profile = ensure_feuilleton(language)
+    relaunched = episodes.relaunch_pending(profile["id"])
+    return {"relaunched": relaunched, "generating": episodes.is_generating(profile["id"])}
+
+
+def relaunch_pending_episodes() -> list[int]:
+    """Au démarrage, en thread : les épisodes réservés et jamais écrits
+    repartent (l'appel à Ollama n'a rien à faire dans le démarrage)."""
+    try:
+        return episodes.relaunch_pending(closed=unavailable_reason)
+    except Exception:  # pragma: no cover - un thread de fond ne remonte rien
+        logger.exception("Relance des épisodes en attente échouée")
+        return []
+
+
 def on_startup() -> None:
-    """Démarrage : données de référence (D23), générations interrompues (G20)."""
+    """Démarrage : données de référence (D23), générations interrompues (G20),
+    puis relance des épisodes en attente, en thread."""
     from services.lang_static import seed_lang_reference
 
     try:
@@ -1445,6 +1504,7 @@ def on_startup() -> None:
     except Exception:  # pragma: no cover - jamais bloquant au démarrage
         logger.exception("Injection des données de langue échouée")
     episodes.requeue_stuck()
+    threading.Thread(target=relaunch_pending_episodes, daemon=True, name="lang-episodes-relaunch").start()
     try:
         writing.requeue_stuck()
     except Exception:  # pragma: no cover - jamais bloquant au démarrage

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from config.subjects import canonical_subject
+from db.documents import get_document_subject
 from db.flashcards import (
     delete_flashcard as _delete_flashcard,
     fill_lang_flashcard_pronunciation,
@@ -16,13 +18,15 @@ from db.flashcards import (
     get_due_flashcards,
     get_existing_tags,
     get_flashcards,
-    get_session_start_cards,
+    get_session_start_pool,
     lang_flashcard_exists,
     save_flashcard,
     update_review,
 )
 from db.user import DEFAULT_USER_ID
+from services import selection
 from utils.tags import fallback_flashcard_tags
+from utils.text import document_reference
 
 logger = logging.getLogger("services.flashcards")
 
@@ -31,6 +35,7 @@ __all__ = [
     "list_flashcards",
     "existing_tags",
     "create_flashcard",
+    "create_auto_flashcard",
     "find_flashcard",
     "create_lang_vocab_flashcards",
     "review_flashcard",
@@ -60,9 +65,88 @@ def due_flashcards(doc_id: int | None = None, limit: int = 5, user_id: int = DEF
 
 
 def session_start_cards(doc_id: int | None = None, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:
-    """Cartes du warm-up de début de session (dues prioritaires + pondération
-    récence × bonus de matière). Sélection pertinente pour le SAS d'entrée web."""
-    return [with_pronunciation_side(c) for c in get_session_start_cards(user_id, n=limit, doc_id=doc_id)]
+    """Cartes de l'échauffement du sas d'entrée d'un document : LA MATIÈRE
+    D'ABORD, la date ensuite.
+
+    Deux paliers, dans l'ordre :
+      1. les cartes de la matière du document — pour un document de turc, celles
+         du module Langues en turc ;
+      2. les autres disciplines et les cartes sans matière. Jamais une autre
+         langue (le vivier les exclut) : réviser du turc avant un cours
+         d'informatique n'échauffe à rien.
+    Dans chaque palier, les cartes dues (les plus en retard d'abord) puis le
+    tirage pondéré. Matière du document encore inconnue (fiche en cours) :
+    palier 2 seul.
+
+    Avant, les cartes dues de TOUTES les matières prenaient d'abord les places,
+    et la matière ne faisait que doubler un poids ensuite : un cours
+    d'informatique s'ouvrait sur quatre cartes de turc en retard.
+    """
+    subject = canonical_subject(get_document_subject(doc_id)) if doc_id else None
+    pool = get_session_start_pool(user_id, subject)
+    if not pool:
+        logger.info("Sas d'entrée : aucune flashcard disponible")
+        return []
+    same = [c for c in pool if subject and canonical_subject(c.get("card_subject")) == subject]
+    others = [c for c in pool if not (subject and canonical_subject(c.get("card_subject")) == subject)]
+    logger.info(
+        "Sas d'entrée : matière=%s, %d carte(s) de la matière, %d autre(s)",
+        subject or "—", len(same), len(others),
+    )
+    picked: list[dict] = []
+    for tier in (same, others):
+        if len(picked) >= limit:
+            break
+        picked += _due_then_weighted(tier, limit - len(picked))
+    for card in picked:
+        logger.info(
+            "  → carte id=%s matière=%s due=%s | %s",
+            card["id"], card.get("card_subject") or "—", bool(card.get("is_due")),
+            (card.get("front") or "")[:60],
+        )
+    return [with_pronunciation_side(c) for c in picked]
+
+
+def _due_then_weighted(cards: list[dict], n: int) -> list[dict]:
+    """`n` cartes d'un palier : les dues, les plus en retard d'abord, puis un
+    tirage pondéré SANS remise (fraîcheur bornée × amortissement « déjà vue »).
+
+    Le tirage évite trois pièges de la version d'origine : un vivier de 60
+    cartes, une demi-vie de récence de 7 jours qui éteignait le stock
+    d'avant-hier, et un `random.choices` AVEC remise dont les collisions étaient
+    rebouchées dans l'ordre de récence. L'amortissement lit `last_reviewed`,
+    que l'échauffement écrit lui-même (WarmUp appelle `/review` sur chaque carte
+    montrée)."""
+    from config.settings import (
+        FLASHCARD_RECENCY_FLOOR,
+        FLASHCARD_RECENCY_HALF_LIFE_DAYS,
+        FLASHCARD_REVIEW_COOLDOWN_DAYS,
+        FLASHCARD_REVIEW_FLOOR,
+    )
+
+    if n <= 0 or not cards:
+        return []
+    due = sorted((c for c in cards if c.get("is_due")), key=lambda c: str(c.get("due_at") or ""))[:n]
+    if len(due) >= n:
+        return due
+    rest = [c for c in cards if not c.get("is_due")]
+    weights = []
+    for card in rest:
+        # Fraîcheur bornée : le matériel récent garde un avantage, sans écraser
+        # le reste du stock.
+        recency = max(
+            FLASHCARD_RECENCY_FLOOR,
+            selection.decay(selection.age_days(card.get("created_at")), FLASHCARD_RECENCY_HALF_LIFE_DAYS),
+        )
+        seen = selection.cooldown(
+            card.get("last_reviewed"), FLASHCARD_REVIEW_COOLDOWN_DAYS, FLASHCARD_REVIEW_FLOOR,
+        )
+        weights.append(recency * seen)
+        logger.debug(
+            "  carte id=%s matière=%s fraîcheur=%.3f vue=%.3f | %s",
+            card["id"], card.get("card_subject") or "—", recency, seen, (card.get("front") or "")[:60],
+        )
+    return due + selection.weighted_sample(rest, weights, n - len(due))
 
 
 def list_flashcards(user_id: int = DEFAULT_USER_ID, **filters) -> list[dict]:
@@ -140,6 +224,57 @@ def create_flashcard(
         dedup_key=flashcard_key(*origin) if origin else None,
         pronunciation=pronunciation,
     )
+
+
+def create_auto_flashcard(
+    card: dict | None,
+    *,
+    verdict: str | None,
+    question_id: int | None,
+    document_id: int | None,
+    session_id: int | None,
+    user_id: int = DEFAULT_USER_ID,
+) -> bool:
+    """LA politique des cartes AUTOMATIQUES, celles que Clikoda propose après une
+    bonne réponse en lecture. Renvoie True si une carte NEUVE a été créée — c'est
+    elle seule qu'on annonce à l'élève.
+
+    Refusée :
+      - une réponse fausse (seuls `correct` et `partial` en créent) ;
+      - une carte déjà connue (même recto/verso au sens près) : ni recréée ni
+        annoncée ;
+      - une carte dont le recto ou le verso renvoie au document (« according to
+        the text », « Based on Table 3.5 »…, `utils.text.document_reference`) :
+        le sas d'entrée la servirait sans lui, et l'élève ne pourrait que deviner.
+        Le prompt le demande déjà au LLM ; cette vérification ne dépend pas de
+        son obéissance.
+
+    Une carte refusée est journalisée, jamais signalée. « + Flashcard » (le choix
+    explicite de l'élève) ne passe pas par ici : il n'est pas filtré."""
+    if not isinstance(card, dict) or verdict not in ("correct", "partial"):
+        return False
+    front = str(card.get("front") or "").strip()
+    back = str(card.get("back") or "").strip()
+    if not front or not back:
+        return False
+    reference = document_reference(front) or document_reference(back)
+    if reference:
+        logger.info("Flashcard automatique refusée : renvoi au document « %s » | %s", reference, front[:80])
+        return False
+    if find_flashcard(front, back, user_id) is not None:
+        return False
+    create_flashcard(
+        user_id,
+        question_id=question_id,
+        front=front,
+        back=back,
+        tags=card.get("tags"),
+        difficulty=card.get("difficulty") or 2,
+        source="auto",
+        document_id=document_id,
+        session_id=session_id,
+    )
+    return True
 
 
 def create_lang_vocab_flashcards(

@@ -15,6 +15,7 @@ import type {
   RunCompletion,
   RunEvent,
   RunPlan,
+  UpcomingEpisode,
   WritingView,
 } from "./feuilleton";
 import { extraTokenParam } from "./security";
@@ -276,8 +277,9 @@ export const api = {
   abandonSession: (sid: number) => postJSON<{ abandoned: boolean }>(`/api/session/${sid}/abandon`, {}),
   // Coupe toute génération LLM en cours (file + en vol). Sans entrée.
   cancelGenerations: () => postJSON<{ cancelled: boolean }>("/api/reader/cancel", {}),
-  endSession: (sid: number, pagesRead: number, durationS: number) =>
-    postJSON<SessionMetrics>(`/api/session/${sid}/end`, { pages_read: pagesRead, duration_s: durationS }),
+  // Pas de pages lues : le serveur les compte lui-même (au moins 5 s par page).
+  endSession: (sid: number, durationS: number) =>
+    postJSON<SessionMetrics>(`/api/session/${sid}/end`, { duration_s: durationS }),
   // `questions` = les intitulés réellement affichés (2 fixes + celle générée) :
   // sans eux, la 3e réflexion serait persistée sous un libellé générique.
   finalizeSession: (sid: number, responses: string[], questions: string[]) =>
@@ -294,6 +296,13 @@ export const api = {
   // génération des épisodes tourne en tâche de fond.
   feuilletonStatus: (language: string) =>
     getJSON<FeuilletonStatus>(`/api/lang/${encodeURIComponent(language)}/status`),
+  /** L'épisode suivant de chaque langue ouverte : l'annonce « épisode prêt » et
+   *  les pastilles de la page Langues. Lecture seule. */
+  feuilletonUpcoming: () => getJSON<UpcomingEpisode[]>("/api/lang/upcoming"),
+  /** L'épisode suivant n'est ni prêt ni en cours d'écriture : il repart (le GET
+   *  `status` reste en lecture seule). Sans effet si Ollama ne répond pas. */
+  feuilletonEnsureNext: (language: string) =>
+    postJSON<{ relaunched: number[]; generating: boolean }>(`/api/lang/${encodeURIComponent(language)}/next/ensure`, {}),
   feuilletonOnboarding: (language: string, interests: string[], hasStudied: boolean) =>
     postJSON<{ ok: boolean; next: "zero" | "placement" | "home" }>(`/api/lang/${encodeURIComponent(language)}/onboarding`, {
       interests,

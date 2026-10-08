@@ -57,10 +57,13 @@ def record(profile_id: int, day: str, *, first_start_local: str | None = None, *
 
 
 def absence_days(profile_id: int, today: str | None = None) -> int | None:
-    """T5 : jours écoulés depuis le dernier jour d'étude de cette langue
-    (avant aujourd'hui) ; None si l'apprenant n'a jamais étudié."""
+    """T5 : jours écoulés depuis le dernier jour d'étude de cette langue ; None
+    si l'apprenant n'a jamais étudié. Aujourd'hui en fait partie dès qu'il
+    compte (T3) : la relecture imposée par une absence faite, la séance
+    suivante du même jour joue l'épisode gardé au lieu de la réimposer."""
     today = today or study_date()
-    last = store.last_counted_study_date(profile_id, before=today)
+    tomorrow = (_as_date(today) + timedelta(days=1)).isoformat()
+    last = store.last_counted_study_date(profile_id, before=tomorrow)
     if not last:
         return None
     return (_as_date(today) - _as_date(last)).days
@@ -74,6 +77,12 @@ def absence_tier(days: int | None) -> str:
         if bound is None or days <= bound:
             return tier
     return "normal"
+
+
+def relecture_due(days: int | None) -> bool:
+    """C7 : passé le palier `normal`, la séance est une relecture imposée, sans
+    nouvel épisode ; l'épisode prêt attend la séance suivante."""
+    return absence_tier(days) != "normal"
 
 
 # ── Analyse hebdomadaire (T8-T11) ─────────────────────────────────────────────

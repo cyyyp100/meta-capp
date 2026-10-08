@@ -20,11 +20,13 @@ def test_counted_day():
 
 
 @pytest.mark.parametrize("days,tier", [
-    (None, "normal"), (1, "normal"), (2, "normal"), (3, "rappel_long"), (6, "rappel_long"),
+    (None, "normal"), (1, "normal"), (2, "normal"), (3, "normal"), (4, "rappel_long"), (6, "rappel_long"),
     (7, "reprise"), (20, "reprise"), (21, "reprise_controle"), (90, "reprise_controle"),
 ])
 def test_absence_tiers(days, tier):
     assert activity.absence_tier(days) == tier
+    # Passé 3 jours, quel que soit le palier, la séance est une relecture imposée.
+    assert activity.relecture_due(days) is (tier != "normal")
 
 
 @pytest.fixture
@@ -53,6 +55,16 @@ def test_absence_days_come_from_counted_days_only(profile_id):
     activity.record(profile_id, "2026-09-10", effective_seconds=10)  # pas un jour d'étude
     assert activity.absence_days(profile_id, "2026-09-12") == 11
     assert activity.absence_days(profile_id + 99, "2026-09-12") is None
+
+
+def test_today_ends_the_absence_once_it_counts(profile_id):
+    """La relecture imposée par l'absence, faite : la séance suivante du même
+    jour n'est plus une reprise."""
+    activity.record(profile_id, "2026-09-01", runs_completed=1)
+    activity.record(profile_id, "2026-09-12", effective_seconds=10)  # séance commencée, pas finie
+    assert activity.absence_days(profile_id, "2026-09-12") == 11
+    activity.record(profile_id, "2026-09-12", rereads=1)
+    assert activity.absence_days(profile_id, "2026-09-12") == 0
 
 
 def test_weekly_aggregates(profile_id):

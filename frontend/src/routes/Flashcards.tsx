@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../api/client";
 import type { Flashcard } from "../api/types";
 import { AutoGrowTextarea } from "../components/AutoGrowTextarea";
+import { MathText } from "../components/MathText";
 import { useDebounced } from "../features/library/useDebounced";
 import { useT } from "../i18n";
 
@@ -77,7 +78,7 @@ export function Flashcards() {
     // était perdue, sans annulation possible.
     const ok = await confirm({
       title: t("flash.delete_title"),
-      description: card.front,
+      description: <MathText text={card.front} />,
       confirmLabel: t("common.delete"),
       destructive: true,
     });
@@ -282,7 +283,7 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
             <div className="mb-4 text-xs font-bold tracking-wide text-muted-foreground">
               {flipped ? t("flash.a") : t("flash.q")}
             </div>
-            {flipped ? card.back : card.front}
+            <MathText text={flipped ? card.back : card.front} dir="auto" />
             {/* Carte de langue : la prononciation accompagne la face écrite dans la langue apprise. */}
             {card.pronunciation && card.pronunciation_side === (flipped ? "back" : "front") && (
               <div title={t("lang.phonetic")} className="mt-2.5 text-lg italic text-muted-foreground">
@@ -312,7 +313,7 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
     >
       <div className="flex justify-between gap-3">
         <div className="font-semibold">
-          {card.front}
+          <MathText text={card.front} dir="auto" />
           {card.pronunciation && card.pronunciation_side === "front" && (
             <span title={t("lang.phonetic")} className="font-normal italic text-muted-foreground"> [{card.pronunciation}]</span>
           )}
@@ -333,7 +334,7 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
         </button>
       </div>
       <div className="mt-1.5 text-text-soft">
-        {card.back}
+        <MathText text={card.back} dir="auto" />
         {card.pronunciation && card.pronunciation_side === "back" && (
           <span title={t("lang.phonetic")} className="italic text-muted-foreground"> [{card.pronunciation}]</span>
         )}

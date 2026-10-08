@@ -1302,12 +1302,50 @@ def pregenerate_after(profile: dict, language: str, played: dict, signals: dict 
 
 
 def requeue_stuck() -> int:
-    """G20 : au démarrage, un épisode resté `generating` repart en file ; il
-    sera relancé par la prochaine séance de sa langue."""
+    """G20 : au démarrage, un épisode resté `generating` repart en file ;
+    `relaunch_pending` le relance ensuite, en thread."""
     count = store.requeue_stuck_generations()
     if count:
         logger.info("%d épisode(s) interrompu(s) remis en file", count)
     return count
+
+
+def relaunch_pending(profile_id: int | None = None, *, closed=None) -> list[int]:
+    """Relance les épisodes réservés mais jamais écrits ; renvoie leurs ids.
+
+    La génération part dans un thread démon et seul son état final est écrit :
+    une application fermée pendant l'écriture laissait l'épisode `queued`, et
+    seul un démarrage de séance retombant en relecture le relançait — jamais
+    « Juste relire », une séance reprise, une file de relecture ni une reprise
+    après absence. Ici :
+      - Ollama ne répond pas : rien ne part. Une panne n'est pas un échec
+        d'écriture, elle ne doit pas rapprocher l'épisode de la mention Pro ;
+      - un épisode `queued` repart ;
+      - un épisode `failed` repart tant qu'il compte moins de
+        LANG_GEN_FAILURES_PRO_HINT échecs. Au-delà, la ligne Pro de l'accueil
+        s'affiche et la séance reste le seul nouvel essai.
+    `closed(language)` : raison pour laquelle une langue ne s'ouvre pas sur
+    cette installation (porte V17) — ses épisodes attendent. Idempotente : une
+    génération en cours n'est pas relancée (`trigger_generation`)."""
+    from config.settings import LANG_GEN_FAILURES_PRO_HINT
+
+    pending = [e for e in store.pending_episodes(profile_id) if not (closed and closed(e["language"]))]
+    pending = [e for e in pending
+               if e["status"] == "queued" or _previous_failures(e) < LANG_GEN_FAILURES_PRO_HINT]
+    if not pending:
+        return []
+    if not llm.is_ollama_available():
+        logger.info("Ollama ne répond pas : %d épisode(s) en attente, rien n'est relancé", len(pending))
+        return []
+    relaunched = []
+    for episode in pending:
+        if episode["status"] == "failed":
+            store.update_episode(episode["id"], status="queued")
+        if trigger_generation(episode["profile_id"], episode["episode_n"]):
+            relaunched.append(int(episode["id"]))
+    if relaunched:
+        logger.info("%d épisode(s) en attente relancé(s)", len(relaunched))
+    return relaunched
 
 
 def wait_idle(timeout: float = 10.0) -> None:

@@ -21,6 +21,9 @@ export interface FeuilletonStatus {
   next_status: "queued" | "generating" | "ready" | "failed" | "played" | null;
   generating: boolean;
   bilan_due: boolean;
+  /** Plus de 3 jours sans séance : la prochaine est une relecture imposée, sans
+   * nouvel épisode ; l'épisode prêt attend la suivante (C7). */
+  relecture_due: boolean;
   level: string;
   program: { order: number; size: number; point: string };
   words_seen: number;
@@ -39,6 +42,18 @@ export interface FeuilletonStatus {
 }
 
 export type ProHint = "generation" | "program_end";
+
+/** L'épisode suivant d'une langue ouverte (`GET /api/lang/upcoming`, lecture seule). */
+export interface UpcomingEpisode {
+  language: string;
+  episode_n: number;
+  /** `ready` : écrit, en attente de passage. `null` : pas encore réservé. */
+  status: FeuilletonStatus["next_status"];
+  /** Clikoda l'écrit en ce moment. */
+  generating: boolean;
+  /** Une relecture imposée passe avant lui (C7). */
+  relecture_due: boolean;
+}
 
 export interface RubySyllable {
   hanzi: string;

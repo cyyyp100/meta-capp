@@ -56,11 +56,12 @@ from db.questions import (
     save_question,
 )
 from db.session_pauses import save_pause
+from db.sessions import update_session_progress
 from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
-from services import assistant, flashcards as flashcards_service, library, pdf_rag, session, warmup
+from services import assistant, flashcards as flashcards_service, library, pdf_rag, session, session_memory, warmup
 from services.intervention import AssistantInterventionPolicy
 from services.pause import PAUSE_SOURCES, PauseTracker, attention_credit
 from services.session_memory import SessionMemory
@@ -218,7 +219,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
         "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
-        "pages_seen": 0,  # pages distinctes vues au dernier tick (progression)
+        "pages_read": 0,  # pages LUES au dernier tick (bonus de progression)
+        "pages_read_saved": 0,  # dernier compte écrit en base (reading_sessions)
         "pending_warmup": None,  # temps de la révision éclair, en attente du session_id
     }
     # Pause en cours (bouton de l'élève ou carte de Clikoda acceptée) et dernière
@@ -237,7 +239,6 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     # alimente aussi la politique d'intervention (services/intervention.py).
     memory = SessionMemory()
     memory.on_page_view(1)
-    state["pages_seen"] = len(memory.pages_seen())
     # Nombre de pages du document (si connu) pour borner les entrées client (S4).
     doc_row = await loop.run_in_executor(None, get_document, doc_id)
     page_count = int(doc_row["page_count"] or 0) if doc_row else 0
@@ -444,20 +445,41 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         get_due_flashcard=lambda: next(iter(get_due_flashcards(doc_id=doc_id, limit=1) or []), None),
     )
 
-    def passive_attention(elapsed_s: float, now: float) -> None:
+    def save_pages_read(count: int) -> None:
+        """Écrit le nombre de pages LUES de la séance quand il augmente.
+
+        Le serveur, qui mesure le temps par page (pauses exclues), est le seul
+        auteur de `reading_sessions.pages_read` (services/session_memory.
+        pages_read) : le tick l'écrit, `/end` y lit le compte exact de cette
+        mémoire (`session_memory.track`), la fermeture du socket écrit la valeur
+        finale. L'écriture ne fait que croître (`update_session_progress`) : un
+        tick resté en vol dans l'exécuteur n'efface pas une valeur plus récente."""
+        sid = state["session_id"]
+        if not sid or count <= state["pages_read_saved"]:
+            return
+        try:
+            update_session_progress(int(sid), pages_read=count)
+            state["pages_read_saved"] = count
+        except Exception:  # persistance best-effort : le prochain tick réessaie
+            logger.debug("Persistance des pages lues ignorée", exc_info=True)
+
+    def passive_attention(elapsed_s: float, now: float, read: int) -> None:
         """Fait vivre la jauge d'attention à partir du COMPORTEMENT de lecture.
 
         Sans elle, `attention` ne bougeait qu'au retour d'une évaluation LLM :
         elle mesurait la performance, jamais l'attention, et le déclencheur
         `low_attention` ne pouvait s'armer qu'après une série de mauvaises
         réponses. Tourne à chaque tick, y compris en mode focus ou discret :
-        ces modes silencient les interventions, pas l'observation."""
+        ces modes silencient les interventions, pas l'observation.
+
+        `read` : pages LUES à ce tick (au moins PAGE_READ_MIN_DWELL_S) — une page
+        traversée en défilant n'est pas une progression."""
+        progressed = max(0, read - int(state["pages_read"]))
+        state["pages_read"] = read
+        save_pages_read(read)
         gauges = state["live_gauges"]
         if gauges is None:
             return
-        seen = len(memory.pages_seen())
-        progressed = max(0, seen - int(state["pages_seen"]))
-        state["pages_seen"] = seen
         gauges.apply_reading_behaviour(
             elapsed_s=elapsed_s,
             stagnant_s=memory.stagnant_since(now),
@@ -522,6 +544,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         if not sid:
             return
         state["session_id"] = sid
+        # `/end` lira ici le compte exact des pages lues (session_memory.track).
+        session_memory.track(int(sid), memory)
         if state["live_gauges"] is not None:
             # Fige l'amorce de la session en base : la finalisation
             # s'en sert pour ne remonter que les jauges exercées.
@@ -557,7 +581,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             if pause.active:
                 continue
             # Écrit (au plus une fois par minute) dans session_gauges : executor.
-            await loop.run_in_executor(None, passive_attention, elapsed, now)
+            # Le compte des pages lues se lit ici, dans la boucle qui fait vivre
+            # la mémoire de séance.
+            read = len(memory.pages_read(now))
+            await loop.run_in_executor(None, passive_attention, elapsed, now, read)
             if state["gated"] or now < state["focus_until"]:
                 # Question bloquante en cours ou mode focus : Clikoda se tait.
                 continue
@@ -604,8 +631,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
                 minutes = PAUSE_DEFAULT_MIN if msg.minutes is None else int(msg.minutes)
                 attention = (state["live_gauges"].snapshot() if state["live_gauges"] else {}).get("attention")
+                now = time.monotonic()
                 if pause.start(
-                    time.monotonic(),
+                    now,
                     source=msg.source,
                     planned_s=minutes * 60.0,
                     page=state["page"],
@@ -613,6 +641,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 ):
                     state["away"] = False
                     policy.set_paused(True)
+                    memory.pause(now)
                 continue
 
             if kind == "resume":
@@ -626,8 +655,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
 
             if kind == "start_reading":
                 # Sas d'entrée franchi : le warm-up de la première question part
-                # d'ici, pas de l'ouverture du socket (cf. policy.start_reading).
+                # d'ici, pas de l'ouverture du socket (cf. policy.start_reading),
+                # et la lecture aussi — le temps du sas n'est pas une lecture de
+                # la page 1 (memory.start_reading).
                 policy.start_reading()
+                memory.start_reading(time.monotonic())
                 attach_session(msg.session_id)
                 if msg.warmup:
                     state["pending_warmup"] = msg.warmup
@@ -769,30 +801,20 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         )
                     except Exception:  # persistance best-effort
                         logger.debug("Persistance de la réponse ignorée", exc_info=True)
-                    # Flashcard auto-portante créée à la bonne réponse (le LLM exclut
-                    # déjà metacognition/anticipation -> flashcard=null). Par le
-                    # service, comme les autres chemins : même politique de
-                    # doublon — une carte déjà connue n'est ni recréée ni annoncée.
+                    # Flashcard auto-portante proposée à la bonne réponse : la
+                    # politique (verdict, doublon, renvoi au document) est celle
+                    # du service. Seule une carte neuve est annoncée.
                     flashcard_created = False
-                    card = ev.get("flashcard")
-                    if card and ev.get("verdict") in ("correct", "partial"):
-                        try:
-                            _front, _back = card.get("front", ""), card.get("back", "")
-                            if flashcards_service.find_flashcard(_front, _back) is None:
-                                flashcards_service.create_flashcard(
-                                    DEFAULT_USER_ID,
-                                    question_id=_qid,
-                                    front=_front,
-                                    back=_back,
-                                    tags=card.get("tags"),
-                                    difficulty=card.get("difficulty") or 2,
-                                    source="auto",
-                                    document_id=doc_id,
-                                    session_id=_sid,
-                                )
-                                flashcard_created = True
-                        except Exception:  # persistance best-effort
-                            logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
+                    try:
+                        flashcard_created = flashcards_service.create_auto_flashcard(
+                            ev.get("flashcard"),
+                            verdict=verdict,
+                            question_id=_qid,
+                            document_id=doc_id,
+                            session_id=_sid,
+                        )
+                    except Exception:  # persistance best-effort
+                        logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
                     # Idée principale présente (correct/partial) -> fin du verrouillage.
                     if verdict in ("correct", "partial"):
                         state["gated"] = False
@@ -840,7 +862,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 persist_pause(record)
         except Exception:  # pragma: no cover - best-effort
             logger.debug("Clôture de la pause ignorée", exc_info=True)
-        # Flush du dwell de la page courante + persistance fine par page.
+        # Flush du dwell de la page courante + persistance fine par page, et le
+        # compte EXACT des pages lues (le dernier tick peut avoir 5 s de retard).
         try:
             memory.flush()
             if state["session_id"] and memory.dwell_by_page:
@@ -849,8 +872,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     {int(k): round(v, 1) for k, v in memory.dwell_by_page.items()},
                     {int(k): int(v) for k, v in memory.visits_by_page.items()},
                 )
+            save_pages_read(len(memory.pages_read()))
         except Exception:  # pragma: no cover - persistance best-effort
             logger.debug("Persistance du dwell ignorée", exc_info=True)
+        if state["session_id"]:
+            session_memory.untrack(int(state["session_id"]), memory)
         # Marque-page : mémorise la dernière page vue pour la signaler à la réouverture.
         try:
             update_last_page(doc_id, int(state["page"]))

@@ -56,9 +56,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   words you gained in a language (still no score); where you slowed down in a
   reading — and all of them with the gauge curve and what it moved in your profile.
   The weekly recap counts every kind of session.
+- **"Episode ready", on every page.** When Clikoda finishes writing a language
+  episode, a small message in the bottom-right corner says which one and in which
+  language ("Spanish: episode 3 is ready"), whatever page you are on; *Open* takes
+  you to that language. On the Languages page, a language whose next episode is
+  written and not played yet shows *Pending* in the corner of its card.
 
 ### Changed
 
+- **Three days off before a mandatory re-read, and the ready episode is kept.** Up
+  to three days without a session in a language (two before), the next session
+  plays the episode that is ready. Beyond that, the session is a re-read with no new
+  episode — a short session asked for included — and the episode already written
+  waits for the next session, the same day included: it is no longer thrown away
+  and rewritten after a week off. The language's home says so (*Re-read before
+  episode 3*).
+- **"Pages read" counts pages you actually read**: at least 5 seconds on a page,
+  visits added up, pauses left out. Flipping through twenty pages to find one reads
+  one, and the time spent in the entry airlock is no longer a reading of page 1.
+  *Where you slowed down* only lists pages read.
+- **The entry airlock reviews the document's subject first.** Its cards come from
+  the subject of the document you are opening — for a Turkish course, the Turkish
+  cards of the language module — due cards first, then completed with your other
+  subjects, never with another language.
+- **No more automatic flashcards that need the document.** Clikoda only proposes a
+  card that can be understood and answered without the document; cards saying
+  "according to the text", "based on Table 3.5"… are refused, and those created
+  before are removed by the update (cards you created yourself are kept). Questions
+  about a figure or linking to another passage no longer make cards.
 - **The entry airlock waits for you.** When its countdown ends it no longer moves
   on to the cards by itself (before a PDF or a language session): you continue
   when you are ready.
@@ -101,6 +126,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Formulas in flashcards are rendered wherever a card is shown (entry airlock,
+  Flashcards page, weekly recap, language sessions, brainstorming sources).
+  `$$…$$`, `\(…\)` and `\[…\]` are recognized, and two amounts such as "5$ and 10$"
+  no longer turn into a formula.
+- A language episode interrupted by closing the app, or that failed to be written,
+  is written again at the next start and when its language's home opens, instead of
+  waiting for a session — never while Ollama is off.
+- On a language's home, *Short session* and *Library* look disabled when they are and
+  say why; opening an episode from the library says it is loading, or that it could
+  not be opened.
 - Reflections written at the end of a language lesson, and the feeling picked at the
   end of an episode, were silently dropped; they are now kept with their session.
 - Languages studied with episodes never appeared on the profile: only lessons of

@@ -20,7 +20,7 @@ def test_session_analysis_endpoint(client, tmp_path, make_pdf):
     """L'endpoint d'analyse renvoie toujours {"analysis": str} (repli "" sans LLM)."""
     doc_id = _import_mini_pdf(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 5})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 5})
 
     resp = client.get(f"/api/session/{sid}/analysis")
     assert resp.status_code == 200

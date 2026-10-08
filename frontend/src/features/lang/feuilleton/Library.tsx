@@ -2,6 +2,9 @@
 //
 // Rien n'y est mesuré : ni taps, ni traductions montrées. Un épisode se relit
 // avec ses notes et la leçon de son point, quand elle est écrite.
+//
+// Ouvrir un épisode montre qu'il se charge, ou qu'il n'a pas pu s'ouvrir :
+// sans ça, le clic restait sur la liste, sans un mot.
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -15,11 +18,24 @@ export function Library({ language, rtl = false, onClose }: { language: string; 
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
   const { data: list } = useQuery({ queryKey: ["feuil", "library", language], queryFn: () => api.feuilletonLibrary(language) });
-  const { data: episode } = useQuery({
+  const { data: episode, isError } = useQuery({
     queryKey: ["feuil", "episode", open],
     queryFn: () => api.feuilletonEpisode(open as number),
     enabled: open !== null,
   });
+
+  if (open !== null && !episode) {
+    return (
+      <Card>
+        <button style={{ ...ghostBtn, marginBottom: 12 }} onClick={() => setOpen(null)}>{t("feuil.library.back")}</button>
+        {isError ? (
+          <p role="alert" style={{ color: "var(--danger)", margin: 0 }}>{t("feuil.library.error")}</p>
+        ) : (
+          <p role="status" style={{ color: "var(--muted)", margin: 0 }}>{t("common.loading")}</p>
+        )}
+      </Card>
+    );
+  }
 
   if (open !== null && episode) {
     return (

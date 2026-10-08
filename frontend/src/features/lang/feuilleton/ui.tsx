@@ -27,6 +27,17 @@ export const ghostBtn: CSSProperties = {
   cursor: "pointer",
 };
 
+// Un bouton désactivé doit SE VOIR. Les styles ci-dessus imposent
+// `cursor: pointer` en ligne et rien n'atténue un bouton désactivé : il
+// ressemblait trait pour trait à un bouton actif, et le clic ne faisait rien,
+// sans un mot (« Séance courte », « Bibliothèque »).
+const DISABLED: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+
+/** Le style d'un bouton (`ghostBtn`, `primaryBtn`…), atténué s'il est désactivé. */
+export function btnStyle(base: CSSProperties, disabled = false, extra?: CSSProperties): CSSProperties {
+  return disabled ? { ...base, ...extra, ...DISABLED } : { ...base, ...extra };
+}
+
 export const chipBtn = (active: boolean): CSSProperties => ({
   border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
   background: active ? "var(--accent-soft)" : "var(--surface)",

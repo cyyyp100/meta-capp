@@ -34,6 +34,7 @@ from db.sessions import delete_session as _delete_session
 from db.sessions import end_session as _end_session
 from db.sessions import get_session
 from db.sessions import start_session as _start_session
+from db.sessions import update_session_progress
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
 from llm.ollama_client import cancel_pending_generations
 from metacog.gauges import (
@@ -46,7 +47,7 @@ from metacog.gauges import (
 )
 from metacog.profile import compute_alpha, compute_confidence, update_profile
 from metacog.reflection import fallback_meta_cognition_analysis, pick_reflection_question
-from services import warmup
+from services import session_memory, warmup
 from services.pause import summarize as summarize_pauses
 
 logger = logging.getLogger("services.session")
@@ -217,8 +218,15 @@ def start_session(doc_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
     return {"session_id": _start_session(doc_id, user_id)}
 
 
-def end_session(session_id: int, pages_read: int | None = None, duration_s: int | None = None) -> dict:
+def end_session(session_id: int, duration_s: int | None = None) -> dict:
     """Clôt la session et coupe Clikoda — en file ET en vol.
+
+    Le nombre de pages lues ne vient jamais du client : le socket du lecteur
+    l'écrit à chaque tick et à sa fermeture (au moins PAGE_READ_MIN_DWELL_S par
+    page, cf. services/session_memory.pages_read), et la clôture lit le compte
+    EXACT de sa mémoire s'il est encore ouvert — le dernier tick peut avoir 5 s
+    de retard, et une page lue juste avant « Terminer » manquerait à l'écran de
+    fin.
 
     « Terminer » arrive souvent pendant qu'une correction ou une intervention
     est en cours : leur résultat n'a plus de destinataire, et il n'y a qu'UN
@@ -227,7 +235,10 @@ def end_session(session_id: int, pages_read: int | None = None, duration_s: int 
     précède l'écriture : le bilan, enfilé après la réponse de cet appel, capture
     un token neuf et n'est pas concerné."""
     cancel_pending_generations()
-    _end_session(session_id, pages_read=pages_read, duration_s=duration_s)
+    _end_session(session_id, duration_s=duration_s)
+    live = session_memory.live_pages_read(session_id)
+    if live is not None:
+        update_session_progress(session_id, pages_read=live)
     return session_metrics(session_id)
 
 

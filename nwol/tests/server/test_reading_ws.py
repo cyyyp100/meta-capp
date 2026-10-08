@@ -1,3 +1,6 @@
+import pytest
+
+
 def _relax_policy(monkeypatch, *, dwell=0.0, cooldown=0.0, warmup=0.0, page_cooldown=0.0):
     """Neutralise la cadence de la politique d'intervention pour un test.
 
@@ -424,6 +427,122 @@ def test_a_session_closed_during_a_pause_still_records_it(client, tmp_path, make
     assert dwell[1] <= 5.0
 
 
+# ── Pages lues : le serveur seul les compte, au temps passé sur la page ──────
+
+@pytest.fixture
+def quick_reading(monkeypatch):
+    """Seuil de lecture et tick ramenés à l'échelle d'un test : 0,3 s pour lire
+    une page au lieu de PAGE_READ_MIN_DWELL_S."""
+    from server.routers import reading
+    from services import session_memory
+
+    monkeypatch.setattr(session_memory, "PAGE_READ_MIN_DWELL_S", 0.3)
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.05)
+    return 0.3
+
+
+def _long_session(client, tmp_path, make_pdf) -> tuple[int, int]:
+    path = make_pdf(tmp_path / "long.pdf", [f"Page {n}" for n in range(1, 21)])
+    doc_id = client.post("/api/library/import", json={"path": path}).json()["id"]
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    return doc_id, sid
+
+
+def test_scrolling_fast_reads_nothing_staying_reads_the_page(client, tmp_path, make_pdf, quick_reading):
+    """Défiler vingt pages pour en trouver une n'en lit qu'une : celle où l'on
+    reste. Le compte est écrit en direct (dernier tick), puis à la fermeture."""
+    import time
+
+    from db.sessions import get_session
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        for page in range(2, 21):
+            ws.send_json({"type": "viewport", "page": page, "session_id": sid})
+        ws.send_json({"type": "viewport", "page": 7, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading * 3)
+        _sync(ws)
+        assert get_session(sid)["pages_read"] == 1  # écrit par le tick, socket ouvert
+    assert get_session(sid)["pages_read"] == 1
+
+
+def test_ending_reads_the_exact_count_without_waiting_for_a_tick(client, tmp_path, make_pdf, quick_reading,
+                                                                  monkeypatch):
+    """« Terminer » juste après une page lue : l'écran de fin la compte. `/end`
+    lit la mémoire du lecteur encore ouvert, pas le dernier tick (ici, aucun)."""
+    import time
+
+    from server.routers import reading
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 60)
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        ws.send_json({"type": "viewport", "page": 5, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading * 2)
+        metrics = client.post(f"/api/session/{sid}/end", json={"duration_s": 30}).json()
+        assert metrics["pages_read"] == 1
+    from db.sessions import get_session
+
+    assert get_session(sid)["pages_read"] == 1
+
+
+def test_ending_from_the_pause_screen_does_not_count_the_pause(client, tmp_path, make_pdf, quick_reading,
+                                                               monkeypatch):
+    import time
+
+    from server.routers import reading
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 60)
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        ws.send_json({"type": "pause", "source": "manual"})
+        _sync(ws)
+        time.sleep(quick_reading * 2)
+        assert client.post(f"/api/session/{sid}/end", json={"duration_s": 30}).json()["pages_read"] == 0
+
+
+def test_a_pause_is_not_reading(client, tmp_path, make_pdf, quick_reading):
+    import time
+
+    from db.sessions import get_session
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        ws.send_json({"type": "pause", "source": "manual"})
+        _sync(ws)
+        time.sleep(quick_reading * 3)
+        ws.send_json({"type": "resume"})
+        _sync(ws)
+    assert get_session(sid)["pages_read"] == 0
+
+
+def test_the_entry_sas_is_not_reading(client, tmp_path, make_pdf, quick_reading):
+    """Le socket est ouvert pendant le sas, page 1 à l'écran : ce temps-là
+    n'est ni une page lue, ni du temps passé sur la page 1."""
+    import time
+
+    from db.page_dwell import get_page_dwell
+    from db.sessions import get_session
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading * 3)  # mise en condition, révision éclair
+        assert get_session(sid)["pages_read"] == 0
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        _sync(ws)
+    assert get_session(sid)["pages_read"] == 0
+    dwell = {row["page"]: row["dwell_s"] for row in get_page_dwell(sid)}
+    assert dwell[1] < quick_reading
+
+
 def test_intervention_context_relays_policy_trigger(client):
     # build_intervention_context ne DÉCIDE plus rien : il relaie le signal que la
     # politique (services/intervention.py) lui passe. Garde-fou anti-duplication.
@@ -538,6 +657,39 @@ def test_reader_ws_qa_creates_auto_flashcard(client, monkeypatch):
 
     cards = get_flashcards(document_id=doc_id)
     assert any(c["source"] == "auto" and c["front"] == "Définition de X ?" for c in cards)
+
+
+def test_reader_ws_qa_refuses_an_auto_flashcard_that_needs_the_document(client, monkeypatch):
+    """Le LLM propose une carte qui renvoie au document : elle n'est ni créée ni
+    annoncée — le sas d'entrée la servirait sans le document."""
+    from db.documents import upsert_document
+    from db.flashcards import get_flashcards
+    from services import assistant
+
+    doc_id = upsert_document("/tmp/fc_ref.pdf", "fc_ref.pdf", 5, "pdfium", False)
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Q ?", "choices": None, "question_type": "comprehension"}),
+    )
+    monkeypatch.setattr(
+        assistant, "evaluate_page_answer",
+        lambda d, p, q, a, ok, err, **kw: ok({
+            "verdict": "correct", "feedback": "ok",
+            "flashcard": {"front": "Based on Table 3.5, which algorithm is the most stable?", "back": "Reptile"},
+        }),
+    )
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        ws.send_json({"type": "qa_answer", "question": q["question"], "answer": "Reptile", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        fb = ws.receive_json()
+        assert fb["type"] == "qa_feedback" and fb["verdict"] == "correct"
+        assert fb["flashcard_created"] is False
+
+    assert get_flashcards(document_id=doc_id) == []
 
 
 def test_reader_ws_gated_question_from_intervention(client, monkeypatch):

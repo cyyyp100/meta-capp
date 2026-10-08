@@ -635,10 +635,15 @@ LANG_ACQUIRED_MIN_EPISODES = 2
 LANG_SCRIPT_ACQUIRED_RECOGNITIONS = 4
 LANG_SCRIPT_ACQUIRED_MIN_EPISODES = 2
 
-# C7 — absence (jours depuis le dernier jour d'étude de CETTE langue).
-# (borne haute incluse, palier) ; None = au-delà.
+# C7 — absence (jours depuis le dernier jour d'étude de CETTE langue, 0 dès
+# qu'aujourd'hui compte). (borne haute incluse, palier) ; None = au-delà.
+# Jusqu'à 3 jours, l'épisode prêt se joue. Au-delà, quel que soit le palier, la
+# séance est une relecture imposée sans nouvel épisode, et l'épisode prêt
+# attend la séance suivante — jamais jeté ni réécrit. Le palier ajoute : une
+# respiration au prochain épisode à écrire dès `reprise`, un contrôle dès
+# `reprise_controle`.
 LANG_ABSENCE_TIERS: tuple[tuple[int | None, str], ...] = (
-    (2, "normal"), (6, "rappel_long"), (20, "reprise"), (None, "reprise_controle"),
+    (3, "normal"), (6, "rappel_long"), (20, "reprise"), (None, "reprise_controle"),
 )
 LANG_DUE_CARDS_CAP = 15                 # cartes dues servies par séance (warm-up du sas compris), les plus anciennes d'abord
 
@@ -804,7 +809,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 40
+DB_SCHEMA_VERSION = 41
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -879,9 +884,16 @@ ATTENTION_IDLE_GRACE_S = 90.0        # immobilité (même page, aucun geste) tol
 ATTENTION_ENGAGED_REPORT_S = 10.0    # cadence max. du signal « engaged » envoyé par le lecteur
 ATTENTION_DRIFT_PER_MIN = 2.0        # points/min perdus au-delà de la grâce
 ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hors focus
-ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue
+ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue (PAGE_READ_MIN_DWELL_S)
 ATTENTION_PASSIVE_FLOOR = 15.0       # plancher de la seule dérive passive
 ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives en base
+# Une page est LUE quand le temps passé dessus dans la séance (pauses exclues,
+# visites cumulées) atteint ce seuil. Avant, « pages lues » était la page la plus
+# avancée envoyée par le client, et le bonus de progression comptait toute page
+# dominante une fraction de seconde : défiler vingt pages en valait vingt.
+# Lu par services/session_memory.pages_read, seul auteur du compte
+# (`reading_sessions.pages_read`) et du bonus de progression ci-dessus.
+PAGE_READ_MIN_DWELL_S = 5.0
 
 # ── Révision éclair : le RYTHME des cartes du sas d'entrée ──────────────────
 # Les cartes du warm-up ne sont pas notées (un clic retourne, un clic avance) :
@@ -1024,10 +1036,11 @@ QUIZ_FRESHNESS_FLOOR = 0.5
 
 # Sas d'entrée : vivier chargé avant pondération (remplace un `LIMIT 60` qui
 # rendait toute carte hors des 60 plus récentes définitivement inatteignable).
+# La matière n'est plus un poids : c'est un palier (services/flashcards.
+# session_start_cards) — les cartes de la matière du document d'abord.
 FLASHCARD_POOL = 400
 FLASHCARD_RECENCY_HALF_LIFE_DAYS = 30.0
 FLASHCARD_RECENCY_FLOOR = 0.35
-FLASHCARD_SUBJECT_BONUS = 2.0
 # `last_reviewed` est déjà écrit par l'échauffement lui-même (WarmUp appelle
 # /review) : c'est le signal « vue à la session précédente », jusqu'ici ignoré.
 FLASHCARD_REVIEW_COOLDOWN_DAYS = 5.0

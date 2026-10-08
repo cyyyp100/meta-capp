@@ -202,9 +202,31 @@ def search_user_db(
     )
 
 
+# Une formule du texte, avec ses délimiteurs — même règle que le découpeur du
+# frontend (renderMath.ts:splitMath) : `$$…$$`, `\[…\]`, `\(…\)`, et `$…$` à la
+# pandoc (ouvrant suivi d'un non-blanc, fermant précédé d'un non-blanc et pas
+# suivi d'un chiffre).
+_MATH_SPAN = re.compile(
+    r"\$\$.+?\$\$|\\\[.+?\\\]|\\\(.+?\\\)|\$(?=\S)[^$]*?(?<=\S)\$(?!\d)",
+    re.DOTALL,
+)
+
+
 def _truncate(text: str) -> str:
+    """L'extrait tenu en `_MAX_SNIPPET` caractères. La coupe ne tombe jamais
+    dans une formule : un `$` orphelin s'afficherait tel quel, et le reste de
+    l'extrait avec. Elle recule alors juste avant la formule."""
     text = " ".join((text or "").split())
-    return text if len(text) <= _MAX_SNIPPET else text[: _MAX_SNIPPET - 1] + "…"
+    if len(text) <= _MAX_SNIPPET:
+        return text
+    cut = _MAX_SNIPPET - 1
+    for formula in _MATH_SPAN.finditer(text):
+        if formula.start() >= cut:
+            break
+        if formula.start() > 0 and formula.end() > cut:
+            cut = formula.start()
+            break
+    return text[:cut].rstrip() + "…"
 
 
 def _scope_sql(column: str, folder_ids: set[int] | None) -> tuple[str, tuple]:

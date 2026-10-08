@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
+import { MathText } from "../../components/MathText";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
@@ -99,7 +100,7 @@ export function WarmUp({
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.5, marginBottom: 16 }}>
               {flipped ? t("flash.a") : t("flash.q")}
             </div>
-            {flipped ? card.back : card.front}
+            <MathText text={flipped ? card.back : card.front} dir="auto" />
             {/* Carte de langue : la prononciation accompagne la face écrite dans la langue apprise. */}
             {card.pronunciation && card.pronunciation_side === (flipped ? "back" : "front") && (
               <div title={t("lang.phonetic")} style={{ marginTop: 10, fontSize: 18, fontStyle: "italic", color: "var(--muted)" }}>

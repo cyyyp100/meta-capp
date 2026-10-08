@@ -18,7 +18,12 @@ def test_session_lifecycle_and_metrics(client, tmp_path, make_pdf):
     save_answer(question_id=None, user_id=1, answer_text="b", verdict="partial", session_id=sid)
     save_answer(question_id=None, user_id=1, answer_text="c", verdict="incorrect", session_id=sid)
 
-    m = client.post(f"/api/session/{sid}/end", json={"pages_read": 5, "duration_s": 120}).json()
+    # Le compte des pages lues est écrit par le socket du lecteur (au moins 5 s
+    # par page) ; celui qu'enverrait un client à la clôture est ignoré.
+    from db.sessions import update_session_progress
+
+    update_session_progress(sid, pages_read=5)
+    m = client.post(f"/api/session/{sid}/end", json={"duration_s": 120}).json()
     assert m["pages_read"] == 5
     assert m["duration_s"] == 120
     assert m["questions_answered"] == 3
@@ -46,7 +51,7 @@ def test_ending_a_session_cuts_clikoda_before_anything_else(client, tmp_path, ma
 
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    resp = client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 10})
+    resp = client.post(f"/api/session/{sid}/end", json={"duration_s": 10})
     assert resp.status_code == 200
     assert events == ["cancel", "end"]
 
@@ -59,7 +64,7 @@ def test_session_finalize_updates_profile(client, tmp_path, make_pdf):
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
     before = (get_profile(1) or {}).get("sessions_count", 0)
 
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 3, "duration_s": 60})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 60})
     f = client.post(f"/api/session/{sid}/finalize", json={"responses": ["r1", "", "r3"]}).json()
     assert f["ok"] is True
 
@@ -159,7 +164,7 @@ def test_session_analysis_carries_the_generated_question(client, tmp_path, make_
 
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 30})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 30})
 
     body = client.get(f"/api/session/{sid}/analysis").json()
     question = body["question"]
@@ -173,7 +178,7 @@ def test_finalize_persists_the_generated_question_text(client, tmp_path, make_pd
 
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 30})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 30})
     generated = client.get(f"/api/session/{sid}/analysis").json()["question"]
 
     client.post(f"/api/session/{sid}/finalize", json={
@@ -196,7 +201,7 @@ def test_streak_is_a_pure_read_and_only_a_finished_session_advances_it(client, t
 
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 30})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 30})
     client.post(f"/api/session/{sid}/finalize", json={"responses": ["r1"], "questions": ["Q1 ?"]})
 
     after = client.get("/api/streak").json()
@@ -235,7 +240,7 @@ def test_abandon_refuses_a_session_that_was_played(client, tmp_path, make_pdf):
 def test_abandon_refuses_a_closed_session(client, tmp_path, make_pdf):
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
-    client.post(f"/api/session/{sid}/end", json={"pages_read": 1, "duration_s": 10})
+    client.post(f"/api/session/{sid}/end", json={"duration_s": 10})
 
     assert client.post(f"/api/session/{sid}/abandon").status_code == 409
 

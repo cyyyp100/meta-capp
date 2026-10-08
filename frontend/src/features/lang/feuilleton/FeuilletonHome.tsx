@@ -1,7 +1,9 @@
 // FeuilletonHome — Accueil d'une langue du pilote (F1).
 //
-// Un bouton principal (« Épisode N », « Bilan », « Reprendre »), deux entrées
-// secondaires (juste relire, séance courte) et la bibliothèque. Les
+// Un bouton principal (« Épisode N », « Bilan », « Reprendre », « Relire avant
+// l'épisode N » après plus de 3 jours sans séance — l'épisode prêt attend
+// alors la séance suivante), deux entrées secondaires (juste relire, séance
+// courte) et la bibliothèque. Les
 // compétences « orales » du flux hérité ne mesuraient rien : elles laissent la
 // place à ce qui compte — épisodes joués, mots rencontrés, niveau. Aucun
 // compteur de jours : le décompte existe côté serveur, il n'est pas une série.
@@ -10,8 +12,12 @@
 // arrivée après sa séance (« Ta correction est prête »), et les limites du
 // modèle local — un encart masquable, plus une ligne là où la limite se voit
 // (`pro_hints`). Texte statique : aucun appel réseau, rien de bloqué.
+//
+// L'épisode suivant réservé mais ni prêt ni en cours d'écriture (application
+// fermée pendant qu'il s'écrivait, échec) est relancé UNE fois à l'ouverture
+// (`next/ensure`) ; le suivi de `generating` prend ensuite le relais.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../../../api/client";
@@ -19,7 +25,7 @@ import { useT } from "../../../i18n";
 import { usePreferences, useSetPreference } from "../../shell/usePreferences";
 import { Library } from "./Library";
 import { ProLine, ProNote } from "./ProNote";
-import { ghostBtn, primaryBtn } from "./ui";
+import { btnStyle, ghostBtn, primaryBtn } from "./ui";
 import { WritingFeedback } from "./WritingFeedback";
 
 export function FeuilletonHome({ language, label, rtl }: { language: string; label: string; rtl: boolean }) {
@@ -39,6 +45,20 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
     refetchInterval: (q) => (q.state.data?.generating ? 8000 : false),
   });
   const unseen = status?.unseen_writing ?? null;
+  // Un épisode réservé qui ne s'écrit pas : relancé une fois par langue ouverte.
+  const ensured = useRef<string | null>(null);
+  const stalled =
+    !!status?.onboarding_done &&
+    !status.generating &&
+    (status.next_status === "queued" || status.next_status === "failed");
+  useEffect(() => {
+    if (!stalled || ensured.current === language) return;
+    ensured.current = language;
+    api
+      .feuilletonEnsureNext(language)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["feuil", "status", language] }))
+      .catch(() => {});
+  }, [stalled, language, queryClient]);
   const { data: writing } = useQuery({
     queryKey: ["feuil", "writing", unseen?.id],
     queryFn: () => api.feuilletonWriting(unseen!.id),
@@ -59,9 +79,13 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
   const go = (mode?: "court" | "relecture", onboarding = false) =>
     navigate("/lang/episode", { state: { language, label, rtl, mode, onboarding } });
   const ready = status.next_status === "ready";
+  // Plus de 3 jours sans séance : la séance relit, l'épisode attend la suivante (C7).
+  const relecture = !status.open_run && status.relecture_due;
+  const shortOpen = ready && !relecture;
   let main = t("feuil.home.episode", { n: status.next_episode });
   if (!status.onboarding_done) main = t("feuil.home.begin");
   else if (status.open_run) main = t("feuil.home.resume");
+  else if (relecture) main = t("feuil.home.relecture", { n: status.next_episode });
   else if (status.bilan_due) main = t("feuil.home.bilan");
   const hints = status.pro_hints ?? [];
   const showNote = !noteClosed && preferences !== undefined && preferences.preferences.lang_pro_note_dismissed !== "true";
@@ -81,10 +105,16 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
         <h2 style={{ fontSize: 16, margin: 0 }}>{label}</h2>
         <button style={primaryBtn} onClick={() => go(undefined, !status.onboarding_done)}>{main}</button>
       </div>
-      {status.onboarding_done && !ready && !status.bilan_due && !status.open_run && (
+      {relecture ? (
         <p style={{ color: "var(--muted)", fontSize: 13, margin: "8px 0 0" }}>
-          {status.generating ? t("feuil.home.writing", { n: status.next_episode }) : t("feuil.home.not_ready")}
+          {t(ready ? "feuil.home.relecture_kept" : "feuil.home.relecture_next", { n: status.next_episode })}
         </p>
+      ) : (
+        status.onboarding_done && !ready && !status.bilan_due && !status.open_run && (
+          <p style={{ color: "var(--muted)", fontSize: 13, margin: "8px 0 0" }}>
+            {status.generating ? t("feuil.home.writing", { n: status.next_episode }) : t("feuil.home.not_ready")}
+          </p>
+        )
       )}
       {hints.includes("generation") && !ready && <ProLine reason="generation" />}
       {hints.includes("program_end") && <ProLine reason="program_end" />}
@@ -106,8 +136,30 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
       {status.onboarding_done && (
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button style={ghostBtn} onClick={() => go("relecture")}>{t("feuil.home.reread")}</button>
-          <button style={ghostBtn} disabled={!ready} onClick={() => go("court")}>{t("feuil.home.short")}</button>
-          <button style={ghostBtn} disabled={!status.episodes_played} onClick={() => setLibrary(true)}>{t("feuil.home.library")}</button>
+          {/* Désactivés, ils doivent le montrer et dire pourquoi : sans quoi
+              le clic ne fait rien, sans un mot. */}
+          <button
+            style={btnStyle(ghostBtn, !shortOpen)}
+            disabled={!shortOpen}
+            title={
+              shortOpen
+                ? undefined
+                : relecture
+                  ? t("feuil.home.short_after_relecture")
+                  : t("feuil.home.short_unavailable", { n: status.next_episode })
+            }
+            onClick={() => go("court")}
+          >
+            {t("feuil.home.short")}
+          </button>
+          <button
+            style={btnStyle(ghostBtn, !status.episodes_played)}
+            disabled={!status.episodes_played}
+            title={status.episodes_played ? undefined : t("feuil.home.library_unavailable")}
+            onClick={() => setLibrary(true)}
+          >
+            {t("feuil.home.library")}
+          </button>
         </div>
       )}
       <div style={{ display: "flex", gap: 28, marginTop: 16, flexWrap: "wrap" }}>

@@ -31,7 +31,8 @@ import { useT } from "../../i18n";
 
 export interface ConfirmOptions {
   title: string;
-  description?: string;
+  /** Texte, ou nœud : le recto d'une carte s'y affiche avec ses formules (MathText). */
+  description?: React.ReactNode;
   /** Libellé du bouton d'action. Par défaut : « Confirmer ». */
   confirmLabel?: string;
   cancelLabel?: string;

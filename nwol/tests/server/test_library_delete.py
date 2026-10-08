@@ -45,6 +45,27 @@ def test_delete_cascades_sessions_and_detaches_flashcards(client, tmp_path, make
     assert card["document_id"] is None
 
 
+def test_deleted_document_leaves_its_subject_on_its_flashcards(client, tmp_path, make_pdf, monkeypatch):
+    """La carte survit au document, sa matière aussi : le sas d'entrée d'un autre
+    cours de la même matière doit encore la reconnaître."""
+    from db import get_connection
+    from db.flashcards import get_flashcard, save_flashcard
+    from services import orchestrator
+
+    monkeypatch.setattr(orchestrator, "generate_document_digest", lambda *_args, **_kwargs: None)
+    doc_id, _ = _import_doc(client, tmp_path, make_pdf)
+    with get_connection() as conn:
+        conn.execute("UPDATE documents SET subject='informatique' WHERE id=?", (doc_id,))
+    card_id = save_flashcard(1, None, front="Q", back="R", document_id=doc_id)
+    other_id = save_flashcard(1, None, front="Q2", back="R2")
+
+    assert client.delete(f"/api/library/doc/{doc_id}").status_code == 200
+
+    card = get_flashcard(card_id)
+    assert card["document_id"] is None and card["subject"] == "informatique"
+    assert get_flashcard(other_id)["subject"] is None
+
+
 def test_delete_purges_the_rendered_pages(client, tmp_path, make_pdf):
     from pdf_viewer.page_renderer import page_cache_dir
 

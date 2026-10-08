@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
 import { RouteFallback } from "./components/RouteFallback";
+import { EpisodeReadyHost } from "./features/lang/feuilleton/EpisodeReadyHost";
 import { BrowserShellHost } from "./features/shell/BrowserShellHost";
 import { TourHost } from "./features/tour/TourHost";
 import { Home } from "./routes/Home";
@@ -43,6 +44,8 @@ export function App() {
       {/* Mode navigateur : présence de l'onglet et écran « arrêté ». Au-dessus
           des routes pour la même raison : le lecteur est hors du layout. */}
       <BrowserShellHost />
+      {/* « L'épisode N est prêt » : annoncé sur toutes les pages, plein écran compris. */}
+      <EpisodeReadyHost />
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Home />} />

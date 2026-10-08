@@ -18,6 +18,7 @@ import type {
   RunPlan,
   RunStep,
 } from "../../../api/feuilleton";
+import { MathText } from "../../../components/MathText";
 import { useT } from "../../../i18n";
 import { EpisodeText } from "./EpisodeText";
 import { GameList } from "./Games";
@@ -63,6 +64,10 @@ export function AccueilStep({ step, plan, onNext }: StepProps) {
         <StepTitle>{t("feuil.reprise.title")}</StepTitle>
         <p>{t(`feuil.reprise.${plan.tone}`, { days: String(plan.absence.days ?? "") })}</p>
         <p style={{ color: "var(--muted)" }}>{t("feuil.reprise.no_new")}</p>
+        {/* L'épisode déjà prêt n'est pas perdu : il attend la séance suivante (C7). */}
+        {step.kept_episode != null && (
+          <p style={{ color: "var(--muted)" }}>{t("feuil.reprise.kept", { n: Number(step.kept_episode) })}</p>
+        )}
         <NextButton onClick={() => onNext()} />
       </Card>
     );
@@ -408,14 +413,14 @@ export function CartesStep({ step, tracker, onNext, title }: StepProps & { title
       <StepTitle hint={t("feuil.cards.hint", { n: cards.length })}>{title ?? t("feuil.cards.title")}</StepTitle>
       {card ? (
         <div style={{ textAlign: "center", display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 24, fontWeight: 600 }}><bdi dir="auto">{card.front}</bdi></div>
+          <div style={{ fontSize: 24, fontWeight: 600 }}><MathText text={card.front} dir="auto" /></div>
           {/* La prononciation accompagne la face écrite dans la langue apprise. */}
           {card.pronunciation && card.pronunciation_side === "front" && (
             <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
           )}
           {flipped ? (
             <>
-              <div style={{ fontSize: 18 }}>{card.back}</div>
+              <div style={{ fontSize: 18 }}><MathText text={card.back} dir="auto" /></div>
               {card.pronunciation && card.pronunciation_side === "back" && (
                 <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
               )}

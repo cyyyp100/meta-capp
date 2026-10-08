@@ -4,6 +4,7 @@ import type { BrainstormDiscussion, BrainstormMessage, BrainstormSource } from "
 import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
+import { MathText } from "../../components/MathText";
 import { useT } from "../../i18n";
 import { renderMathToHtml } from "../reader/renderMath";
 import { FolderScopePicker } from "./FolderScopePicker";
@@ -233,7 +234,7 @@ function Sources({ sources, label }: { sources: BrainstormSource[]; label: strin
                 {s.page ? `, p.${s.page}` : ""} —{" "}
               </strong>
             )}
-            <span style={{ color: "var(--muted)" }}>{s.snippet}</span>
+            <MathText text={s.snippet} style={{ color: "var(--muted)" }} />
           </span>
         </div>
       ))}

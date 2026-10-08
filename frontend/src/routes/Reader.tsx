@@ -150,7 +150,6 @@ export function Reader() {
   const [warmup, setWarmup] = useState<WarmUpTiming[]>([]);
   // 0 = pas encore monté ; la vraie valeur est posée par l'effet de démarrage de session.
   const startTimeRef = useRef(0);
-  const maxPageRef = useRef(1);
   // Pause en cours (bouton « Pause » ou carte de Clikoda acceptée) : le PDF est
   // masqué, la vue figée, et le serveur ne mesure plus rien jusqu'à la reprise.
   // Le temps cumulé des pauses est retiré de la durée de la séance.
@@ -711,7 +710,6 @@ export function Reader() {
   useEffect(() => {
     if (!Number.isFinite(id) || demo) return;
     startTimeRef.current = Date.now();
-    maxPageRef.current = 1;
     let cancelled = false;
     api
       .startSession(id)
@@ -728,11 +726,6 @@ export function Reader() {
       cancelled = true;
     };
   }, [id, demo]);
-
-  // Suit la page la plus avancée atteinte (pour les métriques de session).
-  useEffect(() => {
-    if (currentPage > maxPageRef.current) maxPageRef.current = currentPage;
-  }, [currentPage]);
 
   // Charge les mots (calque de texte) de la page dominante et de ses voisines.
   // Inutile en lecture reconstruite : le texte y est nativement sélectionnable.
@@ -934,7 +927,7 @@ export function Reader() {
     setPause(null);
     setExit({ sessionId, metrics: null });
     api
-      .endSession(sessionId, maxPageRef.current, duration)
+      .endSession(sessionId, duration)
       .then((metrics) => setExit((e) => (e && e.sessionId === sessionId ? { sessionId, metrics } : e)))
       .catch(() => navigate("/"));
   }

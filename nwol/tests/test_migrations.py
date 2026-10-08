@@ -301,3 +301,53 @@ def test_v40_adds_lessons_writings_and_line_reveals(fresh_db, monkeypatch):
     lesson = store.get_point_lesson("espagnol", "es.a1.saludos", "fr")
     assert lesson["lesson"] == {"rule": "r2"} and lesson["point_hash"] == "h2"
     assert store.get_point_lesson("espagnol", "es.a1.saludos", "en") is None
+
+
+# ── v41 : la matière des cartes, plus de carte automatique à renvoi ─────────
+
+def test_v41_keeps_the_subject_and_purges_auto_cards_that_need_the_document(fresh_db, monkeypatch):
+    """Une base v40 avec quatre cartes : la migration ajoute `flashcards.subject`
+    et supprime la seule carte AUTOMATIQUE qui renvoie au document. Une carte
+    automatique autonome reste ; une carte manuelle reste même si elle renvoie
+    au document — l'élève l'a voulue telle quelle. Le sas qui la référençait
+    n'est pas perdu (`ON DELETE SET NULL`). Rejouable."""
+    from db import get_connection, migrations
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 40)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+        cards = {
+            "auto_ref": ("When does transfer learning fail, according to the text?", "Always.", "auto"),
+            "auto_back_ref": ("Which algorithm is the most stable?", "Reptile, as shown in Table 3.5.", "auto"),
+            "auto_ok": ("What is transfer learning?", "Reusing a trained model.", "auto"),
+            "manual_ref": ("Quels biais sont mentionnés dans le texte ?", "Fuites.", "manual"),
+        }
+        ids = {}
+        for name, (front, back, source) in cards.items():
+            ids[name] = conn.execute(
+                "INSERT INTO flashcards (user_id, front, back, source, dedup_key) VALUES (1, ?, ?, ?, ?)",
+                (front, back, source, name),
+            ).lastrowid
+        conn.execute("INSERT INTO documents (path, filename, page_count) VALUES ('/tmp/a.pdf', 'a.pdf', 1)")
+        conn.execute("INSERT INTO reading_sessions (document_id) VALUES (1)")
+        conn.execute(
+            "INSERT INTO session_warmup_cards (session_id, position, card_id, front_ms, back_ms, "
+            "front_pace, back_pace) VALUES (1, 0, ?, 1000, 1000, 'ok', 'ok')",
+            (ids["auto_ref"],),
+        )
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 41)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 41
+
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(flashcards)")}
+    assert "subject" in columns
+    remaining = {r["id"] for r in conn.execute("SELECT id FROM flashcards")}
+    assert remaining == {ids["auto_ok"], ids["manual_ref"]}
+    warmup = conn.execute("SELECT card_id FROM session_warmup_cards").fetchone()
+    assert warmup is not None and warmup["card_id"] is None

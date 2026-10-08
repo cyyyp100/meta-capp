@@ -3,7 +3,7 @@
 // arbitraires, son texte est une entrée non fiable.
 import { describe, expect, it } from "vitest";
 
-import { renderMathToHtml } from "./renderMath";
+import { renderMathToHtml, splitMath } from "./renderMath";
 
 describe("renderMathToHtml — anti-XSS", () => {
   it("échappe le HTML hors formules", () => {
@@ -49,5 +49,62 @@ describe("linkPageRefs", () => {
     expect(renderMathToHtml("cf. p.99", { pageLinks: true, maxPage: 10 })).not.toContain("data-page-ref");
     expect(renderMathToHtml("cf. p.9", { pageLinks: true, maxPage: 10 })).toContain('data-page-ref="9"');
     expect(renderMathToHtml("cf. p.9")).not.toContain("data-page-ref");
+  });
+});
+
+describe("splitMath — une seule règle de découpage", () => {
+  const kinds = (text: string) => splitMath(text).map((s) => [s.kind, s.value]);
+
+  it("reconnaît $…$ et \\(…\\) en ligne", () => {
+    expect(kinds("Soit $u_n$ et \\(v_n\\).")).toEqual([
+      ["text", "Soit "],
+      ["inline", "u_n"],
+      ["text", " et "],
+      ["inline", "v_n"],
+      ["text", "."],
+    ]);
+  });
+
+  it("reconnaît $$…$$ et \\[…\\] en bloc, sur plusieurs lignes", () => {
+    expect(kinds("Aire :\n$$\n\\pi r^2\n$$\nfin")).toEqual([
+      ["text", "Aire :\n"],
+      ["display", "\n\\pi r^2\n"],
+      ["text", "\nfin"],
+    ]);
+    expect(kinds("\\[\\frac{a}{b}\\]")).toEqual([["display", "\\frac{a}{b}"]]);
+  });
+
+  it("laisse la monnaie en texte (règle pandoc)", () => {
+    for (const text of ["5$ et 10$", "Entre $20 et $30.", "$x$5", "un $ seul", "$ x$"]) {
+      expect(splitMath(text).every((s) => s.kind === "text")).toBe(true);
+    }
+  });
+
+  it("ne prend jamais un dollar échappé pour un délimiteur", () => {
+    expect(splitMath("coûte \\$5 ou \\$6$").every((s) => s.kind === "text")).toBe(true);
+    expect(kinds("$a \\$ b$")).toEqual([["inline", "a \\$ b"]]);
+  });
+
+  it("garde le texte d'un délimiteur sans fermeture", () => {
+    expect(kinds("$$x et \\(y")).toEqual([["text", "$$x et \\(y"]]);
+  });
+
+  it("ne coupe pas une formule en ligne sur deux lignes", () => {
+    expect(splitMath("$a\nb$").every((s) => s.kind === "text")).toBe(true);
+  });
+});
+
+describe("renderMathToHtml — formules", () => {
+  it("rend $$…$$ en bloc et \\(…\\) en ligne, sans dollar résiduel", () => {
+    const html = renderMathToHtml("$$x^2$$ puis \\(y\\)");
+    expect(html).toContain("katex-display");
+    expect(html.match(/class="katex"/g)?.length).toBe(2);
+    expect(html).not.toContain("$");
+  });
+
+  it("n'invente pas de formule entre deux montants", () => {
+    const html = renderMathToHtml("5$ et 10$");
+    expect(html).not.toContain("katex");
+    expect(html).toBe("5$ et 10$");
   });
 });

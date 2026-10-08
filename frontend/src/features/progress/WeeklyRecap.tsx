@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, CalendarDays } from "lucide-react";
 
 import { api } from "@/api/client";
+import { MathText } from "@/components/MathText";
 
 import { useT } from "../../i18n";
 import { criterionLabel } from "../stats/labels";
@@ -86,7 +87,7 @@ export function WeeklyRecap() {
                   key={card.id}
                   className="truncate rounded-sm bg-surface-soft px-3 py-2 text-[13px] text-text-soft"
                 >
-                  {card.front}
+                  <MathText text={card.front} dir="auto" />
                 </li>
               ))}
             </ul>

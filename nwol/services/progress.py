@@ -22,6 +22,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from config.settings import PAGE_READ_MIN_DWELL_S
 from db.documents import get_document
 from db.flashcards import get_due_flashcards
 from db.metacog import CRITERIA, ensure_profile, get_history
@@ -140,7 +141,12 @@ def get_session_progress(session_id: int, user_id: int = DEFAULT_USER_ID) -> dic
         "profile_changes": changes,
         # Les mots de l'apprenant, relus TELS QUELS. Ni résumés, ni reformulés.
         "reflections": _reflections(int(session_id)),
-        "page_dwell": _safe(lambda: get_page_dwell(int(session_id)), []),
+        # Où il a ralenti : les pages LUES seulement (au moins
+        # PAGE_READ_MIN_DWELL_S) — une page traversée en défilant n'y figure pas.
+        "page_dwell": [
+            row for row in _safe(lambda: get_page_dwell(int(session_id)), [])
+            if float(row.get("dwell_s") or 0.0) >= PAGE_READ_MIN_DWELL_S
+        ],
         # Les pauses prises, chacune avec ce qui l'a précédée (conseil de Clikoda
         # accepté, recommandation récente, ou rien) — cf. services/pause.
         "pauses": _safe(lambda: get_session_pauses(int(session_id)), []),

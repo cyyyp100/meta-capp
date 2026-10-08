@@ -186,6 +186,9 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("creativity", "context_comprehension"),
         base_weight=1.0,
         widget=WIDGET_TEXT,
+        # Centrée sur une figure ou un schéma du document : sa carte (« The
+        # visualization should show… ») ne se répond pas sans lui.
+        flashcard_eligible=False,
         aliases=("visualisation", "exercice_de_visualisation", "visualization_exercise"),
     ),
     QuestionTypeSpec(
@@ -393,6 +396,9 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         target_gauges=("retention", "meta_cognition"),
         base_weight=1.0,
         widget=WIDGET_TEXT,
+        # Relie à ce qui a été lu ailleurs dans le document : sans objet hors de
+        # la lecture, pour une carte comme pour le quiz.
+        flashcard_eligible=False,
         quiz_eligible=False,
         aliases=("mise_en_lien", "lien", "transfert", "linking", "connexion"),
     ),

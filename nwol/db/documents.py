@@ -248,11 +248,21 @@ def delete_document(doc_id: int) -> bool:
     (sessions, questions, réponses, surlignages, chapitres, index) — les
     flashcards, elles, passent à `document_id = NULL` et survivent (schéma).
 
+    Elles gardent la matière du document (`flashcards.subject`, copiée dans la
+    même transaction) : sans elle, le sas d'entrée ne saurait plus à quel cours
+    une carte appartient (services/flashcards.session_start_cards).
+
     Le FICHIER source n'est jamais touché : `documents.path` désigne le PDF
     de l'utilisateur, là où il l'a choisi, pas une copie de l'application.
     Renvoie False si le document n'existait pas."""
     conn = get_connection()
     with conn:
+        conn.execute(
+            """UPDATE flashcards
+               SET subject = COALESCE((SELECT subject FROM documents WHERE id = ?), subject)
+               WHERE document_id = ?""",
+            (doc_id, doc_id),
+        )
         cur = conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
     deleted = cur.rowcount > 0
     if deleted:

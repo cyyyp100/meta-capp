@@ -61,6 +61,42 @@ def no_startup_backfill(monkeypatch):
     return real
 
 
+@pytest.fixture(autouse=True, scope="session")
+def no_real_logs_or_assets(tmp_path_factory):
+    """En dev, le journal (`logs/nwol.log`) et les assets (`nwol/assets` : cache
+    des pages rendues, PDF de démo) sont ceux de l'utilisateur. Un test qui
+    appelait `POST /api/data/purge` les supprimait — le journal d'une app
+    lancée à côté disparaissait, elle continuant d'écrire dans un fichier
+    effacé —, ceux qui appellent `setup_logging()` y versaient leur sortie, et
+    le rendu des pages remplissait le vrai cache. Toute la session vise un
+    dossier temporaire ; un test qui veut le sien le remplace par-dessus."""
+    from config import logging_config, settings
+    from pdf_viewer import page_renderer
+    from services import data_export, onboarding
+
+    root = tmp_path_factory.mktemp("app-data")
+    with pytest.MonkeyPatch.context() as mp:
+        for module in (settings, logging_config, data_export):
+            mp.setattr(module, "LOG_FILE", str(root / "logs" / "nwol.log"))
+        for module in (settings, page_renderer, onboarding, data_export):
+            mp.setattr(module, "ASSETS_DIR", str(root / "assets"))
+        yield
+
+
+@pytest.fixture(autouse=True)
+def no_startup_relaunch(monkeypatch):
+    """Le démarrage du serveur (lifespan) relance en thread les épisodes de
+    langue en attente (services/lang_runs.on_startup). Ce thread survivrait au
+    test qui l'a lancé : il pourrait viser la VRAIE base une fois `db.DB_PATH`
+    rétabli, et un vrai Ollama. Coupé partout ; le test qui le vérifie reçoit
+    la vraie fonction par cette fixture."""
+    from services import lang_runs
+
+    real = lang_runs.relaunch_pending_episodes
+    monkeypatch.setattr(lang_runs, "relaunch_pending_episodes", lambda: [])
+    return real
+
+
 @pytest.fixture(autouse=True)
 def reference_throughput():
     """Les budgets temps dépendent du débit MESURÉ (llm/throughput) : un test

@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 
 import type { EpisodeView, Game, GameItem } from "../../../api/feuilleton";
 import { useT } from "../../../i18n";
-import { chipBtn, Feedback, ghostBtn, primaryBtn, Target } from "./ui";
+import { btnStyle, chipBtn, Feedback, ghostBtn, primaryBtn, Target } from "./ui";
 
 type Answer = (item: GameItem, given: unknown, ms: number) => void;
 
@@ -225,8 +225,8 @@ function Ordering({ item, rtl, given, answer }: ItemProps) {
       </div>
       {given === undefined && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button style={ghostBtn} onClick={() => setPicked([])} disabled={!picked.length}>{t("feuil.game.reset")}</button>
-          <button style={primaryBtn} onClick={() => answer(built)} disabled={built.length !== options.length}>{t("feuil.check")}</button>
+          <button style={btnStyle(ghostBtn, !picked.length)} onClick={() => setPicked([])} disabled={!picked.length}>{t("feuil.game.reset")}</button>
+          <button style={btnStyle(primaryBtn, built.length !== options.length)} onClick={() => answer(built)} disabled={built.length !== options.length}>{t("feuil.check")}</button>
         </div>
       )}
       {given !== undefined && (
@@ -336,7 +336,7 @@ function FindInText({ item, episode, rtl, given, answer }: ItemProps) {
         )}
       </div>
       {given === undefined ? (
-        <button style={{ ...primaryBtn, marginTop: 8 }} disabled={!sel.size} onClick={() => answer([...sel])}>
+        <button style={btnStyle(primaryBtn, !sel.size, { marginTop: 8 })} disabled={!sel.size} onClick={() => answer([...sel])}>
           {t("feuil.check")}
         </button>
       ) : (

@@ -341,17 +341,26 @@ def test_bilan_comes_after_six_episodes_and_consolidates_them(client, fake, cloc
     assert _start(client)["mode"] == "episode"
 
 
-def test_long_absence_gives_a_reprise_then_a_respiration(client, fake, clock):
+def test_long_absence_rereads_first_and_keeps_the_ready_episode(client, fake, clock):
+    """C7 : la reprise ne jette plus l'épisode prêt. Il attend la séance qui
+    suit la relecture — le même jour —, et la respiration va à celui d'après."""
     _onboard(client)
     _play(client, _start(client))
+    kept = _episode(2)
+    assert kept["status"] == "ready" and kept["kind"] == "normal"
     clock["advance"](10)
     run = _start(client)
     assert run["mode"] == "reprise" and run["absence"]["tier"] == "reprise"
     assert [s["kind"] for s in run["steps"]][:3] == ["accueil", "recap", "relecture"]
-    assert _episode(2)["kind"] == "respiration"
+    assert not any(s["kind"] == "lecture" for s in run["steps"])
+    assert run["steps"][0]["kept_episode"] == 2
+    ep2 = _episode(2)
+    assert (ep2["id"], ep2["status"], ep2["kind"], ep2["title"]) == (kept["id"], "ready", "normal", kept["title"])
     _play(client, run)
-    clock["advance"]()
-    assert _start(client)["mode"] == "episode"
+    run = _start(client)
+    assert run["mode"] == "episode" and run["episode_n"] == 2
+    _play(client, run)
+    assert _episode(3)["kind"] == "respiration" and _profile()["force_respiration"] == 0
 
 
 def test_three_weeks_away_adds_a_control_step(client, fake, clock):
@@ -362,17 +371,36 @@ def test_three_weeks_away_adds_a_control_step(client, fake, clock):
     assert any(s["kind"] == "controle" for s in run["steps"])
 
 
-def test_a_few_days_away_gives_a_long_recall(client, fake, clock):
+def test_three_days_away_still_plays_the_ready_episode(client, fake, clock):
+    _onboard(client)
+    _play(client, _start(client))
+    clock["advance"](3)
+    assert client.get(f"/api/lang/{LANG}/status").json()["relecture_due"] is False
+    run = _start(client)
+    assert run["mode"] == "episode" and run["episode_n"] == 2 and run["absence"]["tier"] == "normal"
+
+
+def test_four_days_away_impose_a_relecture_and_keep_the_episode(client, fake, clock):
+    """Au-delà de 3 jours : relecture imposée, sans nouvel épisode — même une
+    séance courte demandée —, sans respiration avant le palier `reprise`."""
     _onboard(client)
     _play(client, _start(client))
     clock["advance"]()
     _play(client, _start(client))
+    kept = _episode(3)
     clock["advance"](4)
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["relecture_due"] is True and status["next_status"] == "ready"
+    run = _start(client, "court")
+    assert run["mode"] == "reprise" and run["absence"]["tier"] == "rappel_long"
+    assert [s["kind"] for s in run["steps"]][:3] == ["accueil", "recap", "relecture"]
+    assert not any(s["kind"] == "lecture" for s in run["steps"])
+    assert _episode(3)["id"] == kept["id"] and _episode(3)["status"] == "ready"
+    assert _profile()["force_respiration"] == 0
+    _play(client, run)
+    assert client.get(f"/api/lang/{LANG}/status").json()["relecture_due"] is False
     run = _start(client)
-    assert run["mode"] == "episode"
-    recall = run["steps"][0]
-    assert recall["kind"] == "rappel" and recall["long"] is True
-    assert any(s["kind"] == "relecture" for s in run["steps"])
+    assert run["mode"] == "episode" and run["episode_n"] == 3
 
 
 def test_milestone_and_second_wave(client, fake, clock):
@@ -554,6 +582,113 @@ def test_generation_is_single_flight_and_requeued_at_startup(client, fake):
     assert lang_episodes.requeue_stuck() == 1 and _episode(1)["status"] == "queued"
 
 
+# ── Épisodes en attente : relancés sans attendre une séance ──────────────────
+
+def _failing_episode_two(client, monkeypatch, fake, failures: int = 1) -> dict:
+    """L'épisode 2 réservé puis raté (`failures` échecs journalisés)."""
+    from db import lang_episode_db as store
+    from llm import ollama_client
+
+    _onboard(client)
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err("panne"))
+    _play(client, _start(client))
+    episode = _episode(2)
+    assert episode["status"] == "failed"
+    store.update_episode(episode["id"], generation={**episode["generation"], "failures": failures})
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async", fake.fake_text)
+    return _episode(2)
+
+
+@pytest.fixture
+def ollama_up(monkeypatch):
+    from llm import ollama_client
+
+    monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: True)
+
+
+def test_an_episode_interrupted_by_closing_the_app_restarts_at_startup(
+        client, fake, clock, ollama_up, monkeypatch, no_startup_relaunch):
+    """L'application fermée pendant l'écriture : au démarrage, l'épisode repasse
+    en file ET repart, sans attendre une séance qui retombe en relecture."""
+    import threading
+
+    from db import lang_episode_db as store
+    from services import lang_runs
+
+    _failing_episode_two(client, monkeypatch, fake)
+    store.update_episode(_episode(2)["id"], status="generating")
+    monkeypatch.setattr(lang_runs, "relaunch_pending_episodes", no_startup_relaunch)
+    lang_runs.on_startup()
+    for thread in threading.enumerate():
+        if thread.name == "lang-episodes-relaunch":
+            thread.join(timeout=30)
+    assert _episode(2)["status"] == "ready"
+
+
+def test_a_failed_episode_is_retried_below_the_pro_threshold_only(client, fake, clock, ollama_up, monkeypatch):
+    from config.settings import LANG_GEN_FAILURES_PRO_HINT
+    from services import lang_episodes
+
+    episode = _failing_episode_two(client, monkeypatch, fake, failures=LANG_GEN_FAILURES_PRO_HINT)
+    calls = len(fake.CALLS)
+    assert lang_episodes.relaunch_pending() == []
+    assert _episode(2)["status"] == "failed" and len(fake.CALLS) == calls  # la séance reste le seul essai
+
+    from db import lang_episode_db as store
+
+    store.update_episode(episode["id"], generation={**episode["generation"], "failures": 1})
+    assert lang_episodes.relaunch_pending() == [episode["id"]]
+    assert _episode(2)["status"] == "ready"
+
+
+def test_nothing_restarts_and_nothing_counts_while_ollama_is_down(client, fake, clock, monkeypatch):
+    """Ollama éteint : une panne n'est pas un échec d'écriture."""
+    from services import lang_episodes
+
+    _failing_episode_two(client, monkeypatch, fake)
+    calls = len(fake.CALLS)
+    assert lang_episodes.relaunch_pending() == []
+    episode = _episode(2)
+    assert episode["status"] == "failed" and episode["generation"]["failures"] == 1
+    assert len(fake.CALLS) == calls
+    assert client.post(f"/api/lang/{LANG}/next/ensure").json()["relaunched"] == []
+
+
+def test_the_language_home_relaunches_the_next_episode_once(client, fake, clock, ollama_up, monkeypatch):
+    """`POST …/next/ensure` : même règle, pour ce profil ; le GET `status` ne
+    relance rien. Rappelé, il ne refait rien."""
+    episode = _failing_episode_two(client, monkeypatch, fake)
+    calls = len(fake.CALLS)
+    client.get(f"/api/lang/{LANG}/status")
+    assert _episode(2)["status"] == "failed" and len(fake.CALLS) == calls
+
+    first = client.post(f"/api/lang/{LANG}/next/ensure").json()
+    assert first["relaunched"] == [episode["id"]] and _episode(2)["status"] == "ready"
+    calls = len(fake.CALLS)
+    assert client.post(f"/api/lang/{LANG}/next/ensure").json()["relaunched"] == []
+    assert len(fake.CALLS) == calls
+    assert client.get(f"/api/lang/{LANG}/status").json()["next_status"] == "ready"
+
+
+def test_upcoming_names_the_next_episode_of_each_open_language(client, fake, clock):
+    """L'annonce « épisode prêt » et les pastilles de la page Langues : en
+    lecture seule — aucun profil créé, rien de relancé."""
+    from db.lang_db import get_all_lang_profiles
+
+    assert client.get("/api/lang/upcoming").json() == []
+    assert get_all_lang_profiles(1) == []
+    client.post("/api/lang/lesson/start", json={"language": "italien"})  # flux hérité : pas d'épisode
+    _onboard(client)
+    entry = {"language": LANG, "episode_n": 1, "status": "ready", "generating": False, "relecture_due": False}
+    assert client.get("/api/lang/upcoming").json() == [entry]
+    _play(client, _start(client))
+    assert client.get("/api/lang/upcoming").json() == [{**entry, "episode_n": 2}]
+    clock["advance"](4)
+    assert client.get("/api/lang/upcoming").json() == [{**entry, "episode_n": 2, "relecture_due": True}]
+    assert {p["language"] for p in get_all_lang_profiles(1)} == {LANG, "italien"}
+
+
 # ── Langue d'explication (§ 14, n° 14) ────────────────────────────────────────
 
 @pytest.fixture
@@ -714,13 +849,14 @@ def test_a_run_without_any_measure_counts_without_moving_the_profile(client, fak
 
 def test_a_reprise_respiration_starts_from_the_step_of_the_played_episode(client, fake, clock):
     """Base de dev : l'épisode 3, décidé d'avance un cran plus haut, a été
-    redécidé en respiration par une reprise… en montant encore (3 → 4)."""
+    redécidé en respiration par une reprise… en montant encore (3 → 4).
+    Seul un épisode pas encore écrit est redécidé : un épisode prêt est gardé."""
     from db import lang_episode_db as store
 
     _onboard(client)
     _play(client, _start(client))
     played_step = _episode(1)["ladder_step"]
-    store.update_episode(_episode(2)["id"], ladder_step=played_step + 1)
+    store.update_episode(_episode(2)["id"], ladder_step=played_step + 1, status="queued")
     store.update_profile_fields(_profile()["id"], ladder_step=played_step + 1)
     clock["advance"](10)
     assert _start(client)["mode"] == "reprise"
