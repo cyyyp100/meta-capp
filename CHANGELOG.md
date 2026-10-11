@@ -41,7 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most five flashcards of the language you are studying: due ones first, then the
   most recent. Those cards count toward the session's card limit
   and are not served again later in the session. Your first visit to a language
-  (introduction and placement test) has no airlock.
+  (introduction and placement test) has no airlock. Neither does a re-read imposed
+  by more than three days away, at the start or at the end: you come back, re-read
+  and review your flashcards — all those due, up to the limit, inside the session —
+  then return straight to the Languages page, with no farewell, end screen or rest
+  minute. Only the offer to step back a few episodes, after a failed check, remains.
 - **A curiosity hook before each language episode.** As before a PDF, a language
   session's entry airlock shows a sentence from Clikoda, here about the episode you
   are about to discover: a situation, a character, a question it raises, never how
@@ -56,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only informs attention, comprehension and retention, and a skill measured once
   weighs less than one measured ten times. A quiz weighs half as much as a reading
   or a language session: it checks what you learned rather than teaching it.
+- **In a language session, attention only drops when you drift off.** A wrong or
+  slow answer, or a run of mistakes, no longer costs attention. It drops only when
+  you turn a page, or go from one question to the next on the same page, well after
+  the expected time — and only for the part of that time spent without a gesture:
+  moving the mouse along the text, scrolling to keep the line at eye level, typing
+  and clicking all count. A long interruption is one drop, never a free fall. The
+  same gestures keep a session's time active: reading by following the text with the
+  mouse no longer counts as silence.
 - **My progress has three categories: Reading, Quiz and Languages**, each session
   with what is specific to it — the answers you gave in a quiz, with Clikoda's
   debrief and the courses to reinforce; the episode, the point of the day and the
@@ -64,9 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The weekly recap counts every kind of session.
 - **"Episode ready", on every page.** When Clikoda finishes writing a language
   episode, a small message in the bottom-right corner says which one and in which
-  language ("Spanish: episode 3 is ready"), whatever page you are on; *Open* takes
-  you to that language. On the Languages page, a language whose next episode is
-  written and not played yet shows *Pending* in the corner of its card.
+  language ("Spanish: episode 3 is ready"), whatever page you are on. It informs
+  without taking you anywhere: no button pulls you out of what you are doing. On the
+  Languages page, a language whose next episode is written and not played yet shows
+  *Pending* in the corner of its card.
 
 ### Changed
 

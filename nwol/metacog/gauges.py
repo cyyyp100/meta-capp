@@ -8,7 +8,9 @@ from config.settings import (
     ATTENTION_AWAY_PER_MIN,
     ATTENTION_DRIFT_PER_MIN,
     ATTENTION_IDLE_GRACE_S,
+    ATTENTION_PASSIVE_FLOOR,
     ATTENTION_PROGRESS_BONUS,
+    ATTENTION_STALL_MAX_DROP,
     GAUGE_VERDICT_TARGETS,
     GAUGE_VERDICT_WEIGHT,
 )
@@ -27,6 +29,8 @@ CREATIVITY_FLAGS: tuple[str, ...] = (
 )
 # En deçà, un signal du LLM est un zéro arrondi, pas une information.
 _INFORMED_SIGNAL = 0.05
+# En deçà (points), un intervalle à peine trop long est un arrondi, pas un décrochage.
+_INFORMED_STALL = 0.1
 
 # Jauge(s) principalement pilotée(s) par chaque type de question. Le signal LLM
 # de ces dimensions est amplifié, les autres atténués : une question de curiosité
@@ -210,12 +214,17 @@ def replay(seed: dict | None, measures: list[dict]) -> list[tuple[float, dict[st
     rejouées ici, dans l'ordre. Rejouer les mêmes mesures donne la même courbe.
 
     Une mesure : ``{"t", "verdict", "targets", "score"?, "evaluation"?,
-    "question_type"?, "response_time_ms"?}``. Celle qui porte l'évaluation du LLM
-    (`evaluation`, signaux compris) suit le modèle du lecteur ; les autres, le
-    modèle du verdict. Dans les deux cas, **une mesure ne fait bouger que les
-    jauges qu'elle informe** (`_replay_steps`). La série d'erreurs se compte ici,
-    comme le fait le lecteur. Une mesure sans verdict, sans score ni évaluation
-    est ignorée."""
+    "question_type"?, "response_time_ms"?, "costs_attention"?}``. Celle qui porte
+    l'évaluation du LLM (`evaluation`, signaux compris) suit le modèle du lecteur ;
+    les autres, le modèle du verdict. Dans les deux cas, **une mesure ne fait
+    bouger que les jauges qu'elle informe** (`_replay_steps`). La série d'erreurs
+    se compte ici, comme le fait le lecteur ; `costs_attention: False` dit qu'une
+    réponse n'observe pas l'attention — ni sa lenteur ni une série d'erreurs n'y
+    coûtent. Une mesure sans verdict, sans score ni évaluation est ignorée.
+
+    Une mesure ``{"t", "stall": {"elapsed_s", "allowed_s", "idle_s"}}`` est un
+    INTERVALLE (une page tournée, une question répondue) : elle ne fait bouger
+    que l'attention, et seulement à la baisse (`stall_attention_drop`)."""
     return [(t, values) for t, values, _informed in _replay_steps(seed, measures)]
 
 
@@ -249,6 +258,21 @@ def _replay_steps(seed: dict | None, measures: list[dict]):
     position = 0
     streak = 0
     for measure in measures or []:
+        stall = measure.get("stall")
+        if stall is not None:
+            drop = stall_attention_drop(
+                stall.get("elapsed_s", 0.0), stall.get("allowed_s", 0.0), stall.get("idle_s", 0.0),
+            )
+            if drop < _INFORMED_STALL:
+                continue  # dans le temps permis, ou actif : rien à en dire
+            position += 1
+            attention = gauges["attention"]
+            # Le plancher de la dérive passive du lecteur : un décrochage observé
+            # ne descend pas plus bas, et ne remonte pas une jauge déjà dessous.
+            if attention.value > ATTENTION_PASSIVE_FLOOR:
+                attention.value = max(ATTENTION_PASSIVE_FLOOR, attention.value - drop)
+            yield float(measure.get("t", position)), snapshot(gauges), {"attention"}
+            continue
         verdict = measure.get("verdict")
         score = measure.get("score")
         evaluation = measure.get("evaluation")
@@ -273,12 +297,17 @@ def _replay_steps(seed: dict | None, measures: list[dict]):
                     gauges[criterion].value = value
         else:
             targets = measure.get("targets") or ()
+            # Une réponse qui n'observe pas l'attention ne la fait pas payer :
+            # ni sa lenteur ni la série d'erreurs n'y sont alors un décrochage.
+            costs = bool(measure.get("costs_attention", True))
             update_gauges_from_verdict(
                 gauges, verdict, targets,
-                score=score, response_time_ms=response_time_ms, consecutive_incorrect=streak,
+                score=score,
+                response_time_ms=response_time_ms if costs else None,
+                consecutive_incorrect=streak if costs else 0,
             )
             informed = {criterion for criterion in targets if criterion in VERDICT_CRITERIA}
-            if attention_penalty(response_time_ms, streak):
+            if costs and attention_penalty(response_time_ms, streak):
                 informed.add("attention")
         yield float(measure.get("t", position)), snapshot(gauges), informed
 
@@ -325,7 +354,8 @@ def reading_attention_delta(
 ) -> float:
     """Dérive d'attention imputable au COMPORTEMENT de lecture, sur `elapsed_s`.
 
-    C'est le seul endroit du produit où `attention` bouge sans passer par le LLM.
+    Avec `stall_attention_drop` (son pendant pour une séance sans canal temps
+    réel), c'est le seul endroit où `attention` bouge sur le seul comportement.
     Trois observations, et rien d'autre :
 
       * fenêtre masquée ou application au second plan -> l'étudiant n'est pas là ;
@@ -344,6 +374,33 @@ def reading_attention_delta(
         delta -= ATTENTION_DRIFT_PER_MIN * minutes
     delta += ATTENTION_PROGRESS_BONUS * max(0, int(pages_progressed))
     return delta
+
+
+def stall_attention_drop(elapsed_s: float, allowed_s: float, idle_s: float) -> float:
+    """Ce que coûte à l'attention un intervalle TROP LONG d'une séance sans canal
+    temps réel — une page tournée, une question répondue après plus de temps que
+    permis (`allowed_s`).
+
+    Le dépassement seul ne prouve rien : on lit en suivant le texte à la souris,
+    on fait défiler pour garder la ligne à hauteur d'yeux, on cherche sa réponse
+    en tapant. Seule sa part INEXPLIQUÉE coûte — le dépassement × la part de
+    l'intervalle passée sans un geste (`idle_s` : mouvements de souris,
+    défilement, clavier, clic, agrégés par le client sur une fenêtre glissante ;
+    fenêtre masquée comprise) —, au rythme de la dérive du lecteur
+    (`ATTENTION_DRIFT_PER_MIN`), et jamais plus de `ATTENTION_STALL_MAX_DROP` :
+    une longue interruption est UN décrochage, pas une chute libre.
+
+    Renvoie une baisse positive ; 0 dans le temps permis, ou en pleine activité."""
+    try:
+        elapsed = max(0.0, float(elapsed_s))
+        over = elapsed - max(0.0, float(allowed_s))
+        idle = float(idle_s)
+    except (TypeError, ValueError):
+        return 0.0
+    if elapsed <= 0 or over <= 0:
+        return 0.0
+    idle_share = max(0.0, min(1.0, idle / elapsed))
+    return min(float(ATTENTION_STALL_MAX_DROP), ATTENTION_DRIFT_PER_MIN * over / 60.0 * idle_share)
 
 
 def snapshot(gauges: dict[str, GaugeState]) -> dict[str, float]:

@@ -21,12 +21,19 @@
 // tient lieu, et une langue neuve n'a encore aucune carte. Le rappel reste la
 // première étape du plan, l'au revoir et son bilan font le sas de sortie, le
 // sas de repos suit.
+//
+// Une relecture imposée par plus de 3 jours d'absence (C7) n'a AUCUN sas : on
+// revient, on relit, on révise ses cartes — celles que le warm-up aurait
+// servies restent dans l'étape « cartes » de la séance, au plafond entier.
+// L'accueil le sait avant le plan (`sas` du statut, transmis ici) ; le plan le
+// redit (`plan.sas`), et sa dernière étape ramène aux langues. Seule une
+// proposition de reculer, après un contrôle raté, se montre encore à la fin.
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { RunCompletion, RunPlan } from "../api/feuilleton";
-import { EndScreen } from "../features/lang/feuilleton/EndScreen";
+import { EndScreen, RewindOffer } from "../features/lang/feuilleton/EndScreen";
 import { ExpressionStep } from "../features/lang/feuilleton/Expression";
 import { LeconStep } from "../features/lang/feuilleton/Lecon";
 import { LectureStep } from "../features/lang/feuilleton/Lecture";
@@ -39,6 +46,7 @@ import {
   EcritureStep,
   JalonStep,
   JeuxStep,
+  NextButton,
   PhrasesStep,
   RappelStep,
   RecapStep,
@@ -46,7 +54,7 @@ import {
   SecondWaveStep,
   type StepProps,
 } from "../features/lang/feuilleton/Steps";
-import { ghostBtn } from "../features/lang/feuilleton/ui";
+import { Card, ghostBtn } from "../features/lang/feuilleton/ui";
 import { useRunTracker } from "../features/lang/feuilleton/useRunTracker";
 import { EntrySas } from "../features/session/EntrySas";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
@@ -76,14 +84,16 @@ export function LangEpisode() {
   const t = useT();
   const navigate = useNavigate();
   const { state } = useLocation();
-  const nav = (state ?? {}) as { language?: string; label?: string; rtl?: boolean; onboarding?: boolean };
+  const nav = (state ?? {}) as { language?: string; label?: string; rtl?: boolean; onboarding?: boolean; sas?: boolean };
   const language = nav.language;
-  const [phase, setPhase] = useState<Phase>(nav.onboarding ? "onboarding" : "entry");
+  // Sans sas (relecture imposée par l'absence), la séance démarre aussitôt.
+  const withSas = nav.sas !== false;
+  const [phase, setPhase] = useState<Phase>(nav.onboarding ? "onboarding" : withSas ? "entry" : "loading");
   const [plan, setPlan] = useState<RunPlan | null>(null);
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<RunCompletion | null>(null);
   const endReason = useRef<"fini" | "plafond">("fini");
-  const tracker = useRunTracker(plan?.run_id ?? null, plan?.idle_cutoff_s ?? 90);
+  const tracker = useRunTracker(plan?.run_id ?? null, plan?.idle_cutoff_s ?? 90, plan?.activity);
   const started = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   // Cartes révisées au sas d'entrée : le serveur les décompte du plafond de la séance.
@@ -91,6 +101,16 @@ export function LangEpisode() {
 
   useEffect(() => {
     if (!language) navigate("/lang");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
+
+  // Pas de sas d'entrée : le plan est demandé tout de suite, sans carte révisée.
+  const launched = useRef(false);
+  useEffect(() => {
+    if (language && !nav.onboarding && !withSas && !launched.current) {
+      launched.current = true;
+      void start();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
@@ -122,11 +142,14 @@ export function LangEpisode() {
     const current = plan.steps[index];
     if (current.kind === "au_revoir" || index >= plan.steps.length - 1) {
       await tracker.advance(current.key, null, { signal: extra?.signal });
-      try {
-        setResult(await api.feuilletonComplete(plan.run_id, endReason.current, extra?.feeling ?? null));
-      } catch {
-        setResult(null);
+      const done = await api.feuilletonComplete(plan.run_id, endReason.current, extra?.feeling ?? null).catch(() => null);
+      // Pas de sas de sortie : ni écran de fin ni sas de repos, retour aux
+      // langues — sauf s'il reste à proposer de reculer (§ 14.2).
+      if (plan.sas === false && !done?.suggest_rewind) {
+        navigate("/lang");
+        return;
       }
+      setResult(done);
       setPhase("end");
       return;
     }
@@ -197,7 +220,13 @@ export function LangEpisode() {
           );
         })()}
         {phase === "end" && (
-          result ? (
+          plan?.sas === false && result?.suggest_rewind ? (
+            // Ni bilan ni repos : la seule question qui reste, puis les langues.
+            <Card>
+              <RewindOffer n={result.suggest_rewind} language={language!} />
+              <NextButton label={t("feuil.end.close")} onClick={() => navigate("/lang")} />
+            </Card>
+          ) : result ? (
             <EndScreen result={result} language={language!} rtl={!!plan?.rtl} onClose={() => setPhase("rest")} />
           ) : (
             <button style={ghostBtn} onClick={() => setPhase("rest")}>{t("feuil.end.close")}</button>

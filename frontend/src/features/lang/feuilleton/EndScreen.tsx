@@ -3,7 +3,8 @@
 // L'expression écrite de la séance a été envoyée à Clikoda pendant les jeux :
 // l'écran de fin attend sa correction (il interroge le serveur, la séance est
 // déjà close) et la montre dès qu'elle arrive. Après une reprise ratée, on
-// PROPOSE de relire quelques épisodes, sans l'imposer (§ 14.2).
+// PROPOSE de relire quelques épisodes, sans l'imposer (§ 14.2) : c'est la seule
+// chose qui reste de la fin d'une séance sans sas de sortie (`RewindOffer`).
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -28,7 +29,6 @@ export function EndScreen({
   onClose: () => void;
 }) {
   const t = useT();
-  const [rewound, setRewound] = useState(false);
   const writingId = result.writing?.id ?? null;
   const first = result.writing?.status;
   const { data: writing } = useQuery({
@@ -68,26 +68,35 @@ export function EndScreen({
           <WritingFeedback writing={writing} rtl={rtl} />
         </div>
       )}
-      {result.suggest_rewind && !rewound && (
-        <div style={{ marginTop: 16, padding: 12, borderRadius: "var(--radius-md)", background: "var(--surface-soft)" }}>
-          <p style={{ margin: "0 0 8px" }}>{t("feuil.end.rewind", { n: result.suggest_rewind })}</p>
-          <button
-            style={ghostBtn}
-            onClick={async () => {
-              try {
-                await api.feuilletonRewind(language);
-              } finally {
-                setRewound(true);
-              }
-            }}
-          >
-            {t("feuil.end.rewind_yes")}
-          </button>
-        </div>
-      )}
+      {result.suggest_rewind ? <RewindOffer n={result.suggest_rewind} language={language} /> : null}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
         <button style={primaryBtn} onClick={onClose}>{t("feuil.end.close")}</button>
       </div>
     </Card>
+  );
+}
+
+/** « Veux-tu relire les N derniers épisodes avant de continuer ? » — proposé,
+ *  jamais imposé ; il disparaît une fois accepté. */
+export function RewindOffer({ n, language }: { n: number; language: string }) {
+  const t = useT();
+  const [rewound, setRewound] = useState(false);
+  if (rewound) return null;
+  return (
+    <div style={{ marginTop: 16, padding: 12, borderRadius: "var(--radius-md)", background: "var(--surface-soft)" }}>
+      <p style={{ margin: "0 0 8px" }}>{t("feuil.end.rewind", { n })}</p>
+      <button
+        style={ghostBtn}
+        onClick={async () => {
+          try {
+            await api.feuilletonRewind(language);
+          } finally {
+            setRewound(true);
+          }
+        }}
+      >
+        {t("feuil.end.rewind_yes")}
+      </button>
+    </div>
   );
 }

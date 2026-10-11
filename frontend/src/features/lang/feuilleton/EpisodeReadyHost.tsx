@@ -6,11 +6,14 @@
 // avec son numéro et sa langue. Monté au-dessus des routes (App.tsx), comme la
 // visite guidée : le lecteur et la séance de langue sont hors du layout.
 //
+// Le message informe, il n'emmène nulle part : pas de bouton « Ouvrir ». Il
+// tombe pendant une lecture, un quiz, une autre séance — un clic de travers
+// ne doit pas faire quitter ce qu'on est en train de faire.
+//
 // Seul un PASSAGE à « prêt » s'annonce : un épisode déjà prêt au premier relevé
 // n'est pas « tout juste » prêt, et un même relevé ne s'annonce qu'une fois.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { api } from "../../../api/client";
@@ -34,7 +37,6 @@ export function newlyReady(previous: UpcomingEpisode[] | null, current: Upcoming
 
 export function EpisodeReadyHost() {
   const t = useT();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data } = usePolledUpcomingEpisodes();
   const { data: languages } = useQuery({ queryKey: ["lang", "languages"], queryFn: api.languages, staleTime: Infinity });
@@ -52,16 +54,11 @@ export function EpisodeReadyHost() {
         description: t(e.relecture_due ? "feuil.ready.after_relecture" : "feuil.ready.waiting"),
         icon: flag ? <span aria-hidden="true">{flag}</span> : undefined,
         duration: READY_TOAST_MS,
-        action: {
-          label: t("feuil.ready.open"),
-          onClick: () => navigate("/lang", { state: { language: e.language } }),
-        },
-        actionButtonStyle: { background: "var(--accent)", color: "var(--on-accent)" },
       });
       // L'accueil de cette langue, s'il est ouvert, passe à « Épisode N » sans attendre.
       void queryClient.invalidateQueries({ queryKey: ["feuil", "status", e.language] });
     }
-  }, [data, languages, navigate, queryClient, t]);
+  }, [data, languages, queryClient, t]);
 
   return null;
 }

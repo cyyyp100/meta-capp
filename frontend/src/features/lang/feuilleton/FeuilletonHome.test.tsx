@@ -5,8 +5,8 @@
 // toutes, réglage `lang_pro_note_dismissed`), plus une ligne là où le serveur
 // dit que la limite se voit (`pro_hints`). Aucun appel réseau autre que l'API locale.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type PreferencesPayload } from "../../../api/client";
@@ -18,7 +18,7 @@ function status(extra: Partial<FeuilletonStatus> = {}): FeuilletonStatus {
   return {
     language: "espagnol", flow: "feuilleton", family: "latin", explain_lang: "fr", onboarding_done: true,
     episode_n: 2, next_episode: 3, next_status: "ready", generating: false, bilan_due: false, relecture_due: false,
-    level: "A1",
+    sas: true, level: "A1",
     program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3, episodes_played: 2,
     open_run: null, has_placement: true, model: "gemma4:e4b", generation_failures: 0, pro_hints: [],
     unseen_writing: null, ...extra,
@@ -46,13 +46,22 @@ const writing: WritingView = {
   },
 };
 
+/** La séance ouverte par l'accueil, et ce qu'il lui transmet. */
+function EpisodeProbe() {
+  const state = useLocation().state as { sas?: boolean } | null;
+  return <div data-testid="episode">{`sas=${String(state?.sas)}`}</div>;
+}
+
 async function renderHome() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
     render(
       <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <FeuilletonHome language="espagnol" label="Espagnol" rtl={false} />
+        <MemoryRouter initialEntries={["/lang"]}>
+          <Routes>
+            <Route path="/lang" element={<FeuilletonHome language="espagnol" label="Espagnol" rtl={false} />} />
+            <Route path="/lang/episode" element={<EpisodeProbe />} />
+          </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
     );
@@ -131,6 +140,22 @@ describe("FeuilletonHome", () => {
     await renderHome();
     expect(await screen.findByRole("button", { name: /relire avant l'épisode 3|re-read before episode 3/i })).toBeInTheDocument();
     expect(screen.getByText(/l'épisode 3 est prêt : il t'attend|episode 3 is ready: it waits/i)).toBeInTheDocument();
+  });
+
+  it("lance la relecture imposée sans ses sas, une séance d'épisode avec", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    const spy = vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status({ relecture_due: true, sas: false }));
+    await renderHome();
+    const relire = await screen.findByRole("button", { name: /relire avant l'épisode 3|re-read before episode 3/i });
+    await act(async () => fireEvent.click(relire));
+    expect(screen.getByTestId("episode")).toHaveTextContent("sas=false");
+
+    spy.mockResolvedValue(status());
+    cleanup();
+    await renderHome();
+    const episode = await screen.findByRole("button", { name: /épisode 3|episode 3/i });
+    await act(async () => fireEvent.click(episode));
+    expect(screen.getByTestId("episode")).toHaveTextContent("sas=true");
   });
 
   it("une séance du jour restée ouverte passe avant la relecture imposée", async () => {

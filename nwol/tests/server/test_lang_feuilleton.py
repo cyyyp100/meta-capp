@@ -8,7 +8,16 @@ from datetime import date, timedelta
 import pytest
 
 import lang_fakes
-from config.settings import LANG_FEELING_META_STEP, LANG_PILOT_LANGUAGES, LANG_RUN_TARGET_S
+from config.settings import (
+    ATTENTION_STALL_MAX_DROP,
+    LANG_ATTENTION_PAGE_SLACK,
+    LANG_DUE_CARDS_CAP,
+    LANG_FEELING_META_STEP,
+    LANG_PILOT_LANGUAGES,
+    LANG_RUN_TARGET_S,
+    LANG_STEP_BUDGET_S,
+    LANG_STUDY_DAY_MIN_S,
+)
 
 LANG = "espagnol"
 
@@ -50,14 +59,19 @@ WRITTEN = "Hoy estoy muy bien en la plaza con Carmen y Pablo, y hay una fiesta m
 
 
 def _play(client, run, *, answers="right", signal="compris", taps=0, translate=(), finish=True, feeling=True,
-          write=WRITTEN):
+          write=WRITTEN, ms=800, pace=None):
     """Joue une séance : chaque étape est ouverte, jouée, fermée, un lot par étape.
     À la lecture, `taps` mots touchés et les répliques `translate` traduites ;
-    à la leçon, ses items comme ceux du texte ; à l'expression, `write` envoyé."""
+    à la leçon, ses items comme ceux du texte ; à l'expression, `write` envoyé.
+    `pace` : {genre d'étape: (durée, part sans un geste)} de la page jusqu'à la suivante."""
     rid = run["run_id"]
     ep = run["episodes"].get(str(run.get("episode_id"))) if run.get("episode_id") else None
-    for step in run["steps"]:
+    for n, step in enumerate(run["steps"]):
         events = [{"type": "step", "step": step["key"], "started": True}]
+        if pace and step["kind"] in pace:
+            elapsed, idle = pace[step["kind"]]
+            events.append({"type": "pace", "step": step["key"], "origin": "open", "started_ms": 1_000 * (n + 1),
+                           "elapsed_s": elapsed, "idle_s": idle, "at_s": 60})
         if step["kind"] == "lecture" and ep:
             words = [(li, ti) for li, ln in enumerate(ep["lines"]) for ti, t in enumerate(ln["tokens"]) if t["w"]]
             for li, ti in words[:taps]:
@@ -69,7 +83,7 @@ def _play(client, run, *, answers="right", signal="compris", taps=0, translate=(
             items += client.get(f"/api/lang/run/{rid}/lesson").json()["lesson_items"]
         for it in items:
             given = it.get("expected") if answers == "right" else ("__faux__" if answers == "wrong" else None)
-            events.append({"type": "answer", "item": it["ref"], "given": given, "ms": 800})
+            events.append({"type": "answer", "item": it["ref"], "given": given, "ms": ms})
         for line in step.get("lines", []) if step["kind"] == "deuxieme_vague" else []:
             events.append({"type": "rating", "episode_id": step["episode_ref"], "line": line["line"], "rating": "su"})
         if step["kind"] == "expression" and write is not None:
@@ -410,6 +424,53 @@ def test_four_days_away_impose_a_relecture_and_keep_the_episode(client, fake, cl
     assert client.get(f"/api/lang/{LANG}/status").json()["relecture_due"] is False
     run = _start(client)
     assert run["mode"] == "episode" and run["episode_n"] == 3
+
+
+def test_a_relecture_after_an_absence_has_no_sas_but_keeps_its_cards(client, fake, clock):
+    """Plus de 3 jours d'absence : la relecture imposée n'a aucun sas. L'accueil
+    le dit avant le plan (le sas d'entrée le précède) ; le plan n'a pas d'au
+    revoir, et sa dernière étape — les cartes, au plafond entier puisqu'aucune
+    n'a été révisée à l'entrée — est celle que garde le plafond de durée. Une
+    séance d'épisode garde ses sas."""
+    _onboard(client)
+    _play(client, _start(client))
+    assert client.get(f"/api/lang/{LANG}/status").json()["sas"] is True
+    _add_cards(LANG_DUE_CARDS_CAP + 3, due=True, prefix="due")
+    clock["advance"](5)
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["relecture_due"] is True and status["sas"] is False
+
+    run = _start(client)
+    assert run["mode"] == "reprise" and run["sas"] is False
+    assert not any(s["kind"] == "au_revoir" for s in run["steps"])
+    last = run["steps"][-1]
+    assert last["kind"] == "cartes" and last["essential"] and len(last["cards"]) == LANG_DUE_CARDS_CAP
+    # Au plafond, la séance va à ses cartes.
+    events = f"/api/lang/run/{run['run_id']}/events"
+    res = client.post(events, json={"events": [
+        {"type": "step", "step": run["steps"][0]["key"], "ended": True, "active_s": 10_000}]}).json()
+    assert res["cap_reached"] and res["skip_to"] == "cartes"
+
+    assert _play(client, run)["ok"]
+    assert client.get(f"/api/lang/{LANG}/status").json()["sas"] is True
+    run = _start(client)
+    assert run["mode"] == "episode" and run["sas"] is True and run["steps"][-1]["kind"] == "au_revoir"
+
+
+def test_a_resumed_relecture_keeps_no_sas(client, fake, clock):
+    """La relecture du jour, reprise après assez de temps pour que le jour compte
+    (T3, la relecture n'est alors plus « due ») : c'est elle que l'accueil
+    relance, sans sas — son plan le dit."""
+    _onboard(client)
+    _play(client, _start(client))
+    clock["advance"](5)
+    run = _start(client)
+    client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [
+        {"type": "step", "step": run["steps"][0]["key"], "active_s": LANG_STUDY_DAY_MIN_S}],
+        "current_step": run["steps"][0]["key"]})
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["relecture_due"] is False and status["open_run"] == run["run_id"]
+    assert status["sas"] is False
 
 
 def test_milestone_and_second_wave(client, fake, clock):
@@ -968,6 +1029,60 @@ def test_a_run_without_any_measure_moves_only_the_metacognition(client, fake, cl
     assert float(after["meta_cognition"]) > float(before["meta_cognition"])
     for criterion in ("attention", "context_comprehension", "retention", "curiosity", "creativity"):
         assert float(after[criterion]) == float(before[criterion])
+
+
+def _run_gauges(client, run):
+    from db.practice_sessions import find_practice_session
+
+    practice = find_practice_session(lang_run_id=run["run_id"])
+    return client.get(f"/api/progress/practice/{practice['id']}").json()["gauges"]
+
+
+def test_slow_and_wrong_answers_no_longer_cost_attention(client, fake, clock):
+    """Des réponses lentes et fausses à la suite : l'attention ne bouge pas. Une
+    erreur n'est pas un décrochage, et le temps d'une réponse ne se compte plus
+    depuis l'ouverture de la page (la cinquième question « durait » la page)."""
+    _onboard(client)
+    run = _start(client)
+    _play(client, run, answers="wrong", signal="pas_compris", ms=90_000)
+    gauges = _run_gauges(client, run)
+    assert "attention" not in gauges["measured"]
+    assert {p["value"] for p in gauges["series"]["attention"]} == {gauges["seed"]["attention"]}
+    assert gauges["series"]["context_comprehension"][-1]["value"] < gauges["seed"]["context_comprehension"]
+
+
+def test_attention_drops_only_on_a_page_turned_too_late_without_a_gesture(client, fake, clock):
+    """La lecture tournée bien après son temps : lue en suivant le texte à la
+    souris (aucun temps sans geste), l'attention ne bouge pas ; laissée sans un
+    geste, elle baisse — une fois, d'au plus un décrochage."""
+    too_long = LANG_STEP_BUDGET_S["lecture"] * LANG_ATTENTION_PAGE_SLACK + 600
+    _onboard(client)
+    run = _start(client)
+    _play(client, run, answers="wrong", pace={"lecture": (too_long, 0.0)})
+    assert "attention" not in _run_gauges(client, run)["measured"]
+
+    clock["advance"]()
+    run = _start(client)
+    _play(client, run, answers="wrong", pace={"lecture": (too_long, too_long)})
+    gauges = _run_gauges(client, run)
+    assert "attention" in gauges["measured"]
+    drop = gauges["seed"]["attention"] - gauges["series"]["attention"][-1]["value"]
+    assert 0 < drop <= ATTENTION_STALL_MAX_DROP + 1e-9
+
+
+def test_an_interval_sent_twice_is_kept_once_and_garbage_is_ignored(client, fake, clock):
+    from db import lang_episode_db as store
+
+    _onboard(client)
+    run = _start(client)
+    pace = {"type": "pace", "step": "lecture", "origin": "open", "started_ms": 1_760_000_000_000,
+            "elapsed_s": 700, "idle_s": 900, "at_s": 80}
+    garbage = [{"type": "pace", "step": "lecture", "origin": "ailleurs", "started_ms": 2, "elapsed_s": 1,
+                "idle_s": 0, "at_s": 0}, {"type": "pace", "step": "lecture", "origin": "open"}]
+    for _ in range(2):  # un lot renvoyé après une coupure
+        client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [pace, *garbage]})
+    rows = store.get_pace(run["run_id"])
+    assert [(r["step"], r["elapsed_s"], r["idle_s"]) for r in rows] == [("lecture", 700.0, 700.0)]
 
 
 def _meta_moved_by_last_run(client, *, feeling):

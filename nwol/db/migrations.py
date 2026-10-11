@@ -215,6 +215,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 41)
         current = 41
 
+    if current < 42 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v42(conn)
+        _set_version(conn, 42)
+        current = 42
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1834,6 +1839,41 @@ def _migrate_to_v41(conn) -> None:
                 "supprimée(s) : ids=%s", len(doomed), doomed,
             )
     logger.info("Migration SQLite v41 terminée")
+
+
+def _migrate_to_v42(conn) -> None:
+    """Les intervalles d'une séance de langue (`lang_run_pace`), où se lit son attention.
+
+    L'attention d'une séance de langue se lisait dans le temps de réponse de
+    chaque item, compté depuis l'OUVERTURE de la page : sur une page de jeux, la
+    cinquième question « durait » toute la page, chaque réponse au-delà de 12 s
+    coûtait jusqu'à 6 points, et une série d'erreurs autant — la jauge
+    s'effondrait chez un apprenant qui lisait simplement avant de répondre. Elle
+    se lit désormais dans les intervalles — de l'ouverture d'une page ou d'une
+    réponse jusqu'à la réponse suivante ou à la page suivante —, avec la part de
+    chacun passée sans un geste (souris, défilement, clavier, clic). Une ligne
+    par intervalle, jugée à la clôture (`services.lang_runs._run_measures`) ;
+    `started_ms`, l'horloge du client au début de l'intervalle, fait qu'un lot
+    d'événements renvoyé ne le compte pas deux fois.
+
+    Rejouable : `CREATE … IF NOT EXISTS`."""
+    logger.info("Migration SQLite v42 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS lang_run_pace (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step       TEXT NOT NULL,
+                   origin     TEXT NOT NULL,
+                   started_ms INTEGER NOT NULL,
+                   elapsed_s  REAL NOT NULL DEFAULT 0,
+                   idle_s     REAL NOT NULL DEFAULT 0,
+                   at_s       REAL NOT NULL DEFAULT 0,
+                   UNIQUE(run_id, step, started_ms)
+               )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lang_run_pace_run ON lang_run_pace(run_id)")
+    logger.info("Migration SQLite v42 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

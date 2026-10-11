@@ -16,11 +16,17 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import threading
 from datetime import date, datetime, timedelta
 
 from config.settings import (
+    LANG_ACTIVITY_MIN_MOVES,
+    LANG_ACTIVITY_MOVE_SAMPLE_MS,
+    LANG_ACTIVITY_WINDOW_S,
+    LANG_ATTENTION_PAGE_SLACK,
+    LANG_ATTENTION_QUESTION_GAP_S,
     LANG_BILAN_EVERY,
     LANG_DE_GENDER_COLORS,
     LANG_DUE_CARDS_CAP,
@@ -66,6 +72,7 @@ from db.lang_db import (
 from db.practice_sessions import update_practice_details
 from db.user import DEFAULT_USER_ID
 from i18n import t
+from metacog.gauges import stall_attention_drop
 from services import lang_activity as activity
 from services import lang_episodes as episodes
 from services import lang_games as games
@@ -620,6 +627,9 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         "max_s": LANG_RUN_MAX_S, "idle_cutoff_s": LANG_IDLE_CUTOFF_S,
         "episodes": {}, "steps": [], "readings": [], "items": {},
         "absence": {"days": absence_days, "tier": activity.absence_tier(absence_days)},
+        # Une relecture imposée par l'absence (C7) n'a aucun sas — ni d'entrée, ni
+        # de sortie, ni de repos — : on revient, on relit, on révise ses cartes.
+        "sas": not activity.relecture_due(absence_days),
         "tone": activity.message_tone(profile["id"]), "episode_id": None, "episode_n": None,
         "pregen_step": None, "component_units": [], "info": {k: v for k, v in info.items() if k != "episode"},
     }
@@ -745,7 +755,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
             cards = cards[len(controle.get("cards") or []):]
         if cards:
             steps.append(_step("cartes", cards=cards))
-        steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
+        _goodbye(plan, runs_done)
         return plan
 
     # relecture
@@ -767,8 +777,21 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
     cards = _cards_view(profile, language, cards_cap)
     if cards:
         steps.append(_step("cartes", cards=cards))
-    steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
+    _goodbye(plan, runs_done)
     return plan
+
+
+def _goodbye(plan: dict, runs_done: int) -> None:
+    """La fin d'une relecture : l'au revoir et sa question de ressenti, qui font
+    le sas de sortie avec l'écran de fin. Une relecture imposée par l'absence
+    n'a aucun sas (`plan["sas"]`) : sa dernière étape — les cartes, le plus
+    souvent — la termine, et c'est elle que le plafond de durée garde (R24).
+    Sans question de ressenti, la métacognition n'en bouge pas (`_nudge`)."""
+    steps = plan["steps"]
+    if plan["sas"]:
+        steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
+    elif steps:
+        steps[-1]["essential"] = True
 
 
 def _first_reading_taps(profile_id: int, episode_id: int) -> int:
@@ -901,7 +924,11 @@ def run_view(run_id: int, *, resumed: bool = False) -> dict:
     plan.pop("items", None)  # clés de correction : déjà dans chaque étape
     done = [s["step"] for s in store.get_steps(run_id) if s["ended_at"]]
     return {"run_id": run_id, "status": run["status"], "current_step": run.get("current_step"),
-            "done_steps": done, "resumed": resumed, "effective_s": run.get("effective_seconds") or 0, **plan}
+            "done_steps": done, "resumed": resumed, "effective_s": run.get("effective_seconds") or 0, **plan,
+            # Ce qu'est un geste pour le client (LANG_ACTIVITY_*) : lu à chaque
+            # vue, jamais figé dans le plan — une séance reprise suit le réglage courant.
+            "activity": {"window_s": LANG_ACTIVITY_WINDOW_S, "min_moves": LANG_ACTIVITY_MIN_MOVES,
+                         "move_sample_ms": LANG_ACTIVITY_MOVE_SAMPLE_MS}}
 
 
 def record_events(run_id: int, events: list[dict], current_step: str | None = None) -> dict:
@@ -920,10 +947,15 @@ def record_events(run_id: int, events: list[dict], current_step: str | None = No
     day = run.get("study_date") or activity.study_date()
     steps_before = {s["step"]: s for s in store.get_steps(run_id)}
     added_seconds = reveals = answered = cards = 0
+    paces: list[dict] = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for ev in events or []:
         kind = ev.get("type")
-        if kind == "step":
+        if kind == "pace":
+            pace = _pace_row(ev)
+            if pace:
+                paces.append(pace)
+        elif kind == "step":
             step = str(ev.get("step") or "")[:40]
             if not step:
                 continue
@@ -976,6 +1008,7 @@ def record_events(run_id: int, events: list[dict], current_step: str | None = No
                     cards += 1
                 except Exception:
                     logger.debug("Révision de carte ignorée", exc_info=True)
+    store.add_pace(run_id, paces)
     effective = int(run.get("effective_seconds") or 0) + added_seconds
     fields = {"effective_seconds": effective}
     if current_step:
@@ -989,6 +1022,27 @@ def record_events(run_id: int, events: list[dict], current_step: str | None = No
     cap = effective >= LANG_RUN_MAX_S
     return {"ok": True, "effective_s": effective, "cap_reached": cap,
             "skip_to": _skip_target(run_id, plan) if cap else None}
+
+
+def _pace_row(ev: dict) -> dict | None:
+    """Un intervalle envoyé par le client (`type: "pace"`), validé : de
+    l'ouverture d'une page (`origin: "open"`) ou d'une réponse (`"answer"`)
+    jusqu'à la réponse suivante ou à la page suivante. `elapsed_s` : sa durée
+    (fenêtre masquée comprise) ; `idle_s` : la part sans un geste ; `at_s` : sa
+    fin, en temps effectif de l'étape ; `started_ms` : son début, horloge du
+    client — sa clé, pour qu'un lot renvoyé ne le double pas."""
+    try:
+        step = str(ev.get("step") or "")[:40]
+        origin = ev.get("origin")
+        elapsed = max(0.0, float(ev.get("elapsed_s") or 0))
+        idle = max(0.0, min(float(ev.get("idle_s") or 0), elapsed))
+        at = max(0.0, float(ev.get("at_s") or 0))
+        started = int(ev["started_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if not step or origin not in ("open", "answer") or not all(map(math.isfinite, (elapsed, idle, at))):
+        return None
+    return {"step": step, "origin": origin, "started_ms": started, "elapsed_s": elapsed, "idle_s": idle, "at_s": at}
 
 
 def _skip_target(run_id: int, plan: dict) -> str | None:
@@ -1125,24 +1179,31 @@ def _writing_summary(run_id: int) -> dict | None:
 def _run_measures(run_id: int, plan: dict) -> list[dict]:
     """Les mesures d'une séance, dans l'ordre du plan, sur l'horloge du temps effectif.
 
-    Trois sources, toutes déjà enregistrées et recorrigées par le service (R23) :
-    les réponses aux jeux et micro-items (`lang_item_attempts`, avec leur temps
-    de réponse), l'auto-évaluation de la deuxième vague, et le « compris / à peu
-    près / pas compris » qui ferme un passage. Un item sans réponse n'est pas une
-    mesure (P-5) ; une lecture n'est jamais notée, seul ce que l'apprenant en dit
-    l'est. Chaque étape occupe sur l'axe le temps effectif qu'elle a duré : ses
-    réponses s'y répartissent, le « compris » en marque la fin."""
+    Quatre sources, toutes déjà enregistrées et recorrigées par le service (R23) :
+    les réponses aux jeux et micro-items (`lang_item_attempts`), l'auto-évaluation
+    de la deuxième vague, le « compris / à peu près / pas compris » qui ferme un
+    passage, et les intervalles de chaque page (`lang_run_pace`). Un item sans
+    réponse n'est pas une mesure (P-5) ; une lecture n'est jamais notée, seul ce
+    que l'apprenant en dit l'est. Chaque étape occupe sur l'axe le temps effectif
+    qu'elle a duré : ses réponses s'y répartissent, chaque intervalle se place là
+    où il s'est fermé, le « compris » en marque la fin.
+
+    L'attention ne BAISSE que dans les intervalles trop longs (`_stall_measures`).
+    Une réponse ne la fait jamais payer — ni fausse, ni lente, ni dans une série
+    d'erreurs (`costs_attention: False`) — et un repérage raté ne dit rien d'elle ;
+    réussi, il la fait monter (`LANG_GAME_TARGET_GAUGES`)."""
     steps = plan.get("steps") or []
     recorded = {s["step"]: s for s in store.get_steps(run_id)}
     by_step: dict[str, list[dict]] = {}
     for attempt in store.get_attempts(run_id):
         if attempt.get("correct") is None:
             continue
-        by_step.setdefault(attempt["step"], []).append({
-            "verdict": "correct" if attempt["correct"] else "incorrect",
-            "targets": LANG_GAME_TARGET_GAUGES.get(attempt.get("game_kind") or "", ()),
-            "response_time_ms": attempt.get("ms"),
-        })
+        verdict = "correct" if attempt["correct"] else "incorrect"
+        targets = LANG_GAME_TARGET_GAUGES.get(attempt.get("game_kind") or "", ())
+        if verdict != "correct":
+            targets = tuple(c for c in targets if c != "attention")
+        if targets:
+            by_step.setdefault(attempt["step"], []).append(_answer_measure(verdict, targets))
     # Une note de deuxième vague désigne son épisode, pas son étape : l'étape se
     # retrouve par l'épisode qu'elle fait relire (deuxième vague ou contrôle).
     rating_steps: dict[int, str] = {}
@@ -1159,13 +1220,14 @@ def _run_measures(run_id: int, plan: dict) -> list[dict]:
         episode_id = rating.get("episode_id")
         key = rating_steps.get(int(episode_id)) if episode_id is not None else None
         by_step.setdefault(key or "deuxieme_vague", []).append(
-            {"verdict": verdict, "targets": LANG_SECOND_WAVE_TARGET_GAUGES},
+            _answer_measure(verdict, LANG_SECOND_WAVE_TARGET_GAUGES),
         )
     # L'expression écrite : le verdict de Clikoda s'il est arrivé avant la
     # clôture. Ses contrôles calculés ne sont ni une mesure ni un score.
     written = writing.run_measure(run_id)
     if written:
-        by_step.setdefault("expression", []).append({"verdict": written, "targets": LANG_WRITING_TARGET_GAUGES})
+        by_step.setdefault("expression", []).append(_answer_measure(written, LANG_WRITING_TARGET_GAUGES))
+    stalls = _stall_measures(run_id, steps)
 
     keys = [s["key"] for s in steps]
     keys += [k for k in by_step if k not in keys]
@@ -1173,13 +1235,15 @@ def _run_measures(run_id: int, plan: dict) -> list[dict]:
     clock = last = 0.0
     for key in keys:
         seconds = float((recorded.get(key) or {}).get("seconds") or 0)
-        timed = [
-            (clock + seconds * (i + 1) / (len(by_step.get(key, [])) + 1), m)
-            for i, m in enumerate(by_step.get(key, []))
-        ]
+        answers = by_step.get(key, [])
+        # Un intervalle se place là où il s'est fermé, et avant la réponse qui le
+        # ferme quand elles tombent au même instant (tri stable).
+        timed = [(clock + min(at_s, seconds), m) for at_s, m in stalls.get(key, [])]
+        timed += [(clock + seconds * (i + 1) / (len(answers) + 1), m) for i, m in enumerate(answers)]
+        timed.sort(key=lambda item: item[0])
         verdict = _UNDERSTOOD_VERDICT.get((recorded.get(key) or {}).get("signal"))
         if verdict:
-            timed.append((clock + seconds, {"verdict": verdict, "targets": LANG_UNDERSTOOD_TARGET_GAUGES}))
+            timed.append((clock + seconds, _answer_measure(verdict, LANG_UNDERSTOOD_TARGET_GAUGES)))
         for t_s, measure in timed:
             # Une étape sans temps effectif (sautée, ou jouée sans un geste) ne
             # doit pas empiler ses points au même instant : l'axe reste croissant.
@@ -1187,6 +1251,36 @@ def _run_measures(run_id: int, plan: dict) -> list[dict]:
             measures.append({**measure, "t": last})
         clock += seconds
     return measures
+
+
+def _answer_measure(verdict: str, targets: tuple[str, ...]) -> dict:
+    """Une réponse de la séance : elle informe ses jauges, jamais à la baisse
+    l'attention — ni sa lenteur ni une série d'erreurs ne sont un décrochage."""
+    return {"verdict": verdict, "targets": targets, "costs_attention": False}
+
+
+def _stall_measures(run_id: int, steps: list[dict]) -> dict[str, list[tuple[float, dict]]]:
+    """Les intervalles trop longs de chaque page, prêts à rejouer : (fin en temps
+    effectif de l'étape, mesure `stall`).
+
+    Le temps permis (LANG_ATTENTION_*) : une page a LANG_ATTENTION_PAGE_SLACK ×
+    son budget jusqu'à sa première réponse — ou jusqu'à la page suivante quand
+    elle n'en a pas ; d'une réponse à la suivante, puis à la page suivante,
+    LANG_ATTENTION_QUESTION_GAP_S. Ce que coûte le dépassement, c'est le moteur
+    de jauges qui le dit (`stall_attention_drop`) : ici, seuls les intervalles
+    qui coûtent quelque chose deviennent des mesures. Une page absente du plan
+    n'est pas jugée."""
+    budgets = {s["key"]: float(s.get("budget_s") or 0) for s in steps}
+    out: dict[str, list[tuple[float, dict]]] = {}
+    for row in store.get_pace(run_id):
+        budget = budgets.get(row["step"], 0.0)
+        if budget <= 0:
+            continue
+        allowed = budget * LANG_ATTENTION_PAGE_SLACK if row["origin"] == "open" else float(LANG_ATTENTION_QUESTION_GAP_S)
+        stall = {"elapsed_s": float(row["elapsed_s"] or 0), "allowed_s": allowed, "idle_s": float(row["idle_s"] or 0)}
+        if stall_attention_drop(**stall) > 0:
+            out.setdefault(row["step"], []).append((float(row["at_s"] or 0), {"stall": stall}))
+    return out
 
 
 def _record_practice(run_id: int, plan: dict, profile: dict, gained: dict) -> tuple[int | None, int]:
@@ -1332,6 +1426,7 @@ def language_status(language: str) -> dict:
         "generating": episodes.is_generating(profile["id"]),
         "bilan_due": _bilan_due(profile),
         "relecture_due": _relecture_due(profile),
+        "sas": _next_run_has_sas(profile, open_run),
         "level": progress.current_cefr(language, order), "explain_lang": _explain(profile),
         "program": {"order": order, "size": store.program_size(language),
                     "point": localized(point, "title", _explain(profile)) if point else ""},
@@ -1346,6 +1441,16 @@ def _relecture_due(profile: dict) -> bool:
     """C7 : la prochaine séance de cette langue est une relecture imposée par
     l'absence ; l'épisode prêt attend la suivante."""
     return bool(profile.get("onboarding_done")) and activity.relecture_due(activity.absence_days(profile["id"]))
+
+
+def _next_run_has_sas(profile: dict, open_run: dict | None) -> bool:
+    """Si la séance que lancera l'accueil a ses sas : le client le sait AVANT
+    `start_run`, puisque le sas d'entrée précède le plan. C'est celle du jour
+    que `start_run` reprendrait — son plan le dit (`plan["sas"]`) —, sinon une
+    nouvelle : sans sas si l'absence impose une relecture."""
+    if open_run is not None and _resumable(open_run, activity.study_date()):
+        return bool((open_run.get("plan") or {}).get("sas", True))
+    return not _relecture_due(profile)
 
 
 def upcoming_episodes(user_id: int = DEFAULT_USER_ID) -> list[dict]:

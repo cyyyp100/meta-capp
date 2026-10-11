@@ -76,7 +76,8 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
   }
   if (library) return <Library language={language} rtl={rtl} onClose={() => setLibrary(false)} />;
 
-  const go = () => navigate("/lang/episode", { state: { language, label, rtl, onboarding: !status.onboarding_done } });
+  const go = () =>
+    navigate("/lang/episode", { state: { language, label, rtl, onboarding: !status.onboarding_done, sas: status.sas } });
   const ready = status.next_status === "ready";
   // Plus de 3 jours sans séance : la séance relit, l'épisode attend la suivante (C7).
   const relecture = !status.open_run && status.relecture_due;

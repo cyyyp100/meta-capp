@@ -22,7 +22,7 @@ function status(language: string): FeuilletonStatus {
   return {
     language, flow: "feuilleton", family: "latin", explain_lang: "fr", onboarding_done: true,
     episode_n: 2, next_episode: 3, next_status: "ready", generating: false, bilan_due: false, relecture_due: false,
-    level: "A1", program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3,
+    sas: true, level: "A1", program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3,
     episodes_played: 2, open_run: null, has_placement: true, model: "gemma4:e4b", generation_failures: 0,
     pro_hints: [], unseen_writing: null,
   };

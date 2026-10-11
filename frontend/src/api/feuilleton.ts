@@ -24,6 +24,9 @@ export interface FeuilletonStatus {
   /** Plus de 3 jours sans séance : la prochaine est une relecture imposée, sans
    * nouvel épisode ; l'épisode prêt attend la suivante (C7). */
   relecture_due: boolean;
+  /** La séance que lance l'accueil a ses sas (entrée, sortie, repos) ; pas une
+   * relecture imposée par l'absence. Connu AVANT le plan : le sas d'entrée le précède. */
+  sas: boolean;
   level: string;
   program: { order: number; size: number; point: string };
   words_seen: number;
@@ -253,6 +256,15 @@ export interface RunStep {
   [field: string]: unknown;
 }
 
+/** Ce qu'est un geste pour le suivi d'une séance (config serveur LANG_ACTIVITY_*) :
+ * les mouvements de souris, échantillonnés tous les `move_sample_ms` au plus,
+ * valent un geste à partir de `min_moves` sur une fenêtre de `window_s`. */
+export interface ActivityConfig {
+  window_s: number;
+  min_moves: number;
+  move_sample_ms: number;
+}
+
 export interface RunPlan {
   /** Format du plan : 2 = lecture unique, leçon, expression écrite. */
   version: number;
@@ -269,11 +281,16 @@ export interface RunPlan {
   target_s: number;
   max_s: number;
   idle_cutoff_s: number;
+  /** Lu à chaque vue de la séance, jamais figé dans le plan. */
+  activity?: ActivityConfig;
   episodes: Record<string, EpisodeView>;
   steps: RunStep[];
   episode_id: number | null;
   episode_n: number | null;
   absence: { days: number | null; tier: string };
+  /** Faux pour une relecture imposée par l'absence : ni au revoir, ni écran de
+   * fin, ni sas de repos. Absent des plans plus anciens, qui ont leurs sas. */
+  sas?: boolean;
   tone: string;
 }
 
@@ -284,7 +301,11 @@ export type RunEvent =
   | { type: "line"; episode_id: number; line: number; pass: string; all?: boolean }
   | { type: "answer"; item: string; given: unknown; ms?: number }
   | { type: "rating"; episode_id: number; line: number; typed?: string | null; rating: "su" | "a_peu_pres" | "pas_su" }
-  | { type: "card"; card_id: number; verdict: "correct" | "partial" | "incorrect" };
+  | { type: "card"; card_id: number; verdict: "correct" | "partial" | "incorrect" }
+  /** Un intervalle d'une page, où se lit l'attention : de son ouverture ou d'une
+   * réponse jusqu'à la réponse suivante ou à la page suivante. `idle_s` : sa part
+   * sans un geste ; `at_s` : sa fin, en temps effectif de l'étape. */
+  | { type: "pace"; step: string; origin: "open" | "answer"; started_ms: number; elapsed_s: number; idle_s: number; at_s: number };
 
 export interface EventsResult {
   ok: boolean;

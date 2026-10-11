@@ -454,6 +454,29 @@ def get_steps(run_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def add_pace(run_id: int, rows: list[dict]) -> int:
+    """Intervalles d'une séance (de l'ouverture d'une page ou d'une réponse à la
+    suivante) : un lot renvoyé ne les double pas (`started_ms`)."""
+    if not rows:
+        return 0
+    conn = get_connection()
+    with conn:
+        cur = conn.executemany(
+            """INSERT OR IGNORE INTO lang_run_pace (run_id, step, origin, started_ms, elapsed_s, idle_s, at_s)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [(run_id, r["step"], r["origin"], int(r["started_ms"]), float(r["elapsed_s"]), float(r["idle_s"]),
+              float(r["at_s"])) for r in rows],
+        )
+    return int(cur.rowcount or 0)
+
+
+def get_pace(run_id: int) -> list[dict]:
+    rows = get_connection().execute(
+        "SELECT * FROM lang_run_pace WHERE run_id=? ORDER BY started_ms, id", (run_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def add_reveals(run_id: int, episode_id: int | None, events: list[dict]) -> int:
     conn = get_connection()
     with conn:

@@ -6,7 +6,9 @@
 //     demandé qu'une fois le sas franchi, avec le nombre de cartes révisées au
 //     warm-up, que le serveur décompte du plafond de cartes de la séance ;
 //   * la première visite d'une langue (onboarding, test de niveau) n'a pas de
-//     sas : elle enchaîne directement sur la première séance.
+//     sas : elle enchaîne directement sur la première séance ;
+//   * une relecture imposée par plus de 3 jours d'absence n'a aucun sas — ni
+//     d'entrée, ni de sortie, ni de repos — mais garde ses cartes, dans la séance.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
@@ -14,6 +16,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type PreferencesPayload } from "../api/client";
+import type { RunCompletion, RunPlan } from "../api/feuilleton";
 import type { Flashcard } from "../api/types";
 import { LangEpisode } from "./LangEpisode";
 
@@ -36,6 +39,27 @@ const preferences: PreferencesPayload = {
   supported_langs: ["fr", "en"],
   user: { id: 1, name: "Élève" },
 };
+
+/** Une relecture imposée par l'absence, telle que le serveur la construit : sans au revoir. */
+function relecturePlan(): RunPlan {
+  return {
+    version: 2, run_id: 7, status: "in_progress", current_step: null, done_steps: [], resumed: false, effective_s: 0,
+    mode: "reprise", language: "espagnol", family: "latin", rtl: false, target_s: 1080, max_s: 1500, idle_cutoff_s: 90,
+    episodes: {}, episode_id: null, episode_n: null, absence: { days: 5, tier: "rappel_long" }, sas: false,
+    tone: "encourager",
+    steps: [
+      { key: "accueil", kind: "accueil", budget_s: 120, essential: false, variant: "reprise", kept_episode: 3 },
+      { key: "cartes", kind: "cartes", budget_s: 180, essential: true, cards: [{ ...card(5), front: "Hola", back: "Bonjour" }] },
+    ],
+  };
+}
+
+function completion(extra: Partial<RunCompletion> = {}): RunCompletion {
+  return {
+    ok: true, mode: "reprise", episode: null, point: null, new_words: [], cards_created: 0, words_seen: 40,
+    words_acquired: 3, acquired_today: 0, units_acquired_today: 0, suggest_rewind: null, writing: null, ...extra,
+  };
+}
 
 async function wait(seconds: number) {
   for (let i = 0; i < seconds; i++) {
@@ -107,5 +131,52 @@ describe("LangEpisode", () => {
     expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", 0);
     expect(api.langWarmupCards).not.toHaveBeenCalled();
     expect(api.feuilletonHook).not.toHaveBeenCalled();
+  });
+
+  describe("relecture imposée par l'absence", () => {
+    beforeEach(() => {
+      vi.spyOn(api, "feuilletonRunStart").mockResolvedValue(relecturePlan());
+      vi.spyOn(api, "feuilletonEvents").mockResolvedValue({ ok: true, effective_s: 0, cap_reached: false, skip_to: null });
+    });
+
+    async function playThrough() {
+      await act(async () => screen.getByRole("button", { name: /^continuer$|^continue$/i }).click());
+      // Les cartes sont toujours là : retournée, jugée.
+      await act(async () => screen.getByText("Hola").click());
+      await act(async () => screen.getByRole("button", { name: /je savais|i knew it/i }).click());
+      await act(async () => screen.getByRole("button", { name: /^continuer$|^continue$/i }).click());
+    }
+
+    it("n'a ni sas d'entrée ni sas de sortie, et garde ses cartes", async () => {
+      vi.spyOn(api, "feuilletonComplete").mockResolvedValue(completion());
+      renderEpisode({ language: "espagnol", label: "Espagnol", sas: false });
+      await act(async () => {});
+
+      // Pas de sas d'entrée : ni compte à rebours, ni warm-up, ni accroche.
+      expect(screen.queryByRole("timer")).toBeNull();
+      expect(api.langWarmupCards).not.toHaveBeenCalled();
+      expect(api.feuilletonHook).not.toHaveBeenCalled();
+      expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", 0);
+      expect(screen.getByText(/content de te revoir|good to see you again/i)).toBeInTheDocument();
+
+      await playThrough();
+      expect(api.feuilletonComplete).toHaveBeenCalledWith(7, "fini", null);
+      // Ni écran de fin ni sas de repos : retour direct aux langues.
+      expect(screen.getByText("Langues")).toBeInTheDocument();
+      expect(screen.queryByText(/séance terminée|session complete/i)).toBeNull();
+      expect(screen.queryByText(/pause de consolidation|consolidation pause/i)).toBeNull();
+    });
+
+    it("propose encore de reculer après un contrôle raté, puis ramène aux langues", async () => {
+      vi.spyOn(api, "feuilletonComplete").mockResolvedValue(completion({ suggest_rewind: 3 }));
+      renderEpisode({ language: "espagnol", label: "Espagnol", sas: false });
+      await act(async () => {});
+      await playThrough();
+
+      expect(screen.getByText(/relire les 3 derniers épisodes|re-read the last 3 episodes/i)).toBeInTheDocument();
+      expect(screen.queryByText(/séance terminée|session complete/i)).toBeNull();
+      await act(async () => screen.getByRole("button", { name: /fermer|close/i }).click());
+      expect(screen.getByText("Langues")).toBeInTheDocument();
+    });
   });
 });

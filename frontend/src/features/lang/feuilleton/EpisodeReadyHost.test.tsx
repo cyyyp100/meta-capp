@@ -1,10 +1,10 @@
 // EpisodeReadyHost.test.tsx — « Espagnol : l'épisode 3 est prêt », sur toutes les pages.
 //
 // Seul le PASSAGE à « prêt » s'annonce : un épisode déjà prêt au premier relevé,
-// ou relu tel quel au relevé suivant, ne l'est pas une seconde fois.
+// ou relu tel quel au relevé suivant, ne l'est pas une seconde fois. Le message
+// informe sans emmener : il n'a pas de bouton « Ouvrir ».
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { act, render, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,12 +48,6 @@ it("interroge souvent tant qu'un épisode s'écrit, rarement sinon", () => {
   expect(upcomingPollMs(undefined)).toBe(UPCOMING_POLL_IDLE_MS);
 });
 
-function Probe() {
-  const location = useLocation();
-  const state = location.state as { language?: string } | null;
-  return <div data-testid="where">{`${location.pathname} ${state?.language ?? ""}`}</div>;
-}
-
 describe("EpisodeReadyHost", () => {
   let client: QueryClient;
   const toastMock = vi.mocked(toast);
@@ -79,11 +73,7 @@ describe("EpisodeReadyHost", () => {
   async function renderHost() {
     render(
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/reader/7"]}>
-          <Routes>
-            <Route path="*" element={<><EpisodeReadyHost /><Probe /></>} />
-          </Routes>
-        </MemoryRouter>
+        <EpisodeReadyHost />
       </QueryClientProvider>,
     );
     await waitFor(() => expect(client.getQueryState(UPCOMING_KEY)?.status).toBe("success"));
@@ -114,13 +104,11 @@ describe("EpisodeReadyHost", () => {
       duration: READY_TOAST_MS,
     });
 
+    // Il informe, il n'emmène pas : aucun bouton pour quitter la page en cours.
+    expect(options?.action).toBeUndefined();
+
     await poll(); // relu tel quel : rien de plus
     expect(toastMock).toHaveBeenCalledTimes(1);
-
-    // « Ouvrir » mène à la page Langues, la langue déjà choisie.
-    const action = options?.action as unknown as { onClick: () => void };
-    await act(async () => action.onClick());
-    expect(screen.getByTestId("where")).toHaveTextContent("/lang espagnol");
   });
 
   it("n'annonce pas un épisode déjà prêt à l'ouverture", async () => {

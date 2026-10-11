@@ -357,6 +357,55 @@ def test_reading_attention_delta_reads_behaviour_not_performance():
     assert reading_attention_delta(60.0, 600.0, 3, away=False) > 0
 
 
+def test_a_stall_costs_only_its_unexplained_overrun():
+    """Un intervalle trop long ne coûte que la part de son dépassement passée
+    sans un geste, au rythme de la dérive du lecteur — et jamais plus que le
+    plafond : une longue interruption est un décrochage, pas une chute libre."""
+    from config.settings import ATTENTION_DRIFT_PER_MIN, ATTENTION_STALL_MAX_DROP
+    from metacog.gauges import stall_attention_drop
+
+    # Dans le temps permis : rien, même immobile.
+    assert stall_attention_drop(50, 60, 50) == 0.0
+    # Trop long, mais des gestes tout du long (souris qui suit le texte, défilement) : rien.
+    assert stall_attention_drop(300, 60, 0) == 0.0
+    # Trop long et immobile : la minute de dépassement entière.
+    assert stall_attention_drop(120, 60, 120) == pytest.approx(ATTENTION_DRIFT_PER_MIN)
+    # Immobile la moitié du temps : la moitié du dépassement.
+    assert stall_attention_drop(120, 60, 60) == pytest.approx(ATTENTION_DRIFT_PER_MIN / 2)
+    assert stall_attention_drop(3600, 60, 3600) == pytest.approx(ATTENTION_STALL_MAX_DROP)
+    assert stall_attention_drop("illisible", 60, 10) == 0.0
+
+
+def test_replay_lowers_attention_only_on_stalls_when_answers_do_not_cost_it():
+    """Séance de langue : cinq réponses lentes et fausses d'affilée ne coûtent
+    rien à l'attention (`costs_attention: False`) ; seul un intervalle trop long
+    et immobile la fait baisser, sans toucher au reste — jusqu'au plancher de
+    la dérive passive. L'attention n'est mesurée que par ce décrochage."""
+    from config.settings import ATTENTION_PASSIVE_FLOOR
+    from metacog.gauges import informed_counts, replay
+
+    seed = {c: 40.0 for c in CRITERIA}
+    answers = [{"t": i, "verdict": "incorrect", "targets": ("retention",), "response_time_ms": 60_000,
+                "costs_attention": False} for i in range(1, 6)]
+    points = replay(seed, answers)
+    assert all(values["attention"] == pytest.approx(40.0) for _, values in points)
+    assert "attention" not in informed_counts(seed, answers)
+
+    stall = {"t": 6, "stall": {"elapsed_s": 600, "allowed_s": 60, "idle_s": 600}}
+    _, last = replay(seed, [*answers, stall])[-1]
+    assert last["attention"] < 40.0
+    assert last["retention"] == pytest.approx(points[-1][1]["retention"])
+    assert informed_counts(seed, [*answers, stall])["attention"] == 1
+
+    # Dans son temps, ou actif tout du long : ce n'est pas une mesure.
+    quiet = [{"t": 1, "stall": {"elapsed_s": 50, "allowed_s": 60, "idle_s": 50}},
+             {"t": 2, "stall": {"elapsed_s": 600, "allowed_s": 60, "idle_s": 0}}]
+    assert len(replay(seed, quiet)) == 1
+
+    _, low = replay({c: ATTENTION_PASSIVE_FLOOR + 1 for c in CRITERIA}, [stall])[-1]
+    assert low["attention"] == pytest.approx(ATTENTION_PASSIVE_FLOOR)
+
+
 def test_live_gauges_passive_drift_stops_at_the_floor(fresh_db):
     """La seule dérive passive fait descendre l'attention, jamais la vider."""
     from config.settings import ATTENTION_PASSIVE_FLOOR

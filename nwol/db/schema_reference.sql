@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 41).
+-- (config.settings.DB_SCHEMA_VERSION = 42).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -362,6 +362,18 @@ CREATE TABLE lang_reveal_events (
                    UNIQUE(run_id, episode_id, line_idx, token_idx, pass)
                );
 CREATE INDEX idx_lang_reveal_events_run ON lang_reveal_events(run_id);
+CREATE TABLE lang_run_pace (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,
+                   step       TEXT NOT NULL,
+                   origin     TEXT NOT NULL,
+                   started_ms INTEGER NOT NULL,
+                   elapsed_s  REAL NOT NULL DEFAULT 0,
+                   idle_s     REAL NOT NULL DEFAULT 0,
+                   at_s       REAL NOT NULL DEFAULT 0,
+                   UNIQUE(run_id, step, started_ms)
+               );
+CREATE INDEX idx_lang_run_pace_run ON lang_run_pace(run_id);
 CREATE TABLE lang_run_steps (
                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
                    run_id     INTEGER NOT NULL REFERENCES lang_runs(id) ON DELETE CASCADE,

@@ -351,3 +351,40 @@ def test_v41_keeps_the_subject_and_purges_auto_cards_that_need_the_document(fres
     assert remaining == {ids["auto_ok"], ids["manual_ref"]}
     warmup = conn.execute("SELECT card_id FROM session_warmup_cards").fetchone()
     assert warmup is not None and warmup["card_id"] is None
+
+
+def test_v42_adds_the_run_intervals_without_touching_the_runs(fresh_db, monkeypatch):
+    """Une base v41 avec une séance de langue : la migration crée
+    `lang_run_pace` sans toucher à la séance. Un intervalle renvoyé dans un
+    second lot ne se double pas (`started_ms`), et il part avec sa séance.
+    Rejouable."""
+    from db import get_connection, migrations
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 41)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    profile_id = int(get_or_create_lang_profile(1, "espagnol")["id"])
+    run_id = store.create_run(profile_id, mode="episode", plan={"steps": []}, episode_id=None,
+                              second_wave_episode_id=None, absence_days=None, study_date="2026-10-11")
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 42)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 42
+    assert store.get_run(run_id)["mode"] == "episode"
+
+    row = {"step": "lecture", "origin": "open", "started_ms": 1_760_000_000_000,
+           "elapsed_s": 700.0, "idle_s": 500.0, "at_s": 90.0}
+    assert store.add_pace(run_id, [row]) == 1
+    assert store.add_pace(run_id, [row]) == 0
+    assert [(r["step"], r["origin"], r["idle_s"]) for r in store.get_pace(run_id)] == [("lecture", "open", 500.0)]
+    with conn:
+        conn.execute("DELETE FROM lang_runs WHERE id = ?", (run_id,))
+    assert store.get_pace(run_id) == []

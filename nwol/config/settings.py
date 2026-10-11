@@ -445,8 +445,29 @@ LANG_STEP_BUDGET_S: dict[str, int] = {
 # Étapes jamais sautées par le plafond de durée : la lecture de l'épisode, ce
 # que l'apprenant en écrit, et l'au revoir.
 LANG_ESSENTIAL_STEPS: tuple[str, ...] = ("lecture", "expression", "au_revoir")
-# Au-delà de ce silence (aucune interaction), le temps n'est plus « effectif ».
+# Au-delà de ce silence (aucun geste, cf. LANG_ACTIVITY_*), le temps n'est plus « effectif ».
 LANG_IDLE_CUTOFF_S = 90
+# Attention d'une séance de langue. Elle ne baisse que si l'apprenant tourne une
+# page, ou passe d'une question à la suivante sur une même page, après un temps
+# trop long — et seulement pour la part de ce temps passée sans un geste
+# (metacog.gauges.stall_attention_drop). Une réponse fausse ou lente n'est pas un
+# décrochage. Une page est trop longue au-delà de LANG_ATTENTION_PAGE_SLACK × son
+# budget (LANG_STEP_BUDGET_S) — jusqu'à sa première réponse quand elle en a ;
+# d'une réponse à la suivante, puis à la page suivante, au-delà de
+# LANG_ATTENTION_QUESTION_GAP_S. Lus par services/lang_runs._run_measures.
+LANG_ATTENTION_PAGE_SLACK = 2.0
+LANG_ATTENTION_QUESTION_GAP_S = 60
+# Ce qu'est un geste : un clic, une touche, un défilement — ou la souris qui
+# bouge, car on lit aussi en suivant le texte du pointeur, comme d'autres font
+# défiler pour garder la ligne à hauteur d'yeux. Les mouvements sont échantillonnés
+# (au plus un toutes les LANG_ACTIVITY_MOVE_SAMPLE_MS) et comptés sur une fenêtre
+# glissante de LANG_ACTIVITY_WINDOW_S : ils valent un geste à partir de
+# LANG_ACTIVITY_MIN_MOVES, pour qu'un effleurement ne passe pas pour une lecture.
+# Une seconde est active s'il y a eu un geste dans la fenêtre ; fenêtre masquée,
+# elle ne l'est jamais. Envoyés au client avec le plan (`run_view`, `activity`).
+LANG_ACTIVITY_WINDOW_S = 15
+LANG_ACTIVITY_MIN_MOVES = 5
+LANG_ACTIVITY_MOVE_SAMPLE_MS = 100
 
 # C3 — rythme. Une séance sur LANG_BILAN_EVERY est un bilan : il suit chaque
 # bloc de LANG_BILAN_EVERY − 1 = 6 épisodes (un groupe du programme, S2).
@@ -822,7 +843,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 41
+DB_SCHEMA_VERSION = 42
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -899,6 +920,14 @@ ATTENTION_DRIFT_PER_MIN = 2.0        # points/min perdus au-delà de la grâce
 ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hors focus
 ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue (PAGE_READ_MIN_DWELL_S)
 ATTENTION_PASSIVE_FLOOR = 15.0       # plancher de la seule dérive passive
+# Une séance sans canal temps réel (séance de langue) n'observe l'attention que
+# par INTERVALLES — une page tournée, une question répondue. Un intervalle plus
+# long que permis ne coûte que sa part inexpliquée (dépassement × part du temps
+# sans un geste), au rythme de ATTENTION_DRIFT_PER_MIN, jusqu'au plancher
+# ATTENTION_PASSIVE_FLOOR, et jamais plus que ceci par intervalle : une longue
+# interruption est UN décrochage, pas une chute libre.
+# Lu par metacog.gauges.stall_attention_drop.
+ATTENTION_STALL_MAX_DROP = 6.0
 ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives en base
 # Une page est LUE quand le temps passé dessus dans la séance (pauses exclues,
 # visites cumulées) atteint ce seuil. Avant, « pages lues » était la page la plus
