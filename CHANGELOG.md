@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most recent. Those cards count toward the session's card limit
   and are not served again later in the session. Your first visit to a language
   (introduction and placement test) has no airlock.
+- **A curiosity hook before each language episode.** As before a PDF, a language
+  session's entry airlock shows a sentence from Clikoda, here about the episode you
+  are about to discover: a situation, a character, a question it raises, never how
+  it ends. It is written while the airlock runs, in the language Clikoda explains
+  in. A session that plays no new episode (a re-read, a comeback after a few days,
+  the weekly review) has none, and neither does one while Clikoda is off.
 - **Quizzes and language sessions move your gauges.** Like a reading session, each
   quiz and each language session now draws its own gauge curve: quiz answers (with
   their response time), language games, second-wave self-ratings, "understood?"
@@ -67,10 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Three days off before a mandatory re-read, and the ready episode is kept.** Up
   to three days without a session in a language (two before), the next session
   plays the episode that is ready. Beyond that, the session is a re-read with no new
-  episode — a short session asked for included — and the episode already written
-  waits for the next session, the same day included: it is no longer thrown away
-  and rewritten after a week off. The language's home says so (*Re-read before
-  episode 3*).
+  episode, and the episode already written waits for the next session, the same day
+  included: it is no longer thrown away and rewritten after a week off. The
+  language's home says so (*Re-read before episode 3*).
 - **"Pages read" counts pages you actually read**: at least 5 seconds on a page,
   visits added up, pauses left out. Flipping through twenty pages to find one reads
   one, and the time spent in the entry airlock is no longer a reading of page 1.
@@ -124,6 +129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A subject whose last document was deleted, and in which nothing was measured,
   leaves the profile.
 
+### Removed
+
+- **Short session** and **Just re-read today** are gone from a language's home.
+  The session is always the one Clikoda picks: the episode that is ready, a re-read
+  while the next one is being written or after a few days away, the weekly review.
+  Short sessions already played stay in My progress.
+
 ### Fixed
 
 - Formulas in flashcards are rendered wherever a card is shown (entry airlock,
@@ -133,9 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A language episode interrupted by closing the app, or that failed to be written,
   is written again at the next start and when its language's home opens, instead of
   waiting for a session — never while Ollama is off.
-- On a language's home, *Short session* and *Library* look disabled when they are and
-  say why; opening an episode from the library says it is loading, or that it could
-  not be opened.
+- On a language's home, *Library* looks disabled when it is and says why; opening an
+  episode from the library says it is loading, or that it could not be opened.
 - Reflections written at the end of a language lesson, and the feeling picked at the
   end of an episode, were silently dropped; they are now kept with their session.
 - Languages studied with episodes never appeared on the profile: only lessons of

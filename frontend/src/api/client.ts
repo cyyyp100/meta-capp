@@ -303,6 +303,9 @@ export const api = {
    *  `status` reste en lecture seule). Sans effet si Ollama ne répond pas. */
   feuilletonEnsureNext: (language: string) =>
     postJSON<{ relaunched: number[]; generating: boolean }>(`/api/lang/${encodeURIComponent(language)}/next/ensure`, {}),
+  /** L'accroche du sas d'entrée sur l'épisode que la séance va faire découvrir,
+   *  écrite par Clikoda pendant le sas ; vide sans épisode neuf ou sans Clikoda. */
+  feuilletonHook: (language: string) => getJSON<{ hook: string }>(`/api/lang/${encodeURIComponent(language)}/hook`),
   feuilletonOnboarding: (language: string, interests: string[], hasStudied: boolean) =>
     postJSON<{ ok: boolean; next: "zero" | "placement" | "home" }>(`/api/lang/${encodeURIComponent(language)}/onboarding`, {
       interests,
@@ -313,8 +316,8 @@ export const api = {
   feuilletonPlacementSubmit: (language: string, answers: Record<string, number>) =>
     postJSON<PlacementOutcome>(`/api/lang/${encodeURIComponent(language)}/placement/submit`, { answers }),
   // `warmup` : cartes révisées au sas d'entrée, décomptées du plafond de cartes de la séance.
-  feuilletonRunStart: (language: string, mode?: "court" | "relecture", warmup = 0) =>
-    postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, { ...(mode ? { mode } : {}), warmup }),
+  feuilletonRunStart: (language: string, warmup = 0) =>
+    postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, { warmup }),
   feuilletonRun: (runId: number) => getJSON<RunPlan>(`/api/lang/run/${runId}`),
   feuilletonEvents: (runId: number, events: RunEvent[], currentStep: string | null) =>
     postJSON<EventsResult>(`/api/lang/run/${runId}/events`, { events, current_step: currentStep }),
@@ -751,8 +754,8 @@ export interface StudyStreak {
 }
 
 export interface BrainstormSource {
-  source_type: "highlight" | "qa" | "flashcard" | "document" | "mistake" | "language";
-  /** Code de la langue (fiche `language`) : le portrait du module Langues. */
+  source_type: "highlight" | "qa" | "flashcard" | "document" | "mistake" | "language" | "word" | "episode";
+  /** Code de la langue des sources du module Langues (portrait, mot, épisode). */
   language?: string;
   doc_id?: number | null;
   doc_title?: string | null;

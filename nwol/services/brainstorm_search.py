@@ -3,9 +3,10 @@
 # C'est le « tool » de Clikoda pour le brainstorming : à partir d'une requête en
 # langage naturel décidée par le LLM, on fouille les contenus de l'utilisateur
 # (PDFs importés, surlignages, flashcards, anciennes Q&R, réponses fausses ou
-# partielles) et on renvoie des extraits normalisés que le prompt et l'UI peuvent
-# citer. À côté, et sans mots-clés : le portrait de l'apprenant dans chaque
-# langue du module Langues (`language_sources`).
+# partielles, et dans le module Langues : mots rencontrés, épisodes lus) et on
+# renvoie des extraits normalisés que le prompt et l'UI peuvent citer. À côté,
+# et sans mots-clés : le portrait de l'apprenant dans chaque langue
+# (`language_sources`).
 #
 # Une discussion liée à un dossier de la bibliothèque restreint TOUTES les
 # sources aux documents de ce dossier et de ses sous-dossiers (`folder_ids`, cf.
@@ -30,6 +31,7 @@
 # pour que reposer la même question ne rende pas exactement les mêmes extraits.
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -137,6 +139,7 @@ def search_user_db(
     user_id: int = DEFAULT_USER_ID,
     damp_keys: set | None = None,
     folder_ids: set[int] | None = None,
+    languages: bool = False,
 ) -> list[dict]:
     """Cherche dans la base de l'utilisateur. Renvoie des extraits normalisés.
 
@@ -162,6 +165,12 @@ def search_user_db(
     ``folder_ids`` restreint la recherche aux documents de ces dossiers. ``None``
     = toute la base ; un ensemble VIDE = aucun document, donc aucun extrait —
     jamais « pas de filtre ».
+
+    ``languages`` ajoute les mots et épisodes du module Langues — seulement
+    quand le message porte sur l'apprentissage des langues (décision LLM). Sans
+    cette porte, les épisodes d'anglais répondaient aux requêtes d'un article
+    de ML en anglais (« training data », « attention ») et Clikoda citait une
+    réplique de feuilleton au milieu d'une discussion technique.
     """
     terms = extract_terms(query)
     if not terms or limit <= 0:
@@ -174,6 +183,9 @@ def search_user_db(
     candidates.extend(_search_questions(terms, folder_ids))
     candidates.extend(_search_mistakes(terms, user_id, folder_ids))
     candidates.extend(_search_documents(terms, folder_ids))
+    if languages:
+        candidates.extend(_search_lang_words(terms, user_id, folder_ids))
+        candidates.extend(_search_lang_episodes(terms, user_id, folder_ids))
     if not candidates:
         return []
 
@@ -413,17 +425,15 @@ def language_sources(user_id: int = DEFAULT_USER_ID) -> list[dict]:
     portrait entier, pour comparer. Le snippet suit la langue de l'interface :
     il est montré tel quel sous la réponse, et c'est aussi lui que lit le prompt.
     """
-    from services.lang import LANGUAGES
     from services.lang_runs import learner_overview
 
-    labels = {lang["code"]: lang["label"] for lang in LANGUAGES}
     try:
         return [
             {
                 "source_type": "language",
                 "language": entry["language"],
                 "doc_id": None,
-                "doc_title": labels.get(entry["language"]) or entry["language"].capitalize(),
+                "doc_title": _language_label(entry["language"]),
                 "page": None,
                 "snippet": _language_snippet(entry),
             }
@@ -432,6 +442,26 @@ def language_sources(user_id: int = DEFAULT_USER_ID) -> list[dict]:
     except Exception as exc:  # pragma: no cover - best-effort
         logger.debug("Portrait des langues indisponible : %s", exc)
         return []
+
+
+def studied_language_labels(user_id: int = DEFAULT_USER_ID) -> list[str]:
+    """Noms des langues que l'apprenant a commencées dans le module Langues.
+    Best-effort : une liste vide laisse la décision sans repère, rien de plus."""
+    from services.lang_runs import started_languages
+
+    try:
+        return [_language_label(code) for code in started_languages(user_id)]
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("Langues commencées indisponibles : %s", exc)
+        return []
+
+
+def _language_label(code: str) -> str:
+    """Nom d'une langue du catalogue, tel que la page Langues l'affiche. Le
+    front le retraduit depuis le code (`language`) que porte chaque source."""
+    from services.lang import LANGUAGES
+
+    return next((lang["label"] for lang in LANGUAGES if lang["code"] == code), (code or "").capitalize())
 
 
 def _language_snippet(entry: dict) -> str:
@@ -458,6 +488,126 @@ def _language_snippet(entry: dict) -> str:
     if detail:
         parts.append(t("brainstorm.lang.difficulty", detail=detail))
     return " · ".join(parts)
+
+
+def _search_lang_words(terms: list[str], user_id: int, folder_ids: set[int] | None) -> list[dict]:
+    """Mots rencontrés dans les épisodes du module Langues (`lang_lexicon`).
+
+    TOUT le lexique, pas un échantillon : une ligne y tient en trois mots, et
+    « comment dit-on X ? » cherche UN mot précis, qu'un tirage de
+    `_CANDIDATE_POOL` lignes parmi quelques milliers manquerait. Daté par
+    l'épisode où il a été vu en dernier (le lexique n'a pas d'horodatage).
+
+    Comme une flashcard libre, un mot n'appartient à aucun dossier : une
+    discussion liée ne le voit pas (cf. `_scope_sql`).
+    """
+    if folder_ids is not None:
+        return []
+    try:
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT l.form, l.lemma, l.translation, l.pos, l.acquired_at, l.first_episode_n,
+                      p.language, e.first_played_at
+               FROM lang_lexicon l
+               JOIN lang_profiles p ON p.id = l.profile_id
+               LEFT JOIN lang_episodes e
+                 ON e.profile_id = l.profile_id AND e.episode_n = l.last_episode_n
+               WHERE p.user_id=?""",
+            (user_id,),
+        ).fetchall()
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("Recherche lexique échouée : %s", exc)
+        return []
+    out = []
+    for r in rows:
+        lemma = (r["lemma"] or "").strip()
+        form = (r["form"] or "").strip()
+        translation = (r["translation"] or "").strip()
+        hits = _scored(f"{form} {lemma} {translation}", terms)
+        if hits is None:
+            continue
+        word = lemma if _fold(form) == _fold(lemma) or not form else f"{lemma} ({form})"
+        parts = [t("brainstorm.word.entry", word=word, translation=translation)]
+        if r["pos"]:
+            parts.append(r["pos"])
+        parts.append(t("brainstorm.word.acquired" if r["acquired_at"] else "brainstorm.word.learning"))
+        if r["first_episode_n"]:
+            parts.append(t("brainstorm.word.met", n=r["first_episode_n"]))
+        out.append({
+            "source_type": "word",
+            "language": r["language"],
+            "doc_id": None,
+            "doc_title": _language_label(r["language"]),
+            "page": None,
+            "snippet": _truncate(" · ".join(parts)),
+            "_hits": hits,
+            "_age_days": selection.age_days(r["first_played_at"]),
+        })
+    return out
+
+
+def _search_lang_episodes(terms: list[str], user_id: int, folder_ids: set[int] | None) -> list[dict]:
+    """Épisodes LUS du module Langues : titre, résumé et répliques (texte et
+    traduction). Une source par épisode, qui cite sa réplique la plus proche
+    de la requête — ou son résumé, si c'est lui qui répond.
+
+    Les épisodes écrits mais pas encore joués n'en font pas partie : Clikoda ne
+    renvoie pas l'apprenant à un texte qu'il n'a pas lu. Hors de tout dossier,
+    comme les mots (cf. `_search_lang_words`).
+    """
+    if folder_ids is not None:
+        return []
+    try:
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT e.episode_n, e.title, e.summary, e.lines_json, e.first_played_at, p.language
+               FROM lang_episodes e
+               JOIN lang_profiles p ON p.id = e.profile_id
+               WHERE p.user_id=? AND e.status='played'
+               ORDER BY RANDOM() LIMIT ?""",
+            (user_id, _CANDIDATE_POOL),
+        ).fetchall()
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("Recherche épisodes échouée : %s", exc)
+        return []
+    out = []
+    for r in rows:
+        title = (r["title"] or "").strip()
+        summary = (r["summary"] or "").strip()
+        try:
+            lines = [ln for ln in json.loads(r["lines_json"] or "[]") if isinstance(ln, dict)]
+        except (TypeError, ValueError):
+            lines = []
+        spoken = [f"{ln.get('text') or ''} {ln.get('translation') or ''}" for ln in lines]
+        hits = _scored(" ".join([title, summary, *spoken]), terms)
+        if hits is None:
+            continue
+        best, best_hits = None, (0, 0)
+        for line, text in zip(lines, spoken):
+            line_hits = selection.relevance(_fold(text), terms)
+            if line_hits > best_hits:
+                best, best_hits = line, line_hits
+        head = t("brainstorm.episode", n=r["episode_n"], title=title)
+        if best is not None:
+            quote = t(
+                "brainstorm.episode.line",
+                speaker=(best.get("speaker") or "").strip() or "?",
+                text=(best.get("text") or "").strip(),
+                translation=(best.get("translation") or "").strip(),
+            )
+        else:
+            quote = summary
+        out.append({
+            "source_type": "episode",
+            "language": r["language"],
+            "doc_id": None,
+            "doc_title": _language_label(r["language"]),
+            "page": None,
+            "snippet": _truncate(f"{head} — {quote}"),
+            "_hits": hits,
+            "_age_days": selection.age_days(r["first_played_at"]),
+        })
+    return out
 
 
 def _search_documents(terms: list[str], folder_ids: set[int] | None) -> list[dict]:

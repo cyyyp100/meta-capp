@@ -18,7 +18,7 @@ import type {
   RunPlan,
   RunStep,
 } from "../../../api/feuilleton";
-import { MathText } from "../../../components/MathText";
+import { FlipCard } from "../../../components/FlipCard";
 import { useT } from "../../../i18n";
 import { EpisodeText } from "./EpisodeText";
 import { GameList } from "./Games";
@@ -139,8 +139,7 @@ export function RappelStep({ step, plan, tracker, onNext }: StepProps) {
   const episode = episodeOf(plan, step.episode_ref);
   return (
     <Card>
-      <StepTitle hint={step.teaser_only ? undefined : t("feuil.rappel.hint")}>{t("feuil.rappel.title")}</StepTitle>
-      {!!step.teaser_only && <p style={{ fontStyle: "italic" }}>{String(step.teaser || t("feuil.rappel.first"))}</p>}
+      <StepTitle hint={t("feuil.rappel.hint")}>{t("feuil.rappel.title")}</StepTitle>
       {!!step.long && (
         <ol style={{ paddingInlineStart: 20 }}>
           {((step.summaries as string[]) ?? []).map((s, i) => <li key={i}>{s}</li>)}
@@ -412,26 +411,24 @@ export function CartesStep({ step, tracker, onNext, title }: StepProps & { title
     <Card>
       <StepTitle hint={t("feuil.cards.hint", { n: cards.length })}>{title ?? t("feuil.cards.title")}</StepTitle>
       {card ? (
-        <div style={{ textAlign: "center", display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 24, fontWeight: 600 }}><MathText text={card.front} dir="auto" /></div>
-          {/* La prononciation accompagne la face écrite dans la langue apprise. */}
-          {card.pronunciation && card.pronunciation_side === "front" && (
-            <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
-          )}
+        <div style={{ display: "grid", gap: 12, justifyItems: "center" }}>
+          {/* Même carte que les flashcards : clic => verso. Le verdict, lui, se
+              donne en dessous — un re-clic sur la carte ne juge rien. */}
+          <FlipCard
+            card={card}
+            flipped={flipped}
+            disabled={flipped}
+            onClick={() => setFlipped(true)}
+            minHeight="min(40vh, 320px)"
+          />
           {flipped ? (
-            <>
-              <div style={{ fontSize: 18 }}><MathText text={card.back} dir="auto" /></div>
-              {card.pronunciation && card.pronunciation_side === "back" && (
-                <div style={{ color: "var(--muted)" }}>{card.pronunciation}</div>
-              )}
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                <button style={ghostBtn} onClick={() => verdict("incorrect")}>{t("feuil.cards.no")}</button>
-                <button style={ghostBtn} onClick={() => verdict("partial")}>{t("feuil.cards.almost")}</button>
-                <button style={primaryBtn} onClick={() => verdict("correct")}>{t("feuil.cards.yes")}</button>
-              </div>
-            </>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button style={ghostBtn} onClick={() => verdict("incorrect")}>{t("feuil.cards.no")}</button>
+              <button style={ghostBtn} onClick={() => verdict("partial")}>{t("feuil.cards.almost")}</button>
+              <button style={primaryBtn} onClick={() => verdict("correct")}>{t("feuil.cards.yes")}</button>
+            </div>
           ) : (
-            <div><button style={primaryBtn} onClick={() => setFlipped(true)}>{t("feuil.cards.flip")}</button></div>
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>{t("flash.tap_reveal")}</div>
           )}
         </div>
       ) : (

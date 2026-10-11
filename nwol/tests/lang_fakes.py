@@ -227,6 +227,16 @@ def fake_writing_feedback(params, ok, err, on_metrics=None, model=None):
         "corrected": text, "praise": "Well done." if en else "Bien joué."})
 
 
+def fake_hook(params, ok, err, on_metrics=None, model=None):
+    """Une accroche tirée du titre de l'épisode, dans la langue d'explication."""
+    CALLS.append("hook")
+    PROMPTS.append({**params, "task": "hook"})
+    if _en(params):
+        ok({"curiosity_hook": f"“{params['title']}”: what is going to happen? You are about to find out."})
+        return
+    ok({"curiosity_hook": f"« {params['title']} » : que va-t-il se passer ? Tu vas le découvrir."})
+
+
 def install(monkeypatch):
     """Remplace les appels Clikoda du feuilleton et joue la génération inline."""
     from llm import ollama_client
@@ -239,6 +249,7 @@ def install(monkeypatch):
     monkeypatch.setattr(lang_writing, "RUN_IN_BACKGROUND", False)
     monkeypatch.setattr(ollama_client, "generate_lang_point_lesson_async", fake_lesson)
     monkeypatch.setattr(ollama_client, "generate_lang_writing_feedback_async", fake_writing_feedback)
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_hook_async", fake_hook)
     monkeypatch.setattr(ollama_client, "generate_lang_story_bible_async", fake_bible)
     monkeypatch.setattr(ollama_client, "generate_lang_story_arc_async", fake_arc)
     monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async", fake_text)

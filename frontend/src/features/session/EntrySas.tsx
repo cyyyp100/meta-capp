@@ -44,16 +44,22 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *   * un document : accroche de curiosité (LLM) et cartes de sa matière
  *     d'abord (dues, puis tirage récence × déjà vue), complétées par les
  *     autres disciplines — jamais par une autre langue ;
- *   * une langue : cartes de cette langue (dues, puis récentes), et pour
- *     accroche le thème de la séance quand il est connu — pas d'appel LLM.
+ *   * une séance du feuilleton (`episode`) : cartes de la langue (dues, puis
+ *     récentes), et une accroche de curiosité (LLM) sur l'épisode que la
+ *     séance va faire découvrir — aucune quand elle n'en joue pas de neuf ;
+ *   * une leçon du flux hérité (`language`) : les mêmes cartes, et pour
+ *     accroche le thème de la leçon quand il est connu — pas d'appel LLM.
  */
 export type EntrySource =
   | { kind: "document"; docId: number }
+  | { kind: "episode"; language: string }
   | { kind: "language"; language: string; theme?: string };
 
+const LANGUAGE_COPY = { label: "lang.entry_label", text: "lang.entry_text", leave: "feuil.back", leaveHint: "lang.entry_back_hint" } as const;
 const COPY = {
   document: { label: "entry.label", text: "entry.text", leave: "entry.back_library", leaveHint: "entry.back_library_hint" },
-  language: { label: "lang.entry_label", text: "lang.entry_text", leave: "feuil.back", leaveHint: "lang.entry_back_hint" },
+  episode: LANGUAGE_COPY,
+  language: LANGUAGE_COPY,
 } as const;
 
 export function EntrySas({
@@ -104,16 +110,21 @@ export function EntrySas({
   const skipAfter = Math.min(MAX_WAIT_SECONDS, Math.ceil(totalSeconds / 2));
   const canSkip = demo || elapsed >= skipAfter;
 
-  // La langue fait partie de la clé : l'accroche est générée dans la langue de
-  // l'interface, et une accroche mise en cache en anglais ne doit pas resservir
-  // après un passage au français.
+  // L'accroche de Clikoda : celle du document, ou celle de l'épisode à venir.
+  // La langue de l'interface fait partie de la clé : une accroche mise en cache
+  // en anglais ne doit pas resservir après un passage au français (le lecteur
+  // purge celle d'un document par `["hook", docId]`). Celle d'un épisode
+  // s'écrit à CHAQUE sas (`gcTime: 0`) : sa clé ne dit pas de quel épisode il
+  // s'agit — le serveur seul le sait —, et le sas suivant en ouvrira un autre.
   const lang = useLangStore((s) => s.lang);
   const docId = source.kind === "document" ? source.docId : null;
+  const episodeOf = source.kind === "episode" ? source.language : null;
   const { data: hook } = useQuery({
-    queryKey: ["hook", docId, lang],
-    queryFn: () => api.docHook(docId as number, 1),
+    queryKey: docId !== null ? ["hook", docId, lang] : ["episode-hook", episodeOf, lang],
+    queryFn: () => (docId !== null ? api.docHook(docId, 1) : api.feuilletonHook(episodeOf as string)),
     staleTime: Infinity,
-    enabled: !demo && docId !== null,
+    gcTime: episodeOf !== null ? 0 : undefined,
+    enabled: !demo && (docId !== null || episodeOf !== null),
   });
   // Warm-up : 5 cartes au plus, tirées pour ce document ou pour cette langue.
   const { data: cards } = useQuery({
@@ -122,7 +133,7 @@ export function EntrySas({
     staleTime: Infinity,
     enabled: !demo,
   });
-  const hookText = demo ? t("demo.entry_hook") : source.kind === "document" ? hook?.hook : source.theme;
+  const hookText = demo ? t("demo.entry_hook") : source.kind === "language" ? source.theme : hook?.hook;
   const copy = COPY[source.kind];
   const leave = onLeave && !demo ? <LeaveButton onLeave={onLeave} label={t(copy.leave)} hint={t(copy.leaveHint)} /> : null;
 

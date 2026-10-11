@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 import lang_fakes
-from config.settings import LANG_FEELING_META_STEP, LANG_PILOT_LANGUAGES
+from config.settings import LANG_FEELING_META_STEP, LANG_PILOT_LANGUAGES, LANG_RUN_TARGET_S
 
 LANG = "espagnol"
 
@@ -34,8 +34,16 @@ def clock(monkeypatch):
     return state
 
 
-def _start(client, mode=None):
-    return client.post(f"/api/lang/{LANG}/run/start", json={"mode": mode} if mode else {}).json()
+def _start(client):
+    return client.post(f"/api/lang/{LANG}/run/start", json={}).json()
+
+
+def _no_episode_ready(monkeypatch):
+    """Clikoda n'écrit plus d'épisode : la séance retombe sur une relecture (R1)."""
+    from llm import ollama_client
+
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err("panne"))
 
 
 WRITTEN = "Hoy estoy muy bien en la plaza con Carmen y Pablo, y hay una fiesta mañana."
@@ -382,8 +390,8 @@ def test_three_days_away_still_plays_the_ready_episode(client, fake, clock):
 
 
 def test_four_days_away_impose_a_relecture_and_keep_the_episode(client, fake, clock):
-    """Au-delà de 3 jours : relecture imposée, sans nouvel épisode — même une
-    séance courte demandée —, sans respiration avant le palier `reprise`."""
+    """Au-delà de 3 jours : relecture imposée, sans nouvel épisode, sans
+    respiration avant le palier `reprise`."""
     _onboard(client)
     _play(client, _start(client))
     clock["advance"]()
@@ -392,7 +400,7 @@ def test_four_days_away_impose_a_relecture_and_keep_the_episode(client, fake, cl
     clock["advance"](4)
     status = client.get(f"/api/lang/{LANG}/status").json()
     assert status["relecture_due"] is True and status["next_status"] == "ready"
-    run = _start(client, "court")
+    run = _start(client)
     assert run["mode"] == "reprise" and run["absence"]["tier"] == "rappel_long"
     assert [s["kind"] for s in run["steps"]][:3] == ["accueil", "recap", "relecture"]
     assert not any(s["kind"] == "lecture" for s in run["steps"])
@@ -459,16 +467,29 @@ def test_duration_cap_skips_to_the_next_essential_step(client, fake, clock):
     assert res["skip_to"] == "au_revoir"
 
 
-def test_short_and_reread_modes_on_request(client, fake, clock):
+def test_the_server_alone_picks_the_mode(client, fake, clock):
+    """Ni séance courte ni « juste relire » : un mode demandé est ignoré."""
     _onboard(client)
-    court = _start(client, "court")
-    assert court["mode"] == "court"
-    assert [s["kind"] for s in court["steps"]] == ["rappel", "lecture", "lecon", "au_revoir"]
-    assert court["steps"][2]["compact"] is True and court["pregen_step"] == "lecon"
-    _play(client, court)
-    clock["advance"]()
-    relecture = _start(client, "relecture")
-    assert relecture["mode"] == "relecture" and relecture["steps"][0]["kind"] == "relecture"
+    for mode in ("court", "relecture"):
+        run = client.post(f"/api/lang/{LANG}/run/start", json={"mode": mode}).json()
+        assert run["mode"] == "episode" and run["target_s"] == LANG_RUN_TARGET_S
+        assert not any(s.get("compact") or s.get("teaser_only") for s in run["steps"])
+
+
+def test_an_open_short_run_is_abandoned(client, fake, clock):
+    """Une séance courte d'avant son retrait, restée ouverte, ne se reprend pas :
+    l'épisode qu'elle jouait se joue dans une séance complète."""
+    from db import get_connection
+
+    _onboard(client)
+    old = _start(client)
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE lang_runs SET mode='court' WHERE id=?", (old["run_id"],))
+    run = _start(client)
+    assert run["run_id"] != old["run_id"] and run["mode"] == "episode" and not run["resumed"]
+    assert run["episode_n"] == old["episode_n"]
+    assert client.get(f"/api/lang/run/{old['run_id']}").json()["status"] == "abandoned"
 
 
 def test_placement_sets_the_starting_point(client, fake, clock):
@@ -543,27 +564,123 @@ def test_warmup_cards_fall_back_on_recent_cards(client, fake, clock):
     assert fronts[:2] == ["du0", "du1"] and all(f.startswith("nv") for f in fronts[2:])
 
 
-def test_warmup_skips_the_cards_of_todays_open_run(client, fake, clock):
+def test_warmup_skips_the_cards_of_todays_open_run(client, fake, clock, monkeypatch):
     """Reprise d'une séance du jour : son étape `cartes` les révisera, pas le sas."""
+    _no_episode_ready(monkeypatch)
     _onboard(client)
     _add_cards(4, due=True, prefix="du")
     _add_cards(2, due=False, prefix="nv")
-    run = _start(client, "relecture")
+    run = _start(client)
+    assert run["mode"] == "relecture"
     planned = {c["front"] for s in run["steps"] for c in s.get("cards") or []}
     assert planned == {f"du{i}" for i in range(4)}
     assert sorted(_warmup_fronts(client)) == ["nv0", "nv1"]
 
 
-def test_warmup_cards_count_against_the_run_cap(client, fake, clock):
+def test_warmup_cards_count_against_the_run_cap(client, fake, clock, monkeypatch):
     """P13 : le plafond de cartes vaut pour la séance entière, sas d'entrée compris
     (le compte envoyé par le client est borné à WARMUP_MAX_CARDS)."""
     from config.settings import LANG_DUE_CARDS_CAP, WARMUP_MAX_CARDS
 
+    _no_episode_ready(monkeypatch)
     _onboard(client)
     _add_cards(LANG_DUE_CARDS_CAP + 5, due=True, prefix="du")
-    run = client.post(f"/api/lang/{LANG}/run/start", json={"mode": "relecture", "warmup": 99}).json()
+    run = client.post(f"/api/lang/{LANG}/run/start", json={"warmup": 99}).json()
+    assert run["mode"] == "relecture"
     cartes = next(s for s in run["steps"] if s["kind"] == "cartes")
     assert len(cartes["cards"]) == LANG_DUE_CARDS_CAP - WARMUP_MAX_CARDS
+
+
+# ── Sas d'entrée : l'accroche de l'épisode à venir ───────────────────────────
+
+def _hook(client):
+    return client.get(f"/api/lang/{LANG}/hook").json()["hook"]
+
+
+def _hook_prompts(fake):
+    return [p for p in fake.PROMPTS if p["task"] == "hook"]
+
+
+def test_the_entry_hook_teases_the_episode_to_come(client, fake, clock):
+    """Écrite par Clikoda pendant le sas, sur l'épisode que la séance va jouer :
+    son titre, son résumé, son début traduit — pas sa fin —, l'épisode d'avant."""
+    from config.settings import LANG_HOOK_OPENING_LINES
+
+    _onboard(client)
+    _play(client, _start(client))
+    clock["advance"]()
+    ep = _episode(2)
+    assert ep["status"] == "ready" and len(ep["lines"]) > LANG_HOOK_OPENING_LINES
+    assert ep["title"] in _hook(client)
+    prompt = _hook_prompts(fake)[-1]
+    assert (prompt["episode_n"], prompt["title"], prompt["summary"]) == (2, ep["title"], ep["summary"])
+    assert prompt["opening"] == [(ln["speaker"], ln["translation"]) for ln in ep["lines"][:LANG_HOOK_OPENING_LINES]]
+    assert prompt["previous"] == _episode(1)["summary"] and prompt["explain_lang"] == "fr"
+    assert [c["name"] for c in prompt["characters"]] == ["Lucía", "Pablo", "Carmen", "Iñaki"]
+    # Le sas ne décide rien : la séance joue bien cet épisode.
+    run = _start(client)
+    assert (run["mode"], run["episode_n"]) == ("episode", 2)
+
+
+def test_no_hook_without_a_new_episode(client, fake, clock, monkeypatch):
+    """Séance zéro, reprise après absence, relecture de repli : rien à
+    annoncer, et Clikoda n'est pas appelé."""
+    client.post(f"/api/lang/{LANG}/onboarding", json={"interests": ["cuisine"], "has_studied": False})
+    assert _hook(client) == ""  # séance zéro
+    _play(client, _start(client))
+    _play(client, _start(client))  # épisode 1
+    clock["advance"](10)
+    assert _hook(client) == ""  # reprise : l'épisode 2 attend la séance suivante
+    _play(client, _start(client))
+    _no_episode_ready(monkeypatch)
+    _play(client, _start(client))  # épisode 2 ; le 3 ne s'écrit pas
+    clock["advance"]()
+    assert _start(client)["mode"] == "relecture"
+    assert _hook(client) == ""
+    assert not _hook_prompts(fake)
+
+
+def test_a_resumed_run_teases_its_episode_until_it_is_read(client, fake, clock):
+    _onboard(client)
+    run = _start(client)
+    assert _hook(client)  # séance du jour restée ouverte : son épisode, pas encore lu
+    client.post(f"/api/lang/run/{run['run_id']}/events", json={"events": [
+        {"type": "step", "step": "lecture", "started": True},
+        {"type": "step", "step": "lecture", "ended": True, "active_s": 60},
+    ], "current_step": "lecture"})
+    asked = len(_hook_prompts(fake))
+    assert _hook(client) == "" and len(_hook_prompts(fake)) == asked
+
+
+def test_the_hook_is_dropped_when_clikoda_fails_or_strays(client, fake, clock, monkeypatch):
+    """Pas d'accroche plutôt qu'une mauvaise : Clikoda en panne, une phrase trop
+    longue, ou écrite dans l'autre langue d'explication."""
+    from config.settings import LANG_HOOK_MAX_CHARS
+    from llm import ollama_client
+
+    _onboard(client)
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_hook_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err("panne"))
+    assert _hook(client) == ""
+    for bad in ("Une fête se prépare. " * (LANG_HOOK_MAX_CHARS // 10),
+                "What is the secret that Carmen keeps for the party?"):
+        monkeypatch.setattr(ollama_client, "generate_lang_episode_hook_async",
+                            lambda params, ok, err, on_metrics=None, model=None, bad=bad: ok({"curiosity_hook": bad}))
+        assert _hook(client) == ""
+
+
+def test_the_hook_speaks_the_explanation_language(client, fake, clock, english_ui):
+    from llm.prompts import build_lang_episode_hook_prompt
+
+    _onboard(client)
+    assert "what is going to happen" in _hook(client)
+    prompt = _hook_prompts(fake)[-1]
+    assert (prompt["explain_lang"], prompt["language_label"]) == ("en", "Spanish")
+    assert "soap opera in Spanish" in build_lang_episode_hook_prompt(prompt)
+
+
+def test_no_hook_for_a_language_outside_the_pilot(client):
+    assert client.get("/api/lang/italien/hook").status_code == 404
 
 
 def test_generation_is_single_flight_and_requeued_at_startup(client, fake):

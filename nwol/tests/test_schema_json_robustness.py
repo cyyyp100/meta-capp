@@ -13,6 +13,7 @@ PARSERS = [
     schema_json.parse_rephrasing,
     schema_json.parse_session_summary,
     schema_json.parse_curiosity_hook,
+    schema_json.parse_lang_episode_hook,
     schema_json.parse_chapter_summary,
     schema_json.parse_quiz_session_analysis,
     schema_json.parse_flashcard,
@@ -55,6 +56,15 @@ def test_parsers_accept_dict_and_none_like(parser):
 
 
 # ── Récupérations tolérantes attendues (cas réels de gemma) ─────────────────
+
+def test_lang_episode_hook_drops_wrapping_quotes_only():
+    parse = schema_json.parse_lang_episode_hook
+    assert parse('{"curiosity_hook": "« Une fête sur la place ? »"}') == {"curiosity_hook": "Une fête sur la place ?"}
+    assert parse({"curiosity_hook": '"Carmen sait tout."'}) == {"curiosity_hook": "Carmen sait tout."}
+    kept = "« Non », dit Carmen, « jamais »"
+    assert parse({"curiosity_hook": kept}) == {"curiosity_hook": kept}
+    assert parse({"curiosity_hook": "   "}) is None
+
 
 def test_question_recovers_from_fenced_and_trailing_comma():
     raw = """```json

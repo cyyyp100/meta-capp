@@ -2177,28 +2177,6 @@ Contraintes strictes :
 - Les thèmes progressent de façon réaliste : salutations → famille → travail → société → débat."""
 
 
-def build_lang_curiosity_prompt(
-    language: str, lesson_n: int, theme: str, grammar_point: str
-) -> str:
-    return f"""Tu génères une phrase d'accroche pour un apprenant qui s'apprête à commencer \
-la leçon {lesson_n} de {language}.
-
-Thème de la leçon : {theme}
-Point grammatical : {grammar_point or "non spécifié"}
-
-Réponds UNIQUEMENT en JSON valide, sans markdown :
-{{
-  "curiosity_hook": "une seule phrase courte et motivante en français",
-  "cultural_note": "anecdote culturelle factuelle courte sur la langue ou le thème",
-  "tone": "calm"
-}}
-
-Contraintes :
-- curiosity_hook : une seule phrase max 120 caractères, parle du contenu culturel ou linguistique.
-- cultural_note : anecdote factuelle max 200 caractères.
-- tone vaut exactement "calm", "intriguing", "concrete" ou "playful"."""
-
-
 def build_lang_lesson_prompt(
     language: str, lesson_n: int, curriculum_row: dict
 ) -> str:
@@ -3269,6 +3247,39 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
 "praise" sont en français ; "original", "correction" et "corrected" sont en {lang}."""
 
 
+def _hook_opening(p: dict, narrator: str) -> str:
+    return "\n".join(f"- {speaker or narrator} : {translation}" for speaker, translation in p.get("opening") or [])
+
+
+def build_lang_episode_hook_prompt(p: dict) -> str:
+    """L'accroche du sas d'entrée, écrite pendant le sas : une phrase sur
+    l'épisode que la séance va faire découvrir. Ni phrase d'exemple ni mot de
+    la langue cible dans la consigne (un petit modèle recopie les exemples) ;
+    du texte, seul le DÉBUT traduit — la fin ne doit pas être éventée."""
+    if _explain_en(p):
+        return _build_lang_episode_hook_prompt_en(p)
+    lang = p["language_label"]
+    if p.get("previous"):
+        previous = f"Épisode précédent : {p['previous']}"
+    else:
+        previous = "C'est le premier épisode du feuilleton." if p["episode_n"] == 1 else ""
+    return f"""Un apprenant s'apprête à lire l'épisode {p['episode_n']} d'un feuilleton pédagogique en {lang}.
+Personnages : {_characters_line(p.get('characters') or [])}.
+{previous}
+Titre de l'épisode : {p['title']}
+Ce qui s'y passe : {p['summary']}
+Début de l'épisode, traduit :
+{_hook_opening(p, "Narrateur")}
+
+Écris UNE phrase d'accroche en français, adressée à l'apprenant (tutoiement), qui lui donne envie de découvrir cet
+épisode : une situation, un personnage, une question que l'épisode pose. Ne révèle pas comment il se termine. La
+phrase parle de l'histoire, ni de grammaire ni de l'application ; aucun mot en {lang} hors les prénoms ;
+{p['max_chars']} caractères au plus.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{"curiosity_hook": "la phrase (fr)"}}"""
+
+
 def build_lang_weekly_analysis_prompt(p: dict) -> str:
     if _explain_en(p):
         return _build_lang_weekly_analysis_prompt_en(p)
@@ -3492,6 +3503,29 @@ Answer ONLY with valid JSON, no markdown:
 "verdict": "correct" if there is no error, "partial" if the meaning comes through despite the errors, "incorrect"
 otherwise; "errors" is empty if the text is correct. "error_type" among: {", ".join(p['error_types'])}. The
 explanations and "praise" are in English; "original", "correction" and "corrected" are in {lang}."""
+
+
+def _build_lang_episode_hook_prompt_en(p: dict) -> str:
+    lang = p["language_label"]
+    if p.get("previous"):
+        previous = f"Previous episode: {p['previous']}"
+    else:
+        previous = "This is the first episode of the series." if p["episode_n"] == 1 else ""
+    return f"""A learner is about to read episode {p['episode_n']} of a language-learning soap opera in {lang}.
+Characters: {_characters_line(p.get('characters') or [], en=True)}.
+{previous}
+Episode title: {p['title']}
+What happens: {p['summary']}
+Beginning of the episode, translated:
+{_hook_opening(p, "Narrator")}
+
+Write ONE hook sentence in English, addressed to the learner ("you"), that makes them want to discover this
+episode: a situation, a character, a question the episode raises. Do not reveal how it ends. The sentence is about
+the story, neither about grammar nor about the application; no word in {lang} except first names;
+{p['max_chars']} characters at most.
+
+Answer ONLY with valid JSON, no markdown:
+{{"curiosity_hook": "the sentence (en)"}}"""
 
 
 def _build_lang_weekly_analysis_prompt_en(p: dict) -> str:
@@ -3880,6 +3914,8 @@ def _brainstorm_sources_block(sources: list[dict] | None, languages_checked: boo
         "document": "Document",
         "mistake": _t("Erreur passée", "Past mistake"),
         "language": _t("Langue", "Language"),
+        "word": _t("Mot rencontré", "Word met"),
+        "episode": _t("Épisode lu", "Episode read"),
     }
     lines: list[str] = []
     for i, s in enumerate(sources, 1):
@@ -3922,11 +3958,23 @@ def build_brainstorm_search_decide_prompt(
     history: list[dict] | None,
     user_message: str,
     scope: dict | None = None,
+    languages: list[str] | None = None,
 ) -> str:
-    """Décision JSON courte : faut-il fouiller la base de l'utilisateur, et avec quels mots-clés."""
+    """Décision JSON courte : faut-il fouiller la base de l'utilisateur, avec quels
+    mots-clés, et faut-il consulter le module Langues.
+
+    ``languages`` : les langues qu'il a commencées, nommées pour que « l'épisode
+    d'hier en espagnol » soit reconnu comme une question sur ce module."""
     hist = _brainstorm_history_block(history, max_turns=4)
-    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses, erreurs passées) et à sa progression dans le module Langues de l'app.", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers, past mistakes) and to their progress in the app's Languages module.")}
-{_brainstorm_scope_block(scope)}{_t("Décide s'il serait utile de chercher dans cette base AVANT de répondre au dernier message.", "Decide whether searching that database BEFORE answering the last message would help.")}
+    names = ", ".join(str(name) for name in (languages or []) if name)
+    studied = (
+        _t(f"Langues qu'il apprend dans le module Langues (une histoire en épisodes par langue, avec le vocabulaire rencontré) : {names}.",
+           f"Languages they are learning in the Languages module (one story in episodes per language, with the vocabulary met): {names}.")
+        + "\n"
+        if names else ""
+    )
+    return f"""{_t("Tu prépares la réponse d'un assistant de brainstorming qui a accès à la base personnelle de l'utilisateur (PDFs lus, passages surlignés, flashcards, anciennes questions/réponses, erreurs passées, mots rencontrés et épisodes lus dans ses langues) et à sa progression dans le module Langues de l'app.", "You are preparing a brainstorming assistant's reply; it has access to the user's personal database (PDFs read, highlighted passages, flashcards, past questions/answers, past mistakes, words met and episodes read in their languages) and to their progress in the app's Languages module.")}
+{studied}{_brainstorm_scope_block(scope)}{_t("Décide s'il serait utile de chercher dans cette base AVANT de répondre au dernier message.", "Decide whether searching that database BEFORE answering the last message would help.")}
 
 {_t("Contexte récent", "Recent context")} :
 {hist}
@@ -3940,7 +3988,8 @@ def build_brainstorm_search_decide_prompt(
 {_t("Règles", "Rules")} :
 - search=true {_t("seulement si le sujet peut faire écho à ce que l'utilisateur a déjà lu/noté", "only if the topic may echo something the user has already read/noted")}.
 - {_t("1 à 3 requêtes courtes (mots-clés), pas de phrases. Si search=false, queries=[].", "1 to 3 short keyword queries, not sentences. If search=false, queries=[].")}
-- languages=true {_t("si le message porte sur SON apprentissage des langues dans l'app (quelle langue travailler ou prioriser, son niveau, ses progrès, son rythme, son vocabulaire) : la réponse recevra alors l'état chiffré de chaque langue qu'il étudie. Indépendant de search ; false sinon.", "if the message is about THEIR language learning in the app (which language to work on or prioritise, their level, progress, pace, vocabulary): the reply will then receive the computed state of each language they study. Independent of search; false otherwise.")}"""
+- languages=true {_t("si le message porte sur SON apprentissage des langues dans l'app (quelle langue travailler ou prioriser, son niveau, ses progrès, son rythme, un mot ou un épisode qu'il a rencontré) : la réponse recevra alors l'état chiffré de chaque langue qu'il étudie, et search fouillera aussi les mots et épisodes de ses langues. false sinon — en particulier pour un sujet de cours, même en anglais.", "if the message is about THEIR language learning in the app (which language to work on or prioritise, their level, progress, pace, a word or an episode they met): the reply will then receive the computed state of each language they study, and search will also cover the words and episodes of their languages. false otherwise — in particular for a course topic, even in English.")}
+- {_t("Pour un mot ou un épisode de ses langues, une requête au moins garde ses mots tels qu'il les a écrits, sans les traduire : titres, résumés et traductions des épisodes sont dans sa langue à lui.", "For a word or an episode of their languages, at least one query keeps their words exactly as written, untranslated: episode titles, summaries and translations are in their own language.")}"""
 
 
 def build_brainstorm_answer_prompt(
@@ -3961,8 +4010,8 @@ def build_brainstorm_answer_prompt(
     src = _brainstorm_sources_block(sources, languages_checked)
     language_rule = (
         "\n- " + _t(
-            "Les fiches « Langue » sont l'état CALCULÉ par l'app de son apprentissage de chaque langue (niveau, avancée dans le programme, régularité, mots acquis, difficulté des dernières séances). Pour une question sur ses langues, fonde ta réponse sur ces chiffres : compare les langues entre elles, dis ce qu'ils montrent, puis propose. N'invente aucun chiffre, ni aucune langue absente des fiches ; si aucune langue n'est commencée, dis-le simplement.",
-            "The \"Language\" entries are the app's COMPUTED state of their learning in each language (level, position in the programme, regularity, words acquired, difficulty of recent sessions). For a question about their languages, ground your reply in these figures: compare the languages, say what they show, then suggest. Never invent a figure or a language missing from the entries; if no language has been started, just say so.",
+            "Les fiches « Langue » sont l'état CALCULÉ par l'app de son apprentissage de chaque langue (niveau, avancée dans le programme, régularité, mots acquis, difficulté des dernières séances). Pour une question sur ses langues, fonde ta réponse sur ces chiffres : compare les langues entre elles, dis ce qu'ils montrent, puis propose. N'invente aucun chiffre, ni aucune langue absente des fiches ; si aucune langue n'est commencée, dis-le simplement. Un « Mot rencontré » ou un « Épisode lu » se cite en phrase (le mot, sa traduction, l'épisode où il l'a croisé, s'il l'a acquis), jamais en recopiant la fiche avec ses « · » ; un épisode absent des extraits, tu ne t'en souviens pas.",
+            "The \"Language\" entries are the app's COMPUTED state of their learning in each language (level, position in the programme, regularity, words acquired, difficulty of recent sessions). For a question about their languages, ground your reply in these figures: compare the languages, say what they show, then suggest. Never invent a figure or a language missing from the entries; if no language has been started, just say so. A \"Word met\" or an \"Episode read\" is quoted in a sentence (the word, its translation, the episode where they met it, whether they acquired it), never by copying the entry with its \"·\" separators; an episode missing from the excerpts is one you do not remember.",
         )
         if languages_checked
         else ""
@@ -3975,7 +4024,7 @@ def build_brainstorm_answer_prompt(
 {_t("Messages récents", "Recent messages")} :
 {hist}
 
-{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R, erreurs passées, progression en langues)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A, past mistakes, language progress)")} :
+{_t("Extraits trouvés dans la base de l'utilisateur (PDFs, surlignages, flashcards, anciennes Q&R, erreurs passées, mots et épisodes de ses langues, progression en langues)", "Excerpts found in the user's database (PDFs, highlights, flashcards, past Q&A, past mistakes, words and episodes of their languages, language progress)")} :
 {src}
 
 {_t("Nouveau message de l'utilisateur", "User's new message")} :

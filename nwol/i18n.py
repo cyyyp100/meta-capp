@@ -578,6 +578,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.lang.easy": "facile",
         "brainstorm.lang.ok": "adaptée",
         "brainstorm.lang.hard": "difficile",
+        # Mots et épisodes du module Langues cités par le brainstorming.
+        "brainstorm.word.entry": "{word} → {translation}",
+        "brainstorm.word.acquired": "acquis",
+        "brainstorm.word.learning": "pas encore acquis",
+        "brainstorm.word.met": "rencontré à l'épisode {n}",
+        "brainstorm.episode": "épisode {n} « {title} »",
+        "brainstorm.episode.line": "{speaker} : « {text} » ({translation})",
         "library.title_empty": "Le titre ne peut pas être vide.",
         # « Localiser le fichier » (services/relink) : refus traduits, renvoyés
         # tels quels par le serveur et affichés par l'interface.
@@ -1223,6 +1230,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.lang.easy": "easy",
         "brainstorm.lang.ok": "right level",
         "brainstorm.lang.hard": "hard",
+        "brainstorm.word.entry": "{word} → {translation}",
+        "brainstorm.word.acquired": "acquired",
+        "brainstorm.word.learning": "not acquired yet",
+        "brainstorm.word.met": "met in episode {n}",
+        "brainstorm.episode": "episode {n} \"{title}\"",
+        "brainstorm.episode.line": "{speaker}: \"{text}\" ({translation})",
         "library.title_empty": "The title cannot be empty.",
         "library.file_missing": "File not found: it was moved, renamed or deleted since the import.",
         "library.relink_different_file": (

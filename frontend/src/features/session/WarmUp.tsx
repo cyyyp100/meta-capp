@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
 import type { Flashcard } from "../../api/types";
-import { MathText } from "../../components/MathText";
+import { FlipCard } from "../../components/FlipCard";
 import { useT } from "../../i18n";
 import { WhyButton } from "../science/WhyButton";
 import { SasOverlay } from "./SasOverlay";
@@ -91,24 +91,7 @@ export function WarmUp({
         <div style={{ margin: "0 0 14px" }}>
           <WhyButton whyKey="warmup" onOpenChange={onWhyOpenChange} />
         </div>
-        <div
-          data-tour="warmup-card"
-          onClick={advance}
-          style={{ minHeight: "min(62vh, 480px)", display: "grid", placeItems: "center", padding: 44, borderRadius: "var(--radius-lg)", border: "1px solid var(--border)", background: flipped ? "var(--warning-soft)" : "var(--surface)", boxShadow: "var(--shadow-md)", cursor: "pointer", fontSize: 24, fontFamily: "var(--font-title)" }}
-        >
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.5, marginBottom: 16 }}>
-              {flipped ? t("flash.a") : t("flash.q")}
-            </div>
-            <MathText text={flipped ? card.back : card.front} dir="auto" />
-            {/* Carte de langue : la prononciation accompagne la face écrite dans la langue apprise. */}
-            {card.pronunciation && card.pronunciation_side === (flipped ? "back" : "front") && (
-              <div title={t("lang.phonetic")} style={{ marginTop: 10, fontSize: 18, fontStyle: "italic", color: "var(--muted)" }}>
-                [{card.pronunciation}]
-              </div>
-            )}
-          </div>
-        </div>
+        <FlipCard card={card} flipped={flipped} onClick={advance} minHeight="min(62vh, 480px)" dataTour="warmup-card" />
         <div style={{ marginTop: 16, color: "var(--muted)", fontSize: 13 }}>
           {flipped ? t("flash.tap_next") : t("flash.tap_reveal")}
         </div>

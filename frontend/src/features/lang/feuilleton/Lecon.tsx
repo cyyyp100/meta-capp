@@ -8,8 +8,6 @@
 //    (`lesson_pending`), elle est redemandée en entrant dans l'étape — sans
 //    attendre : sinon, l'étape garde son repli (titre, but, explication).
 // 3. S'entraîner : trois micro-items tirés du texte, trois de la leçon.
-// En séance courte (`compact`), la règle et « à retenir » seulement ; la leçon
-// complète reste repliée.
 import { useEffect, useState } from "react";
 
 import { api } from "../../../api/client";
@@ -24,7 +22,6 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
   const t = useT();
   const episode = episodeOf(plan, step.episode_ref)!;
   const point = step.point as PointView;
-  const compact = !!step.compact;
   const [lesson, setLesson] = useState<Lesson | null>((step.lesson as Lesson | null) ?? null);
   const [lessonItems, setLessonItems] = useState<GameItem[]>((step.lesson_items as GameItem[]) ?? []);
   const [phase, setPhase] = useState<"observe" | "lesson" | "practice">("observe");
@@ -63,7 +60,7 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
   return (
     <Card>
       <StepTitle hint={point.learner_goal}>{`${t("feuil.lecon.title")} : ${point.title}`}</StepTitle>
-      {(phase === "observe" || compact) && (
+      {phase === "observe" && (
         <>
           {point.observation && <p style={{ fontWeight: 600 }}>{point.observation}</p>}
           <EpisodeText
@@ -80,31 +77,16 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
             </details>
           )}
           {point.explanation && <p style={{ marginTop: 12, lineHeight: 1.6 }}>{point.explanation}</p>}
+          <NextButton label={t("feuil.lecon.show_lesson")} onClick={() => setPhase("lesson")} />
         </>
       )}
-      {compact && (
-        <>
-          {lesson ? <RuleAndRemember lesson={lesson} /> : <p style={{ color: "var(--muted)" }}>{t("feuil.lecon.pending")}</p>}
-          {lesson && (
-            <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", color: "var(--muted)" }}>{t("feuil.lecon.full_lesson")}</summary>
-              <LessonBody lesson={lesson} rtl={plan.rtl} />
-            </details>
-          )}
-          {items.length > 0 && practice}
-          <NextButton onClick={() => onNext()} />
-        </>
-      )}
-      {!compact && phase === "observe" && (
-        <NextButton label={t("feuil.lecon.show_lesson")} onClick={() => setPhase("lesson")} />
-      )}
-      {!compact && phase === "lesson" && (
+      {phase === "lesson" && (
         <>
           {lesson ? <LessonBody lesson={lesson} rtl={plan.rtl} /> : <p style={{ color: "var(--muted)" }}>{t("feuil.lecon.pending")}</p>}
           <NextButton label={items.length ? t("feuil.lecon.go_practice") : undefined} onClick={() => (items.length ? setPhase("practice") : onNext())} />
         </>
       )}
-      {!compact && phase === "practice" && (
+      {phase === "practice" && (
         <>
           {/* La leçon reste à portée, repliée : revenir en arrière remonterait les
               items, et une réponse déjà donnée pourrait être redonnée. */}
@@ -119,16 +101,6 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
         </>
       )}
     </Card>
-  );
-}
-
-function RuleAndRemember({ lesson }: { lesson: Lesson }) {
-  const t = useT();
-  return (
-    <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-      <p style={{ margin: 0, lineHeight: 1.6 }}>{lesson.rule}</p>
-      {lesson.remember && <Remember text={lesson.remember} label={t("feuil.lecon.remember")} />}
-    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Play, Plus, Trash2 } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../api/client";
 import type { Flashcard } from "../api/types";
 import { AutoGrowTextarea } from "../components/AutoGrowTextarea";
+import { FlipCard } from "../components/FlipCard";
 import { MathText } from "../components/MathText";
 import { useDebounced } from "../features/library/useDebounced";
 import { useT } from "../i18n";
@@ -216,7 +217,6 @@ export function Flashcards() {
 
 function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => void }) {
   const t = useT();
-  const reduce = useReducedMotion();
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const card = cards[index];
@@ -258,41 +258,9 @@ function ReviewSession({ cards, onDone }: { cards: Flashcard[]; onDone: () => vo
         </div>
       </div>
 
-      {/* La carte basculait en changeant de couleur, sans mouvement : rien ne
-          disait qu'on venait de la RETOURNER. */}
-      <button
-        type="button"
-        onClick={advance}
-        aria-label={flipped ? t("flash.tap_next") : t("flash.tap_reveal")}
-        className="mt-6 w-full cursor-pointer rounded-lg border-none bg-transparent p-0
-                   focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-        style={{ perspective: 1600 }}
-      >
-        <motion.div
-          className="relative grid min-h-[min(68vh,560px)] w-full place-items-center rounded-lg
-                     border border-border p-12 text-center font-serif text-h2 shadow-e2"
-          animate={{
-            rotateX: reduce ? 0 : flipped ? 180 : 0,
-            backgroundColor: flipped ? "var(--warning-soft)" : "var(--surface)",
-          }}
-          transition={{ duration: 0.45, ease: [0.33, 1, 0.68, 1] }}
-          style={{ transformStyle: "preserve-3d" }}
-        >
-          {/* Le contenu se contre-tourne, sinon il s'afficherait en miroir. */}
-          <div style={{ transform: reduce ? undefined : flipped ? "rotateX(180deg)" : undefined }}>
-            <div className="mb-4 text-xs font-bold tracking-wide text-muted-foreground">
-              {flipped ? t("flash.a") : t("flash.q")}
-            </div>
-            <MathText text={flipped ? card.back : card.front} dir="auto" />
-            {/* Carte de langue : la prononciation accompagne la face écrite dans la langue apprise. */}
-            {card.pronunciation && card.pronunciation_side === (flipped ? "back" : "front") && (
-              <div title={t("lang.phonetic")} className="mt-2.5 text-lg italic text-muted-foreground">
-                [{card.pronunciation}]
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </button>
+      <div className="mt-6 w-full">
+        <FlipCard card={card} flipped={flipped} onClick={advance} />
+      </div>
 
       <div className="mt-4 text-[13px] text-muted-foreground">
         {flipped ? t("flash.tap_next") : t("flash.tap_reveal")}

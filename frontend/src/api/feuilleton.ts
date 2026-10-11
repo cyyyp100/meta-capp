@@ -262,7 +262,7 @@ export interface RunPlan {
   done_steps: string[];
   resumed: boolean;
   effective_s: number;
-  mode: "zero" | "episode" | "bilan" | "reprise" | "relecture" | "court" | "jalon";
+  mode: "zero" | "episode" | "bilan" | "reprise" | "relecture" | "jalon";
   language: string;
   family: "latin" | "hanzi" | "arabe";
   rtl: boolean;

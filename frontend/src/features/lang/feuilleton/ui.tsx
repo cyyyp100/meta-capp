@@ -30,7 +30,7 @@ export const ghostBtn: CSSProperties = {
 // Un bouton désactivé doit SE VOIR. Les styles ci-dessus imposent
 // `cursor: pointer` en ligne et rien n'atténue un bouton désactivé : il
 // ressemblait trait pour trait à un bouton actif, et le clic ne faisait rien,
-// sans un mot (« Séance courte », « Bibliothèque »).
+// sans un mot (« Bibliothèque »).
 const DISABLED: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 
 /** Le style d'un bouton (`ghostBtn`, `primaryBtn`…), atténué s'il est désactivé. */

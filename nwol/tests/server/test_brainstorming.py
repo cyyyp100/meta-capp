@@ -517,7 +517,7 @@ def test_linked_discussion_searches_only_its_folder(client, monkeypatch):
 
     captured: dict = {}
 
-    def _decide(history, user_message, on_success, on_error, model=None, scope=None):
+    def _decide(history, user_message, on_success, on_error, model=None, scope=None, **_):
         captured["decide_scope"] = scope
         on_success({"search": True, "queries": ["vélo"]})
 
@@ -861,3 +861,133 @@ def test_answer_prompt_frames_the_language_entries():
     # Pas consulté : ni consigne ni mention.
     plain = build_brainstorm_answer_prompt("", [], "question", [])
     assert "CALCULÉ" not in plain and "aucune langue commencée" not in plain
+
+
+def _episode(pid: int, n: int, status: str, lines: list[dict], title: str = "La fête") -> int:
+    from db import lang_episode_db as store
+
+    episode_id = store.create_episode(
+        pid, n, kind="normal", program_point_id=None, format="dialogue", ladder_step=0, params={},
+    )
+    store.update_episode(
+        episode_id, status=status, title=title, summary="Les voisins préparent la fête.", lines=lines,
+        first_played_at="2026-10-01 10:00:00" if status == "played" else None,
+    )
+    return episode_id
+
+
+def test_search_finds_a_word_of_the_lexicon_by_its_translation(client):
+    from db import lang_episode_db as store
+    from i18n import t
+    from services.brainstorm_search import search_user_db
+
+    pid = _start_language("espagnol")
+    lexeme = store.insert_lexeme(pid, {"lemma": "poder", "form": "Podemos", "translation": "pouvoir", "pos": "verbe"}, 1)
+    store.update_lexeme(lexeme, acquired_at="2026-10-01 10:00:00")
+    store.insert_lexeme(pid, {"lemma": "comer", "translation": "manger"}, 1)
+
+    (item,) = search_user_db("pouvoir", languages=True)
+    assert item["source_type"] == "word" and item["language"] == "espagnol"
+    assert item["doc_title"] == "Espagnol"
+    assert item["snippet"].startswith(t("brainstorm.word.entry", word="poder (Podemos)", translation="pouvoir"))
+    assert t("brainstorm.word.acquired") in item["snippet"]
+    assert t("brainstorm.word.met", n=1) in item["snippet"]
+
+
+def test_search_quotes_the_closest_line_of_a_played_episode(client):
+    from services.brainstorm_search import search_user_db
+
+    pid = _start_language("espagnol")
+    lines = [
+        {"speaker": "Elena", "text": "¿Mañana es el gran día?", "translation": "Demain est le grand jour ?"},
+        {"speaker": "Paco", "text": "Tenemos muy poco tiempo.", "translation": "Nous avons très peu de temps."},
+    ]
+    _episode(pid, 1, "played", lines)
+    _episode(pid, 2, "ready", lines, title="Pas encore lu")  # écrit, jamais joué
+
+    items = [i for i in search_user_db("temps", languages=True) if i["source_type"] == "episode"]
+    assert len(items) == 1
+    snippet = items[0]["snippet"]
+    assert "La fête" in snippet and "Tenemos muy poco tiempo." in snippet and "Mañana" not in snippet
+
+
+def test_linked_discussion_search_skips_words_and_episodes(client):
+    from db import lang_episode_db as store
+    from services.brainstorm_search import search_user_db
+
+    pid = _start_language("espagnol")
+    store.insert_lexeme(pid, {"lemma": "poder", "translation": "pouvoir"}, 1)
+    _episode(pid, 1, "played", [{"speaker": "Paco", "text": "Quiero poder.", "translation": "Je veux pouvoir."}])
+    folder = _folder(client, "Cours")
+
+    assert {i["source_type"] for i in search_user_db("pouvoir", languages=True)} == {"word", "episode"}
+    assert search_user_db("pouvoir", folder_ids={folder}, languages=True) == []
+
+
+def test_words_and_episodes_need_a_language_question(client):
+    """Sans la porte `languages`, rien du module Langues : un épisode d'anglais ne
+    répond pas à « training data » au milieu d'une discussion sur un article."""
+    from db import lang_episode_db as store
+    from services.brainstorm_search import search_user_db
+
+    pid = _start_language("anglais")
+    store.insert_lexeme(pid, {"lemma": "data", "translation": "données"}, 1)
+    _episode(pid, 1, "played", [{"speaker": "Agnes", "text": "We must check our data.", "translation": "Vérifions nos données."}])
+
+    assert search_user_db("training data") == []
+    assert search_user_db("training data", languages=True)
+
+
+def test_language_question_searches_words_and_episodes(client, monkeypatch):
+    import services.brainstorm as svc
+
+    captured: dict = {}
+
+    def _decide(history, user_message, on_success, on_error, model=None, **_):
+        on_success({"search": True, "queries": ["pouvoir"], "languages": True})
+
+    def _spy_search(query, *a, languages=False, **k):
+        captured["languages"] = languages
+        return []
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer_fake)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+    monkeypatch.setattr(svc.brainstorm_search, "search_user_db", _spy_search)
+
+    did = client.post("/api/brainstorming", json={"title": "Mots"}).json()["id"]
+    with client.websocket_connect(f"/api/brainstorming/{did}/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Comment on dit pouvoir en espagnol ?"})
+        while ws.receive_json()["type"] != "answer":
+            pass
+
+    assert captured["languages"] is True
+
+
+def test_decision_is_told_which_languages_are_studied(client, monkeypatch):
+    """La décision connaît les langues COMMENCÉES (pas celles seulement ouvertes) ;
+    une discussion liée à un dossier n'en reçoit aucune."""
+    import services.brainstorm as svc
+    from llm.prompts import build_brainstorm_search_decide_prompt
+    from services.lang_runs import ensure_feuilleton
+
+    _start_language("espagnol")
+    ensure_feuilleton("allemand")
+    seen: list = []
+
+    def _decide(history, user_message, on_success, on_error, model=None, languages=None, **_):
+        seen.append(languages)
+        on_success({"search": False, "queries": []})
+
+    monkeypatch.setattr(svc, "decide_brainstorm_search_async", _decide)
+    monkeypatch.setattr(svc, "answer_brainstorm_async", _answer_fake)
+    monkeypatch.setattr(svc, "summarize_brainstorm_async", _summarize_noop)
+
+    free = client.post("/api/brainstorming", json={"title": "Libre"}).json()["id"]
+    linked = client.post("/api/brainstorming", json={"title": "Lié", "folder_id": _folder(client, "Cours")}).json()["id"]
+    for did in (free, linked):
+        svc.handle_message(did, "question", lambda _r: None, lambda _e: None)
+
+    assert seen == [["Espagnol"], []]
+    assert "Espagnol." in build_brainstorm_search_decide_prompt([], "question", None, ["Espagnol"])
+    assert "Langues qu'il apprend" not in build_brainstorm_search_decide_prompt([], "question", None, [])

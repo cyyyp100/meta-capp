@@ -2,8 +2,8 @@
 //
 // Un bouton principal (« Épisode N », « Bilan », « Reprendre », « Relire avant
 // l'épisode N » après plus de 3 jours sans séance — l'épisode prêt attend
-// alors la séance suivante), deux entrées secondaires (juste relire, séance
-// courte) et la bibliothèque. Les
+// alors la séance suivante) et la bibliothèque : c'est le serveur qui choisit
+// le mode de la séance, jamais l'apprenant. Les
 // compétences « orales » du flux hérité ne mesuraient rien : elles laissent la
 // place à ce qui compte — épisodes joués, mots rencontrés, niveau. Aucun
 // compteur de jours : le décompte existe côté serveur, il n'est pas une série.
@@ -76,12 +76,10 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
   }
   if (library) return <Library language={language} rtl={rtl} onClose={() => setLibrary(false)} />;
 
-  const go = (mode?: "court" | "relecture", onboarding = false) =>
-    navigate("/lang/episode", { state: { language, label, rtl, mode, onboarding } });
+  const go = () => navigate("/lang/episode", { state: { language, label, rtl, onboarding: !status.onboarding_done } });
   const ready = status.next_status === "ready";
   // Plus de 3 jours sans séance : la séance relit, l'épisode attend la suivante (C7).
   const relecture = !status.open_run && status.relecture_due;
-  const shortOpen = ready && !relecture;
   let main = t("feuil.home.episode", { n: status.next_episode });
   if (!status.onboarding_done) main = t("feuil.home.begin");
   else if (status.open_run) main = t("feuil.home.resume");
@@ -103,7 +101,7 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 16, margin: 0 }}>{label}</h2>
-        <button style={primaryBtn} onClick={() => go(undefined, !status.onboarding_done)}>{main}</button>
+        <button style={primaryBtn} onClick={go}>{main}</button>
       </div>
       {relecture ? (
         <p style={{ color: "var(--muted)", fontSize: 13, margin: "8px 0 0" }}>
@@ -135,23 +133,8 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
       )}
       {status.onboarding_done && (
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          <button style={ghostBtn} onClick={() => go("relecture")}>{t("feuil.home.reread")}</button>
-          {/* Désactivés, ils doivent le montrer et dire pourquoi : sans quoi
-              le clic ne fait rien, sans un mot. */}
-          <button
-            style={btnStyle(ghostBtn, !shortOpen)}
-            disabled={!shortOpen}
-            title={
-              shortOpen
-                ? undefined
-                : relecture
-                  ? t("feuil.home.short_after_relecture")
-                  : t("feuil.home.short_unavailable", { n: status.next_episode })
-            }
-            onClick={() => go("court")}
-          >
-            {t("feuil.home.short")}
-          </button>
+          {/* Désactivée, elle doit le montrer et dire pourquoi : sans quoi le
+              clic ne fait rien, sans un mot. */}
           <button
             style={btnStyle(ghostBtn, !status.episodes_played)}
             disabled={!status.episodes_played}

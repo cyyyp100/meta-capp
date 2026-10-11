@@ -1,9 +1,11 @@
 // EntrySas.test.tsx — Le sas d'entrée et sa révision éclair.
 //
-// Trois règles :
+// Quatre règles :
 //   * à la fin du compte à rebours, le sas ATTEND : c'est l'élève qui décide
 //     d'aller aux cartes, rien ne l'y envoie de lui-même ;
 //   * la durée du sas est un réglage (`entry_sas_s`) ;
+//   * avant une séance du feuilleton, l'accroche de Clikoda porte sur l'épisode
+//     à venir et s'écrit à chaque sas ; une leçon du flux hérité garde son thème ;
 //   * la révision éclair ne se passe pas — aucun bouton pour l'écourter — et
 //     son rythme (temps par face) remonte à la sortie du sas.
 
@@ -13,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type PreferencesPayload } from "../../api/client";
 import type { Flashcard } from "../../api/types";
-import { EntrySas } from "./EntrySas";
+import { EntrySas, type EntrySource } from "./EntrySas";
 import { WarmUp } from "./WarmUp";
 
 const card = (id: number): Flashcard => ({
@@ -46,21 +48,25 @@ async function wait(seconds: number) {
   }
 }
 
-function renderSas(onStart = vi.fn()) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+function renderSas(
+  onStart = vi.fn(),
+  source: EntrySource = { kind: "document", docId: 3 },
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
+  return render(
     <QueryClientProvider client={client}>
-      <EntrySas source={{ kind: "document", docId: 3 }} title="Segmentation 3D" onStart={onStart} />
+      <EntrySas source={source} title="Segmentation 3D" onStart={onStart} />
     </QueryClientProvider>,
   );
-  return onStart;
 }
 
 describe("EntrySas", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(api, "docHook").mockResolvedValue({ hook: "Une accroche." } as Awaited<ReturnType<typeof api.docHook>>);
+    vi.spyOn(api, "feuilletonHook").mockResolvedValue({ hook: "Une fête se prépare, et Carmen n'en sait rien." });
     vi.spyOn(api, "sessionStartCards").mockResolvedValue([card(1), card(2)]);
+    vi.spyOn(api, "langWarmupCards").mockResolvedValue([card(1), card(2)]);
     vi.spyOn(api, "reviewFlashcard").mockResolvedValue({} as Awaited<ReturnType<typeof api.reviewFlashcard>>);
   });
   afterEach(() => {
@@ -93,6 +99,38 @@ describe("EntrySas", () => {
     await wait(29);
     expect(screen.getByRole("button", { name: /continuer|continue/i })).toBeEnabled();
   });
+
+  it("annonce l'épisode à venir par une accroche de Clikoda, comme avant un PDF", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
+    renderSas(vi.fn(), { kind: "episode", language: "espagnol" });
+
+    await wait(1);
+    expect(screen.getByText("Une fête se prépare, et Carmen n'en sait rien.")).toBeInTheDocument();
+    expect(api.feuilletonHook).toHaveBeenCalledWith("espagnol");
+    expect(api.docHook).not.toHaveBeenCalled();
+  });
+
+  it("écrit l'accroche d'un épisode à chaque sas, sans la resservir", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const first = renderSas(vi.fn(), { kind: "episode", language: "espagnol" }, client);
+    await wait(1);
+    first.unmount();
+    await wait(1);
+    renderSas(vi.fn(), { kind: "episode", language: "espagnol" }, client);
+    await wait(1);
+    expect(api.feuilletonHook).toHaveBeenCalledTimes(2);
+  });
+
+  it("garde le thème d'une leçon du flux hérité, sans appeler Clikoda", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
+    renderSas(vi.fn(), { kind: "language", language: "italien", theme: "Au marché" });
+
+    await wait(1);
+    expect(screen.getByText("Au marché")).toBeInTheDocument();
+    expect(api.feuilletonHook).not.toHaveBeenCalled();
+    expect(api.docHook).not.toHaveBeenCalled();
+  });
 });
 
 describe("WarmUp", () => {
@@ -105,8 +143,10 @@ describe("WarmUp", () => {
     const onDone = vi.fn();
     render(<WarmUp cards={[card(1), card(2)]} onDone={onDone} />);
 
-    // Seul « Pourquoi ? » est un bouton : rien pour écourter la révision.
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([expect.stringMatching(/pourquoi|why/i)]);
+    // Hors la carte elle-même (qui retourne puis avance), seul « Pourquoi ? »
+    // est un bouton : rien pour écourter la révision.
+    const others = screen.getAllByRole("button").filter((b) => !/révéler|reveal/i.test(b.getAttribute("aria-label") ?? ""));
+    expect(others.map((b) => b.textContent)).toEqual([expect.stringMatching(/pourquoi|why/i)]);
 
     for (const text of ["Question 1", "Réponse 1", "Question 2", "Réponse 2"]) {
       await act(async () => screen.getByText(text).click());

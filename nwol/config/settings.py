@@ -90,7 +90,6 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "quiz_analysis":            {"num_ctx": 4096, "num_predict": 420, "temperature": 0.2},
     # ── Module langue ──────────────────────────────────────────────────────────
     "lang_curriculum":    {"num_ctx": 4096, "num_predict": 3000, "temperature": 0.15},
-    "lang_curiosity":     {"num_ctx": 2048, "num_predict": 200,  "temperature": 0.15},
     "lang_lesson":        {"num_ctx": 4096, "num_predict": 2000, "temperature": 0.10},
     "lang_exercises":     {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.10},
     "lang_correction":    {"num_ctx": 2048, "num_predict": 400,  "temperature": 0.10},
@@ -154,6 +153,10 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "lang_point_lesson":        {"num_ctx": 4096, "num_predict": 1500, "temperature": 0.30},
     # Correction d'une expression écrite : trois erreurs au plus et le texte corrigé.
     "lang_writing_feedback":    {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
+    # Accroche du sas d'entrée, écrite pendant le sas : une phrase (~60 tokens
+    # JSON compris), le double pour ne jamais la couper. Un peu de température :
+    # elle doit donner envie, pas résumer.
+    "lang_episode_hook":        {"num_ctx": 2048, "num_predict": 160,  "temperature": 0.40},
     # ── Brainstorming (chat libre + RAG sur la base utilisateur) ────────────────
     # Décision de recherche : JSON court (faut-il chercher + mots-clés).
     "brainstorm_search_decide": {"num_ctx": 2048, "num_predict": 160, "temperature": 0.10},
@@ -431,7 +434,6 @@ LANG_EXPLAIN_LANGUAGES: tuple[str, ...] = ("fr", "en")
 # ≈ 18,5 min (sas d'entrée en plus) ; 2e vague et jalon compris, ≤ 1 470 s.
 LANG_RUN_TARGET_S = 1080
 LANG_RUN_MAX_S = 1500
-LANG_RUN_SHORT_TARGET_S = 600
 # Budget indicatif par étape : sert à ordonner ce qu'on saute quand le plafond
 # approche, et à la barre de progression. Jamais un compte à rebours affiché.
 LANG_STEP_BUDGET_S: dict[str, int] = {
@@ -652,8 +654,8 @@ LANG_STUDY_DAY_CUTOFF_HOUR = 4
 LANG_STUDY_DAY_MIN_S = 300
 
 # C9 — pré-génération. L'épisode N+1 part à l'étape LANG_PREGEN_TRIGGER_STEP de
-# la séance N (séance courte comprise), avec les signaux du jour : la lecture
-# est faite, ses taps et ses traductions montrées sont connus.
+# la séance N, avec les signaux du jour : la lecture est faite, ses taps et ses
+# traductions montrées sont connus.
 LANG_PREGEN_BUFFER = 1
 LANG_PREGEN_TRIGGER_STEP = "lecon"
 LANG_GEN_MAX_ATTEMPTS_PER_CALL = 3
@@ -670,6 +672,11 @@ LANG_EXPLANATION_MAX_CHARS = 420
 LANG_TITLE_MAX_CHARS = 80
 LANG_SUMMARY_MAX_CHARS = 220
 LANG_TEASER_MAX_CHARS = 160
+# Accroche du sas d'entrée (services/lang_hook.py) : une phrase, refusée au-delà,
+# et les répliques du DÉBUT de l'épisode que Clikoda voit traduites — de quoi
+# poser la situation sans lui montrer la fin.
+LANG_HOOK_MAX_CHARS = 200
+LANG_HOOK_OPENING_LINES = 6
 LANG_NOTES_PER_EPISODE = (3, 5)
 LANG_POINT_EXAMPLES = (2, 4)
 # G6 : part minimale des lettres arabes portant une voyelle brève ou un sukūn
@@ -1061,7 +1068,8 @@ FLASHCARD_REVIEW_COOLDOWN_DAYS = 5.0
 FLASHCARD_REVIEW_FLOOR = 0.2
 
 # Brainstorming : plafond d'extraits par type de source (surlignage, flashcard, erreur,
-# Q&R, document) et amortissement d'une source DÉJÀ CITÉE dans la discussion.
+# Q&R, document, mot et épisode du module Langues) et amortissement d'une source
+# DÉJÀ CITÉE dans la discussion.
 BRAINSTORM_PER_TYPE_CAP = 2
 BRAINSTORM_CITED_FLOOR = 0.2
 # Poids d'un terme DISTINCT retrouvé, en base d'exponentielle : un extrait qui

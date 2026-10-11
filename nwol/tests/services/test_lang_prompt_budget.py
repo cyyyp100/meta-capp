@@ -150,6 +150,32 @@ def test_bible_arc_and_weekly_prompts_fit(lang):
     }), lang)
 
 
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
+def test_episode_hook_prompt_fits(family, lang):
+    from config.settings import LANG_HOOK_MAX_CHARS, LANG_HOOK_OPENING_LINES, LANG_TITLE_MAX_CHARS
+
+    _text, tr = LINE[family]
+    prompt = prompts.build_lang_episode_hook_prompt({
+        "language_label": "arabe littéraire", "episode_n": 270, "title": LONG_FR[:LANG_TITLE_MAX_CHARS],
+        "summary": LONG_FR[:LANG_SUMMARY_MAX_CHARS], "previous": LONG_FR[:LANG_SUMMARY_MAX_CHARS],
+        "opening": [("Personnage0", tr)] * LANG_HOOK_OPENING_LINES, "characters": CHARACTERS,
+        "max_chars": LANG_HOOK_MAX_CHARS, "explain_lang": lang,
+    })
+    _check("lang_episode_hook", prompt, lang)
+
+
+def test_episode_hook_prompt_carries_no_target_word():
+    """Ni phrase d'exemple ni mot de la langue cible dans la consigne : seules
+    les données de l'épisode (titre, résumé, début traduit) en apportent."""
+    for lang in LANGS:
+        text = prompts.build_lang_episode_hook_prompt({
+            "language_label": "espagnol", "episode_n": 1, "title": "T", "summary": "S", "previous": "",
+            "opening": [], "characters": [], "max_chars": 200, "explain_lang": lang,
+        })
+        assert not any(word in text.split() for word in ("estar", "ser", "soy", "estoy", "hola"))
+
+
 def test_estimator_is_pessimistic_on_known_counts():
     # Repère mesuré par le banc (gemma4:e4b) : le français tourne autour de
     # quatre caractères par token ; l'estimateur doit rester au-dessus.

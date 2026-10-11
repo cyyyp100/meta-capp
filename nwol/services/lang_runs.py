@@ -40,7 +40,6 @@ from config.settings import (
     LANG_REPRISE_CONTROLE_OK,
     LANG_REWIND_EPISODES,
     LANG_RUN_MAX_S,
-    LANG_RUN_SHORT_TARGET_S,
     LANG_RUN_TARGET_S,
     LANG_SCRIPT_FAMILY,
     LANG_SECOND_WAVE_LINES,
@@ -95,8 +94,9 @@ FEELING_OPTIONS = ("a", "b", "c")
 # la deuxième vague, lus comme des verdicts par le moteur de jauges.
 _UNDERSTOOD_VERDICT = {"compris": "correct", "a_peu_pres": "partial", "pas_compris": "incorrect"}
 _RATING_VERDICT = {"su": "correct", "a_peu_pres": "partial", "pas_su": "incorrect"}
-EPISODE_MODES = ("episode", "court")
-MODES = ("zero", "episode", "bilan", "reprise", "relecture", "court", "jalon")
+# La séance courte (`court`) n'existe plus : ses séances passées restent dans
+# l'historique, une séance `court` restée ouverte est abandonnée (`_resumable`).
+MODES = ("zero", "episode", "bilan", "reprise", "relecture", "jalon")
 # Paliers d'absence (C7) après lesquels le prochain épisode à écrire est une
 # respiration ; en deçà (`rappel_long`), la reprise ne fait que relire.
 RESPIRATION_TIERS = ("reprise", "reprise_controle")
@@ -461,23 +461,17 @@ def _bilan_due(profile: dict) -> bool:
     return n > 0 and n % (LANG_BILAN_EVERY - 1) == 0 and int(profile.get("last_bilan_episode_n") or 0) < n
 
 
-def choose_mode(profile: dict, language: str, *, requested: str | None, absence_days: int | None) -> tuple[str, dict]:
-    """R1, par ordre de priorité : onboarding -> reprise (absence) -> bilan ->
-    épisode prêt -> relecture (et la génération part). L'apprenant peut
-    toujours demander « juste relire », et une séance courte tant qu'aucune
-    relecture n'est imposée : passé 3 jours d'absence (C7), la séance est une
-    reprise sans nouvel épisode — la séance courte aussi —, et l'épisode prêt
-    attend la séance suivante."""
+def choose_mode(profile: dict, language: str, *, absence_days: int | None) -> tuple[str, dict]:
+    """R1, par ordre de priorité : onboarding -> file de relecture -> reprise
+    (absence) -> bilan -> épisode prêt -> relecture (et la génération part).
+    Le serveur décide seul : passé 3 jours d'absence (C7), la séance est une
+    reprise sans nouvel épisode, et l'épisode prêt attend la séance suivante."""
     if not profile.get("onboarding_done"):
         return "zero", {}
     tier = activity.absence_tier(absence_days)
     next_n = int(profile.get("episode_n") or 0) + 1
     ready = store.get_episode_by_n(profile["id"], next_n)
     ready = ready if ready and ready["status"] == "ready" else None
-    if requested == "relecture":
-        return "relecture", {"requested": True}
-    if requested == "court" and not activity.relecture_due(absence_days):
-        return ("court", {"episode": ready, "requested": True}) if ready else ("relecture", {"fallback": "court"})
     if profile.get("replay_queue"):
         return "relecture", {"queued": True}
     if activity.relecture_due(absence_days):
@@ -600,7 +594,7 @@ def _register_items(plan: dict, step_key: str, items: list[dict]) -> None:
         }
 
 
-def _lesson_step(profile: dict, language: str, ep: dict, plan: dict, *, run_seed: int, compact: bool) -> dict:
+def _lesson_step(profile: dict, language: str, ep: dict, plan: dict, *, run_seed: int) -> dict:
     """L'étape « leçon » : observer le point dans le texte, la leçon, puis
     s'entraîner — trois micro-items du texte et trois de la leçon, corrigés
     sous `lecon`. Une leçon pas encore écrite (tout premier épisode) laisse
@@ -612,7 +606,7 @@ def _lesson_step(profile: dict, language: str, ep: dict, plan: dict, *, run_seed
     _register_items(plan, "lecon", micro + lesson_items)
     return _step("lecon", episode_ref=ep["id"], point=_point_view(language, ep, lang), lesson=view["lesson"],
                  lesson_source=view["source"], lesson_pending=view["lesson"] is None, items=micro,
-                 lesson_items=lesson_items, compact=compact)
+                 lesson_items=lesson_items)
 
 
 def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed: int,
@@ -622,7 +616,7 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
     plan: dict = {
         "version": PLAN_VERSION,
         "mode": mode, "language": language, "family": fam, "rtl": fam == "arabe", "explain_lang": lang,
-        "target_s": LANG_RUN_SHORT_TARGET_S if mode == "court" else LANG_RUN_TARGET_S,
+        "target_s": LANG_RUN_TARGET_S,
         "max_s": LANG_RUN_MAX_S, "idle_cutoff_s": LANG_IDLE_CUTOFF_S,
         "episodes": {}, "steps": [], "readings": [], "items": {},
         "absence": {"days": absence_days, "tier": activity.absence_tier(absence_days)},
@@ -652,14 +646,12 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         steps.append(_step("au_revoir", take_away=None, teaser="", feeling=_feeling(runs_done)))
         return plan
 
-    if mode in EPISODE_MODES:
+    if mode == "episode":
         ep = info["episode"]
         plan["episode_id"], plan["episode_n"] = ep["id"], ep["episode_n"]
         add_episode(ep)
         prev = store.get_episode_by_n(profile["id"], ep["episode_n"] - 1) if ep["episode_n"] > 1 else None
-        if mode == "court":
-            steps.append(_step("rappel", teaser_only=True, teaser=(prev or {}).get("teaser", ""), episode_ref=None))
-        elif prev and prev["status"] == "played":
+        if prev and prev["status"] == "played":
             steps.append(_step("rappel", episode_ref=add_episode(prev), summary=prev["summary"], long=False))
             add_reading("rappel", prev, "rappel")
         # Une seule lecture, aide à la demande : un mot au tap, la traduction
@@ -671,31 +663,30 @@ def build_plan(profile: dict, language: str, mode: str, info: dict, *, run_seed:
         steps.append(_step("lecture", episode_ref=ep["id"], translate_all=translation in LANG_TRANSLATE_ALL_MODES,
                            notes=notes))
         add_reading("lecture", ep, "lecture")
-        steps.append(_lesson_step(profile, language, ep, plan, run_seed=run_seed, compact=mode == "court"))
-        if mode == "episode":
-            # L'écrit juste après la leçon : l'application est immédiate, et la
-            # correction a le temps des jeux pour arriver avant l'écran de fin.
-            steps.append(_step("expression", episode_ref=ep["id"], task=writing.writing_task(language, ep, lang),
-                               keyboard=writing_keyboard(language), lang=LANG_ISO.get(language, "")))
-            recent_kinds = [[g["kind"] for g in s.get("games", [])]
-                            for r in store.recent_runs(profile["id"], limit=2)
-                            for s in (r.get("plan") or {}).get("steps", []) if s.get("kind") == "jeux"]
-            chosen = games.choose_games(ep, fam, run_seed, recent_kinds)
-            for g in chosen:
-                register_items("jeux", g["items"])
-            if chosen:
-                steps.append(_step("jeux", episode_ref=ep["id"], games=chosen))
-            old, sw_lines = _second_wave(profile, ep["episode_n"], fam, run_seed)
-            if old and sw_lines:
-                plan["second_wave_episode_id"] = old["id"]
-                steps.append(_step("deuxieme_vague", episode_ref=add_episode(old), lines=sw_lines))
-            if ep["episode_n"] in LANG_MILESTONES_EPISODE_1:
-                first = store.get_episode_by_n(profile["id"], 1)
-                if first and first["status"] == "played":
-                    first_taps = _first_reading_taps(profile["id"], first["id"])
-                    steps.append(_step("jalon", episode_ref=add_episode(first), first_taps=first_taps,
-                                       tokens=progress.word_token_count(first["lines"])))
-                    add_reading("jalon", first, "jalon")
+        steps.append(_lesson_step(profile, language, ep, plan, run_seed=run_seed))
+        # L'écrit juste après la leçon : l'application est immédiate, et la
+        # correction a le temps des jeux pour arriver avant l'écran de fin.
+        steps.append(_step("expression", episode_ref=ep["id"], task=writing.writing_task(language, ep, lang),
+                           keyboard=writing_keyboard(language), lang=LANG_ISO.get(language, "")))
+        recent_kinds = [[g["kind"] for g in s.get("games", [])]
+                        for r in store.recent_runs(profile["id"], limit=2)
+                        for s in (r.get("plan") or {}).get("steps", []) if s.get("kind") == "jeux"]
+        chosen = games.choose_games(ep, fam, run_seed, recent_kinds)
+        for g in chosen:
+            register_items("jeux", g["items"])
+        if chosen:
+            steps.append(_step("jeux", episode_ref=ep["id"], games=chosen))
+        old, sw_lines = _second_wave(profile, ep["episode_n"], fam, run_seed)
+        if old and sw_lines:
+            plan["second_wave_episode_id"] = old["id"]
+            steps.append(_step("deuxieme_vague", episode_ref=add_episode(old), lines=sw_lines))
+        if ep["episode_n"] in LANG_MILESTONES_EPISODE_1:
+            first = store.get_episode_by_n(profile["id"], 1)
+            if first and first["status"] == "played":
+                first_taps = _first_reading_taps(profile["id"], first["id"])
+                steps.append(_step("jalon", episode_ref=add_episode(first), first_taps=first_taps,
+                                   tokens=progress.word_token_count(first["lines"])))
+                add_reading("jalon", first, "jalon")
         plan["pregen_step"] = LANG_PREGEN_TRIGGER_STEP
         steps.append(_step("au_revoir", take_away=_take_away(language, ep), teaser=ep.get("teaser", ""),
                            feeling=_feeling(runs_done)))
@@ -806,25 +797,47 @@ def _controle_step(profile, language, plan, add_episode, register_items, seed, c
 
 # ── Cycle de vie d'une séance (E3-E6) ─────────────────────────────────────────
 
-def start_run(language: str, mode: str | None = None, warmup: int = 0) -> dict:
+def _resumable(run: dict, today: str) -> bool:
+    """R2 : une séance restée ouverte se reprend le jour même, si son plan est du
+    format courant et son mode existe encore. Les autres sont abandonnées."""
+    return (run.get("study_date") == today and (run.get("plan") or {}).get("version") == PLAN_VERSION
+            and run.get("mode") in MODES)
+
+
+def coming_episode(profile: dict, language: str) -> dict | None:
+    """L'épisode que la prochaine séance fera découvrir, sujet de l'accroche du
+    sas d'entrée (qui précède `start_run`) : celui de la séance du jour que
+    `start_run` reprendrait, tant que sa lecture n'est pas faite, sinon celui
+    que `choose_mode` jouerait. Rien quand la séance ne joue pas d'épisode
+    neuf (séance zéro, relecture, reprise, bilan). Ne touche à aucune séance."""
+    today = activity.study_date()
+    run = next((r for r in store.open_runs(profile["id"]) if _resumable(r, today)), None)
+    if run:
+        if run["mode"] != "episode" or not run.get("episode_id"):
+            return None
+        read = any(s["step"] == "lecture" and s["ended_at"] for s in store.get_steps(run["id"]))
+        return None if read else store.get_episode(int(run["episode_id"]))
+    mode, info = choose_mode(profile, language, absence_days=activity.absence_days(profile["id"], today))
+    return info["episode"] if mode == "episode" else None
+
+
+def start_run(language: str, warmup: int = 0) -> dict:
     """E3 : plan complet de la séance, immédiatement (aucune attente de Clikoda).
-    Une séance du jour restée ouverte est reprise à l'étape atteinte (R2) ;
-    celles des jours précédents passent `abandoned`.
+    Le mode est choisi par le serveur seul (`choose_mode`). Une séance du jour
+    restée ouverte est reprise à l'étape atteinte (R2, `_resumable`) ; les
+    autres passent `abandoned`.
 
     `warmup` : cartes révisées au sas d'entrée, juste avant (E10). Elles
     entament le plafond de cartes de la séance (P13), qui la couvre entière."""
     profile = ensure_feuilleton(language)
     today = activity.study_date()
     for run in store.open_runs(profile["id"]):
-        if run.get("study_date") != today or (run.get("plan") or {}).get("version") != PLAN_VERSION:
-            # Une séance d'un autre jour, ou d'un autre format : abandonnée.
-            store.update_run(run["id"], status="abandoned", end_reason="quitte")
-        elif mode in (None, run["mode"]):
+        if _resumable(run, today):
             return run_view(run["id"], resumed=True)
-        else:
-            store.update_run(run["id"], status="abandoned", end_reason="quitte")
+        # Une séance d'un autre jour, d'un autre format ou d'un mode retiré : abandonnée.
+        store.update_run(run["id"], status="abandoned", end_reason="quitte")
     days = activity.absence_days(profile["id"], today)
-    chosen, info = choose_mode(profile, language, requested=mode, absence_days=days)
+    chosen, info = choose_mode(profile, language, absence_days=days)
     if chosen == "relecture" and info.get("fallback") and profile.get("onboarding_done"):
         _ensure_next_generation(profile, language)
     if chosen == "bilan":
@@ -1042,7 +1055,7 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
     episode = store.get_episode(run["episode_id"]) if run.get("episode_id") else None
     read = any(s["step"] in ("lecture", "episode_p1", "episode_p2") and s["ended_at"] and not s["skipped"]
                for s in store.get_steps(run_id))
-    if episode and run["mode"] in EPISODE_MODES:
+    if episode and run["mode"] == "episode":
         if read and not plan.get("pregen_done"):
             _on_episode_read(run_id)
             plan = store.get_run(run_id)["plan"]
@@ -1061,7 +1074,7 @@ def complete_run(run_id: int, end_reason: str = "fini", feeling: str | None = No
         store.bump_script_unit(profile["id"], COMPONENTS_SCRIPT, unit, exposures=1)
     cards_created = 0
     new_words: list[str] = []
-    if episode and run["mode"] in EPISODE_MODES:
+    if episode and run["mode"] == "episode":
         tapped = set()
         for r in store.get_reveals(run_id):
             if r["episode_id"] == episode["id"] and r["pass"] in progress.FIRST_READING_PASSES:
@@ -1360,6 +1373,21 @@ def upcoming_episodes(user_id: int = DEFAULT_USER_ID) -> list[dict]:
 _MEASURED_SIGNALS = ("reveal_rate", "understood", "games_rate", "second_wave_rate")
 
 
+def _started_profiles(user_id: int) -> list[dict]:
+    """Profils des langues COMMENCÉES : pilote, feuilleton, onboarding passé.
+    Une langue seulement ouverte depuis la page Langues n'en fait pas partie."""
+    return [
+        row for row in get_all_lang_profiles(user_id)
+        if row.get("flow") == "feuilleton" and is_pilot(row["language"]) and row.get("onboarding_done")
+    ]
+
+
+def started_languages(user_id: int = DEFAULT_USER_ID) -> list[str]:
+    """Codes des langues commencées (cf. `_started_profiles`) : de quoi dire au
+    brainstorming QUELLES langues l'apprenant étudie, sans calculer le portrait."""
+    return [row["language"] for row in _started_profiles(user_id)]
+
+
 def learner_overview(user_id: int = DEFAULT_USER_ID) -> list[dict]:
     """Où en est l'apprenant dans chaque langue commencée (onboarding passé),
     en chiffres que d'autres calculent déjà : niveau (`progress.current_cefr`),
@@ -1373,10 +1401,8 @@ def learner_overview(user_id: int = DEFAULT_USER_ID) -> list[dict]:
     # `weekly_aggregates` s'arrête la veille du jour qu'on lui donne.
     tomorrow = (date.fromisoformat(activity.study_date()) + timedelta(days=1)).isoformat()
     out = []
-    for row in get_all_lang_profiles(user_id):
+    for row in _started_profiles(user_id):
         language = row["language"]
-        if row.get("flow") != "feuilleton" or not is_pilot(language) or not row.get("onboarding_done"):
-            continue
         profile_id = int(row["id"])
         order = int(row.get("program_order") or 0)
         lexicon = store.lexicon_counts(profile_id)

@@ -1,9 +1,10 @@
 // LangEpisode.test.tsx — Le sas d'entrée d'une séance de langue.
 //
 // Deux règles :
-//   * une séance s'ouvre sur le sas d'entrée, et son plan n'est demandé qu'une
-//     fois le sas franchi — avec le nombre de cartes révisées au warm-up, que
-//     le serveur décompte du plafond de cartes de la séance ;
+//   * une séance s'ouvre sur le sas d'entrée — l'accroche de Clikoda sur
+//     l'épisode à venir, puis les cartes de la langue —, et son plan n'est
+//     demandé qu'une fois le sas franchi, avec le nombre de cartes révisées au
+//     warm-up, que le serveur décompte du plafond de cartes de la séance ;
 //   * la première visite d'une langue (onboarding, test de niveau) n'a pas de
 //     sas : elle enchaîne directement sur la première séance.
 
@@ -63,6 +64,7 @@ describe("LangEpisode", () => {
     vi.useFakeTimers();
     vi.spyOn(api, "preferences").mockResolvedValue(preferences);
     vi.spyOn(api, "langWarmupCards").mockResolvedValue([card(1), card(2)]);
+    vi.spyOn(api, "feuilletonHook").mockResolvedValue({ hook: "Pablo arrive encore en retard : qui l'attend sur la place ?" });
     vi.spyOn(api, "reviewFlashcard").mockResolvedValue({} as Awaited<ReturnType<typeof api.reviewFlashcard>>);
     // Le plan lui-même n'est pas l'objet de ces tests : un échec suffit à
     // savoir s'il a été demandé, et avec quoi.
@@ -82,6 +84,8 @@ describe("LangEpisode", () => {
     // La durée réglée vaut aussi pour une séance de langue.
     await wait(1);
     expect(screen.getByRole("timer")).toHaveTextContent("29");
+    expect(screen.getByText("Pablo arrive encore en retard : qui l'attend sur la place ?")).toBeInTheDocument();
+    expect(api.feuilletonHook).toHaveBeenCalledWith("espagnol");
     await wait(14);
     await act(async () => screen.getByRole("button", { name: /continuer|continue/i }).click());
     expect(api.langWarmupCards).toHaveBeenCalledWith("espagnol");
@@ -90,7 +94,7 @@ describe("LangEpisode", () => {
       await act(async () => screen.getByText(text).click());
     }
     expect(api.feuilletonRunStart).toHaveBeenCalledTimes(1);
-    expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", undefined, 2);
+    expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", 2);
   });
 
   it("n'a pas de sas après l'onboarding d'une nouvelle langue", async () => {
@@ -100,7 +104,8 @@ describe("LangEpisode", () => {
     await act(async () => screen.getByRole("button", { name: /continuer|continue/i }).click());
     await act(async () => screen.getByRole("button", { name: /jamais|never/i }).click());
 
-    expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", undefined, 0);
+    expect(api.feuilletonRunStart).toHaveBeenCalledWith("espagnol", 0);
     expect(api.langWarmupCards).not.toHaveBeenCalled();
+    expect(api.feuilletonHook).not.toHaveBeenCalled();
   });
 });

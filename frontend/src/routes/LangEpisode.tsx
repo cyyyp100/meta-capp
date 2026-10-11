@@ -13,7 +13,9 @@
 // de ces vues n'existe plus ici.
 //
 // Rituels : le sas d'entrée — le même qu'avant un PDF, avec les cartes de la
-// langue pour révision éclair — précède chaque séance, AVANT que son plan ne soit construit — les
+// langue pour révision éclair et, comme pour un PDF, une accroche de Clikoda
+// écrite pendant le sas, sur l'épisode que la séance va faire découvrir —
+// précède chaque séance, AVANT que son plan ne soit construit — les
 // cartes qu'il fait réviser ne sont plus dues, et la séance ne les ressert pas.
 // Il n'y en a pas au premier accès : l'onboarding (et son test de niveau) en
 // tient lieu, et une langue neuve n'a encore aucune carte. Le rappel reste la
@@ -74,7 +76,7 @@ export function LangEpisode() {
   const t = useT();
   const navigate = useNavigate();
   const { state } = useLocation();
-  const nav = (state ?? {}) as { language?: string; label?: string; rtl?: boolean; mode?: "court" | "relecture"; onboarding?: boolean };
+  const nav = (state ?? {}) as { language?: string; label?: string; rtl?: boolean; onboarding?: boolean };
   const language = nav.language;
   const [phase, setPhase] = useState<Phase>(nav.onboarding ? "onboarding" : "entry");
   const [plan, setPlan] = useState<RunPlan | null>(null);
@@ -100,10 +102,10 @@ export function LangEpisode() {
     }
   }, [plan, index, tracker]);
 
-  async function start(mode?: "court" | "relecture") {
+  async function start() {
     setPhase("loading");
     try {
-      const p = await api.feuilletonRunStart(language!, mode, warmedUp.current);
+      const p = await api.feuilletonRunStart(language!, warmedUp.current);
       // Séance du jour reprise à l'étape atteinte (R2).
       const resumeAt = p.resumed && p.current_step ? Math.max(0, p.steps.findIndex((s) => s.key === p.current_step)) : 0;
       started.current = false;
@@ -156,11 +158,11 @@ export function LangEpisode() {
     return (
       <div style={{ position: "fixed", inset: 0, background: "var(--bg)" }}>
         <EntrySas
-          source={{ kind: "language", language }}
+          source={{ kind: "episode", language }}
           title={nav.label ?? language}
           onStart={(timings) => {
             warmedUp.current = timings.length;
-            void start(nav.mode);
+            void start();
           }}
           onLeave={() => navigate("/lang")}
         />
@@ -182,7 +184,7 @@ export function LangEpisode() {
         {phase === "error" && (
           <div>
             <p style={{ color: "var(--danger)" }}>{t("feuil.error")}</p>
-            <button style={ghostBtn} onClick={() => void start(nav.mode)}>{t("common.retry")}</button>
+            <button style={ghostBtn} onClick={() => void start()}>{t("common.retry")}</button>
           </div>
         )}
         {phase === "run" && plan && (() => {

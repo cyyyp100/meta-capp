@@ -100,31 +100,29 @@ describe("FeuilletonHome", () => {
     expect(screen.getAllByRole("link", { name: /version pro|pro edition/i })).toHaveLength(2);
   });
 
-  it("montre pourquoi « Séance courte » et « Bibliothèque » sont inactives", async () => {
+  it("montre pourquoi « Bibliothèque » est inactive", async () => {
     vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
     vi.spyOn(api, "feuilletonStatus").mockResolvedValue(
       status({ next_status: "failed", episodes_played: 0, episode_n: 0, next_episode: 1 }),
     );
     await renderHome();
-    const short = await screen.findByRole("button", { name: /séance courte|short session/i });
-    const library = screen.getByRole("button", { name: /^bibliothèque$|^library$/i });
-    for (const button of [short, library]) {
-      expect(button).toBeDisabled();
-      // Lisiblement inactif : atténué, et le curseur le dit.
-      expect(button).toHaveStyle({ opacity: "0.45", cursor: "not-allowed" });
-    }
-    expect(short).toHaveAttribute("title", expect.stringMatching(/épisode 1 est écrit|episode 1 is written/i));
+    const library = await screen.findByRole("button", { name: /^bibliothèque$|^library$/i });
+    expect(library).toBeDisabled();
+    // Lisiblement inactive : atténuée, et le curseur le dit.
+    expect(library).toHaveStyle({ opacity: "0.45", cursor: "not-allowed" });
     expect(library).toHaveAttribute("title", expect.stringMatching(/premier épisode|first episode/i));
   });
 
-  it("laisse « Séance courte » et « Bibliothèque » actives quand l'épisode est prêt", async () => {
+  it("laisse le serveur choisir la séance : ni « Séance courte » ni « Juste relire »", async () => {
     vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
     vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status());
     await renderHome();
-    const short = await screen.findByRole("button", { name: /séance courte|short session/i });
-    expect(short).toBeEnabled();
-    expect(short).not.toHaveAttribute("title");
-    expect(short).toHaveStyle({ cursor: "pointer" });
+    const library = await screen.findByRole("button", { name: /^bibliothèque$|^library$/i });
+    expect(library).toBeEnabled();
+    expect(library).not.toHaveAttribute("title");
+    expect(library).toHaveStyle({ cursor: "pointer" });
+    expect(screen.queryByRole("button", { name: /séance courte|short session/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /juste relire|just re-read/i })).toBeNull();
   });
 
   it("après plus de 3 jours sans séance, propose la relecture et dit que l'épisode prêt attend", async () => {
@@ -133,11 +131,6 @@ describe("FeuilletonHome", () => {
     await renderHome();
     expect(await screen.findByRole("button", { name: /relire avant l'épisode 3|re-read before episode 3/i })).toBeInTheDocument();
     expect(screen.getByText(/l'épisode 3 est prêt : il t'attend|episode 3 is ready: it waits/i)).toBeInTheDocument();
-    // La séance courte jouerait l'épisode : elle attend la relecture, et le dit.
-    const short = screen.getByRole("button", { name: /séance courte|short session/i });
-    expect(short).toBeDisabled();
-    expect(short).toHaveAttribute("title", expect.stringMatching(/après la relecture|after the re-read/i));
-    expect(screen.getByRole("button", { name: /juste relire|just re-read/i })).toBeEnabled();
   });
 
   it("une séance du jour restée ouverte passe avant la relecture imposée", async () => {

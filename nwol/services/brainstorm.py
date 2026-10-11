@@ -260,7 +260,7 @@ def _handle_claimed(
             if languages:
                 portraits = brainstorm_search.language_sources()
             if search:
-                excerpts = _search_excerpts(discussion_id, queries, scope)
+                excerpts = _search_excerpts(discussion_id, queries, scope, languages)
         except Exception as exc:  # pragma: no cover - best-effort
             logger.debug("Recherche base échouée : %s", exc)
         finally:
@@ -273,13 +273,20 @@ def _handle_claimed(
         logger.debug("Décision de recherche échouée (%s) -> réponse sans recherche", msg)
         _answer([])
 
+    # Les langues qu'il étudie, nommées à la décision : sans elles, « l'épisode
+    # de la fête, en espagnol » ne lui disait pas qu'il s'agit du module Langues.
+    # Rien pour une discussion liée, qui ne consulte pas ce module.
+    studied = brainstorm_search.studied_language_labels() if scope is None else []
     decide_brainstorm_search_async(
-        history, user_message, _on_decision, _on_decide_error, scope=scope,
+        history, user_message, _on_decision, _on_decide_error, scope=scope, languages=studied,
     )
 
 
-def _search_excerpts(discussion_id: int, queries: list[str], scope: dict | None) -> list[dict]:
+def _search_excerpts(
+    discussion_id: int, queries: list[str], scope: dict | None, languages: bool = False,
+) -> list[dict]:
     """Extraits de la base pour les requêtes décidées, ``MAX_SOURCES`` au plus.
+    ``languages`` : la recherche couvre aussi les mots et épisodes du module Langues.
 
     Extraits DÉJÀ CITÉS dans cette discussion : amortis, pas exclus. Sans cela,
     la même poignée de surlignages revenait tour après tour, et deux fois la
@@ -294,7 +301,7 @@ def _search_excerpts(discussion_id: int, queries: list[str], scope: dict | None)
             break
         for item in brainstorm_search.search_user_db(
             q, limit=remaining, damp_keys=already_cited | seen,
-            folder_ids=scope["folder_ids"] if scope else None,
+            folder_ids=scope["folder_ids"] if scope else None, languages=languages,
         ):
             key = brainstorm_search.source_key(item)
             if key in seen:

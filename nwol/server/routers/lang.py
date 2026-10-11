@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import LANG_WRITING_MAX_CHARS
 from db.lang_db import SESSION_TYPES_SEED
-from services import lang_runs, lang_writing
+from services import lang_hook, lang_runs, lang_writing
 from services.lang import (
     complete_lesson,
     complete_session,
@@ -188,7 +188,6 @@ class PlacementAnswersBody(BaseModel):
 
 
 class RunStartBody(BaseModel):
-    mode: str | None = None
     # Cartes révisées au sas d'entrée (E10) ; le service les borne lui-même.
     warmup: int = 0
 
@@ -249,6 +248,14 @@ def feuilleton_next_ensure(language: str) -> dict:
     return _call(lang_runs.ensure_next, language)
 
 
+@router.get("/{language}/hook")
+def feuilleton_hook(language: str) -> dict:
+    """L'accroche du sas d'entrée sur l'épisode que la séance va faire
+    découvrir, écrite par Clikoda pendant le sas ; vide sans épisode neuf ou
+    sans Clikoda (`lang_hook.entry_hook`)."""
+    return {"hook": _call(lang_hook.entry_hook, language)}
+
+
 @router.post("/{language}/onboarding")
 def feuilleton_onboarding(language: str, body: OnboardingBody) -> dict:
     return _call(lang_runs.onboarding, language, body.interests, body.has_studied)
@@ -267,9 +274,8 @@ def feuilleton_placement_submit(language: str, body: PlacementAnswersBody) -> di
 
 @router.post("/{language}/run/start")
 def feuilleton_run_start(language: str, body: RunStartBody) -> dict:
-    """E3 : plan complet de la séance (mode facultatif : court, relecture)."""
-    mode = body.mode if body.mode in ("court", "relecture") else None
-    return _call(lang_runs.start_run, language, mode, body.warmup)
+    """E3 : plan complet de la séance, dans le mode que choisit le serveur."""
+    return _call(lang_runs.start_run, language, body.warmup)
 
 
 @router.get("/run/{run_id}")

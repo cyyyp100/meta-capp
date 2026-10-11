@@ -1303,23 +1303,6 @@ def parse_lang_curriculum(raw: str | dict) -> dict | None:
     return {"lessons": lessons}
 
 
-def parse_lang_curiosity(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return None
-    hook = _coerce_text(data.get("curiosity_hook", ""))
-    if not _non_empty_str(hook):
-        return None
-    tone = _normalize_curiosity_tone(data.get("tone"))
-    if tone not in {"calm", "intriguing", "concrete", "playful"}:
-        tone = "concrete"
-    return {
-        "curiosity_hook": (hook or "").strip(),
-        "cultural_note": (_coerce_text(data.get("cultural_note", "")) or "").strip(),
-        "tone": tone,
-    }
-
-
 def parse_lang_lesson(raw: str | dict) -> dict | None:
     data = _load_json(raw)
     if not isinstance(data, dict):
@@ -2298,3 +2281,23 @@ def parse_lang_writing_feedback(raw: str | dict) -> dict | None:
     if verdict is None or not corrected:
         return None
     return {"verdict": verdict, "errors": errors, "corrected": corrected, "praise": _str(data.get("praise"))}
+
+
+# ── Accroche du sas d'entrée (services/lang_hook.py) ──────────────────────────
+# Structure seulement : la longueur et la langue sont vérifiées par
+# `lang_hook.validate_hook`.
+
+_HOOK_QUOTES = {'"': '"', "«": "»", "“": "”"}
+
+
+def parse_lang_episode_hook(raw: str | dict) -> dict | None:
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    hook = _str(data.get("curiosity_hook", data.get("hook")))
+    # Une phrase rendue entre guillemets : ils ne font pas partie de l'accroche.
+    # Pas quand elle en contient d'autres (« non », dit-elle, « jamais »).
+    inner = hook[1:-1]
+    if len(hook) > 1 and _HOOK_QUOTES.get(hook[0]) == hook[-1] and hook[0] not in inner and hook[-1] not in inner:
+        hook = inner.strip()
+    return {"curiosity_hook": hook} if hook else None

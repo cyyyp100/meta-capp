@@ -125,7 +125,6 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_content_matching":    7,
     "lang_content_transform":   7,
     "lang_curriculum":          7,
-    "lang_curiosity":           7,
     "lang_lesson":              7,
     "lang_exercises":           7,
     # ── Module langue, méthode feuilleton (G17) ──────────────────────────────
@@ -146,6 +145,9 @@ _TASK_PRIORITY: dict[str, int] = {
     # passe devant les appels d'épisode en file, sans interrompre celui en cours
     # (un seul worker, aucune préemption).
     "lang_writing_feedback":    5,
+    # L'accroche du sas d'entrée s'écrit pendant le sas, qui ne l'attend pas
+    # mais ne dure qu'une minute : même rang que la correction.
+    "lang_episode_hook":        5,
     # Analyse hebdomadaire : usage interne, rien ne l'attend.
     "lang_weekly_analysis":     8,
     # Mesure du débit au démarrage (`calibrate_throughput`) : quelques secondes,
@@ -2625,23 +2627,6 @@ def generate_lang_curriculum_async(
     )
 
 
-def generate_lang_curiosity_async(
-    language: str,
-    lesson_n: int,
-    theme: str,
-    grammar_point: str,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    from llm.prompts import build_lang_curiosity_prompt
-    from llm.schema_json import parse_lang_curiosity
-    prompt = build_lang_curiosity_prompt(language, lesson_n, theme, grammar_point)
-    return _run_json_async(
-        "lang_curiosity", prompt, parse_lang_curiosity, on_success, on_error, model
-    )
-
-
 def generate_lang_lesson_async(
     language: str,
     lesson_n: int,
@@ -2928,6 +2913,16 @@ def generate_lang_writing_feedback_async(params: dict, on_success, on_error, on_
     )
 
 
+def generate_lang_episode_hook_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+    from llm.prompts import build_lang_episode_hook_prompt
+    from llm.schema_json import parse_lang_episode_hook
+    return _run_json_async(
+        "lang_episode_hook", build_lang_episode_hook_prompt(params), parse_lang_episode_hook,
+        on_success, on_error, model, on_metrics=on_metrics,
+        system_lang=params.get("explain_lang"),
+    )
+
+
 def generate_lang_weekly_analysis_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
     from llm.prompts import build_lang_weekly_analysis_prompt
     from llm.schema_json import parse_lang_weekly_analysis
@@ -2961,13 +2956,15 @@ def decide_brainstorm_search_async(
     on_error,
     model: str = OLLAMA_MODEL,
     scope: dict | None = None,
+    languages: list[str] | None = None,
 ) -> None:
-    """Décide s'il faut fouiller la base de l'utilisateur (JSON court {search, queries}).
+    """Décide s'il faut fouiller la base de l'utilisateur (JSON court {search, queries, languages}).
 
-    ``scope`` : dossier auquel la discussion est liée (cf. services/brainstorm._scope)."""
+    ``scope`` : dossier auquel la discussion est liée (cf. services/brainstorm._scope).
+    ``languages`` : noms des langues qu'il a commencées dans le module Langues."""
     from llm.prompts import build_brainstorm_search_decide_prompt
     from llm.schema_json import parse_brainstorm_search_decision
-    prompt = build_brainstorm_search_decide_prompt(history, user_message, scope)
+    prompt = build_brainstorm_search_decide_prompt(history, user_message, scope, languages)
     return _run_json_async(
         "brainstorm_search_decide", prompt, parse_brainstorm_search_decision,
         on_success, on_error, model,
