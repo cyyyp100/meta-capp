@@ -84,6 +84,11 @@ jobs:
           cache: pip
       - name: Dépendances backend (pour le serveur des parcours)
         run: pip install -r ../requirements.txt
+      # Les deux arbres de dépendances sont installés ici : c'est l'endroit où
+      # refuser, dès la PR, une dépendance copyleft ou sans licence déclarée.
+      - name: Licences des dépendances (Python + npm)
+        run: python scripts/third_party_notices.py --check
+        working-directory: ${{ github.workspace }}
       - name: Navigateur Playwright
         run: npx playwright install --with-deps chromium
       - name: Parcours de bout en bout (playwright)
