@@ -113,7 +113,11 @@ def test_a_moved_file_is_reported_missing_instead_of_a_server_error(client, tmp_
 
     listed = _listed(client)[doc["id"]]
     assert listed["file_missing"] is True
-    assert listed["last_known_folder"] == str((tmp_path / "cours").resolve())
+    # Sous Windows `tmp_path` est dans le dossier personnel : affiché « ~\\… ».
+    from services.library import _last_known_folder
+
+    assert listed["last_known_folder"] == _last_known_folder(str(src.resolve()))
+    assert listed["last_known_folder"].endswith("cours")
     detail = client.get(f"/api/library/doc/{doc['id']}").json()
     assert detail["file_missing"] is True and detail["page_sizes_pts"] == []
 

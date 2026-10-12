@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Callable
 from config import question_types
@@ -518,7 +519,9 @@ def calibrate_throughput() -> None:
         # Un début propre à ce lancement : relancé avant la fin du `keep_alive`,
         # le même prompt serait servi par le cache de préfixe d'Ollama, et la
         # lecture paraîtrait huit fois plus rapide qu'elle ne l'est (llm/throughput).
-        prompt = f"[{time.time_ns()}]\n{_CALIBRATION_PROMPT}"
+        # Pas `time.time_ns()` : sous Windows deux appels rapprochés (~15 ms)
+        # renvoient la même valeur.
+        prompt = f"[{uuid.uuid4().hex}]\n{_CALIBRATION_PROMPT}"
         try:
             _call_ollama(
                 prompt, OLLAMA_MODEL,
