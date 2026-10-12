@@ -133,7 +133,18 @@ def create_app() -> FastAPI:
     if env_token:
         security.set_launch_token(env_token)
 
-    app = FastAPI(title="Meta-Capp", version=APP_VERSION, lifespan=_lifespan)
+    # Ni `/docs`, ni `/redoc`, ni `/openapi.json` : servis hors de `/api`, ils
+    # publiaient le schéma complet de l'API sans passer par le nonce, et leurs
+    # pages chargent Swagger UI / ReDoc depuis un CDN (bloqué par la CSP, donc
+    # inutilisables de toute façon). Le schéma se lit dans `server/routers/`.
+    app = FastAPI(
+        title="Meta-Capp",
+        version=APP_VERSION,
+        lifespan=_lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.add_exception_handler(Exception, _unhandled_error)
     app.add_exception_handler(DocumentFileMissing, _file_missing)
 

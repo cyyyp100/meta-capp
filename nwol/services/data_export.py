@@ -19,6 +19,8 @@ logger = logging.getLogger("services.data_export")
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
 MAX_IMPORT_BYTES = 512 * 1024 * 1024  # garde-fou grossier (DB locale ~Mo)
+# Copie de la base prise juste avant une restauration : `nwol.db.pre-import-…`.
+SAFETY_BACKUP_MARK = ".pre-import-"
 
 
 def export_db() -> str:
@@ -59,14 +61,21 @@ def import_db(content: bytes) -> dict:
             if has_docs is None:
                 raise ValueError("Sauvegarde invalide (schéma Meta-Capp absent)")
 
-            # Backup de sécurité de la DB actuelle avant remplacement.
-            current = db.DB_PATH
-            safety = None
-            if os.path.isfile(current):
-                safety = current + time.strftime(".pre-import-%Y%m%d-%H%M%S")
-                shutil.copy2(current, safety)
-
+            # Copie de sécurité de la base actuelle avant remplacement. VACUUM
+            # INTO et non une copie du fichier : en WAL, les dernières écritures
+            # vivent dans `nwol.db-wal` tant qu'aucun point de contrôle ne les a
+            # reversées — copier `nwol.db` seul donnait une base ancienne, voire
+            # vide. Une seule copie est gardée, celle d'avant la DERNIÈRE
+            # restauration : chacune est un double complet des données de
+            # l'étudiant, et « Tout effacer » les retire aussi.
             target = db.get_connection()
+            safety = None
+            if os.path.isfile(db.DB_PATH):
+                _discard_safety_backups()
+                safety = db.DB_PATH + time.strftime(SAFETY_BACKUP_MARK + "%Y%m%d-%H%M%S")
+                target.execute("VACUUM INTO ?", (safety,))
+                os.chmod(safety, 0o600)
+
             src.backup(target)
             target.commit()
         finally:
@@ -109,6 +118,11 @@ def purge_all_data() -> dict:
     finally:
         conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("VACUUM")
+    # En WAL, l'ancien contenu reste dans `nwol.db` jusqu'au prochain point de
+    # contrôle : on le force, journal tronqué, pour que l'effacement soit fait
+    # sur le disque et pas seulement aux yeux de SQLite.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    _discard_safety_backups()
 
     shutil.rmtree(ASSETS_DIR, ignore_errors=True)
     # Copies des documents envoyés depuis le navigateur : des données de
@@ -130,6 +144,16 @@ def purge_all_data() -> dict:
     initialize_schema()
     logger.info("Effacement total des données effectué (%d tables purgées).", len(tables))
     return {"purged": True, "tables": len(tables)}
+
+
+def _discard_safety_backups() -> None:
+    """Efface les copies de sécurité laissées par `import_db`."""
+    current = Path(db.DB_PATH)
+    for path in current.parent.glob(current.name + SAFETY_BACKUP_MARK + "*"):
+        try:
+            path.unlink()
+        except OSError:  # pragma: no cover - fichier verrouillé (Windows)
+            logger.warning("Copie de sécurité non effacée : %s", path.name)
 
 
 def export_logs() -> str | None:

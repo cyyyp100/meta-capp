@@ -21,12 +21,14 @@
 # pypdfium2 wraps PDFium (the PDF engine of Chrome), licensed Apache-2.0 OR
 # BSD-3-Clause — deliberately NOT PyMuPDF, which is AGPL-3.0 and would force
 # the whole app open-source or a commercial Artifex licence.
-# See architecture/07-pdf-et-code-reader.md.
-# Pinned to 4.30.0, not the latest 5.x: that is the version the wider Python PDF
-# ecosystem pins, and upgrading breaks other tools sharing the `nwol` env.
+# PDFium parses every PDF the user imports: it is the widest attack surface of
+# the app, so the pin follows PDFium's security releases (5.14.0 = PDFium
+# 156.0.8076; 4.30.0 shipped the June 2024 engine). The whole suite passes on
+# both. OCR tools that pin pypdfium2==4.30.0 (marker-pdf, surya) belong in
+# their own environment, not in Meta-Capp's.
 # PDFium is NOT thread-safe — every call is serialised through
 # pdf_viewer/engine.py:PDFIUM_LOCK. Do not bypass it.
-pypdfium2==4.30.0
+pypdfium2==5.14.0
 Pillow==12.3.0            # PNG encoding of the rendered pages (PdfBitmap -> file)
 
 # Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
