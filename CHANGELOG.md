@@ -170,7 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code that no longer served: the adaptive language sequencer of the old flow
   (`/api/lang/session`, `/api/lang/session/complete`, `/api/lang/session-types`,
   the deprecated `/api/lang/lesson`), `/api/flashcards/due`,
-  `/api/session/{id}/metrics`, about seventy unused functions, the strings of the
+  `/api/session/{id}/metrics`, about a hundred unused functions, the strings of the
   former Tkinter interface, and the interactive API documentation (`/docs`,
   `/redoc`, `/openapi.json`).
 - **Short session** and **Just re-read today** are gone from a language's home.
