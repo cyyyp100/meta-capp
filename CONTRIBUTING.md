@@ -47,7 +47,7 @@ git clone https://github.com/cyyyp100/meta-capp.git
 cd meta-capp
 
 # Python 3.11 — conda is what the project is developed against
-conda create -n nwol python=3.11.9 && conda activate nwol
+conda create -n metacapp python=3.11.9 && conda activate metacapp
 # ...or a plain venv:  python -m venv .venv && source .venv/bin/activate
 
 pip install -r requirements.txt

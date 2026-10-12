@@ -1,6 +1,6 @@
 # metacapp.spec — Recette PyInstaller pour produire un exécutable desktop.
 #
-# Build :  conda activate nwol && cd frontend && npm run build && cd ..
+# Build :  conda activate metacapp && cd frontend && npm run build && cd ..
 #          pyinstaller desktop/metacapp.spec --noconfirm
 #
 # Recette de départ : les dépendances binaires délicates (pypdfium2, pywebview,

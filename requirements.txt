@@ -1,8 +1,8 @@
 # Meta-Capp — Python dependencies.
-# Versions aligned with the working conda env `nwol`.
+# Versions aligned with the working conda env `metacapp`.
 #
 # Quick start:
-#   conda create -n nwol python=3.11.9 && conda activate nwol
+#   conda create -n metacapp python=3.11.9 && conda activate metacapp
 #   pip install -r requirements.txt
 #   cd frontend && npm install && npm run build && cd ..   # web UI bundle
 #   python main.py                                          # native app window

@@ -19,6 +19,12 @@ def test_is_code_file_by_extension_and_name(tmp_path):
     assert not code_reader.is_code_file(_write(tmp_path, "photo.png", "\x89PNG"))
 
 
+def test_secret_bearing_files_are_refused(tmp_path):
+    # Jetons et mots de passe : ni fiche LLM, ni index, ni copie d'envoi.
+    for name in (".env", "prod.env", ".bashrc", ".zshrc"):
+        assert not code_reader.is_code_file(_write(tmp_path, name, "TOKEN=x\n")), name
+
+
 def test_detect_language(tmp_path):
     assert code_reader.detect_language(_write(tmp_path, "a.py", "")) == "python"
     assert code_reader.detect_language(_write(tmp_path, "a.rs", "")) == "rust"

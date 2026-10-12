@@ -8,7 +8,7 @@
 #   ./scripts/build_app.sh --desktop    # build + pose l'app sur le Bureau
 #   ./scripts/build_app.sh --no-install # build seul (résultat dans dist_app/)
 #
-# À lancer depuis l'env conda `nwol` (`conda activate nwol`) : c'est lui qui
+# À lancer depuis l'env conda `metacapp` (`conda activate metacapp`) : c'est lui qui
 # porte pyinstaller et les dépendances gelées. Mode d'emploi détaillé :
 # architecture/15-installer-sur-le-bureau.md.
 set -euo pipefail
