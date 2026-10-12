@@ -57,12 +57,6 @@ def save_answer(
     return int(cur.lastrowid)
 
 
-def get_answer(answer_id: int) -> dict | None:
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM answers WHERE id=?", (answer_id,)).fetchone()
-    return _decode_answer(row) if row else None
-
-
 def get_answers_for_session(session_id: int) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(
@@ -70,35 +64,6 @@ def get_answers_for_session(session_id: int) -> list[dict]:
         (session_id,),
     ).fetchall()
     return [_decode_answer(row) for row in rows]
-
-
-def get_answers_for_question(question_id: int, user_id: int | None = None) -> list[dict]:
-    conn = get_connection()
-    if user_id is None:
-        rows = conn.execute(
-            "SELECT * FROM answers WHERE question_id=? ORDER BY attempt_number, id",
-            (question_id,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT * FROM answers
-               WHERE question_id=? AND user_id=?
-               ORDER BY attempt_number, id""",
-            (question_id, user_id),
-        ).fetchall()
-    return [_decode_answer(row) for row in rows]
-
-
-def get_recent_session_answers(session_id: int, limit: int = 5) -> list[dict]:
-    conn = get_connection()
-    rows = conn.execute(
-        """SELECT * FROM answers
-           WHERE session_id=?
-           ORDER BY answered_at DESC, id DESC
-           LIMIT ?""",
-        (session_id, limit),
-    ).fetchall()
-    return list(reversed([_decode_answer(row) for row in rows]))
 
 
 def get_recurring_struggles(

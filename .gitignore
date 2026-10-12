@@ -114,3 +114,6 @@ ancien_script/
 /dist_app/
 /build_app/
 /frontend/dist/
+
+# Mentions des licences tierces : générées à chaque release (scripts/third_party_notices.py).
+/THIRD_PARTY_NOTICES.txt

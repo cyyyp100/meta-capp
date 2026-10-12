@@ -82,10 +82,6 @@ def source_version(*parts: str) -> str | None:
     return hashlib.sha256(got[0].encode("utf-8")).hexdigest()[:16] if got else None
 
 
-def clear_cache() -> None:
-    _read.cache_clear()
-
-
 # ── Validateurs (S2 et équivalents) ───────────────────────────────────────────
 
 def _nonempty(value) -> bool:

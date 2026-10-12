@@ -102,18 +102,6 @@ def get_session(session_id: int) -> dict | None:
     return _decode_session(row) if row else None
 
 
-def get_open_session(user_id: int = DEFAULT_USER_ID) -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        """SELECT * FROM reading_sessions
-           WHERE user_id=? AND ended_at IS NULL
-           ORDER BY started_at DESC, id DESC
-           LIMIT 1""",
-        (user_id,),
-    ).fetchone()
-    return _decode_session(row) if row else None
-
-
 def list_sessions(user_id: int = DEFAULT_USER_ID, limit: int = 20) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(

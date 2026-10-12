@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Callable
 from config import question_types
@@ -39,12 +40,8 @@ from llm.prompts import (
     build_curiosity_hook_prompt,
     build_evaluation_prompt,
     build_flashcard_prompt,
-    build_flashcard_tags_prompt,
-    build_follow_up_prompt,
     build_intervention_prompt,
-    build_latex_contextual_chunk_render_prompt,
     build_meta_cognition_analysis_prompt,
-    build_meta_cognition_questions_prompt,
     build_profile_analysis_prompt,
     build_question_prompt,
     build_quiz_distractors_prompt,
@@ -58,12 +55,9 @@ from llm.schema_json import (
     parse_curiosity_hook,
     parse_evaluation,
     parse_flashcard,
-    parse_flashcard_tags,
     parse_follow_up,
     parse_intervention,
-    parse_latex_paragraph_render,
     parse_meta_cognition_analysis,
-    parse_meta_cognition_questions,
     parse_profile_analysis,
     parse_question,
     parse_quiz_distractors,
@@ -80,15 +74,13 @@ _CHUNK_MAX_CHARS = 1500
 _IMAGE_MAX_BYTES = 500_000
 
 # File de priorité LLM — sérialise toutes les requêtes Ollama sur un worker unique.
-# Valeur basse = priorité haute. Ordre : math_render > descriptions > Q&A > background.
+# Valeur basse = priorité haute. Ordre : bilan de sortie > Q&A > fond.
 _TASK_PRIORITY: dict[str, int] = {
-    "math_render":              0,
     # Bilan du sas de sortie : la session est close (`services.session.end_session`
     # a déjà purgé la file), l'étudiant n'attend plus que lui. Au-dessus de tout
     # ce que le lecteur pourrait encore enfiler avant que son WebSocket se ferme.
     "session_summary":          1,
     "question":                 2,
-    "follow_up":                3,
     "assistant_answer":         3,
     "evaluation":               4,
     "rephrasing":               5,
@@ -111,7 +103,6 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_placement_eval":      5,
     "lang_lesson_plan":         5,
     "lang_revision_quiz":       7,
-    "lang_session_select":      7,
     "lang_content_dialogue":    7,
     "lang_content_reading":     7,
     "lang_content_vocab":       7,
@@ -124,9 +115,6 @@ _TASK_PRIORITY: dict[str, int] = {
     "lang_content_ordering":    7,
     "lang_content_matching":    7,
     "lang_content_transform":   7,
-    "lang_curriculum":          7,
-    "lang_lesson":              7,
-    "lang_exercises":           7,
     # ── Module langue, méthode feuilleton (G17) ──────────────────────────────
     # Aucune tâche interactive : une séance n'attend jamais Clikoda. La
     # génération d'un épisode passe après tout ce que le lecteur demande, mais
@@ -206,13 +194,29 @@ class ModelOutOfMemory(RuntimeError):
 _OOM_RE = re.compile(r"requires more system memory|out of memory|insufficient memory", re.IGNORECASE)
 _OOM_SIZES_RE = re.compile(r"\(([\d.]+\s*[GM]iB)\)\D+\(([\d.]+\s*[GM]iB)\)")
 
+# Un appel AVEC image qui échoue est rejoué sans image, quelle qu'en soit la
+# cause. Le journal, lui, doit dire laquelle : « Ollama a refusé les images »
+# s'écrivait aussi quand c'était le modèle qui bégayait (Ollama interrompt une
+# génération qui répète en boucle le même jeton).
+_REPEAT_LIMIT_RE = re.compile(r"token repeat limit", re.IGNORECASE)
+_CONTEXT_OVERFLOW_RE = re.compile(r"exceed\w*_context|context (length|size|window)", re.IGNORECASE)
+
+
+def _image_retry_reason(exc: Exception) -> str:
+    detail = str(exc)
+    if _REPEAT_LIMIT_RE.search(detail):
+        return "le modèle s'est mis à répéter le même texte, Ollama a interrompu la génération"
+    if _CONTEXT_OVERFLOW_RE.search(detail):
+        return "l'image ne tient pas dans le contexte du modèle"
+    return f"erreur d'Ollama ({detail})"
+
 
 # Tâches où l'étudiant a posé une question à Clikoda et attend SA réponse. Le
 # repli local y fabrique une réponse générique : sur une panne de mémoire, elle
 # cacherait la seule information utile — cet ordinateur ne peut pas faire
 # tourner le modèle. Ailleurs (fiche, intervention), le repli silencieux reste
 # le bon comportement, comme quand Ollama est éteint.
-_OOM_EXPLAINED_TASKS = frozenset({"assistant_answer", "follow_up", "rephrasing"})
+_OOM_EXPLAINED_TASKS = frozenset({"assistant_answer", "rephrasing"})
 
 
 def _raise_if_out_of_memory(detail: str) -> None:
@@ -515,7 +519,9 @@ def calibrate_throughput() -> None:
         # Un début propre à ce lancement : relancé avant la fin du `keep_alive`,
         # le même prompt serait servi par le cache de préfixe d'Ollama, et la
         # lecture paraîtrait huit fois plus rapide qu'elle ne l'est (llm/throughput).
-        prompt = f"[{time.time_ns()}]\n{_CALIBRATION_PROMPT}"
+        # Pas `time.time_ns()` : sous Windows deux appels rapprochés (~15 ms)
+        # renvoient la même valeur.
+        prompt = f"[{uuid.uuid4().hex}]\n{_CALIBRATION_PROMPT}"
         try:
             _call_ollama(
                 prompt, OLLAMA_MODEL,
@@ -616,28 +622,6 @@ def evaluate_answer_async(
         "evaluation",
         prompt,
         parse_evaluation,
-        on_success,
-        on_error,
-        model,
-        image_paths=context.get("image_paths") or [],
-    )
-
-
-def answer_follow_up_async(
-    context: dict,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    prompt = build_follow_up_prompt(
-        paragraph=context.get("paragraph") or "",
-        user_question=context.get("user_question") or "",
-        metacog_profile=context.get("metacog_profile") or {},
-    )
-    return _run_json_async(
-        "follow_up",
-        prompt,
-        parse_follow_up,
         on_success,
         on_error,
         model,
@@ -760,21 +744,6 @@ def generate_session_summary_async(
     return _run_json_async("session_summary", prompt, parse_session_summary, on_success, on_error, model)
 
 
-def generate_meta_cognition_questions_async(
-    context: dict,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    prompt = build_meta_cognition_questions_prompt(
-        session_summary=context.get("session_summary") or {},
-        recent_user_answers=context.get("recent_user_answers") or [],
-        previous_end_questions=context.get("previous_end_questions") or [],
-        user_profile=context.get("user_profile") or {},
-    )
-    return _run_json_async("meta_cognition_questions", prompt, parse_meta_cognition_questions, on_success, on_error, model)
-
-
 def analyze_meta_cognition_answers_async(
     context: dict,
     on_success,
@@ -807,22 +776,6 @@ def generate_profile_analysis_async(
         previous_analysis=context.get("previous_analysis") or "",
     )
     return _run_json_async("profile_analysis", prompt, parse_profile_analysis, on_success, on_error, model)
-
-
-def generate_flashcard_tags_async(
-    context: dict,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    prompt = build_flashcard_tags_prompt(
-        front=context.get("front") or "",
-        back=context.get("back") or "",
-        session_context=context.get("session_context") or {},
-        existing_sections=context.get("existing_sections") or [],
-        existing_tags=context.get("existing_tags") or [],
-    )
-    return _run_json_async("flashcard_tags", prompt, parse_flashcard_tags, on_success, on_error, model)
 
 
 def make_standalone_flashcard_async(
@@ -892,75 +845,6 @@ def generate_curiosity_hook_async(
     return _run_json_async("curiosity_hook", prompt, parse_curiosity_hook, on_success, on_error, model)
 
 
-def render_math_paragraph_async(
-    paragraph_text: str,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-    image_paths: list[str] | None = None,
-) -> None:
-    chunks = _split_paragraph_for_llm_with_context(paragraph_text)
-    safe_images = _filter_heavy_images(image_paths or [])
-    task_options = OLLAMA_TASK_OPTIONS.get("math_render", OLLAMA_OPTIONS)
-    seq = next(_QUEUE_COUNTER)
-    captured_token = _generation_token
-
-    def _run_chunks() -> None:
-        if _generation_token != captured_token:
-            logger.debug("Tâche LLM math_render annulée (token obsolète)")
-            return
-        try:
-            parts = []
-            for i, chunk in enumerate(chunks):
-                target = chunk["target"]
-                imgs = safe_images if i == 0 else []
-                prompt = build_latex_contextual_chunk_render_prompt(
-                    target,
-                    chunk.get("previous_context", ""),
-                    chunk.get("next_context", ""),
-                )
-                try:
-                    parsed = _generate_json(
-                        "math_render",
-                        prompt,
-                        parse_latex_paragraph_render,
-                        model=model,
-                        retries=1,
-                        image_paths=imgs,
-                        options=task_options,
-                    )
-                    parts.append(_sanitize_math_paragraph_render(parsed.get("rendered"), target))
-                except Exception as exc:
-                    logger.warning("math_render chunk %s/%s échoué: %s", i + 1, len(chunks), exc)
-                    parts.append(target)
-            on_success({"rendered": "\n\n".join(parts)})
-        except Exception as exc:
-            logger.error("Échec génération LLM math_render : %s", exc)
-            on_error(str(exc))
-
-    _LLM_QUEUE.put((0, seq, _run_chunks))
-
-
-def generate_questions_async(
-    text: str,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    """
-    Compatibilité API : certains appels attendent encore une liste de questions.
-    La v1.3 génère désormais une question par paragraphe.
-    """
-    def _on_question(question: dict) -> None:
-        on_success([{
-            **question,
-            "answer": question["expected_answer"],
-            "llm_model": model,
-        }])
-
-    return generate_question_async({"paragraph": text}, _on_question, on_error, model)
-
-
 def _split_paragraph_for_llm(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> list[str]:
     """Découpe un texte long en chunks cohérents sans couper volontairement les blocs."""
     if len(text) <= max_chars:
@@ -982,140 +866,6 @@ def _split_paragraph_for_llm(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> li
             result.extend(_split_paragraph_for_llm(tail, max_chars))
 
     return result or [text[:max_chars]]
-
-
-def _split_paragraph_for_llm_with_context(
-    text: str,
-    max_chars: int = _CHUNK_MAX_CHARS,
-    previous_context_chars: int = 520,
-    next_context_chars: int = 320,
-    source_block_ids: list[str] | None = None,
-    document_context_before: str = "",
-) -> list[dict[str, str | list[str]]]:
-    """Split text into contextual chunks for LLM processing.
-
-    Each chunk carries:
-      - target: the text to rewrite
-      - previous_context / next_context: surrounding text for understanding only
-      - instruction: explicit reminder not to rewrite context
-      - source_block_ids: which blocks this chunk belongs to (for dedup at recomposition)
-
-    document_context_before seeds the first chunk's previous_context with text
-    from already-rendered surrounding blocks so the LLM has document-level context.
-    """
-    chunks = _split_paragraph_for_llm(text, max_chars=max_chars)
-    result: list[dict[str, str | list[str]]] = []
-    for index, target in enumerate(chunks):
-        if index > 0:
-            previous_context = chunks[index - 1][-previous_context_chars:]
-        else:
-            # Seed from document-level rendered context when no intra-block context exists.
-            previous_context = document_context_before[-previous_context_chars:] if document_context_before else ""
-        next_context = chunks[index + 1][:next_context_chars] if index + 1 < len(chunks) else ""
-        result.append({
-            "target": target,
-            "previous_context": previous_context,
-            "next_context": next_context,
-            "instruction": "Rewrite only the 'target' section. The context sections are for understanding only.",
-            "source_block_ids": list(source_block_ids or []),
-        })
-    return result
-
-
-def _sanitize_math_paragraph_render(rendered: str | None, source: str) -> str:
-    """Reject math renderer outputs that would make the extracted PDF text worse."""
-    source = (source or "").strip()
-    text = (rendered or "").strip()
-    if not text:
-        return source
-    degradation_reason = _math_render_degradation_reason(text, source)
-    if degradation_reason:
-        logger.debug("Rendu math LLM rejeté (%s), repli sur le texte PDF source.", degradation_reason)
-        logger.debug(
-            "Rendu math rejeté (%s): source=%r rendu=%r",
-            degradation_reason,
-            source[:500],
-            text[:500],
-        )
-        return source
-    return text
-
-
-def _math_render_looks_degraded(rendered: str, source: str) -> bool:
-    return _math_render_degradation_reason(rendered, source) is not None
-
-
-def _math_render_degradation_reason(rendered: str, source: str) -> str | None:
-    if not rendered:
-        return "empty"
-    if source and len(rendered) < max(8, int(len(source) * 0.35)):
-        return "too_short"
-
-    outside_math = _strip_math_spans(rendered)
-    if _EMPTY_SQRT_RE.search(rendered):
-        return "empty_sqrt"
-    if _ORPHAN_SCRIPT_OUTSIDE_MATH_RE.search(outside_math):
-        return "orphan_script_outside_math"
-    if _RAW_LATEX_OUTSIDE_MATH_RE.search(outside_math):
-        return "raw_latex_outside_math"
-
-    source_mathish = _count_mathish_tokens(source)
-    if source_mathish >= 3:
-        rendered_math_spans = len(_math_ranges(rendered))
-        rendered_mathish = _count_mathish_tokens(rendered)
-        if rendered_math_spans == 0 and rendered_mathish >= source_mathish:
-            return "undelimited_math"
-
-    return None
-
-
-def _json_math_render_fallback(
-    chunk: str,
-    image_paths: list[str],
-    task_options: dict,
-    model: str,
-    *,
-    previous_context: str = "",
-    next_context: str = "",
-) -> str:
-    try:
-        parsed = _generate_json(
-            "math_render",
-            build_latex_contextual_chunk_render_prompt(chunk, previous_context, next_context),
-            parse_latex_paragraph_render,
-            model=model,
-            retries=1,
-            image_paths=image_paths,
-            options=task_options,
-        )
-        return _sanitize_math_paragraph_render(parsed.get("rendered"), chunk)
-    except Exception as exc:
-        logger.warning("math_render JSON de secours échoué, repli texte brut: %s", exc)
-        return chunk
-
-
-def _strip_math_spans(text: str) -> str:
-    if not text:
-        return ""
-    ranges = _math_ranges(text)
-    if not ranges:
-        return text
-    parts: list[str] = []
-    cursor = 0
-    for start, end in ranges:
-        if cursor < start:
-            parts.append(text[cursor:start])
-        parts.append(" ")
-        cursor = max(cursor, end)
-    if cursor < len(text):
-        parts.append(text[cursor:])
-    return "".join(parts)
-
-
-def _count_mathish_tokens(text: str) -> int:
-    if not text:
-        return 0
-    return len(re.findall(r"\\[A-Za-z]+|[_^{}]|[α-ωΑ-Ω]|[⊗∑∏∞≤≥≈≃∼≠·]", text))
 
 
 def _find_safe_cut_outside_math(text: str, max_chars: int) -> int:
@@ -1216,24 +966,6 @@ def _is_escaped(text: str, index: int) -> bool:
         backslashes += 1
         cursor -= 1
     return backslashes % 2 == 1
-
-
-def _filter_heavy_images(image_paths: list[str]) -> list[str]:
-    result = []
-    for path in image_paths:
-        try:
-            size = Path(path).stat().st_size
-            if size <= _IMAGE_MAX_BYTES:
-                result.append(path)
-            else:
-                logger.debug(
-                    "Image trop lourde (%d Ko), non envoyée au LLM: %s",
-                    size // 1024,
-                    path,
-                )
-        except OSError:
-            pass
-    return result
 
 
 def _run_json_async(
@@ -1342,7 +1074,8 @@ def _run_text_async(
                 raise
             except Exception as exc:
                 if images:
-                    logger.warning("Ollama a refusé les images, repli texte seul: %s", exc)
+                    logger.warning("Génération %s avec image échouée : %s — nouvel essai sans image.",
+                                   label, _image_retry_reason(exc))
                     raw = _call_ollama(prompt, model, images=[], options=task_options, format_json=False, task=label)
                 else:
                     raise
@@ -1395,7 +1128,8 @@ def _generate_json(
             break
         except Exception as exc:
             if images:
-                logger.warning("Ollama a refusé les images jointes, repli texte seul: %s", exc)
+                logger.warning("Génération %s avec image échouée : %s — nouvel essai sans image.",
+                               label, _image_retry_reason(exc))
                 images = []
                 try:
                     raw = _call_ollama(current_prompt, model, images=[], options=options, format_json=json_format,
@@ -1479,12 +1213,6 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
   "answer_to_user_question": null,
   "flashcard": null
 }""",
-        "follow_up": """
-{
-  "answer": "réponse claire",
-  "metacog_signals": {},
-  "curiosity_signals": {}
-}""",
         "rephrasing": """
 {
   "rephrasing_angle": "angle choisi",
@@ -1503,8 +1231,6 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
     "metacognitive_questions": ["question 1", "question 2", "question 3"]
   }
 }""",
-        "meta_cognition_questions": """
-{"questions": ["question 1", "question 2", "question 3"]}""",
         "meta_cognition_analysis": """
 {
   "score_delta": 0.0,
@@ -1512,8 +1238,6 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
   "reasoning": "raisonnement bref",
   "detected_signals": {}
 }""",
-        "flashcard_tags": """
-{"tags": ["tag 1", "tag 2"]}""",
         "chapter_summary": """
 {
   "chapter_summary": {
@@ -1535,8 +1259,6 @@ def _build_json_repair_prompt(label: str, original_prompt: str, raw_response: st
 }""",
         "quiz_analysis": """
 {"analysis": "synthèse courte"}""",
-        "math_render": """
-{"rendered": "texte nettoyé"}""",
         "document_digest": """
 {"subject": "culture", "summary": "phrase courte décrivant le contenu du document", "keywords": ["mot-clé 1", "mot-clé 2", "mot-clé 3"]}""",
         "assistant_answer": """
@@ -1586,8 +1308,6 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
         return _fallback_question_from_prompt(prompt)
     if label == "evaluation":
         return _fallback_evaluation_from_prompt(prompt)
-    if label == "follow_up":
-        return _fallback_follow_up_from_prompt(prompt)
     if label == "assistant_answer":
         return _fallback_follow_up_from_prompt(prompt)
     if label == "assistant_intervention":
@@ -1597,12 +1317,8 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
         return _fallback_rephrasing_from_prompt(prompt)
     if label == "session_summary":
         return _fallback_session_summary_from_prompt(prompt)
-    if label == "meta_cognition_questions":
-        return _fallback_meta_cognition_questions_from_prompt(prompt)
     if label == "meta_cognition_analysis":
         return _fallback_meta_cognition_analysis_from_prompt(prompt)
-    if label == "flashcard_tags":
-        return _fallback_flashcard_tags_from_prompt(prompt)
     if label == "chapter_summary":
         return _fallback_chapter_summary_from_prompt(prompt)
     if label == "curiosity_hook":
@@ -1610,8 +1326,6 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
     # quiz_analysis : pas de repli local. Cours à renforcer et matières faibles
     # sont calculés par `services.quiz` ; sans LLM, le bilan s'affiche sans texte
     # d'analyse plutôt qu'avec une phrase générique qui ne dirait rien de vrai.
-    if label == "math_render":
-        return _fallback_math_render_from_prompt(prompt)
     if label == "document_digest":
         return _fallback_document_digest_from_prompt(prompt)
     return None
@@ -2155,17 +1869,6 @@ def _fallback_session_summary_from_prompt(prompt: str) -> dict | None:
     })
 
 
-def _fallback_meta_cognition_questions_from_prompt(prompt: str) -> dict | None:
-    previous = _extract_prompt_json(prompt, "Questions déjà posées récemment")
-    session_summary = _extract_prompt_json(prompt, "Résumé de session")
-    seed = session_summary.get("session_id") if isinstance(session_summary, dict) else None
-    questions = _fallback_meta_questions(
-        previous_questions=previous if isinstance(previous, list) else [],
-        seed=seed,
-    )
-    return parse_meta_cognition_questions({"questions": questions})
-
-
 def _fallback_meta_cognition_analysis_from_prompt(prompt: str) -> dict | None:
     from metacog.reflection import fallback_meta_cognition_analysis
 
@@ -2180,27 +1883,6 @@ def _fallback_meta_cognition_analysis_from_prompt(prompt: str) -> dict | None:
         profile if isinstance(profile, dict) else {},
     )
     return parse_meta_cognition_analysis(analysis)
-
-
-def _fallback_flashcard_tags_from_prompt(prompt: str) -> dict | None:
-    from utils.tags import fallback_flashcard_tags
-
-    front = _extract_prompt_section(prompt, "Recto")
-    back = _extract_prompt_section(prompt, "Verso")
-    existing_tags = _extract_prompt_json(prompt, "Tags existants")
-    existing_sections = _extract_prompt_json(prompt, "Sections existantes")
-    tags = fallback_flashcard_tags(
-        front,
-        back,
-        existing_tags=existing_tags if isinstance(existing_tags, list) else [],
-        existing_sections=existing_sections if isinstance(existing_sections, list) else [],
-    )
-    for default_tag in ("memoire", "revision"):
-        if len(tags) >= 2:
-            break
-        if default_tag not in tags:
-            tags.append(default_tag)
-    return parse_flashcard_tags({"tags": tags})
 
 
 def _fallback_chapter_summary_from_prompt(prompt: str) -> dict | None:
@@ -2239,14 +1921,6 @@ def _fallback_curiosity_hook_from_prompt(prompt: str) -> dict | None:
         "link_with_chapter": chapter or target,
         "estimated_accessibility": 0.7,
     })
-
-
-def _fallback_math_render_from_prompt(prompt: str) -> dict | None:
-    text = _extract_prompt_section(prompt, "Texte brut extrait")
-    text = text.strip()
-    if not text:
-        return None
-    return parse_latex_paragraph_render({"rendered": text})
 
 
 def _fallback_document_digest_from_prompt(prompt: str) -> dict | None:
@@ -2613,53 +2287,6 @@ def _warn_if_context_overflow(task: str, data: dict, options: dict, with_images:
 
 # ── Module langue — fonctions async ──────────────────────────────────────────
 
-def generate_lang_curriculum_async(
-    language: str,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    from llm.prompts import build_lang_curriculum_prompt
-    from llm.schema_json import parse_lang_curriculum
-    prompt = build_lang_curriculum_prompt(language)
-    return _run_json_async(
-        "lang_curriculum", prompt, parse_lang_curriculum, on_success, on_error, model
-    )
-
-
-def generate_lang_lesson_async(
-    language: str,
-    lesson_n: int,
-    curriculum_row: dict,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    from llm.prompts import build_lang_lesson_prompt
-    from llm.schema_json import parse_lang_lesson
-    prompt = build_lang_lesson_prompt(language, lesson_n, curriculum_row)
-    return _run_json_async(
-        "lang_lesson", prompt, parse_lang_lesson, on_success, on_error, model
-    )
-
-
-def generate_lang_exercises_async(
-    language: str,
-    lesson_n: int,
-    dialogue: list,
-    vocabulary: list,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    from llm.prompts import build_lang_exercises_prompt
-    from llm.schema_json import parse_lang_exercises
-    prompt = build_lang_exercises_prompt(language, lesson_n, dialogue, vocabulary)
-    return _run_json_async(
-        "lang_exercises", prompt, parse_lang_exercises, on_success, on_error, model
-    )
-
-
 def generate_lang_correction_async(
     language: str,
     target_phrase: str,
@@ -2673,21 +2300,6 @@ def generate_lang_correction_async(
     prompt = build_lang_correction_prompt(language, target_phrase, user_attempt)
     return _run_json_async(
         "lang_correction", prompt, parse_lang_correction, on_success, on_error, model
-    )
-
-
-def generate_lang_revision_quiz_async(
-    language: str,
-    errors: list,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    from llm.prompts import build_lang_revision_quiz_prompt
-    from llm.schema_json import parse_lang_revision_quiz
-    prompt = build_lang_revision_quiz_prompt(language, errors)
-    return _run_json_async(
-        "lang_revision_quiz", prompt, parse_lang_revision_quiz, on_success, on_error, model
     )
 
 
@@ -2756,22 +2368,6 @@ def evaluate_placement_async(
     prompt = build_lang_placement_eval_prompt(language, summary)
     return _run_json_async(
         "lang_placement_eval", prompt, parse_placement_eval, on_success, on_error, model
-    )
-
-
-def choose_session_type_async(
-    state: dict,
-    available: list,
-    on_success,
-    on_error,
-    model: str = OLLAMA_MODEL,
-) -> None:
-    """Appel court : choisit le TYPE de la prochaine session (JSON de 2 champs)."""
-    from llm.prompts import build_lang_session_select_prompt
-    from llm.schema_json import parse_session_choice
-    prompt = build_lang_session_select_prompt(state, available)
-    return _run_json_async(
-        "lang_session_select", prompt, parse_session_choice, on_success, on_error, model
     )
 
 

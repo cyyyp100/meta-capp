@@ -10,7 +10,6 @@ from services.session import (
     end_session,
     finalize_session,
     session_analysis,
-    session_metrics,
     start_session,
 )
 
@@ -53,11 +52,6 @@ def abandon(session_id: int) -> dict:
         return abandon_session(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-
-
-@router.get("/{session_id}/metrics")
-def metrics(session_id: int) -> dict:
-    return session_metrics(session_id)
 
 
 @router.get("/{session_id}/analysis")

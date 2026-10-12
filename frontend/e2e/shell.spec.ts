@@ -11,7 +11,10 @@ test.describe("Coque de l'application", () => {
     // comportement voulu, et c'est exactement ce qui rendrait ces scénarios
     // ininterprétables. On la déclare faite via l'API — la même que celle que
     // « Passer la visite » utilise, donc on ne teste pas un chemin fictif.
-    await page.request.post("/api/preferences", { data: { tour_done: true } });
+    // Thème clair d'office : il est persisté côté serveur, dans une base e2e qui
+    // survit d'une campagne à l'autre — un scénario interrompu le laissait sombre
+    // et faisait échouer le suivant.
+    await page.request.post("/api/preferences", { data: { tour_done: true, theme: "light" } });
     await page.goto("/");
   });
 
@@ -68,6 +71,8 @@ test.describe("Coque de l'application", () => {
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    await page.request.post("/api/preferences", { data: { theme: "light" } });
   });
 
   test("bascule la langue depuis les Réglages", async ({ page }) => {

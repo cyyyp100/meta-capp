@@ -648,7 +648,6 @@ export function Reader() {
   // Le zoom change la largeur du PDF -> on reborne le décalage en conséquence.
   useEffect(() => {
     setPanX((p) => clampPanX(p));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom]);
 
   // Raccourcis clavier Ctrl/Cmd + +/-/0.

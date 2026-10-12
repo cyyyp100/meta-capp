@@ -133,17 +133,6 @@ def replace_script_units(script: str, units: list[dict], version: str) -> None:
         )
 
 
-def get_script_units(script: str, kind: str | None = None) -> list[dict]:
-    sql = "SELECT * FROM lang_script_units WHERE script=?"
-    params: list = [script]
-    if kind:
-        sql += " AND kind=?"
-        params.append(kind)
-    rows = get_connection().execute(sql + " ORDER BY ord", params).fetchall()
-    return [_loads(r["payload_json"], {}) | {"id": r["unit_id"], "kind": r["kind"], "display": r["display"]}
-            for r in rows]
-
-
 def replace_placement(language: str, items: list[dict], version: str) -> None:
     conn = get_connection()
     with conn:
@@ -231,13 +220,6 @@ def save_arc(profile_id: int, arc_n: int, start_episode_n: int, beats: list[dict
 def get_arc(profile_id: int, arc_n: int) -> dict | None:
     row = get_connection().execute(
         "SELECT * FROM lang_story_arcs WHERE profile_id=? AND arc_n=?", (profile_id, int(arc_n))
-    ).fetchone()
-    return _decode(row, {"beats_json": []})
-
-
-def get_latest_arc(profile_id: int) -> dict | None:
-    row = get_connection().execute(
-        "SELECT * FROM lang_story_arcs WHERE profile_id=? ORDER BY arc_n DESC LIMIT 1", (profile_id,)
     ).fetchone()
     return _decode(row, {"beats_json": []})
 
@@ -901,18 +883,6 @@ def add_report(profile_id: int, *, episode_id: int | None, line_idx: int | None,
             (profile_id, episode_id, line_idx, token_idx, kind, comment),
         )
     return int(cur.lastrowid)
-
-
-def list_reports(profile_id: int | None = None, *, status: str | None = None) -> list[dict]:
-    sql = "SELECT * FROM lang_reports WHERE 1=1"
-    params: list = []
-    if profile_id is not None:
-        sql += " AND profile_id=?"
-        params.append(profile_id)
-    if status:
-        sql += " AND status=?"
-        params.append(status)
-    return [dict(r) for r in get_connection().execute(sql + " ORDER BY id", params).fetchall()]
 
 
 def reported_tokens(episode_id: int) -> set[tuple[int, int]]:

@@ -11,7 +11,6 @@
 #     qui porte les terminaisons) pour le comparer aux formes validées (A7).
 from __future__ import annotations
 
-import unicodedata
 from functools import lru_cache
 
 from services.lang_text import segment
@@ -97,10 +96,6 @@ def vocalization_ratio(text: str) -> float:
             if marks & (VOWEL_MARKS | {SHADDA, DAGGER_ALIF}):
                 marked += 1
     return marked / carriers if carriers else (1.0 if any(is_arabic_letter(c) for c in text or "") else 0.0)
-
-
-def is_fully_vocalized(text: str, min_ratio: float) -> bool:
-    return vocalization_ratio(text) >= min_ratio
 
 
 def partial_vocalization(text: str, keep) -> str:
@@ -319,7 +314,3 @@ def contextual_form(word: str, index: int) -> str:
     if joins_next:
         return "initial"
     return "isolated"
-
-
-def nfc(text: str) -> str:
-    return unicodedata.normalize("NFC", text or "")

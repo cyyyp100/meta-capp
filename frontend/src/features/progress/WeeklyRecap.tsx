@@ -60,7 +60,7 @@ export function WeeklyRecap() {
                     ) : (
                       <ArrowDown className="size-3.5 text-warning" aria-hidden />
                     )}
-                    {criterionLabel(mover.criterion)}
+                    {criterionLabel(t, mover.criterion)}
                     <span className="tabular-nums text-muted-foreground">
                       {mover.delta > 0 ? "+" : ""}
                       {Math.round(mover.delta)}

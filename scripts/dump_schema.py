@@ -8,7 +8,7 @@ tête. Ce dump est la référence lisible, posée à côté de `schema.py` et
 `migrations.py` pour être trouvée par qui cherche le modèle de données ; il est
 versionné, et `tests/test_schema_reference.py` échoue s'il n'est plus à jour.
 
-    conda activate nwol && python scripts/dump_schema.py
+    conda activate metacapp && python scripts/dump_schema.py
 """
 from __future__ import annotations
 

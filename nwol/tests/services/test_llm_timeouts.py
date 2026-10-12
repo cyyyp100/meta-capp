@@ -25,6 +25,17 @@ from llm import ollama_client
 from services.llm_bridge import run_llm_sync
 
 
+# Tâche lourde de référence (3000 tokens à écrire). Synthétique : ces tests
+# portent sur la forme du calcul de budget, pas sur une tâche de production
+# susceptible de disparaître (l'ancien curriculum de langue, retiré).
+HEAVY_TASK = "tache_lourde"
+
+
+@pytest.fixture(autouse=True)
+def heavy_task(monkeypatch):
+    monkeypatch.setitem(OLLAMA_TASK_OPTIONS, HEAVY_TASK, {"num_ctx": 4096, "num_predict": 3000, "temperature": 0.1})
+
+
 def _wait_worker_idle(timeout: float = 10.0) -> None:
     """La file LLM est PARTAGÉE par toute la suite : un test précédent peut y
     avoir laissé des tâches de fond. On attend qu'elle soit vide avant de
@@ -38,7 +49,7 @@ def _wait_worker_idle(timeout: float = 10.0) -> None:
 def test_budget_grows_with_the_token_budget_of_the_task():
     """Une tâche qui demande plus de tokens obtient plus de temps."""
     court = task_timeout_s("document_digest")        # num_predict = 260
-    long = task_timeout_s("lang_curriculum")         # num_predict = 3000
+    long = task_timeout_s(HEAVY_TASK)               # num_predict = 3000
     assert court == OLLAMA_TIMEOUT                   # plancher
     assert long > court
     assert long <= OLLAMA_TIMEOUT_MAX                # plafond dur
@@ -52,16 +63,16 @@ def test_budget_is_bounded_and_defined_for_every_declared_task():
 
 
 def test_heavy_task_gets_more_than_the_floor():
-    """`lang_curriculum` (3000 tokens) ne peut pas tenir dans 60 s : c'est très
+    """Une tâche de 3000 tokens ne peut pas tenir dans 60 s : c'est très
     exactement le cas qui échouait à tous les coups avant la correction."""
-    assert task_timeout_s("lang_curriculum") > OLLAMA_TIMEOUT * 2
+    assert task_timeout_s(HEAVY_TASK) > OLLAMA_TIMEOUT * 2
 
 
 def test_wall_budget_covers_the_retries():
     """L'appelant attend la tâche ENTIÈRE. `_generate_json` peut rejouer une
     sortie non conforme : si l'attente ne couvrait qu'une tentative, la
     deuxième travaillerait pour un destinataire déjà parti."""
-    for task in ("document_digest", "quiz_distractors", "lang_curriculum"):
+    for task in ("document_digest", "quiz_distractors", HEAVY_TASK):
         assert task_wall_timeout_s(task) > task_timeout_s(task)
         assert task_wall_timeout_s(task) <= OLLAMA_WALL_TIMEOUT_MAX
 
@@ -74,12 +85,12 @@ def test_async_task_publishes_its_own_budget_to_the_caller():
     def fake_async(on_success, on_error):
         # Ce que fait `_run_json_async` : publier le budget de sa tâche.
         slot = ollama_client._current_caller_slot()
-        slot.timeout_s = task_wall_timeout_s("lang_curriculum")
+        slot.timeout_s = task_wall_timeout_s(HEAVY_TASK)
         seen["budget"] = slot.timeout_s
         on_success({"ok": True})
 
     assert run_llm_sync(fake_async) == {"ok": True}
-    assert seen["budget"] == task_wall_timeout_s("lang_curriculum")
+    assert seen["budget"] == task_wall_timeout_s(HEAVY_TASK)
 
 
 def test_caller_waits_for_the_budget_republished_when_the_task_starts():

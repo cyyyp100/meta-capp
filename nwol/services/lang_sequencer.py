@@ -1,11 +1,8 @@
-# services/lang_sequencer.py — Séquenceur adaptatif des sessions de langue.
+# services/lang_sequencer.py — Planificateur des séances de langue (flux hérité).
 #
-# Décide JUSTE le type de la prochaine session (jamais son contenu). C'est la
-# séparation qui manquait à l'ancien _ensure_curriculum (qui mélangeait décision
-# et génération en un seul appel monolithique trop lourd pour gemma4:e2b).
-#
-# Le LLM est un BONUS, pas une dépendance bloquante : un fallback déterministe
-# garantit qu'une session démarre toujours, même Ollama éteint.
+# Construit le plan d'une séance de 10 exercices (`plan_lesson`) pour les
+# langues hors pilote. Le LLM est un BONUS, pas une dépendance bloquante : un
+# repli déterministe garantit qu'une séance démarre toujours, même Ollama éteint.
 from __future__ import annotations
 
 import logging
@@ -29,14 +26,13 @@ from db.lang_db import (
     get_recent_lesson_score_avg,
     get_session_types_for_phase,
     get_skill_distribution,
-    log_sequencer_decision,
 )
-from llm.ollama_client import choose_session_type_async, plan_lesson_async
+from llm.ollama_client import plan_lesson_async
 from services.llm_bridge import run_llm_sync
 
 logger = logging.getLogger("services.lang_sequencer")
 
-# Une session de révision est imposée toutes les N sessions, sans appeler le LLM.
+# Fenêtre (en sessions) sur laquelle la répartition des compétences est mesurée.
 REVISION_EVERY = LANG_LEGACY_REVISION_EVERY
 
 # ── Planificateur de séance (arc Assimil à 4 temps sur 10 exercices) ───────────
@@ -111,53 +107,6 @@ def build_sequencer_state(profile: dict) -> dict:
         "previous_theme": get_last_lesson_theme(profile_id),
         "character": _recurring_character(profile),
     }
-
-
-def decide_session_type(profile: dict) -> tuple[str, str]:
-    """Retourne (type_choisi, raison). Règles forcées d'abord, LLM en dernier recours."""
-    state = build_sequencer_state(profile)
-    session_n = state["session_n"]
-    profile_id = profile["id"]
-
-    # Règle forcée : révision périodique (toutes les REVISION_EVERY sessions).
-    if session_n % REVISION_EVERY == 0:
-        reason = f"Révision périodique (toutes les {REVISION_EVERY} sessions)"
-        log_sequencer_decision(profile_id, session_n, "revision_adaptative", reason)
-        return "revision_adaptative", reason
-
-    available = get_session_types_for_phase(state["phase"])
-    valid_codes = {t["code"] for t in available}
-
-    chosen: str | None = None
-    reason = ""
-    try:
-        result = run_llm_sync(
-            lambda ok, err: choose_session_type_async(state, available, ok, err),
-        )
-        if isinstance(result, dict):
-            chosen = result.get("chosen_type")
-            reason = result.get("reason", "")
-    except Exception as exc:  # Ollama indisponible / timeout / réponse illisible
-        logger.info("Séquenceur : LLM indisponible (%s), fallback déterministe", exc)
-
-    # Fallback si le LLM échoue ou renvoie un type invalide.
-    if not chosen or chosen not in valid_codes:
-        chosen = _fallback_choice(state, available)
-        reason = "Choix déterministe (LLM indisponible ou réponse invalide)"
-
-    log_sequencer_decision(profile_id, session_n, chosen, reason)
-    return chosen, reason
-
-
-def _fallback_choice(state: dict, available: list[dict]) -> str:
-    """Sans LLM : exclut le dernier type, prend la compétence la moins représentée."""
-    if not available:
-        return "dialogue_ecoute"
-    last = state.get("last_session_type")
-    candidates = [t for t in available if t["code"] != last] or available
-    dist = state.get("skill_distribution_7") or {}
-    candidates.sort(key=lambda t: dist.get(t["skill"], 0))
-    return candidates[0]["code"]
 
 
 def _decide_theme(state: dict, profile: dict, phase: str) -> str:

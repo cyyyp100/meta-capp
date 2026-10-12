@@ -26,12 +26,10 @@ from config.settings import (
 )
 from db.lang_db import (
     SESSION_TYPE_LABEL,
-    SESSION_TYPE_RENDER_KIND,
     SESSION_TYPE_SKILL,
     complete_lang_lesson,
     create_lang_lesson,
     find_lang_flashcard_id,
-    get_curriculum,
     get_due_flashcards_for_language,
     get_exercises_cache,
     get_lang_errors_for_revision,
@@ -44,11 +42,9 @@ from db.lang_db import (
     get_or_create_lang_profile,
     get_recent_flashcards_for_language,
     get_skill_scores,
-    save_curriculum,
     save_exercises_cache,
     save_lang_error,
     save_lang_exercise,
-    save_lang_session,
     save_lesson_exercise_cache,
     update_lang_profile,
 )
@@ -57,15 +53,13 @@ from db.user import DEFAULT_USER_ID
 from llm.ollama_client import (
     evaluate_placement_async,
     generate_lang_correction_async,
-    generate_lang_curriculum_async,
-    generate_lang_lesson_async,
     generate_placement_test_async,
     generate_session_content_async,
 )
 from services.flashcards import create_lang_vocab_flashcards, review_flashcard, with_pronunciation_side
 from services import practice
 from services.lang_inflight import InflightRegistry
-from services.lang_sequencer import LESSON_SIZE, decide_session_type, plan_lesson
+from services.lang_sequencer import LESSON_SIZE, plan_lesson
 from services.llm_bridge import run_llm_sync
 
 logger = logging.getLogger("services.lang")
@@ -95,9 +89,6 @@ __all__ = [
     "script_is_tonal",
     "writing_to_passive",
     "get_language_profile",
-    "generate_lesson",
-    "generate_session",
-    "complete_session",
     "correct_attempt",
     "review_lang_card",
     "start_lesson",
@@ -238,67 +229,6 @@ def _ensure_profile(user_id: int, language: str) -> dict:
         update_lang_profile(profile["id"], phase="writing", touch_last_session=False)
         profile = get_or_create_lang_profile(user_id, language)
     return profile
-
-
-def _ensure_curriculum(language: str) -> list[dict]:
-    existing = get_curriculum(language)
-    if existing:
-        return existing
-    result = run_llm_sync(lambda ok, err: generate_lang_curriculum_async(language, ok, err))
-    lessons = result.get("lessons") if isinstance(result, dict) else result if isinstance(result, list) else []
-    if lessons:
-        save_curriculum(language, lessons)
-    return get_curriculum(language)
-
-
-def generate_session(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
-    """Décide puis génère UNE session juste-à-temps (séquenceur adaptatif).
-
-    Remplace l'ancien flux generate_lesson : plus de pré-curriculum monolithique.
-    Deux appels courts (choix de type ~20s, contenu ciblé ~60s) au lieu d'un seul
-    appel énorme qui dépassait le timeout sur gemma4:e2b.
-    """
-    profile = get_or_create_lang_profile(user_id, language)
-    session_type, reason = decide_session_type(profile)
-    weak_points = get_lang_errors_for_revision(profile["id"], limit=LANG_LEGACY_WEAK_POINTS)
-    try:
-        content = run_llm_sync(
-            lambda ok, err: generate_session_content_async(
-                language, session_type, profile, weak_points, ok, err
-            ),
-        )
-    except Exception as exc:
-        logger.warning("Génération de session échouée (%s) : %s", session_type, exc)
-        content = None
-    if not content:
-        return {"error": "Génération indisponible (Ollama ?).", "session_type": session_type}
-    return {
-        "session_type": session_type,
-        "render_kind": content.get("render_kind", SESSION_TYPE_RENDER_KIND.get(session_type)),
-        "label": content.get("label", SESSION_TYPE_LABEL.get(session_type, session_type)),
-        "reason": reason,
-        "content": content,
-    }
-
-
-def complete_session(
-    language: str,
-    session_type: str,
-    score: float,
-    duration_s: int,
-    user_id: int = DEFAULT_USER_ID,
-) -> dict:
-    """Clôture d'une session : écrit le résultat (DB, pas de LLM).
-
-    C'est ce qui remplit la répartition des compétences (via session_type) dont
-    le séquenceur se sert pour rééquilibrer les prochaines décisions.
-    """
-    profile = get_or_create_lang_profile(user_id, language)
-    session_n = get_lang_session_count(profile["id"]) + 1
-    save_lang_session(
-        profile["id"], session_n, int(duration_s or 0), float(score or 0.0), session_type
-    )
-    return {"ok": True, "total_sessions": get_lang_session_count(profile["id"])}
 
 
 def correct_attempt(
@@ -986,26 +916,3 @@ def placement_submit(language: str, answers: dict, user_id: int = DEFAULT_USER_I
         current_lesson=current_lesson, touch_last_session=False,
     )
     return {"ok": True, "level": cefr, "phase": phase, "comment": comment}
-
-
-def generate_lesson(language: str, user_id: int = DEFAULT_USER_ID) -> dict:
-    """DÉPRÉCIÉ — ancien flux curriculum + leçon (gardé pour l'alias /lang/lesson).
-
-    Remplacé par generate_session (séquenceur adaptatif). Ne plus utiliser :
-    _ensure_curriculum génère un curriculum entier qui dépasse le timeout."""
-    profile = get_or_create_lang_profile(user_id, language)
-    curriculum = _ensure_curriculum(language)
-    if not curriculum:
-        return {"error": "Curriculum indisponible (Ollama ?)."}
-    lesson_n = int(profile.get("current_lesson") or 1)
-    row = next((c for c in curriculum if int(c.get("lesson_n", 0)) == lesson_n), curriculum[0])
-    lesson = run_llm_sync(
-        lambda ok, err: generate_lang_lesson_async(language, int(row.get("lesson_n", 1)), row, ok, err),
-    )
-    return {
-        "lesson_n": int(row.get("lesson_n", 1)),
-        "theme": row.get("theme", ""),
-        "dialogue": (lesson or {}).get("dialogue", []),
-        "notes": (lesson or {}).get("notes", {}),
-        "vocabulary": (lesson or {}).get("vocabulary", []),
-    }

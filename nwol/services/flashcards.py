@@ -15,7 +15,6 @@ from db.flashcards import (
     fill_lang_flashcard_pronunciation,
     find_flashcard_id,
     flashcard_key,
-    get_due_flashcards,
     get_existing_tags,
     get_flashcards,
     get_session_start_pool,
@@ -41,7 +40,6 @@ __all__ = [
     "review_flashcard",
     "delete_flashcards",
     "fallback_tags",
-    "due_flashcards",
     "session_start_cards",
     "with_pronunciation_side",
 ]
@@ -57,11 +55,6 @@ def with_pronunciation_side(card: dict) -> dict:
     afficher la prononciation ; None pour une carte qui n'en a pas."""
     side = _TARGET_SIDE.get(card.get("source") or "", "back") if card.get("pronunciation") else None
     return {**card, "pronunciation_side": side}
-
-
-def due_flashcards(doc_id: int | None = None, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:
-    """Cartes dont l'échéance de révision est passée (warm-up du SAS d'entrée)."""
-    return [with_pronunciation_side(c) for c in get_due_flashcards(user_id, limit, doc_id)]
 
 
 def session_start_cards(doc_id: int | None = None, limit: int = 5, user_id: int = DEFAULT_USER_ID) -> list[dict]:

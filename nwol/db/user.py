@@ -54,12 +54,6 @@ def get_user_speed(user_id: int = DEFAULT_USER_ID) -> int:
     return READING_SPEED_INITIAL_MS
 
 
-def save_user_speed(user_id: int, speed_ms: int) -> None:
-    conn = get_connection()
-    with conn:
-        conn.execute("UPDATE user SET speed_ms=? WHERE id=?", (int(speed_ms), user_id))
-
-
 # Un jour manqué ne casse pas la série. C'est une décision de produit, pas un
 # réglage : l'identité de Meta-Capp est bienveillante, et un streak qui punit
 # retient mal les adultes — il fait surtout abandonner ceux qui viennent de
@@ -165,44 +159,6 @@ def set_user_lang(user_id: int, lang: str) -> None:
     conn = get_connection()
     with conn:
         conn.execute("UPDATE user SET lang=? WHERE id=?", (lang, user_id))
-
-
-def get_assistant_prefs(user_id: int = DEFAULT_USER_ID) -> dict:
-    """Préférences de la bulle assistant : mode + position mémorisée."""
-    from config.settings import ASSISTANT_DEFAULT_MODE, ASSISTANT_MODES
-
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT assistant_mode, bubble_rel_x, bubble_rel_y FROM user WHERE id=?",
-        (user_id,),
-    ).fetchone()
-    mode = row["assistant_mode"] if row and row["assistant_mode"] else ASSISTANT_DEFAULT_MODE
-    if mode not in ASSISTANT_MODES:
-        mode = ASSISTANT_DEFAULT_MODE
-    return {
-        "mode": mode,
-        "bubble_rel_x": row["bubble_rel_x"] if row else None,
-        "bubble_rel_y": row["bubble_rel_y"] if row else None,
-    }
-
-
-def save_assistant_mode(user_id: int, mode: str) -> None:
-    from config.settings import ASSISTANT_MODES
-
-    if mode not in ASSISTANT_MODES:
-        raise ValueError(f"Mode assistant inconnu : {mode}")
-    conn = get_connection()
-    with conn:
-        conn.execute("UPDATE user SET assistant_mode=? WHERE id=?", (mode, user_id))
-
-
-def save_bubble_position(user_id: int, rel_x: float, rel_y: float) -> None:
-    conn = get_connection()
-    with conn:
-        conn.execute(
-            "UPDATE user SET bubble_rel_x=?, bubble_rel_y=? WHERE id=?",
-            (max(0.0, min(1.0, float(rel_x))), max(0.0, min(1.0, float(rel_y))), user_id),
-        )
 
 
 def update_user_name(user_id: int, name: str) -> None:

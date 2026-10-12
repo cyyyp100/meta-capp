@@ -5,7 +5,7 @@
 # Pinned like everything else: PyInstaller assembles the binary we distribute,
 # so a floating version meant a release could change — or ship whatever PyPI
 # served that day — without a single commit. These are the versions of the
-# working conda env `nwol`, the ones local builds are made with. The release
+# working conda env `metacapp`, the ones local builds are made with. The release
 # workflow installs this file on every runner; security.yml audits it;
 # Dependabot proposes the bumps.
 pyinstaller==6.21.0

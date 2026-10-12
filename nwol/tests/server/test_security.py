@@ -75,6 +75,17 @@ def test_security_headers_on_frontend_and_api(client):
     assert response.headers["referrer-policy"] == "no-referrer"
 
 
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_api_schema_and_docs_not_served(client, launch_token, path):
+    """La documentation interactive de FastAPI vit hors de `/api`, donc hors de
+    la garde du nonce : elle publiait le schéma complet de l'API et chargeait
+    Swagger UI / ReDoc depuis un CDN. Au mieux, la page de l'app répond."""
+    body = client.get(path).text.lower()
+    assert "swagger" not in body
+    assert "redoc" not in body
+    assert '"openapi"' not in body
+
+
 def test_bundle_mime_types_do_not_depend_on_the_windows_registry():
     """Un registre Windows qui mappe `.js` sur `text/plain` ne doit pas atteindre
     le bundle : avec `nosniff`, le navigateur refuserait d'exécuter les scripts."""

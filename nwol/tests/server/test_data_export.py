@@ -48,6 +48,52 @@ def test_import_db_restores_data(client):
     assert row["filename"] == "avant-backup.pdf"
 
 
+def _safety_backups() -> list:
+    from pathlib import Path
+
+    import db
+
+    current = Path(db.DB_PATH)
+    return sorted(current.parent.glob(current.name + ".pre-import-*"))
+
+
+def test_import_keeps_one_complete_safety_backup(client):
+    """La copie de sécurité prise avant une restauration doit contenir les
+    dernières écritures — en WAL, elles vivent dans `-wal`, qu'une copie du
+    seul fichier `nwol.db` laisse de côté — et il n'en reste qu'une : chacune
+    est un double complet des données de l'étudiant."""
+    import db
+
+    _insert_document(client, filename="avant-backup.pdf")
+    backup = client.get("/api/data/export").content
+    _insert_document(client, path="/tmp/y.pdf", filename="ecrit-apres.pdf")
+
+    assert client.post("/api/data/import", content=backup).status_code == 200
+    copies = _safety_backups()
+    assert len(copies) == 1
+    conn = sqlite3.connect(str(copies[0]))
+    try:
+        names = {row[0] for row in conn.execute("SELECT filename FROM documents")}
+    finally:
+        conn.close()
+    assert names == {"avant-backup.pdf", "ecrit-apres.pdf"}
+
+    assert client.post("/api/data/import", content=backup).status_code == 200
+    assert len(_safety_backups()) == 1
+    assert db.get_connection().execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+
+
+def test_purge_removes_safety_backups(client):
+    """« Tout effacer » ne laisse aucun double de la base derrière lui."""
+    _insert_document(client, filename="perso.pdf")
+    backup = client.get("/api/data/export").content
+    assert client.post("/api/data/import", content=backup).status_code == 200
+    assert _safety_backups()
+
+    assert client.post("/api/data/purge", json={"confirm": "EFFACER"}).status_code == 200
+    assert _safety_backups() == []
+
+
 def test_import_rejects_garbage(client):
     assert client.post("/api/data/import", content=b"").status_code == 400
     assert client.post("/api/data/import", content=b"pas une base sqlite").status_code == 400

@@ -120,10 +120,10 @@ export function GaugeCurves({ gauges }: { gauges: GaugeSeries }) {
                 borderRadius: "var(--radius-sm)",
                 color: "var(--text)",
               }}
-              formatter={(value: number, name: string) => [Math.round(value), criterionLabel(name)]}
+              formatter={(value: number, name: string) => [Math.round(value), criterionLabel(t, name)]}
               labelFormatter={pointLabel}
             />
-            <Legend formatter={(name: string) => criterionLabel(name)} wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={(name: string) => criterionLabel(t, name)} wrapperStyle={{ fontSize: 12 }} />
             {names.map((name) => (
               <Line
                 key={name}

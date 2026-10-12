@@ -1,19 +1,15 @@
-# server/routers/lang.py — Module Langues (profil + séquenceur adaptatif).
+# server/routers/lang.py — Module Langues (profil, séances, feuilleton).
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from config.settings import LANG_WRITING_MAX_CHARS
-from db.lang_db import SESSION_TYPES_SEED
 from services import lang_hook, lang_runs, lang_writing
 from services.lang import (
     complete_lesson,
-    complete_session,
     correct_attempt,
     finalize_lang_lesson,
-    generate_lesson,
-    generate_session,
     get_language_profile,
     get_lesson_exercise,
     lang_lesson_analysis,
@@ -31,13 +27,6 @@ router = APIRouter(prefix="/lang", tags=["lang"])
 
 class LessonBody(BaseModel):
     language: str
-
-
-class SessionCompleteBody(BaseModel):
-    language: str
-    session_type: str
-    score: float = 0.0
-    duration_s: int = 0
 
 
 class CorrectBody(BaseModel):
@@ -90,24 +79,6 @@ def warmup_cards(language: str) -> list[dict]:
     return lang_warmup_cards(language)
 
 
-@router.get("/session-types")
-def session_types() -> list[dict]:
-    return [
-        {"code": c, "phase": ph, "skill": sk, "label": lb, "render_kind": rk}
-        for (c, ph, sk, lb, _desc, rk) in SESSION_TYPES_SEED
-    ]
-
-
-@router.post("/session")
-def session(body: LessonBody) -> dict:
-    return generate_session(body.language)
-
-
-@router.post("/session/complete")
-def session_complete(body: SessionCompleteBody) -> dict:
-    return complete_session(body.language, body.session_type, body.score, body.duration_s)
-
-
 @router.post("/correct")
 def correct(body: CorrectBody) -> dict:
     return correct_attempt(body.language, body.target_phrase, body.user_attempt)
@@ -117,12 +88,6 @@ def correct(body: CorrectBody) -> dict:
 def sr_review(body: SrReviewBody) -> dict:
     """Boucle le pont SR : met à jour l'échéance d'une carte révisée en séance."""
     return review_lang_card(body.language, body.verdict, card_id=body.card_id, word=body.word)
-
-
-@router.post("/lesson")
-def lesson(body: LessonBody) -> dict:
-    """DÉPRÉCIÉ — conservé le temps de la transition vers /lang/session."""
-    return generate_lesson(body.language)
 
 
 # ── Séances (10 exercices, arc 4 temps) ───────────────────────────────────────

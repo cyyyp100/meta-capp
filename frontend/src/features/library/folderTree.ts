@@ -46,11 +46,6 @@ export function isDescendant(tree: FolderNode[], candidateId: number, folderId: 
   return flattenFolders(folder.children).some((child) => child.id === candidateId);
 }
 
-/** Les ids de tous les dossiers de l'arbre — pour purger un état de dépliage. */
-export function allFolderIds(tree: FolderNode[]): number[] {
-  return flattenFolders(tree).map((folder) => folder.id);
-}
-
 /** Chaîne des ancêtres de `id`, de la racine jusqu'à son parent direct. */
 export function ancestorIds(tree: FolderNode[], id: number): number[] {
   const path: number[] = [];

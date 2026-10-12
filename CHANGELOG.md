@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-10-12 — Public beta
+
 ### Added
 
+- **Free-scroll PDF reader**: the document is rendered page by page at full fidelity,
+  with no reconstruction and no progression locks.
+- **Embodied assistant "Clikoda"**: an animated bubble over the page with idle, reading,
+  thinking, answering, intervention and sleeping states.
+- **Submit-time context capture**: every question is answered against a snapshot of the
+  page visible at the moment Send was pressed.
+- **Autonomous interventions**: LLM-decided help offers, pedagogical questions, pause
+  suggestions and page rephrasings, gated by per-mode dwell and cooldown policy
+  (`discret` / `normal` / `coach`).
+- **Metacognitive engine**: six hidden gauges (attention, comprehension, curiosity,
+  retention, creativity, metacognition) feeding a long-term profile with an adaptive
+  blending factor.
+- **Adaptive questioning pipeline**: question → answer → evaluation → feedback →
+  flashcard, non-blocking.
+- **Session flow**: concentration airlock with an AI-generated curiosity hook, flash
+  review of due flashcards, free reading, end-of-session synthesis and reflection.
+- **Source-code reading**: imported source files are paginated into readable code blocks.
+- **Bilingual FR/EN** interface, with the LLM prompt language following the UI choice.
+- **Fully local inference** via Ollama (`gemma4:e4b`), with graceful degradation when
+  the model is unavailable.
+- Desktop shell (`pywebview` + FastAPI + React/Vite), versioned SQLite schema with
+  incremental migrations, PyInstaller packaging for macOS and Windows, and CI covering
+  tests, lint, frontend build and security scans.
 - MIT license, contribution guide, code of conduct, security policy, issue and pull
   request templates.
 - **Runs on every desktop OS, with or without a GPU.** Release archives for Apple
@@ -82,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   *Pending* in the corner of its card.
 
 ### Changed
+
+- **Release builds are smaller and signable.** The macOS build no longer drags in
+  OpenCV, numpy and FFmpeg from the build machine (200 MB → 85 MB), carries its
+  version and copyright, and is signed by PyInstaller with the hardened runtime and a
+  secure timestamp when a Developer ID is configured, then notarized and checked by
+  Gatekeeper. Windows builds are signed through Azure Artifact Signing when it is
+  configured. Every release embeds `THIRD_PARTY_NOTICES.txt`.
+- Log lines carry their date and time, and the native file dialog follows the
+  interface language.
 
 - **Verbs are reviewed in the infinitive.** A language card shows a word's dictionary
   form — the infinitive for a verb — with the meaning of that form and its
@@ -158,12 +192,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Code that no longer served: the adaptive language sequencer of the old flow
+  (`/api/lang/session`, `/api/lang/session/complete`, `/api/lang/session-types`,
+  the deprecated `/api/lang/lesson`), `/api/flashcards/due`,
+  `/api/session/{id}/metrics`, about a hundred unused functions, the strings of the
+  former Tkinter interface, and the interactive API documentation (`/docs`,
+  `/redoc`, `/openapi.json`).
 - **Short session** and **Just re-read today** are gone from a language's home.
   The session is always the one Clikoda picks: the episode that is ready, a re-read
   while the next one is being written or after a few days away, the weekly review.
   Short sessions already played stay in My progress.
 
 ### Fixed
+
+- **Restoring a backup kept a complete safety copy of the current data.** The copy
+  was made from the database file alone and could miss the latest changes — or be
+  empty — since they still sat in SQLite's journal. It is now a consistent snapshot,
+  only the latest one is kept, and *Erase everything* deletes it.
+- The answer evaluation ran out of context when the page image was attached (the
+  model then lost the beginning of its instructions), and Clikoda's intervention
+  decisions could be cut mid-answer: both budgets were raised.
+- The log said "Ollama refused the images" for any failed generation with an image;
+  it now names the actual cause, such as the model repeating itself.
+- Mode changes in the reader, the progress page's criteria and the file dialog were
+  shown in French in the English interface.
 
 - **My progress, *Where you slowed down*.** The time spent on each page of a reading
   session was overwritten, once the session had ended, by the rest pause that follows
@@ -213,40 +265,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **PDF engine updated**: pypdfium2 5.14.0 ships PDFium 156 (2026); 4.30.0 shipped
+  the June 2024 engine, thirty Chrome security cycles behind, for the component that
+  parses every imported file.
+- The interactive API documentation is no longer served (it exposed the full API
+  schema without the launch token).
+- Exported logs no longer contain the path of your home folder (it appears as `~`),
+  including in error traces.
+- *Erase everything* also flushes SQLite's journal and removes the safety copy
+  kept when a backup is restored.
+- Build tooling: npm advisories fixed (`brace-expansion`, `source-map-js`, `undici`),
+  KaTeX 0.18.11.
+
 - The local API refuses requests that the browser itself marks as coming from another
   site or another local port (`Sec-Fetch-Site`). In browser mode, every port of
   127.0.0.1 counts as the same site and received the launch cookie.
 - Release builds pin PyInstaller and its community hooks (`requirements-build.txt`,
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
-
-## [0.1.0] — Initial public release
-
-### Added
-
-- **Free-scroll PDF reader**: the document is rendered page by page at full fidelity,
-  with no reconstruction and no progression locks.
-- **Embodied assistant "Clikoda"**: an animated bubble over the page with idle, reading,
-  thinking, answering, intervention and sleeping states.
-- **Submit-time context capture**: every question is answered against a snapshot of the
-  page visible at the moment Send was pressed.
-- **Autonomous interventions**: LLM-decided help offers, pedagogical questions, pause
-  suggestions and page rephrasings, gated by per-mode dwell and cooldown policy
-  (`discret` / `normal` / `coach`).
-- **Metacognitive engine**: six hidden gauges (attention, comprehension, curiosity,
-  retention, creativity, metacognition) feeding a long-term profile with an adaptive
-  blending factor.
-- **Adaptive questioning pipeline**: question → answer → evaluation → feedback →
-  flashcard, non-blocking.
-- **Session flow**: concentration airlock with an AI-generated curiosity hook, flash
-  review of due flashcards, free reading, end-of-session synthesis and reflection.
-- **Source-code reading**: imported source files are paginated into readable code blocks.
-- **Bilingual FR/EN** interface, with the LLM prompt language following the UI choice.
-- **Fully local inference** via Ollama (`gemma4:e4b`), with graceful degradation when
-  the model is unavailable.
-- Desktop shell (`pywebview` + FastAPI + React/Vite), versioned SQLite schema with
-  incremental migrations, PyInstaller packaging for macOS and Windows, and CI covering
-  tests, lint, frontend build and security scans.
 
 [Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/cyyyp100/meta-capp/releases/tag/v0.1.0

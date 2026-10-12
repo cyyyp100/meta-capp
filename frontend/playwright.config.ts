@@ -38,7 +38,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 
   webServer: {
-    // L'app attend l'env conda `nwol` (voir CLAUDE.md). En CI il n'y a pas de
+    // L'app attend l'env conda `metacapp` (voir CLAUDE.md). En CI il n'y a pas de
     // conda et `python` suffit ; en local on passe l'interpréteur de l'env.
     command: `${process.env.NWOL_PYTHON ?? "python"} -m server.main`,
     cwd: "../nwol",

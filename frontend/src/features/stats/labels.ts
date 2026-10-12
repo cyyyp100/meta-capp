@@ -1,39 +1,8 @@
-import type { Recommendation, TrendCategory } from "../../api/types";
-
-// Libellés FR (le port complet de l'i18n serveur viendra au Plan 07).
-export const CRITERION_LABELS: Record<string, string> = {
-  attention: "Attention",
-  context_comprehension: "Compréhension",
-  creativity: "Créativité",
-  retention: "Rétention",
-  curiosity: "Curiosité",
-  meta_cognition: "Métacognition",
-};
-
-export const TREND_LABELS: Record<TrendCategory, string> = {
-  in_progress: "En progrès",
-  to_improve: "À améliorer",
-  stable: "Stable",
-};
-
-export const RECOMMENDATION_LABELS: Record<Recommendation, string> = {
-  solid: "Solide",
-  progressing: "En progrès",
-  to_review: "À revoir",
-  to_improve: "À améliorer",
-};
-
-export const CRITERION_DESC: Record<string, string> = {
-  attention: "Ta capacité à rester concentré et à éviter les distractions pendant la lecture.",
-  context_comprehension: "Ta compréhension du sens global et des liens entre les idées.",
-  creativity: "Ta capacité à faire des liens originaux et à reformuler avec tes mots.",
-  retention: "Ce que tu retiens dans le temps, mesuré via les révisions et réponses.",
-  curiosity: "Ton envie d'explorer, de poser des questions et d'approfondir.",
-  meta_cognition: "Ta conscience de ta propre façon d'apprendre et de progresser.",
-};
-
-export function criterionLabel(key: string): string {
-  return CRITERION_LABELS[key] ?? key;
+/** Libellé traduit d'un critère du profil (`crit.<clé>`) ; la clé brute si
+ *  le critère est inconnu des dictionnaires. */
+export function criterionLabel(t: (key: string) => string, key: string): string {
+  const label = t(`crit.${key}`);
+  return label === `crit.${key}` ? key : label;
 }
 
 // Clé i18n du libellé de chaque matière, par sa clé en base. Miroir du
@@ -121,10 +90,4 @@ export function scoreInk(value: number): string {
   if (value >= 75) return "var(--success)";
   if (value >= 45) return "var(--accent-ink)";
   return "var(--warning)";
-}
-
-export function deltaLabel(delta: number): string {
-  if (delta > 2) return `+${Math.round(delta)}`;
-  if (delta < -2) return `${Math.round(delta)}`;
-  return "Stable";
 }

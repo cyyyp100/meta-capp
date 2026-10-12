@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Droits du runtime durci (notarisation macOS), lus par desktop/metacapp.spec
+  quand METACAPP_CODESIGN_IDENTITY est défini.
+
+  Une seule exception, celle qu'exige Python : ctypes (pypdfium2) et PyObjC
+  (la fenêtre pywebview) fabriquent des trampolines libffi en mémoire
+  exécutable non signée. Pas de `disable-library-validation` : PyInstaller
+  signe chaque bibliothèque embarquée avec la même identité, la validation
+  passe. Si un build notarisé refuse un jour de charger une bibliothèque
+  (« not valid for use in process »), c'est ce droit qu'il faudra ajouter.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

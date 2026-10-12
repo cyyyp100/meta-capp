@@ -40,6 +40,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from config.settings import (
+    ASSISTANT_DEFAULT_MODE,
     ASSISTANT_MODES,
     FOCUS_DEFAULT_MIN,
     PAUSE_DEFAULT_MIN,
@@ -58,6 +59,7 @@ from db.questions import (
 from db.session_pauses import save_pause
 from db.sessions import get_session, update_session_progress
 from db.user import DEFAULT_USER_ID
+from i18n import t
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
@@ -200,7 +202,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     out: asyncio.Queue = asyncio.Queue()
     state = {
         "page": 1,
-        "mode": "normal",
+        "mode": ASSISTANT_DEFAULT_MODE,
         "focus_until": 0.0,
         "qa_qid": None,
         "qa_question_type": None,  # type de la question Q&R courante (jauges type-aware)
@@ -681,9 +683,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 continue
 
             if kind == "mode":
-                mode = str(msg.mode or "normal")
-                state["mode"] = mode if mode in ASSISTANT_MODES else "normal"
-                await out.put({"type": "system", "message": f"Mode : {state['mode']}"})
+                mode = str(msg.mode or ASSISTANT_DEFAULT_MODE)
+                state["mode"] = mode if mode in ASSISTANT_MODES else ASSISTANT_DEFAULT_MODE
+                await out.put({
+                    "type": "system",
+                    "message": t("assistant.mode_changed", mode=t(f"assistant.mode_{state['mode']}")),
+                })
                 continue
 
             if kind == "focus":

@@ -25,20 +25,6 @@ def _table(scope: str) -> str:
         raise ValueError(f"Famille de séance inconnue : {scope!r}") from None
 
 
-def record_gauge(
-    session_id: int, gauge_name: str, value: float, t: float | None = None, *, scope: str = READING,
-) -> int:
-    timestamp = time() if t is None else t
-    conn = get_connection()
-    with conn:
-        cur = conn.execute(
-            f"""INSERT INTO {_table(scope)} (session_id, t, gauge_name, value)
-                VALUES (?, ?, ?, ?)""",
-            (session_id, float(timestamp), gauge_name, float(value)),
-        )
-    return int(cur.lastrowid)
-
-
 def record_gauges(
     session_id: int, values: dict[str, float], t: float | None = None, *, scope: str = READING,
 ) -> None:

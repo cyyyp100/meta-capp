@@ -394,23 +394,6 @@ def parse_session_summary(raw: str | dict) -> dict | None:
     }
 
 
-def parse_meta_cognition_questions(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if isinstance(data, list):
-        questions = _coerce_str_list(data)
-        normalized = normalize_meta_cognition_questions(questions)
-        return {"questions": normalized} if len(normalized) == 3 else None
-    if not isinstance(data, dict):
-        return None
-    questions = _coerce_str_list(
-        data.get("questions", data.get("metacognitive_questions", data.get("metacognition_questions", [])))
-    )
-    normalized = normalize_meta_cognition_questions(questions)
-    if len(normalized) != 3:
-        return None
-    return {"questions": normalized}
-
-
 def parse_meta_cognition_analysis(raw: str | dict) -> dict | None:
     data = _load_json(raw)
     if not isinstance(data, dict):
@@ -588,33 +571,6 @@ def parse_quiz_distractors(raw: str | dict) -> dict | None:
         parsed[qid] = {"answer": answer, "distractors": distractors[:3]}
 
     return parsed or None
-
-
-def parse_latex_paragraph_render(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return None
-    rendered = _coerce_text(data.get("rendered", data.get("text", data.get("paragraph"))))
-    if not _non_empty_str(rendered) or len(rendered.strip()) < 8:
-        return None
-    return {"rendered": rendered.strip()}
-
-
-def parse_flashcard_tags(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if isinstance(data, list):
-        tags = _coerce_str_list(data)
-        normalized = normalize_flashcard_tags(tags)
-        if not (2 <= len(normalized) <= 6):
-            return None
-        return {"tags": normalized[:6]}
-    if not isinstance(data, dict):
-        return None
-    tags = _coerce_str_list(data.get("tags", data.get("labels", data.get("keywords", []))))
-    normalized = normalize_flashcard_tags(tags)
-    if not (2 <= len(normalized) <= 6):
-        return None
-    return {"tags": normalized[:6]}
 
 
 def parse_flashcard(raw: str | dict) -> dict | None:
@@ -1167,10 +1123,6 @@ def _non_empty_str(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _string_fields(data: dict, fields: tuple[str, ...]) -> bool:
-    return all(isinstance(data.get(field, ""), str) for field in fields)
-
-
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
@@ -1272,37 +1224,6 @@ def parse_brainstorm_search_decision(raw: str | dict) -> dict | None:
 
 # ── Parsers module langue ──────────────────────────────────────────────────────
 
-def parse_lang_curriculum(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return None
-    lessons_raw = data.get("lessons")
-    if not isinstance(lessons_raw, list) or len(lessons_raw) < 10:
-        return None
-    lessons = []
-    for item in lessons_raw:
-        if not isinstance(item, dict):
-            continue
-        n = item.get("lesson_n")
-        theme = _coerce_text(item.get("theme", ""))
-        if not isinstance(n, int) or not _non_empty_str(theme):
-            continue
-        lessons.append({
-            "lesson_n": int(n),
-            "theme": (theme or "").strip(),
-            "grammar_point": (_coerce_text(item.get("grammar_point", "")) or "").strip(),
-            "vocabulary": _coerce_str_list(item.get("vocabulary", [])),
-            "level": str(item.get("level", "A1")),
-            "reuses": [
-                int(x) for x in (item.get("reuses") or [])
-                if isinstance(x, (int, float))
-            ],
-        })
-    if len(lessons) < 10:
-        return None
-    return {"lessons": lessons}
-
-
 def parse_lang_lesson(raw: str | dict) -> dict | None:
     data = _load_json(raw)
     if not isinstance(data, dict):
@@ -1345,34 +1266,6 @@ def parse_lang_lesson(raw: str | dict) -> dict | None:
                 "example": (_coerce_text(v.get("example", "")) or "").strip(),
             })
     return {"dialogue": dialogue, "notes": notes, "vocabulary": vocabulary}
-
-
-def parse_lang_exercises(raw: str | dict) -> dict | None:
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return None
-    exercises_raw = data.get("exercises")
-    if not isinstance(exercises_raw, list) or not exercises_raw:
-        return None
-    exercises = []
-    for ex in exercises_raw:
-        if not isinstance(ex, dict):
-            continue
-        question = _coerce_text(ex.get("question", ""))
-        choices = _coerce_str_list(ex.get("choices", []))
-        correct = str(ex.get("correct", "A")).strip().upper()
-        if not _non_empty_str(question) or len(choices) < 2:
-            continue
-        if correct not in {"A", "B", "C", "D"}:
-            correct = "A"
-        exercises.append({
-            "type": "qcm",
-            "question": (question or "").strip(),
-            "choices": choices[:4],
-            "correct": correct,
-            "explanation": (_coerce_text(ex.get("explanation", "")) or "").strip(),
-        })
-    return {"exercises": exercises} if exercises else None
 
 
 def parse_lang_correction(raw: str | dict) -> dict | None:
@@ -1432,20 +1325,6 @@ def parse_lang_revision_quiz(raw: str | dict) -> dict | None:
 
 
 # ── Séquenceur adaptatif : choix de type + contenu par render_kind ────────────
-
-def parse_session_choice(raw: str | dict) -> dict | None:
-    """JSON minuscule du sélecteur : {chosen_type, reason}."""
-    data = _load_json(raw)
-    if not isinstance(data, dict):
-        return None
-    chosen = _coerce_text(data.get("chosen_type", ""))
-    if not _non_empty_str(chosen):
-        return None
-    return {
-        "chosen_type": (chosen or "").strip(),
-        "reason": (_coerce_text(data.get("reason", "")) or "").strip(),
-    }
-
 
 def _parse_qcm_list(items) -> list[dict]:
     out = []

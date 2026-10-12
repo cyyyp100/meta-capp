@@ -17,7 +17,6 @@ PARSERS = [
     schema_json.parse_chapter_summary,
     schema_json.parse_quiz_session_analysis,
     schema_json.parse_flashcard,
-    schema_json.parse_lang_curriculum,
     schema_json.parse_lesson_plan,
     schema_json.parse_placement_test,
 ]

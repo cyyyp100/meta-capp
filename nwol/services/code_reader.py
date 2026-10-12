@@ -46,7 +46,7 @@ _EXT_LANG: dict[str, str] = {
     "css": "css", "scss": "scss", "sass": "sass", "less": "less",
     "vue": "vue", "svelte": "svelte", "astro": "text",
     "json": "json", "jsonc": "json", "yaml": "yaml", "yml": "yaml", "toml": "toml",
-    "ini": "ini", "cfg": "ini", "conf": "ini", "env": "text", "properties": "ini",
+    "ini": "ini", "cfg": "ini", "conf": "ini", "properties": "ini",
     "md": "markdown", "markdown": "markdown", "rst": "text", "tex": "latex",
     "txt": "text", "log": "text", "csv": "text", "tsv": "text",
     "mk": "makefile", "cmake": "cmake", "gradle": "gradle",
@@ -73,11 +73,12 @@ _NAME_LANG: dict[str, str] = {
     ".gitattributes": "text",
     ".dockerignore": "text",
     ".editorconfig": "ini",
-    ".env": "text",
-    ".bashrc": "bash",
-    ".zshrc": "bash",
     ".vimrc": "vim",
 }
+# Volontairement absents : `.env`, `*.env`, `.bashrc`, `.zshrc`. Ils portent
+# souvent des jetons ou des mots de passe, que la fiche LLM, l'index de
+# recherche et une copie d'envoi recopieraient dans le dossier de données —
+# pour un intérêt pédagogique nul.
 
 
 def supported_extensions() -> set[str]:
