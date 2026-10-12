@@ -19,6 +19,12 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "lang"
 REAL = json.loads((FIXTURES / "espagnol_gemma_2026-09-24.json").read_text(encoding="utf-8"))
 
 
+def _glossary_lists(entries: list[dict], pron: bool = False) -> list[list[str]]:
+    """Les entrées telles que Clikoda les écrit : des listes de chaînes, dans
+    l'ordre que le prompt demande (`schema_json.glossary_fields`)."""
+    return [[str(e.get(field) or "") for field in schema_json.glossary_fields(pron)] for e in entries]
+
+
 def _ctx(episode, **extra):
     names = REAL["bible_characters"]
     return {
@@ -44,8 +50,7 @@ def clean():
 
 def test_parsers_accept_the_real_outputs(real):
     assert schema_json.parse_lang_episode_text(json.dumps(real["text"]))["lines"]
-    glossary = {"entries": [[g["form"], g["lemma"], g["translation"], g["pos"], g["gender"] or ""]
-                            for g in real["glossary"]]}
+    glossary = {"entries": _glossary_lists(real["glossary"])}
     assert len(schema_json.parse_lang_episode_glossary(json.dumps(glossary))["entries"]) == len(real["glossary"])
     assert schema_json.parse_lang_episode_notes_point(json.dumps(real["notes_point"]))["point"]["examples"]
 
@@ -414,10 +419,44 @@ def test_an_accent_only_distractor_is_a_real_wrong_form():
 # ── Prononciation des langues latines : écrite par Clikoda ───────────────────
 
 def test_the_glossary_parser_reads_the_pronunciation():
-    raw = '{"entries": [["casa", "casa", "maison", "nom", "f", "/ˈkasa/"]], "expressions": []}'
-    assert schema_json.parse_lang_episode_glossary(raw)["entries"][0]["pron"] == "ˈkasa"
-    five = '{"entries": [["casa", "casa", "maison", "nom", "f"]]}'
-    assert schema_json.parse_lang_episode_glossary(five)["entries"][0]["pron"] is None
+    casa = {"form": "casa", "lemma": "casa", "lemma_translation": "maison", "translation": "maison", "pos": "nom",
+            "gender": "f", "pron": "/ˈkasa/"}
+    raw = json.dumps({"entries": _glossary_lists([casa], pron=True), "expressions": []})
+    assert schema_json.parse_lang_episode_glossary(raw, pron=True)["entries"][0]["pron"] == "ˈkasa"
+    without = json.dumps({"entries": _glossary_lists([casa])})
+    assert schema_json.parse_lang_episode_glossary(without)["entries"][0]["pron"] is None
+
+
+def test_the_glossary_parser_reads_the_meaning_of_the_lemma():
+    """Deux traductions par mot : celle DU TEXTE, pour la bulle, et le sens du
+    lemme, pour la carte — l'infinitif d'un verbe."""
+    verb = {"form": "Tenemos", "lemma": "tener", "lemma_translation": "avoir", "translation": "Nous avons",
+            "pos": "verbe", "pron": "teˈneɾ"}
+    raw = json.dumps({"entries": _glossary_lists([verb], pron=True)})
+    entry = schema_json.parse_lang_episode_glossary(raw, pron=True)["entries"][0]
+    assert (entry["lemma"], entry["pron"], entry["lemma_translation"], entry["translation"], entry["pos"]) == (
+        "tener", "teˈneɾ", "avoir", "Nous avons", "verbe")
+    # Banc du 12 octobre : un mot-outil arrive parfois sans traduction dans le
+    # texte, mais avec son sens — la bulle prend le sens, le mot n'est pas perdu.
+    article = {"form": "el", "lemma": "el", "lemma_translation": "le", "translation": "", "pos": "déterminant",
+               "pron": "el"}
+    raw = json.dumps({"entries": _glossary_lists([article], pron=True)})
+    assert schema_json.parse_lang_episode_glossary(raw, pron=True)["entries"][0]["translation"] == "le"
+
+
+def test_a_shifted_glossary_entry_is_set_aside():
+    """Banc du 11 octobre : Clikoda saute parfois une chaîne, et tout ce qui suit
+    glisse d'un cran — « park's » traduit par « nom », de nature « m ». L'entrée
+    décalée est écartée : le mot sera redemandé. « nombre », traduit par « nom »,
+    est un vrai nom et reste."""
+    fields = schema_json.glossary_fields(True)
+    park = {"form": "park's", "lemma": "park", "pron": "pɑːk", "lemma_translation": "parc",
+            "translation": "du parc", "pos": "nom", "gender": "m"}
+    shifted = [v for field, v in zip(fields, _glossary_lists([park], pron=True)[0]) if field != "translation"] + [""]
+    nombre = {"form": "nombre", "lemma": "nombre", "pron": "ˈnombɾe", "lemma_translation": "nom",
+              "translation": "nom", "pos": "nom", "gender": "m"}
+    raw = json.dumps({"entries": [shifted, *_glossary_lists([nombre], pron=True)]})
+    assert [e["form"] for e in schema_json.parse_lang_episode_glossary(raw, pron=True)["entries"]] == ["nombre"]
 
 
 def test_a_latin_entry_without_pronunciation_is_asked_again():
@@ -533,9 +572,10 @@ def prompts_en_rule():
 
 
 def test_english_enum_values_are_mapped_to_the_canonical_ones():
-    glossary = schema_json.parse_lang_episode_glossary(json.dumps({"entries": [
-        ["Haus", "Haus", "house", "noun", "n"], ["gehen", "gehen", "to go", "verb", ""],
-        ["Anna", "Anna", "Anna", "proper noun", ""]]}))
+    glossary = schema_json.parse_lang_episode_glossary(json.dumps({"entries": _glossary_lists([
+        {"form": "Haus", "lemma": "Haus", "translation": "house", "pos": "noun", "gender": "n"},
+        {"form": "gehen", "lemma": "gehen", "translation": "to go", "pos": "verb"},
+        {"form": "Anna", "lemma": "Anna", "translation": "Anna", "pos": "proper noun"}])}))
     assert [e["pos"] for e in glossary["entries"]] == ["nom", "verbe", "nom propre"]
     notes = schema_json.parse_lang_episode_notes_point(json.dumps({
         "notes": [{"line": 1, "anchor": "a", "kind": "grammar", "text": "t"},

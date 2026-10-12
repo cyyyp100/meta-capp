@@ -56,7 +56,7 @@ from db.questions import (
     save_question,
 )
 from db.session_pauses import save_pause
-from db.sessions import update_session_progress
+from db.sessions import get_session, update_session_progress
 from db.user import DEFAULT_USER_ID
 from llm.ollama_client import cancel_pending_generations, decide_intervention_async
 from metacog.reflection import augment_evaluation_with_response_signals
@@ -222,6 +222,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "pages_read": 0,  # pages LUES au dernier tick (bonus de progression)
         "pages_read_saved": 0,  # dernier compte écrit en base (reading_sessions)
         "pending_warmup": None,  # temps de la révision éclair, en attente du session_id
+        "closed_session": None,  # séance close qu'un message a voulu rattacher (refusée)
     }
     # Pause en cours (bouton de l'élève ou carte de Clikoda acceptée) et dernière
     # recommandation du LLM. Tant qu'elle dure, tout est figé (cf. end_pause).
@@ -539,11 +540,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             await loop.run_in_executor(None, gauges.recover_attention, credit)
         await loop.run_in_executor(None, persist_pause, record)
 
-    def attach_session(sid: int | None) -> None:
-        """Rattache la séance (premier `viewport` ou `start_reading` qui la porte)."""
-        if not sid:
+    async def attach_session(sid: int | None) -> None:
+        """Rattache la séance (premier `viewport` ou `start_reading` qui la porte).
+
+        Jamais une séance CLOSE (ou effacée) : un lecteur rouvert après
+        « Terminer » — le sas de repos le remontait — se rattachait à la séance
+        finie, comptait le repos comme une lecture de la page 1 et, à sa
+        fermeture, écrasait le temps par page de toute la séance (« Où tu as
+        ralenti ») et ajoutait ses points aux courbes de jauges. Le refus est
+        retenu : le socket ne redemande pas à chaque message."""
+        if not sid or sid == state["closed_session"]:
             return
-        state["session_id"] = sid
+        if sid != state["session_id"]:
+            row = await loop.run_in_executor(None, get_session, int(sid))
+            if not row or row.get("ended_at"):
+                state["closed_session"] = sid
+                logger.info("Lecteur : séance %s close, socket non rattaché", sid)
+                return
+            state["session_id"] = sid
         # `/end` lira ici le compte exact des pages lues (session_memory.track).
         session_memory.track(int(sid), memory)
         if state["live_gauges"] is not None:
@@ -605,7 +619,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             page = clamp_page(msg.page)
 
             if kind == "viewport":
-                attach_session(msg.session_id)
+                await attach_session(msg.session_id)
                 await flush_warmup()
                 # En pause, la page ne bouge pas (le lecteur est masqué) : un
                 # viewport tardif ne doit pas ouvrir de dwell sur une autre page.
@@ -660,7 +674,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # la page 1 (memory.start_reading).
                 policy.start_reading()
                 memory.start_reading(time.monotonic())
-                attach_session(msg.session_id)
+                await attach_session(msg.session_id)
                 if msg.warmup:
                     state["pending_warmup"] = msg.warmup
                 await flush_warmup()

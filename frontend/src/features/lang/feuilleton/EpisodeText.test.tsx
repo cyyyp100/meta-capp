@@ -79,4 +79,21 @@ describe("EpisodeText", () => {
     expect(reveal).toHaveBeenCalledWith(0, 0);
     expect(screen.getByRole("dialog", { name: "Hola" })).toHaveTextContent("salut");
   });
+
+  it("un verbe conjugué : sa traduction dans le texte, puis son infinitif, prononcé, et son sens", () => {
+    const verb: EpisodeView = {
+      ...episode,
+      lines: [{ speaker: "Ana", translation: "Nous avons le temps.", tokens: [{ text: "Tenemos", w: true, g: 0 }] }],
+      glossary: [{
+        form: "Tenemos", lemma: "tener", translation: "Nous avons", lemma_translation: "avoir", pos: "verbe",
+        gender: null, article: null, pron: "teˈneɾ", vocalized: null, faux_ami: null, acquired: false, transparent: false,
+      }],
+    };
+    render(<EpisodeText episode={verb} onReveal={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Tenemos" }));
+    const bubble = screen.getByRole("dialog", { name: "Tenemos" });
+    expect(bubble).toHaveTextContent(/Nous avons — (forme de base|base form) : tener \/teˈneɾ\/ = avoir/);
+    // La prononciation est celle du lemme : elle n'est pas posée sous « Tenemos ».
+    expect(screen.queryByText("teˈneɾ")).toBeNull();
+  });
 });

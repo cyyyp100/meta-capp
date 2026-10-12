@@ -83,6 +83,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Verbs are reviewed in the infinitive.** A language card shows a word's dictionary
+  form — the infinitive for a verb — with the meaning of that form and its
+  pronunciation, never the conjugated word met in the episode nor its translation
+  there (*tener* — *avoir*, not *tener* — *Nous avons*; *be* pronounced /biː/, not
+  /wəz/). The words to use in the writing step follow the same rule, and the word
+  bubble adds the base form's pronunciation and meaning (*Nous avons — base form:
+  tener /teˈneɾ/ = avoir*). A card made before takes the right meaning as soon as an
+  episode glosses another form of the same verb, unless you edited it. Arabic cards
+  still show the vocalized word of the text.
+- **A language step that asks questions waits for your answers.** The games, the
+  lesson's practice, the second wave, the check, the cards and the writing step keep
+  **Continue** disabled, and say why, until every question has an answer — a wrong
+  one counts. The writing step needs at least one word. The feeling asked at the
+  goodbye stays optional: leaving it blank is itself measured.
 - **Three days off before a mandatory re-read, and the ready episode is kept.** Up
   to three days without a session in a language (two before), the next session
   plays the episode that is ready. Beyond that, the session is a re-read with no new
@@ -151,6 +165,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **My progress, *Where you slowed down*.** The time spent on each page of a reading
+  session was overwritten, once the session had ended, by the rest pause that follows
+  it: only "page 1" was left, with the length of the pause. Each page read now keeps
+  its number and its time (m:ss). The rest pause no longer adds points to the
+  session's gauge curves either, nor cancels the analysis being written for the
+  session. Sessions already affected cannot be recovered: their time per page was
+  erased.
 - Formulas in flashcards are rendered wherever a card is shown (entry airlock,
   Flashcards page, weekly recap, language sessions, brainstorming sources).
   `$$…$$`, `\(…\)` and `\[…\]` are recognized, and two amounts such as "5$ and 10$"

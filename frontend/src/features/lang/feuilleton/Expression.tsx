@@ -3,9 +3,9 @@
 // Juste après la leçon, pour l'appliquer aussitôt. La consigne vient du serveur
 // (déterministe, dans la langue d'explication), avec les mots du jour et les
 // formes du point à employer. Le compteur et la liste de contrôle guident ; ils
-// ne notent rien. « Continuer » envoie le texte et passe à la suite sans
-// attendre : Clikoda corrige en arrière-plan, la correction attend à l'écran de
-// fin (ou à l'accueil, si elle arrive après).
+// ne notent rien. « Continuer », dès qu'un mot est écrit, envoie le texte et
+// passe à la suite sans attendre : Clikoda corrige en arrière-plan, la
+// correction attend à l'écran de fin (ou à l'accueil, si elle arrive après).
 import { useState } from "react";
 
 import { api } from "../../../api/client";
@@ -131,7 +131,12 @@ export function ExpressionStep({ step, plan, onNext }: StepProps) {
           </div>
         </details>
       )}
-      <NextButton label={t("feuil.expr.continue")} onClick={() => void send()} />
+      <NextButton
+        label={t("feuil.expr.continue")}
+        disabled={count === 0}
+        hint={t("feuil.expr.write_first")}
+        onClick={() => void send()}
+      />
     </Card>
   );
 }

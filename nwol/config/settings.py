@@ -139,12 +139,17 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "lang_episode_text":        {"num_ctx": 4096, "num_predict": 1600, "temperature": 0.70},
     # Mandarin : les jetons (segmentation) allongent la sortie.
     "lang_episode_text_hanzi":  {"num_ctx": 4096, "num_predict": 1900, "temperature": 0.70},
-    # Une entrée par mot inconnu de l'apprenant (au plus LANG_GLOSSARY_MAX_ENTRIES),
-    # ~18 tokens chacune en liste compacte.
+    # Une entrée par mot inconnu de l'apprenant (au plus LANG_GLOSSARY_CHUNK par
+    # appel), ~20 tokens chacune en liste compacte, sens du lemme compris.
     "lang_episode_glossary":    {"num_ctx": 4096, "num_predict": 900,  "temperature": 0.20},
     # Langues latines : ~10 tokens de plus par entrée pour la prononciation en API
     # qu'écrit Clikoda (le pinyin et la translittération arabe sont calculés).
-    "lang_episode_glossary_pron": {"num_ctx": 4096, "num_predict": 1200, "temperature": 0.20},
+    # Banc du 12 octobre (lots de 20 mots, sens du lemme compris) : 549 tokens en
+    # moyenne, 937 au plus — un lot dont les « expressions » étaient des phrases
+    # entières, chacune écrite cinq fois. 1 100 est le plafond qui garde le prompt
+    # du pire cas dans num_ctx (tests/services/test_lang_prompt_budget.py) ; une
+    # coupure ne toucherait que les expressions, écrites après les entrées.
+    "lang_episode_glossary_pron": {"num_ctx": 4096, "num_predict": 1100, "temperature": 0.20},
     # Notes + explication + micro-exercices : 700 coupait au banc dès l'A2.
     "lang_episode_notes_point": {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
     "lang_weekly_analysis":     {"num_ctx": 2048, "num_predict": 300,  "temperature": 0.20},
@@ -843,7 +848,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 42
+DB_SCHEMA_VERSION = 43
 
 # Logs
 LOG_MAX_BYTES = 1_000_000

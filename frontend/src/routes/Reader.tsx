@@ -1367,7 +1367,11 @@ export function Reader() {
         demo={demo}
         reading={entered}
         warmup={warmup}
-        ended={exit !== null}
+        // Une séance close le reste : refermer le sas de sortie (`exit` repasse
+        // à null) ouvre le sas de repos, et un `ended` revenu à false rouvrait
+        // un socket qui, à sa fermeture, écrasait côté serveur le temps par
+        // page de la séance (« Où tu as ralenti »).
+        ended={exit !== null || showPostExitRest}
         paused={pause}
         onPauseRequest={(minutes) => startPause("suggested", minutes)}
         onDemoReady={handleDemoReady}

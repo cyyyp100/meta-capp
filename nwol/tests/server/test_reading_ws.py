@@ -543,6 +543,41 @@ def test_the_entry_sas_is_not_reading(client, tmp_path, make_pdf, quick_reading)
     assert dwell[1] < quick_reading
 
 
+def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_path, make_pdf, quick_reading):
+    """« Terminer », puis le sas de repos : un lecteur rouvert sur la séance
+    close ne s'y rattache pas. Il écrasait à sa fermeture le temps par page
+    (« Où tu as ralenti ») avec le repos compté comme une lecture de la page 1,
+    et ajoutait ses points aux courbes de jauges."""
+    import time
+
+    from db.page_dwell import get_page_dwell
+    from db.session_gauges import get_session_gauges
+    from db.sessions import get_session
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        for page in (3, 4):
+            ws.send_json({"type": "viewport", "page": page, "session_id": sid})
+            _sync(ws)
+            time.sleep(quick_reading * 2)
+        client.post(f"/api/session/{sid}/end", json={"duration_s": 30})
+    dwell = get_page_dwell(sid)
+    gauges = get_session_gauges(sid)
+    assert {row["page"] for row in dwell} >= {3, 4}
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid})
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading * 3)
+        _sync(ws)
+
+    assert get_page_dwell(sid) == dwell
+    assert get_session_gauges(sid) == gauges
+    assert get_session(sid)["pages_read"] == 2
+
+
 def test_intervention_context_relays_policy_trigger(client):
     # build_intervention_context ne DÉCIDE plus rien : il relaie le signal que la
     # politique (services/intervention.py) lui passe. Garde-fou anti-duplication.

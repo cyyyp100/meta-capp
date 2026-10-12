@@ -82,10 +82,13 @@ def _last_speaker(episode: dict) -> str | None:
     return None
 
 
-def _word_entry(entry: dict) -> dict:
+def _word_entry(language: str, entry: dict) -> dict:
+    """Un mot à employer, montré comme sa carte : le lemme et son sens
+    (`progress.card_face`) — « tener, avoir », pas « tener, Nous avons »."""
     lemma = entry.get("lemma") or entry.get("form")
-    shown = f"{entry['article']} {lemma}" if entry.get("article") else (entry.get("vocalized") or lemma)
-    return {"form": shown, "match": [lemma, entry.get("form") or lemma], "translation": entry.get("translation", "")}
+    face = progress.card_face(language, entry)
+    return {"form": face["front"], "match": [lemma, entry.get("form") or lemma],
+            "translation": face["back"] or entry.get("translation", "")}
 
 
 def writing_task(language: str, episode: dict, explain_lang: str) -> dict:
@@ -114,8 +117,8 @@ def writing_task(language: str, episode: dict, explain_lang: str) -> dict:
         lemma = g.get("lemma") or g["form"]
         if lemma not in taken and len(bank) < LANG_WRITING_BANK_WORDS:
             taken.add(lemma)
-            bank.append(_word_entry(g))
-    use_words = [_word_entry(g) for g in chosen]
+            bank.append(_word_entry(language, g))
+    use_words = [_word_entry(language, g) for g in chosen]
     forms = list(dict.fromkeys((episode.get("point") or {}).get("examples") or []))[:2]
     prompt = t_in(explain_lang, f"lang.writing.task.{kind}", speaker=speaker or "", length=length)
     return {

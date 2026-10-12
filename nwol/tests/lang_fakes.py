@@ -149,7 +149,8 @@ def fake_glossary(params, ok, err, on_metrics=None, model=None):
     fields = ("form", "lemma", "translation", "pos", "gender", "pron")
 
     def entry(e):
-        return dict(zip(fields, [*e, f"ˈ{e[1]}" if params.get("pron") else ""]))
+        # Les traductions de GLOSSARY sont celles des lemmes : le sens du lemme les reprend.
+        return {**dict(zip(fields, [*e, f"ˈ{e[1]}" if params.get("pron") else ""])), "lemma_translation": e[2]}
 
     ok({"entries": [entry(e) for e in entries], "expressions": [entry(e) for e in expressions]})
 

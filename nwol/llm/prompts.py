@@ -3119,25 +3119,37 @@ def build_lang_episode_glossary_prompt(p: dict) -> str:
         return _build_lang_episode_glossary_prompt_en(p)
     lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
     wanted = " | ".join(p["words"])
+    # Deux traductions par mot (banc du 11 octobre) : celle DU TEXTE, pour la
+    # bulle, et le sens du LEMME, pour la carte — « Tenemos » est « Nous avons »
+    # dans le texte, « tener » est « avoir ». Le lemme, sa prononciation et son
+    # sens se suivent : placée après la nature et le genre, la prononciation
+    # était le plus souvent celle du mot du texte (« was » /wəz/ pour « be »).
+    # Un « infinitif » dans la définition du LEMME en faisait inventer aux
+    # autres mots (« as » → « be ») : la règle ne vit que dans celle du sens.
+    # « sans article » n'y ôtait pas l'article des noms qui le prennent et
+    # faisait laisser vide la traduction des mots-outils : écarté.
     # `pron` : langues latines, dont rien n'est calculé ici — Clikoda écrit la
     # prononciation du lemme, qui suit le mot jusqu'à sa flashcard.
     if p.get("pron"):
-        asked, count = "sa nature, son genre et sa prononciation", "six"
-        fields = "mot tel que donné, lemme, traduction, nature, genre, prononciation"
-        skeleton = '["mot", "lemme", "traduction", "nature", "genre", "prononciation"]'
-        pron_rule = ('\n"prononciation" : celle du lemme, en alphabet phonétique international, dans la variété '
-                     "du registre, sans barres obliques ni crochets ; jamais vide.")
+        asked = "la prononciation de ce lemme, le sens de ce lemme en français"
+        count = "sept"
+        fields = ("mot tel que donné, traduction dans le texte, lemme,\nprononciation du lemme, sens du lemme, "
+                  "nature, genre")
+        skeleton = ('["mot", "traduction dans le texte", "lemme", "prononciation du lemme", "sens du lemme", '
+                    '"nature", "genre"]')
+        pron_rule = ('"prononciation du lemme" : celle du lemme et non du mot du texte, en alphabet phonétique '
+                     "international, dans\nla variété du registre, sans barres obliques ni crochets ; jamais vide.\n")
         register = f"\n{p.get('register', '')}"
     else:
-        asked, count = "sa nature et son genre", "cinq"
-        fields = "mot tel que donné, lemme, traduction, nature, genre"
-        skeleton = '["mot", "lemme", "traduction", "nature", "genre"]'
+        asked, count = "le sens de ce lemme en français", "six"
+        fields = "mot tel que donné, traduction dans le texte, lemme, sens du lemme, nature, genre"
+        skeleton = '["mot", "traduction dans le texte", "lemme", "sens du lemme", "nature", "genre"]'
         pron_rule = register = ""
     return f"""Voici un texte en {p['language_label']} avec sa traduction française, réplique par réplique :
 {lines}
 {register}
-Pour CHACUN des {len(p['words'])} mots suivants, dans cet ordre, donne son lemme (forme du dictionnaire), sa
-traduction française DANS CE TEXTE, {asked} :
+Pour CHACUN des {len(p['words'])} mots suivants, dans cet ordre, donne sa traduction française DANS CE TEXTE,
+son lemme (forme du dictionnaire), {asked}, sa nature et son genre :
 {wanted}
 {p.get('form_rule', '')}
 {_rejected_block(p.get('rejected', ''))}
@@ -3147,8 +3159,10 @@ Ajoute dans "expressions", au même format, jusqu'à 5 expressions de plusieurs 
 débutant (par exemple une formule de politesse), recopiées exactement ; liste vide s'il n'y en a pas.
 {{"entries": [{skeleton}], "expressions": []}}
 
+{pron_rule}"sens du lemme" : la traduction française du lemme lui-même, hors de ce texte, comme dans un
+dictionnaire ; un verbe se traduit par un infinitif.
 "nature" parmi : nom, verbe, adjectif, adverbe, pronom, préposition, conjonction, déterminant, interjection,
-expression. "genre" : m, f ou n pour un nom, sinon chaîne vide.{pron_rule}"""
+expression. "genre" : m, f ou n pour un nom, sinon chaîne vide."""
 
 
 def build_lang_episode_notes_point_prompt(p: dict) -> str:
@@ -3390,22 +3404,25 @@ def _build_lang_episode_glossary_prompt_en(p: dict) -> str:
     lines = "\n".join(f"{i}. {text}  (= {tr})" for i, (text, tr) in enumerate(p["lines"], start=1))
     wanted = " | ".join(p["words"])
     if p.get("pron"):
-        asked, count = "its part of speech, its gender and its pronunciation", "six"
-        fields = "word as given, lemma, translation, part of speech, gender, pronunciation"
-        skeleton = '["word", "lemma", "translation", "part of speech", "gender", "pronunciation"]'
-        pron_rule = ('\n"pronunciation": that of the lemma, in the International Phonetic Alphabet, in the variety '
-                     "of the register, without slashes or brackets; never empty.")
+        asked, count = "the pronunciation of that lemma, the meaning of that lemma in English", "seven"
+        fields = ("word as given, translation in the text, lemma,\npronunciation of the lemma, meaning of the "
+                  "lemma, part of speech, gender")
+        skeleton = ('["word", "translation in the text", "lemma", "pronunciation of the lemma", '
+                    '"meaning of the lemma", "part of speech", "gender"]')
+        pron_rule = ('"pronunciation of the lemma": that of the lemma, not of the word in the text, in the '
+                     "International\nPhonetic Alphabet, in the variety of the register, without slashes or brackets; "
+                     "never empty.\n")
         register = f"\n{p.get('register', '')}"
     else:
-        asked, count = "its part of speech and its gender", "five"
-        fields = "word as given, lemma, translation, part of speech, gender"
-        skeleton = '["word", "lemma", "translation", "part of speech", "gender"]'
+        asked, count = "the meaning of that lemma in English", "six"
+        fields = "word as given, translation in the text, lemma, meaning of the lemma, part of speech, gender"
+        skeleton = '["word", "translation in the text", "lemma", "meaning of the lemma", "part of speech", "gender"]'
         pron_rule = register = ""
     return f"""Here is a text in {p['language_label']} with its English translation, line by line:
 {lines}
 {register}
-For EACH of the {len(p['words'])} following words, in this order, give its lemma (dictionary form), its English
-translation IN THIS TEXT, {asked}:
+For EACH of the {len(p['words'])} following words, in this order, give its English translation IN THIS TEXT,
+its lemma (dictionary form), {asked}, its part of speech and its gender:
 {wanted}
 {p.get('form_rule', '')}
 {_rejected_block(p.get('rejected', ''), en=True)}
@@ -3415,8 +3432,10 @@ Add in "expressions", in the same format, up to 5 multi-word expressions of the 
 beginner (a polite formula, for instance), copied exactly; an empty list if there are none.
 {{"entries": [{skeleton}], "expressions": []}}
 
+{pron_rule}"meaning of the lemma": the English translation of the lemma itself, outside this text, as a
+dictionary gives it; a verb is translated by an infinitive.
 "part of speech" among: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner,
-interjection, expression. "gender": m, f or n for a noun, otherwise an empty string.{pron_rule}"""
+interjection, expression. "gender": m, f or n for a noun, otherwise an empty string."""
 
 
 def _build_lang_episode_notes_point_prompt_en(p: dict) -> str:

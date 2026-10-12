@@ -681,7 +681,8 @@ def requeue_stuck_writings() -> list[int]:
 # ── Lexique (D12) ─────────────────────────────────────────────────────────────
 
 _LEXEME_FIELDS = {
-    "form", "translation", "pos", "gender", "pron", "vocalized", "transparent", "card_id", "acquired_at",
+    "form", "translation", "lemma_translation", "pos", "gender", "pron", "vocalized", "transparent", "card_id",
+    "acquired_at",
 }
 
 
@@ -701,22 +702,26 @@ def get_lexeme(profile_id: int, lemma: str) -> dict | None:
 
 def insert_lexeme(profile_id: int, entry: dict, episode_n: int | None) -> int:
     """Nouveau mot ; renvoie l'id, existant ou neuf. Un mot déjà connu garde
-    tout, sauf la prononciation qui lui manquait (inscrit avant que Clikoda la
-    donne pour les langues latines) : il la reçoit."""
+    tout, sauf ce qui lui manquait et que l'entrée apporte : la prononciation
+    (inscrit avant que Clikoda la donne pour les langues latines) et le sens du
+    lemme (inscrit avant qu'on le demande, v43)."""
     conn = get_connection()
     with conn:
         conn.execute(
             """INSERT INTO lang_lexicon
-               (profile_id, form, lemma, translation, pos, gender, pron, vocalized, transparent,
-                first_episode_n)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(profile_id, lemma) DO UPDATE SET pron = excluded.pron
-               WHERE COALESCE(lang_lexicon.pron, '') = '' AND COALESCE(excluded.pron, '') <> ''""",
+               (profile_id, form, lemma, translation, lemma_translation, pos, gender, pron, vocalized,
+                transparent, first_episode_n)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(profile_id, lemma) DO UPDATE SET
+                 pron = COALESCE(NULLIF(lang_lexicon.pron, ''), NULLIF(excluded.pron, ''), lang_lexicon.pron),
+                 lemma_translation = COALESCE(NULLIF(lang_lexicon.lemma_translation, ''),
+                                              NULLIF(excluded.lemma_translation, ''),
+                                              lang_lexicon.lemma_translation)""",
             (
                 profile_id, entry.get("form") or entry["lemma"], entry["lemma"],
-                entry.get("translation") or "", entry.get("pos"), entry.get("gender"),
-                entry.get("pron"), entry.get("vocalized"), int(bool(entry.get("transparent"))),
-                episode_n,
+                entry.get("translation") or "", entry.get("lemma_translation") or None,
+                entry.get("pos"), entry.get("gender"), entry.get("pron"), entry.get("vocalized"),
+                int(bool(entry.get("transparent"))), episode_n,
             ),
         )
     row = conn.execute(

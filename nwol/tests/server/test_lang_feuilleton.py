@@ -273,6 +273,60 @@ def test_a_word_without_pronunciation_gets_no_card(client):
     assert [(r["front"], r["pronunciation"]) for r in rows] == [("der Hund", "deːɐ̯ hʊnt")]
 
 
+def test_a_verb_card_shows_the_infinitive_and_its_meaning(client):
+    """Un verbe se révise à l'infinitif, traduit à l'infinitif : « tener » —
+    « avoir », jamais la traduction de la forme rencontrée (« Nous avons »).
+    Sans le sens de son lemme, un verbe n'a pas de carte : il l'aura quand un
+    épisode le lui donnera."""
+    from db import get_connection
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+    from services.lang_progress import create_episode_flashcards
+
+    profile = {**get_or_create_lang_profile(1, LANG), "user_id": 1}
+    glossary = [
+        {"form": "Tenemos", "lemma": "tener", "translation": "Nous avons", "lemma_translation": "avoir",
+         "pos": "verbe", "pron": "teˈneɾ", "new": True},
+        {"form": "fue", "lemma": "ser", "translation": "était", "pos": "verbe", "pron": "seɾ", "new": True},
+    ]
+    for entry in glossary:
+        store.insert_lexeme(profile["id"], entry, 1)
+    assert create_episode_flashcards(profile, LANG, {"glossary": glossary}, set()) == 1
+    rows = get_connection().execute("SELECT front, back, pronunciation FROM flashcards").fetchall()
+    assert [(r["front"], r["back"], r["pronunciation"]) for r in rows] == [("tener", "avoir", "teˈneɾ")]
+
+
+def test_a_verb_card_made_before_takes_the_meaning_of_its_lemma(client):
+    """Une carte de verbe faite avec la traduction de la forme rencontrée
+    (« tener » — « Nous avons ») prend le sens du lemme au verso dès qu'un
+    épisode le donne ; le lexique le garde, la bulle garde la traduction dans le
+    texte. Une carte retouchée par l'apprenant reste la sienne."""
+    from db import get_connection
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+    from services.flashcards import create_flashcard
+    from services.lang_progress import ensure_lexemes
+
+    pid = get_or_create_lang_profile(1, LANG)["id"]
+    for form, lemma, translation in (("Tenemos", "tener", "Nous avons"), ("fue", "ser", "était")):
+        lex_id = store.insert_lexeme(pid, {"form": form, "lemma": lemma, "translation": translation, "pos": "verbe"}, 1)
+        card_id = create_flashcard(1, front=lemma, back=translation, tags=[LANG], source="lang_feuilleton",
+                                   language=LANG, origin=("lang_lemma", f"{LANG}\x1f{lemma}"), pronunciation="x")
+        store.update_lexeme(lex_id, card_id=card_id)
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE flashcards SET back = 'être (fue : il fut)' WHERE front = 'ser'")
+
+    ensure_lexemes(pid, LANG, {"episode_n": 2, "glossary": [
+        {"form": "tengo", "lemma": "tener", "translation": "j'ai", "lemma_translation": "avoir", "pos": "verbe"},
+        {"form": "es", "lemma": "ser", "translation": "est", "lemma_translation": "être", "pos": "verbe"},
+    ]})
+    backs = {r["front"]: r["back"] for r in conn.execute("SELECT front, back FROM flashcards")}
+    assert backs == {"tener": "avoir", "ser": "être (fue : il fut)"}
+    row = store.get_lexeme(pid, "tener")
+    assert (row["translation"], row["lemma_translation"]) == ("Nous avons", "avoir")
+
+
 def test_a_known_word_receives_the_pronunciation_it_lacked(client):
     from db import lang_episode_db as store
     from db.lang_db import get_or_create_lang_profile

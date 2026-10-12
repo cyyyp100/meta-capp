@@ -220,6 +220,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 42)
         current = 42
 
+    if current < 43 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v43(conn)
+        _set_version(conn, 43)
+        current = 43
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1874,6 +1879,26 @@ def _migrate_to_v42(conn) -> None:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lang_run_pace_run ON lang_run_pace(run_id)")
     logger.info("Migration SQLite v42 terminée")
+
+
+def _migrate_to_v43(conn) -> None:
+    """Le sens du LEMME au lexique (`lang_lexicon.lemma_translation`).
+
+    Un mot n'y gardait que sa traduction DANS LE TEXTE où on l'avait rencontré :
+    « tener » restait « Nous avons », « be » restait « était ». Sa carte — le
+    lemme au recto, l'infinitif pour un verbe — montrait cette forme conjuguée
+    au verso, et la consigne d'écriture aussi. Le glossaire donne désormais le
+    sens du lemme lui-même (un verbe se traduit par un infinitif) : c'est lui
+    que la carte et la consigne affichent ; la traduction dans le texte reste
+    celle de la bulle. Un mot déjà inscrit n'en a pas : s'il reparaît dans un
+    épisode, il est reglosé pour le recevoir (`lang_episodes.glossary_request`)
+    et sa carte est corrigée au passage (`lang_progress.ensure_lexemes`).
+
+    Rejouable : la colonne n'est ajoutée qu'une fois."""
+    logger.info("Migration SQLite v43 démarrée")
+    with conn:
+        _ensure_column(conn, "lang_lexicon", "lemma_translation", "TEXT")
+    logger.info("Migration SQLite v43 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

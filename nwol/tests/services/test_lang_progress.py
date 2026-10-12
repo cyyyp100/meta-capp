@@ -308,3 +308,25 @@ def test_a_known_false_positive_of_the_lemma_repair_is_documented():
     répare en sa forme. Ce test fixe ce comportement assumé."""
     assert progress.lemma_polluted("espagnol", "viene", "venir", "venir") is True
     assert progress.lemma_polluted("espagnol", "venir", "venir", "venir") is False
+
+
+def test_a_card_shows_the_lemma_with_the_meaning_of_the_lemma():
+    """Le verso traduit le recto : le lemme — l'infinitif d'un verbe — et son
+    sens, jamais la forme rencontrée ni sa traduction dans le texte."""
+    verb = {"form": "Tenemos", "lemma": "tener", "translation": "Nous avons", "pos": "verbe", "pron": "teˈneɾ"}
+    assert progress.card_face("espagnol", {**verb, "lemma_translation": "avoir"}) == {
+        "front": "tener", "back": "avoir", "pron": "teˈneɾ"}
+    # Inscrit avant qu'on demande le sens du lemme : la traduction de « Tenemos »
+    # ne vaut pas pour « tener », pas plus que celle d'un pluriel pour son singulier.
+    assert progress.card_face("espagnol", verb)["back"] == ""
+    plural = {"form": "luces", "lemma": "luz", "translation": "lumières", "pos": "nom", "pron": "luθ"}
+    assert progress.card_face("espagnol", plural)["back"] == ""
+    assert progress.card_face("espagnol", {**plural, "form": "Luz", "translation": "lumière"})["back"] == "lumière"
+    # L'allemand garde l'article devant le nom, et le dit dans la prononciation.
+    noun = {"form": "Hunde", "lemma": "Hund", "translation": "chiens", "lemma_translation": "chien", "pos": "nom",
+            "article": "der", "pron": "hʊnt"}
+    assert progress.card_face("allemand", noun) == {"front": "der Hund", "back": "chien", "pron": "deːɐ̯ hʊnt"}
+    # L'arabe montre la forme vocalisée du texte : son verso est sa traduction dans le texte.
+    arabic = {"form": "كَتَبْنَا", "vocalized": "كَتَبْنَا", "lemma": "كَتَبَ", "translation": "nous avons écrit",
+              "lemma_translation": "écrire", "pos": "verbe", "pron": "katabnā"}
+    assert progress.card_face("arabe", arabic) == {"front": "كَتَبْنَا", "back": "nous avons écrit", "pron": "katabnā"}

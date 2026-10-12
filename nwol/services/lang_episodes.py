@@ -700,6 +700,7 @@ def glossary_request(language: str, lines: list[dict], ctx: dict) -> tuple[list[
             row = known.get(key)
             if row:
                 from_lexicon.append({"form": tok["text"], "lemma": row["lemma"], "translation": row["translation"],
+                                     "lemma_translation": row.get("lemma_translation"),
                                      "pos": row.get("pos") or "expression", "gender": row.get("gender"),
                                      "pron": row.get("pron"), "from_lexicon": True})
             elif len(asked) < limit:

@@ -57,6 +57,7 @@ from config.settings import (
 )
 from db import get_connection
 from db import lang_episode_db as store
+from db.flashcards import rewrite_lang_card_back
 from services.lang_latin import de_article_pron
 
 logger = logging.getLogger("services.lang_progress")
@@ -550,19 +551,32 @@ def _is_acquired(row: dict, recognitions: int, min_episodes: int) -> bool:
     )
 
 
-def ensure_lexemes(profile_id: int, episode: dict) -> dict[int, int]:
+def ensure_lexemes(profile_id: int, language: str, episode: dict) -> dict[int, int]:
     """Inscrit au lexique les mots du glossaire d'un épisode ; renvoie
-    {index glossaire: id lexique}."""
+    {index glossaire: id lexique}.
+
+    Un mot déjà inscrit reçoit ce qui lui manquait (`insert_lexeme`), dont le
+    sens de son lemme (v43) ; sa carte, faite avant avec la traduction de la
+    forme rencontrée, le prend alors au verso — « tener » : « Nous avons »
+    devient « avoir » —, sauf si l'apprenant l'a retouchée."""
+    before = store.get_lexicon(profile_id)
     ids: dict[int, int] = {}
     for gi, entry in enumerate(episode.get("glossary") or []):
         if (entry.get("pos") or "") == "nom propre":
             continue
+        lemma = entry.get("lemma") or entry.get("form")
         ids[gi] = store.insert_lexeme(profile_id, {
-            "form": entry.get("form"), "lemma": entry.get("lemma") or entry.get("form"),
-            "translation": entry.get("translation"), "pos": entry.get("pos"), "gender": entry.get("gender"),
+            "form": entry.get("form"), "lemma": lemma,
+            "translation": entry.get("translation"), "lemma_translation": entry.get("lemma_translation"),
+            "pos": entry.get("pos"), "gender": entry.get("gender"),
             "pron": entry.get("pron"), "vocalized": entry.get("vocalized"),
             "transparent": entry.get("transparent"),
         }, episode.get("episode_n"))
+        row = before.get(lemma)
+        if row and row.get("card_id") and not row.get("lemma_translation") and entry.get("lemma_translation"):
+            back = card_face(language, {**row, "lemma_translation": entry["lemma_translation"]})["back"]
+            if rewrite_lang_card_back(int(row["card_id"]), row.get("translation") or "", back):
+                logger.info("Carte %s (%s) : verso « %s » -> « %s »", row["card_id"], lemma, row.get("translation"), back)
     return ids
 
 
@@ -598,7 +612,7 @@ def apply_run_acquisition(run_id: int) -> dict:
         episode = store.get_episode(reading["episode_id"])
         if not episode:
             continue
-        lex_ids = ensure_lexemes(profile_id, episode)
+        lex_ids = ensure_lexemes(profile_id, language, episode)
         taps = tapped.get((episode["id"], reading["pass"]), set())
         shown = translated.get((episode["id"], reading["pass"]), set())
         counted_ok: dict[int, int] = {}
@@ -674,14 +688,43 @@ def _card_pronunciation(entry: dict) -> str | None:
     return f"{article} {pron}" if article else pron
 
 
+def card_face(language: str, entry: dict) -> dict:
+    """Un mot hors de son texte, tel que sa carte le montre (et la consigne
+    d'écriture avec elle) : {front, back, pron}. Le verso traduit le recto.
+
+    Le recto est le LEMME — l'infinitif d'un verbe, l'article devant un nom
+    allemand — et le verso le sens de ce lemme, jamais la traduction de la
+    forme rencontrée : « tener » au recto, « avoir » au verso, pas « Nous
+    avons ». Un mot inscrit avant qu'on demande ce sens (v43) n'a que sa
+    traduction dans le texte ; elle ne vaut pour le lemme que si le mot y
+    paraissait tel quel et n'est pas un verbe. Sinon le verso reste vide, et la
+    carte attend qu'un épisode le lui donne.
+
+    L'arabe garde au recto la forme VOCALISÉE du texte, la seule dont la
+    vocalisation est contrôlée (A7), et donc au verso sa traduction dans le
+    texte."""
+    from services.lang_text import fold
+
+    lemma = entry.get("lemma") or entry.get("form") or ""
+    pron = _card_pronunciation(entry)
+    if family(language) == "arabe":
+        return {"front": entry.get("vocalized") or lemma, "back": entry.get("translation") or "", "pron": pron}
+    back = entry.get("lemma_translation") or ""
+    if not back and (entry.get("pos") or "") != "verbe" and fold(entry.get("form") or lemma) == fold(lemma):
+        back = entry.get("translation") or ""
+    front = f"{entry['article']} {lemma}" if entry.get("article") else lemma
+    return {"front": front, "back": back, "pron": pron}
+
+
 def create_episode_flashcards(profile: dict, language: str, episode: dict, tapped_lemmas: set[str]) -> int:
-    """P12 : cartes du feuilleton — recto en langue cible, verso traduction,
-    prononciation du recto, dédoublonnées par lemme. Les mots touchés au passage 2
-    d'abord, puis les mots nouveaux non transparents.
+    """P12 : cartes du feuilleton — le lemme au recto, son sens au verso
+    (`card_face`), la prononciation du recto, dédoublonnées par lemme. Les mots
+    touchés au passage 2 d'abord, puis les mots nouveaux non transparents.
 
     Pas de carte de langue sans prononciation : calculée (pinyin, translittération
-    arabe) ou écrite par Clikoda (langues latines). Un mot qui n'en a pas laisse
-    sa place au suivant ; il aura sa carte quand un épisode la lui donnera."""
+    arabe) ou écrite par Clikoda (langues latines) — ni sans verso. Un mot qui
+    n'en a pas laisse sa place au suivant ; il aura sa carte quand un épisode la
+    lui donnera."""
     from services.flashcards import create_flashcard
 
     user_id = int(profile.get("user_id") or 1)
@@ -692,24 +735,25 @@ def create_episode_flashcards(profile: dict, language: str, episode: dict, tappe
         row = lexicon.get(lemma)
         if not row or row.get("card_id") or (entry.get("pos") or "") == "nom propre":
             continue
-        if not _card_pronunciation(entry):
+        # Le lexique a pu apprendre le sens du lemme depuis l'écriture de l'épisode.
+        face = card_face(language, {**entry, "lemma_translation": entry.get("lemma_translation")
+                                    or row.get("lemma_translation")})
+        if not face["pron"] or not face["back"]:
             continue
         priority = 0 if lemma in tapped_lemmas else (1 if entry.get("new") and not entry.get("transparent") else 9)
         if priority < 9:
-            candidates.append({**entry, "_priority": priority, "_lexeme_id": row["id"]})
+            candidates.append({**entry, "_face": face, "_priority": priority, "_lexeme_id": row["id"]})
     candidates.sort(key=lambda e: e["_priority"])
     created = 0
     for entry in candidates[:LANG_CARDS_PER_EPISODE]:
         lemma = entry.get("lemma") or entry["form"]
-        front = entry.get("vocalized") or lemma
-        if entry.get("article"):
-            front = f"{entry['article']} {front}"
+        face = entry["_face"]
         try:
             card_id = create_flashcard(
-                user_id, front=front, back=entry["translation"], tags=[language],
+                user_id, front=face["front"], back=face["back"], tags=[language],
                 source="lang_feuilleton", language=language,
                 origin=("lang_lemma", f"{language}\x1f{lemma}"),
-                pronunciation=_card_pronunciation(entry),
+                pronunciation=face["pron"],
             )
         except Exception:  # une carte ratée ne casse pas la clôture
             logger.warning("Carte du feuilleton non créée (%s)", lemma, exc_info=True)

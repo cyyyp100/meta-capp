@@ -197,7 +197,8 @@ export function ClikodaPanel({
    * suite, pendant que le sas de sortie recouvre le lecteur. Côté serveur, la
    * déconnexion coupe la génération en vol, arrête le ticker (plus
    * d'intervention enfilée, plus de dérive d'attention pendant que l'étudiant
-   * écrit ses réflexions) et persiste le temps passé par page.
+   * écrit ses réflexions) et persiste le temps passé par page. Définitif : le
+   * repasser à false rouvrirait un socket sur une séance close.
    */
   ended?: boolean;
   /**

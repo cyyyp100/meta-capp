@@ -388,3 +388,43 @@ def test_v42_adds_the_run_intervals_without_touching_the_runs(fresh_db, monkeypa
     with conn:
         conn.execute("DELETE FROM lang_runs WHERE id = ?", (run_id,))
     assert store.get_pace(run_id) == []
+
+
+def test_v43_gives_the_lexicon_the_meaning_of_its_lemmas(fresh_db, monkeypatch):
+    """Une base v42 avec un verbe au lexique : la migration ajoute
+    `lang_lexicon.lemma_translation` sans toucher au mot — sa traduction dans
+    le texte reste celle de la bulle. Le sens du lemme viendra du prochain
+    épisode qui le glose, et il ne remplace jamais un sens déjà connu.
+    Rejouable."""
+    from db import get_connection, migrations
+    from db import lang_episode_db as store
+    from db.lang_db import get_or_create_lang_profile
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 42)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    profile_id = int(get_or_create_lang_profile(1, "espagnol")["id"])
+    with conn:
+        conn.execute(
+            "INSERT INTO lang_lexicon (profile_id, form, lemma, translation, pos) "
+            "VALUES (?, 'Tenemos', 'tener', 'Nous avons', 'verbe')",
+            (profile_id,),
+        )
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 43)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 43
+    row = store.get_lexeme(profile_id, "tener")
+    assert (row["form"], row["translation"], row["lemma_translation"]) == ("Tenemos", "Nous avons", None)
+
+    entry = {"form": "tengo", "lemma": "tener", "translation": "j'ai", "pos": "verbe"}
+    store.insert_lexeme(profile_id, {**entry, "lemma_translation": "avoir"}, 2)
+    store.insert_lexeme(profile_id, {**entry, "lemma_translation": "posséder"}, 3)
+    row = store.get_lexeme(profile_id, "tener")
+    assert (row["form"], row["translation"], row["lemma_translation"]) == ("Tenemos", "Nous avons", "avoir")

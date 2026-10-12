@@ -2075,39 +2075,64 @@ def parse_lang_episode_text(raw: str | dict) -> dict | None:
     }
 
 
-def _glossary_entry(item) -> dict | None:
+# Les chaînes d'une entrée de glossaire, dans l'ordre où le prompt les demande
+# (`prompts.build_lang_episode_glossary_prompt`) : le mot et sa traduction DANS
+# le texte (la bulle), puis son LEMME, la prononciation de ce lemme — écrite par
+# Clikoda pour les langues latines — et son sens hors du texte, un verbe à
+# l'infinitif (la carte, la consigne d'écriture) ; enfin la nature et le genre.
+GLOSSARY_FIELDS = ("form", "translation", "lemma", "lemma_translation", "pos", "gender")
+GLOSSARY_FIELDS_PRON = ("form", "translation", "lemma", "pron", "lemma_translation", "pos", "gender")
+
+
+def glossary_fields(pron: bool) -> tuple[str, ...]:
+    return GLOSSARY_FIELDS_PRON if pron else GLOSSARY_FIELDS
+
+
+def _glossary_entry(item, fields: tuple[str, ...]) -> dict | None:
     if isinstance(item, (list, tuple)):
-        parts = [_str(x) for x in item] + [""] * 6
-        form, lemma, translation, pos, gender, pron = parts[:6]
+        values = dict(zip(fields, (_str(x) for x in item)))
     elif isinstance(item, dict):
-        form = _str(item.get("form", item.get("word")))
-        lemma = _str(item.get("lemma"))
-        translation = _str(item.get("translation"))
-        pos = _str(item.get("pos"))
-        gender = _str(item.get("gender"))
-        pron = _str(item.get("pron", item.get("pronunciation")))
+        values = {
+            "form": _str(item.get("form", item.get("word"))), "lemma": _str(item.get("lemma")),
+            "lemma_translation": _str(item.get("lemma_translation")), "translation": _str(item.get("translation")),
+            "pos": _str(item.get("pos")), "gender": _str(item.get("gender")),
+            "pron": _str(item.get("pron", item.get("pronunciation"))),
+        }
     else:
         return None
+    # Un mot-outil reçoit parfois son sens sans traduction dans le texte (« el » :
+    # « », puis « le ») : la bulle prend alors le sens du lemme.
+    form = values.get("form", "")
+    translation = values.get("translation", "") or values.get("lemma_translation", "")
     if not form or not translation:
         return None
-    pos = _lang_enum(pos.lower())
-    gender = gender.lower()[:1] if gender.lower()[:1] in ("m", "f", "n") else ""
+    pos = _lang_enum(values.get("pos", "").lower())
+    # Entrée DÉCALÉE : Clikoda a sauté une chaîne, la nature tombe dans une
+    # traduction et le genre (ou rien) dans la nature — « park's » traduit par
+    # « nom ». Écartée, elle sera redemandée comme un mot manquant.
+    if pos not in _LANG_POS and any(
+        _lang_enum(values.get(key, "").lower()) in _LANG_POS for key in ("translation", "lemma_translation")
+    ):
+        return None
+    gender = values.get("gender", "").lower()[:1]
     # Prononciation (langues latines) : les barres ou crochets de l'API sont
     # retirés, l'affichage pose les siens.
-    pron = pron.strip().strip("/[]").strip()
+    pron = values.get("pron", "").strip("/[]").strip()
     return {
-        "form": form, "lemma": lemma or form, "translation": translation,
-        "pos": pos if pos in _LANG_POS else (pos or "expression"), "gender": gender or None,
+        "form": form, "lemma": values.get("lemma") or form, "translation": translation,
+        "lemma_translation": values.get("lemma_translation") or None,
+        "pos": pos if pos in _LANG_POS else (pos or "expression"),
+        "gender": gender if gender in ("m", "f", "n") else None,
         "pron": pron or None,
     }
 
 
 def lang_episode_glossary_schema(words: int, pron: bool) -> dict:
     """Schéma des sorties structurées d'Ollama pour le glossaire : EXACTEMENT
-    une entrée par mot demandé (cinq chaînes, six avec la prononciation), au
-    plus cinq expressions. Le décodage ne peut plus refermer la liste trop tôt ;
-    le contenu reste jugé par `lang_episodes.check_glossary`."""
-    width = 6 if pron else 5
+    une entrée par mot demandé (`glossary_fields` : six chaînes, sept avec la
+    prononciation), au plus cinq expressions. Le décodage ne peut plus refermer
+    la liste trop tôt ; le contenu reste jugé par `lang_episodes.check_glossary`."""
+    width = len(glossary_fields(pron))
     entry = {"type": "array", "items": {"type": "string"}, "minItems": width, "maxItems": width}
     return {
         "type": "object",
@@ -2119,14 +2144,17 @@ def lang_episode_glossary_schema(words: int, pron: bool) -> dict:
     }
 
 
-def parse_lang_episode_glossary(raw: str | dict) -> dict | None:
+def parse_lang_episode_glossary(raw: str | dict, pron: bool = False) -> dict | None:
+    """`pron` : le prompt a demandé la prononciation (langues latines), donc une
+    chaîne de plus dans chaque entrée (`glossary_fields`)."""
     data = _load_json(raw)
     if isinstance(data, list):
         data = {"entries": data}
     if not isinstance(data, dict):
         return None
-    entries = [e for e in (_glossary_entry(it) for it in data.get("entries") or data.get("glossary") or []) if e]
-    expressions = [e for e in (_glossary_entry(it) for it in data.get("expressions") or []) if e]
+    fields = glossary_fields(pron)
+    entries = [e for e in (_glossary_entry(it, fields) for it in data.get("entries") or data.get("glossary") or []) if e]
+    expressions = [e for e in (_glossary_entry(it, fields) for it in data.get("expressions") or []) if e]
     for e in expressions:
         e["pos"] = "expression"
     return {"entries": entries, "expressions": expressions} if entries or expressions else None

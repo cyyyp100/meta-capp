@@ -147,6 +147,25 @@ def fill_lang_flashcard_pronunciation(
     return cur.rowcount > 0
 
 
+def rewrite_lang_card_back(card_id: int, old_back: str, new_back: str) -> bool:
+    """Réécrit le verso d'une carte du feuilleton resté tel qu'il a été créé.
+
+    Seulement si le verso vaut encore `old_back` — une carte que l'apprenant a
+    retouchée reste la sienne — et sans toucher à la clé de doublon : celle
+    d'une carte du feuilleton vient de son lemme (`lang_lemma`), pas de son
+    texte. Renvoie True si la carte a été réécrite."""
+    old_back, new_back = (old_back or "").strip(), (new_back or "").strip()
+    if not new_back or new_back == old_back:
+        return False
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE flashcards SET back=? WHERE id=? AND source='lang_feuilleton' AND back=?",
+            (new_back, int(card_id), old_back),
+        )
+    return cur.rowcount > 0
+
+
 def get_flashcard(card_id: int) -> dict | None:
     conn = get_connection()
     row = conn.execute("SELECT * FROM flashcards WHERE id=?", (card_id,)).fetchone()

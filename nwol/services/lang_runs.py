@@ -358,6 +358,8 @@ def display_episode(profile: dict, language: str, episode: dict) -> dict:
         lemma = entry.get("lemma") or entry.get("form")
         glossary.append({
             "form": entry.get("form"), "lemma": lemma, "translation": entry.get("translation"),
+            # Le sens du lemme : celui de l'épisode, ou celui que le lexique a appris depuis.
+            "lemma_translation": entry.get("lemma_translation") or (lexicon.get(lemma) or {}).get("lemma_translation"),
             "pos": entry.get("pos"), "gender": entry.get("gender"), "article": entry.get("article"),
             "pron": entry.get("pron"), "vocalized": entry.get("vocalized"),
             "faux_ami": entry.get("faux_ami"), "acquired": lemma in acquired,
@@ -1081,7 +1083,7 @@ def _on_episode_read(run_id: int) -> None:
 def _mark_played(profile: dict, language: str, episode: dict) -> None:
     # Les mots de l'épisode entrent au lexique AVANT que le suivant s'écrive :
     # sans ça, l'épisode N+1 comptait comme « nouveaux » les mots de N.
-    progress.ensure_lexemes(profile["id"], episode)
+    progress.ensure_lexemes(profile["id"], language, episode)
     if episode["status"] != "played":
         store.update_episode(episode["id"], status="played",
                              first_played_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

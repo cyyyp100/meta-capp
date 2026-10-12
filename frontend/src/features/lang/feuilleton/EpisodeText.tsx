@@ -291,7 +291,15 @@ function Bubble({
   const t = useT();
   const [reported, setReported] = useState(!!tok.reported);
   const rtl = episode.dir === "rtl";
-  const pron = tok.ruby?.map((s) => s.mark).join(" ") || tok.translit || gloss?.pron || "";
+  // Le pinyin et la translittération sont calculés sur le mot touché ; la
+  // prononciation qu'écrit Clikoda (langues latines) est celle du LEMME : elle
+  // va sous le mot quand il est son propre lemme, à côté du lemme sinon.
+  const computed = tok.ruby?.map((s) => s.mark).join(" ") || tok.translit || "";
+  const inflected = !!gloss?.lemma && gloss.lemma.toLocaleLowerCase() !== tok.text.toLocaleLowerCase();
+  const pron = computed || (inflected ? "" : gloss?.pron || "");
+  const lemmaPron = !computed && inflected ? gloss?.pron || "" : "";
+  // Le sens du lemme (un verbe : son infinitif), quand il dit autre chose que la traduction dans le texte.
+  const sense = gloss?.lemma_translation && gloss.lemma_translation !== gloss.translation ? gloss.lemma_translation : "";
   async function report() {
     const kind = episode.family === "arabe" ? "vocalisation" : episode.family === "hanzi" ? "pinyin" : "traduction";
     try {
@@ -329,8 +337,12 @@ function Bubble({
       {gloss ? (
         <div>
           <strong>{gloss.translation}</strong>
-          {gloss.lemma && gloss.lemma !== tok.text && (
-            <span style={{ color: "var(--muted)" }}> — {t("feuil.lemma")} : <Target rtl={rtl}>{gloss.lemma}</Target></span>
+          {(inflected || sense) && (
+            <span style={{ color: "var(--muted)" }}>
+              {" — "}{t("feuil.lemma")} : <Target rtl={rtl}>{gloss.lemma}</Target>
+              {lemmaPron && ` /${lemmaPron}/`}
+              {sense && ` = ${sense}`}
+            </span>
           )}
           {gloss.gender && (
             <span style={{ color: "var(--muted)" }}> · {t(`feuil.gender_${gloss.gender}`)}</span>

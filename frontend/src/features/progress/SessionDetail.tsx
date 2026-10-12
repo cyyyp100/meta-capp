@@ -105,8 +105,9 @@ function PracticeDetail({ sessionId }: { sessionId: number }) {
   return data.kind === "quiz" ? <QuizDetail data={data} /> : <LangDetail data={data} />;
 }
 
-/** Où la lecture a ralenti. Une barre par page, normalisée sur la plus longue :
- *  l'échelle absolue n'apprend rien, le contraste entre pages si. */
+/** Où la lecture a ralenti. Une barre par page lue, dans l'ordre des pages,
+ *  normalisée sur la plus longue : l'échelle absolue n'apprend rien, le
+ *  contraste entre pages si. Le temps exact reste écrit au bout de la barre. */
 function DwellBars({ dwell }: { dwell: { page: number; dwell_s: number; visits: number }[] }) {
   const t = useT();
   const max = Math.max(...dwell.map((d) => d.dwell_s), 1);
@@ -119,7 +120,7 @@ function DwellBars({ dwell }: { dwell: { page: number; dwell_s: number; visits: 
           </span>
           <Bar ratio={entry.dwell_s / max} />
           <span className="w-12 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground">
-            {Math.round(entry.dwell_s)}s
+            {formatDuration(entry.dwell_s)}
           </span>
         </li>
       ))}

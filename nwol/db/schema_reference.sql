@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 42).
+-- (config.settings.DB_SCHEMA_VERSION = 43).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -270,7 +270,7 @@ CREATE TABLE lang_lexicon (
                    recognitions_ok  INTEGER NOT NULL DEFAULT 0,
                    recognitions_ko  INTEGER NOT NULL DEFAULT 0,
                    acquired_at      DATETIME,
-                   card_id          INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+                   card_id          INTEGER REFERENCES flashcards(id) ON DELETE SET NULL, lemma_translation TEXT,
                    UNIQUE(profile_id, lemma)
                );
 CREATE INDEX idx_lang_lexicon_form ON lang_lexicon(profile_id, form);

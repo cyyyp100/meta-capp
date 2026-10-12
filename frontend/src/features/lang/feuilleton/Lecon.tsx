@@ -15,7 +15,7 @@ import type { GameItem, Lesson, PointView } from "../../../api/feuilleton";
 import { useT } from "../../../i18n";
 import { EpisodeText } from "./EpisodeText";
 import { GameItemView } from "./Games";
-import { answerFor, episodeOf, NextButton, type StepProps } from "./Steps";
+import { episodeOf, NextButton, type StepProps, useAnswered } from "./Steps";
 import { Card, StepTitle, Target } from "./ui";
 
 export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
@@ -45,6 +45,7 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
   }, [plan.run_id, step.lesson_pending]);
 
   const items = [...((step.items as GameItem[]) ?? []), ...lessonItems];
+  const { onAnswer, done } = useAnswered(tracker, items);
   const exampleLines = point.highlights.map((h) => h.line);
   const practice = (
     <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
@@ -52,7 +53,7 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
         {t("feuil.lecon.practice")}
       </div>
       {items.map((item) => (
-        <GameItemView key={item.ref} item={item} episodes={plan.episodes} rtl={plan.rtl} onAnswer={answerFor(tracker)} />
+        <GameItemView key={item.ref} item={item} episodes={plan.episodes} rtl={plan.rtl} onAnswer={onAnswer} />
       ))}
     </div>
   );
@@ -97,7 +98,7 @@ export function LeconStep({ step, plan, tracker, onNext }: StepProps) {
             </details>
           )}
           {practice}
-          <NextButton onClick={() => onNext()} />
+          <NextButton disabled={!done} hint={t("feuil.answer_all")} onClick={() => onNext()} />
         </>
       )}
     </Card>

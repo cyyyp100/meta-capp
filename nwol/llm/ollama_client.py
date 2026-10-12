@@ -2874,12 +2874,13 @@ def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_
     seule entrée — à chaque appel, sur certains textes (banc du 2026-10-07)."""
     from llm.prompts import build_lang_episode_glossary_prompt
     from llm.schema_json import lang_episode_glossary_schema, parse_lang_episode_glossary
-    label = "lang_episode_glossary_pron" if params.get("pron") else "lang_episode_glossary"
+    pron = bool(params.get("pron"))
+    label = "lang_episode_glossary_pron" if pron else "lang_episode_glossary"
     return _run_json_async(
-        label, build_lang_episode_glossary_prompt(params), parse_lang_episode_glossary,
+        label, build_lang_episode_glossary_prompt(params), lambda raw: parse_lang_episode_glossary(raw, pron=pron),
         on_success, on_error, model, on_metrics=on_metrics,
         system_lang=params.get("explain_lang"),
-        json_schema=lang_episode_glossary_schema(len(params.get("words") or []), bool(params.get("pron"))),
+        json_schema=lang_episode_glossary_schema(len(params.get("words") or []), pron),
     )
 
 

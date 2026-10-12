@@ -318,14 +318,14 @@ def test_each_calibration_starts_differently(monkeypatch):
 def test_a_json_schema_constrains_the_decoding(fake_ollama):
     """Sorties structurées : un schéma passe tel quel dans `format` (le glossaire
     y impose une entrée par mot) ; sans lui, le simple mode JSON."""
-    from llm.schema_json import lang_episode_glossary_schema
+    from llm.schema_json import glossary_fields, lang_episode_glossary_schema
 
     fake_ollama["body"] = _ollama_reply(output_tps=30.0, prompt_tps=300.0)
     schema = lang_episode_glossary_schema(20, pron=True)
     ollama_client._call_ollama_http("prompt", "model", format_json=schema, task="lang_episode_glossary_pron")
     assert fake_ollama["last"]["format"] == schema
     assert schema["properties"]["entries"]["minItems"] == schema["properties"]["entries"]["maxItems"] == 20
-    assert schema["properties"]["entries"]["items"]["minItems"] == 6
+    assert schema["properties"]["entries"]["items"]["minItems"] == len(glossary_fields(pron=True)) == 7
     ollama_client._call_ollama_http("prompt", "model", task="question")
     assert fake_ollama["last"]["format"] == "json"
 

@@ -5,6 +5,11 @@
 // tracker de séance. Aucune ne calcule de score : la lecture n'est jamais notée.
 // La lecture, la leçon et l'expression écrite ont leur fichier (Lecture.tsx,
 // Lecon.tsx, Expression.tsx) ; ici, les autres étapes et les aides partagées.
+//
+// Une étape qui pose des questions ne se passe pas sans y avoir répondu : jeux,
+// entraînement de la leçon, expression écrite, deuxième vague, contrôle, cartes.
+// Seul le ressenti de l'au revoir reste libre — le laisser sans réponse est
+// lui-même une mesure de métacognition (services/lang_runs._nudge).
 import { useState } from "react";
 
 import { api } from "../../../api/client";
@@ -23,7 +28,7 @@ import { useT } from "../../../i18n";
 import { EpisodeText } from "./EpisodeText";
 import { GameList } from "./Games";
 import type { RunTracker } from "./useRunTracker";
-import { Card, chipBtn, ghostBtn, primaryBtn, StepTitle, Target } from "./ui";
+import { btnStyle, Card, chipBtn, ghostBtn, primaryBtn, StepTitle, Target } from "./ui";
 
 export interface StepProps {
   step: RunStep;
@@ -37,17 +42,48 @@ export function episodeOf(plan: RunPlan, ref: unknown): EpisodeView | undefined 
   return ref === null || ref === undefined ? undefined : plan.episodes[String(ref)];
 }
 
-export function NextButton({ onClick, label }: { onClick: () => void; label?: string }) {
+export function NextButton({
+  onClick,
+  label,
+  disabled = false,
+  hint,
+}: {
+  onClick: () => void;
+  label?: string;
+  /** L'étape attend encore une réponse : le bouton ne passe pas, et `hint` dit pourquoi. */
+  disabled?: boolean;
+  hint?: string;
+}) {
   const t = useT();
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-      <button style={primaryBtn} onClick={onClick}>{label ?? t("feuil.next")}</button>
+    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, marginTop: 18 }}>
+      {disabled && hint && <span style={{ color: "var(--muted)", fontSize: 13 }}>{hint}</span>}
+      <button style={btnStyle(primaryBtn, disabled)} onClick={onClick} disabled={disabled}>
+        {label ?? t("feuil.next")}
+      </button>
     </div>
   );
 }
 
 export function answerFor(tracker: RunTracker) {
   return (item: GameItem, given: unknown, ms: number) => tracker.push({ type: "answer", item: item.ref, given, ms });
+}
+
+/** Les réponses aux items de l'étape, remontées au tracker : `done` quand chacun a été joué. */
+export function useAnswered(tracker: RunTracker, items: GameItem[]) {
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
+  const push = answerFor(tracker);
+  const onAnswer = (item: GameItem, given: unknown, ms: number) => {
+    push(item, given, ms);
+    setAnswered((refs) => new Set(refs).add(item.ref));
+  };
+  return { onAnswer, done: items.every((item) => answered.has(item.ref)) };
+}
+
+/** Les phrases déjà auto-évaluées (« je savais », « à peu près »…), par clé. */
+function useRated() {
+  const [rated, setRated] = useState<ReadonlySet<string>>(() => new Set());
+  return { rated, rate: (key: string) => setRated((keys) => new Set(keys).add(key)) };
 }
 
 export function revealFor(tracker: RunTracker, episode: EpisodeView, pass: string) {
@@ -172,11 +208,13 @@ export function Understood({ onPick }: { onPick: (signal: string) => void }) {
 
 export function JeuxStep({ step, plan, tracker, onNext }: StepProps) {
   const t = useT();
+  const games = (step.games as Game[]) ?? [];
+  const { onAnswer, done } = useAnswered(tracker, games.flatMap((game) => game.items));
   return (
     <Card>
       <StepTitle hint={t("feuil.games.hint")}>{t("feuil.games.title")}</StepTitle>
-      <GameList games={(step.games as Game[]) ?? []} episodes={plan.episodes} rtl={plan.rtl} onAnswer={answerFor(tracker)} />
-      <NextButton onClick={() => onNext()} />
+      <GameList games={games} episodes={plan.episodes} rtl={plan.rtl} onAnswer={onAnswer} />
+      <NextButton disabled={!done} hint={t("feuil.answer_all")} onClick={() => onNext()} />
     </Card>
   );
 }
@@ -262,6 +300,7 @@ function Retranslate({
 
 export function SecondWaveStep({ step, plan, tracker, onNext }: StepProps) {
   const t = useT();
+  const { rated, rate } = useRated();
   const episode = episodeOf(plan, step.episode_ref)!;
   const lines = (step.lines as { line: number; translation: string; typing: boolean }[]) ?? [];
   return (
@@ -276,21 +315,30 @@ export function SecondWaveStep({ step, plan, tracker, onNext }: StepProps) {
             translation={l.translation}
             typing={l.typing}
             rtl={plan.rtl}
-            onRate={(rating, typed) => tracker.push({ type: "rating", episode_id: episode.id, line: l.line, rating, typed })}
+            onRate={(rating, typed) => {
+              rate(String(l.line));
+              tracker.push({ type: "rating", episode_id: episode.id, line: l.line, rating, typed });
+            }}
           />
         ))}
       </div>
-      <NextButton onClick={() => onNext()} />
+      <NextButton
+        disabled={lines.some((l) => !rated.has(String(l.line)))}
+        hint={t("feuil.rate_all")}
+        onClick={() => onNext()}
+      />
     </Card>
   );
 }
 
 export function ControleStep({ step, plan, tracker, onNext }: StepProps) {
   const t = useT();
+  const { rated, rate } = useRated();
   if (step.mode === "cartes") {
     return <CartesStep step={{ ...step, cards: step.cards }} plan={plan} tracker={tracker} onNext={onNext} title={t("feuil.controle.title")} />;
   }
   const blocks = (step.blocks as { episode_ref: number; lines: { line: number; translation: string; typing: boolean }[] }[]) ?? [];
+  const keys = blocks.flatMap((b) => b.lines.map((l) => `${b.episode_ref}-${l.line}`));
   return (
     <Card>
       <StepTitle hint={t("feuil.controle.hint")}>{t("feuil.controle.title")}</StepTitle>
@@ -305,12 +353,15 @@ export function ControleStep({ step, plan, tracker, onNext }: StepProps) {
               translation={l.translation}
               typing={l.typing}
               rtl={plan.rtl}
-              onRate={(rating, typed) => tracker.push({ type: "rating", episode_id: episode.id, line: l.line, rating, typed })}
+              onRate={(rating, typed) => {
+                rate(`${b.episode_ref}-${l.line}`);
+                tracker.push({ type: "rating", episode_id: episode.id, line: l.line, rating, typed });
+              }}
             />
           ));
         })}
       </div>
-      <NextButton onClick={() => onNext()} />
+      <NextButton disabled={keys.some((key) => !rated.has(key))} hint={t("feuil.rate_all")} onClick={() => onNext()} />
     </Card>
   );
 }
@@ -434,7 +485,7 @@ export function CartesStep({ step, tracker, onNext, title }: StepProps & { title
       ) : (
         <p style={{ color: "var(--muted)" }}>{t("feuil.cards.done")}</p>
       )}
-      <NextButton onClick={() => onNext()} />
+      <NextButton disabled={index < cards.length} hint={t("feuil.cards.judge_all")} onClick={() => onNext()} />
     </Card>
   );
 }

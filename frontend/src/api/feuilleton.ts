@@ -92,7 +92,10 @@ export interface EpLine {
 export interface GlossEntry {
   form: string;
   lemma: string;
+  /** Traduction du mot DANS le texte (la bulle). */
   translation: string;
+  /** Sens du lemme hors du texte — un verbe à l'infinitif (la carte, la consigne d'écriture). */
+  lemma_translation?: string | null;
   pos: string | null;
   gender: string | null;
   article: string | null;
