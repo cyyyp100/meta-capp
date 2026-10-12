@@ -24,7 +24,9 @@ more comfortable writing.
 ## Scope: what belongs in this repository
 
 This repository is the **local edition**: 100 % offline, Ollama only, no account, no
-activation, no network call beyond `127.0.0.1:11434`.
+activation, no network call beyond `127.0.0.1:11434` — with one documented exception, the
+opt-in update check (`nwol/services/updates.py`), which is off by default and must stay
+the only one.
 
 Please do **not** submit code that:
 
@@ -80,7 +82,7 @@ python desktop/pywebview_main.py --server-only  # headless server smoke test
 
 ## Conventions that matter here
 
-Six house rules hold this codebase together. They are the ones that most often trip
+Seven house rules hold this codebase together. They are the ones that most often trip
 newcomers up, and a pull request that breaks them will be sent back:
 
 1. **Absolute imports rooted at `nwol/`.** Write `from services import ...`, never
@@ -94,6 +96,9 @@ newcomers up, and a pull request that breaks them will be sent back:
 5. **i18n stays in sync.** A new user-facing string means a new key in *both*
    dictionaries (FR and EN).
 6. **Tests live in `nwol/tests/{server,services}`.** New behaviour ships with a test.
+7. **No copyleft dependency.** Every new Python or npm dependency must be under a
+   permissive licence; `python scripts/third_party_notices.py --check` (run by CI)
+   refuses GPL/AGPL and undeclared licences.
 
 ---
 

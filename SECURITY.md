@@ -3,15 +3,23 @@
 ## Threat model in one paragraph
 
 Meta-Capp is a **local-first desktop application**. The FastAPI backend binds to
-`127.0.0.1:8756` and is embedded in the desktop shell; the only outbound traffic the app
-is allowed to make is to a local Ollama instance on `127.0.0.1:11434`. There is no
+`127.0.0.1:8756` and is embedded in the desktop shell; every API call and WebSocket must
+carry a per-launch token, and requests from another origin or another local site are
+refused. The app talks to a local Ollama instance on `127.0.0.1:11434`. There is no
 account, no telemetry, no remote API. All learner data — documents, sessions, answers,
 gauges, flashcards — lives in a local SQLite database (`data/nwol.db` in development,
 the OS application-data directory when packaged).
 
+**One outbound request exists, opt-in and off by default**: the update check
+(`nwol/services/updates.py`) reads the latest version number from GitHub's API when the
+user asks for it. Its response is treated as untrusted input: only a strictly validated
+version number is kept, the download URL is hard-coded, redirects are not followed and
+TLS is always verified.
+
 That shapes what counts as a vulnerability here: anything that makes the app process
-untrusted input unsafely (a malicious PDF or source file), exposes the local server or
-database beyond the machine, leaks data off the device, or lets an imported document
+untrusted input unsafely (a malicious PDF or source file, a hostile update response),
+exposes the local server or database beyond the machine, lets a web page reach the local
+API or the native bridge, leaks data off the device, or lets an imported document
 influence execution.
 
 ## Supported versions
@@ -66,6 +74,8 @@ credited in the release notes unless they prefer to stay anonymous.
 
 ## Automated checks
 
-CI runs `pip-audit`, `npm audit` and secret scanning (gitleaks) on every push and pull
-request, and the release pipeline re-runs them as a blocking gate before publishing a
-binary.
+CI runs `pip-audit`, `npm audit`, secret scanning (gitleaks) and a dependency licence
+check (`scripts/third_party_notices.py --check`) on every push and pull request, and the
+release pipeline re-runs them as a blocking gate before publishing a binary. Each release
+publishes `SHA256SUMS.txt` next to the archives; signed builds can also be checked with
+`codesign --verify` (macOS) or the file's *Digital Signatures* tab (Windows).
