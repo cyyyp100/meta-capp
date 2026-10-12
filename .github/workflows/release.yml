@@ -96,6 +96,9 @@ jobs:
 
   build-macos:
     needs: [checks, scans]
+    # Secrets de signature dans l'environnement `release` : le job attend
+    # l'approbation manuelle (Actions → Review deployments) avant de les lire.
+    environment: release
     # PyInstaller produit un binaire de l'architecture de la machine qui le
     # construit : un .app « universal2 » exigerait des roues universal2 pour
     # TOUTES les dépendances natives (pypdfium2, Pillow…), qui n'existent pas.
@@ -229,6 +232,9 @@ jobs:
 
   build-windows:
     needs: [checks, scans]
+    # Secrets de signature dans l'environnement `release` : le job attend
+    # l'approbation manuelle (Actions → Review deployments) avant de les lire.
+    environment: release
     runs-on: windows-latest
     env:
       NWOL_DISABLE_CONDA_REEXEC: "1"
