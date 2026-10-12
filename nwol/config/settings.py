@@ -50,7 +50,6 @@ OLLAMA_EMBED_TIMEOUT = 60          # par lot de chunks (le premier appel charge 
 # Permet d'économiser du compute sur les tâches courtes sans sacrifier la précision des tâches complexes.
 OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "curiosity_hook":           {"num_ctx": 2048, "num_predict": 180, "temperature": 0.1},
-    "flashcard_tags":           {"num_ctx": 2048, "num_predict": 140, "temperature": 0.1},
     "session_summary":          {"num_ctx": 3072, "num_predict": 360, "temperature": 0.1},
     # num_ctx 6144 (mesuré sur gemma4:e4b, 2026-09-10) : squelette du prompt
     # (guide des types + règles + schéma) ~2300 tokens + paragraphe [:3500] ~950
@@ -62,14 +61,15 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # (rôle, contexte, profil). Les autres tâches avec image gardent ≥ 1200
     # tokens de marge à 4096.
     "question":                 {"num_ctx": 6144, "num_predict": 700, "temperature": 0.1},
-    "evaluation":               {"num_ctx": 4096, "num_predict": 680, "temperature": 0.1},
+    # num_ctx 6144, comme `question` (mesuré le 2026-10-12) : avec l'image de la
+    # page, le prompt atteint 3558 tokens ; + 680 réservés en sortie, il
+    # dépassait 4096 et Ollama en tronquait le DÉBUT sans rien dire. Même
+    # contexte que la question qui la précède : pas de rechargement du modèle.
+    "evaluation":               {"num_ctx": 6144, "num_predict": 680, "temperature": 0.1},
     "rephrasing":               {"num_ctx": 4096, "num_predict": 560, "temperature": 0.1},
-    "follow_up":                {"num_ctx": 4096, "num_predict": 560, "temperature": 0.1},
     "chapter_summary":          {"num_ctx": 4096, "num_predict": 520, "temperature": 0.1},
-    "meta_cognition_questions": {"num_ctx": 4096, "num_predict": 300, "temperature": 0.1},
     "meta_cognition_analysis":  {"num_ctx": 4096, "num_predict": 320, "temperature": 0.1},
     "profile_analysis":         {"num_ctx": 4096, "num_predict": 360, "temperature": 0.2},
-    "math_render":              {"num_ctx": 4096, "num_predict": 900, "temperature": 0.1},
     # Fiche d'un document à l'import : matière + résumé + mots-clés en UN appel.
     # num_ctx 3072 : extrait de 2400 caractères (~700 tokens) + consigne + les 25
     # matières. num_predict 260 : la sortie utile tient en ~130 tokens, on garde
@@ -83,20 +83,17 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # pages dépasse les « 4 à 8 phrases » (mesuré ~420 tokens avec le JSON
     # autour) ; coupée, elle finit en pleine phrase.
     "assistant_answer":         {"num_ctx": 8192, "num_predict": 700, "temperature": 0.1},
-    "assistant_intervention":   {"num_ctx": 3072, "num_predict": 220, "temperature": 0.1},
+    # num_predict 320 (mesuré le 2026-10-12) : 2 réponses sur 8 atteignaient le
+    # plafond de 220 et arrivaient coupées en plein JSON. Prompt ~1700 tokens.
+    "assistant_intervention":   {"num_ctx": 3072, "num_predict": 320, "temperature": 0.1},
     "flashcard_standalone":     {"num_ctx": 3072, "num_predict": 260, "temperature": 0.1},
     # Génération batch des distracteurs de QCM (~10 questions en un seul appel).
     "quiz_distractors":         {"num_ctx": 4096, "num_predict": 1200, "temperature": 0.3},
     "quiz_analysis":            {"num_ctx": 4096, "num_predict": 420, "temperature": 0.2},
     # ── Module langue ──────────────────────────────────────────────────────────
-    "lang_curriculum":    {"num_ctx": 4096, "num_predict": 3000, "temperature": 0.15},
-    "lang_lesson":        {"num_ctx": 4096, "num_predict": 2000, "temperature": 0.10},
-    "lang_exercises":     {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.10},
     "lang_correction":    {"num_ctx": 2048, "num_predict": 400,  "temperature": 0.10},
     "lang_revision_quiz": {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.10},
-    # ── Séquenceur adaptatif de sessions ───────────────────────────────────────
-    # Choix du type de session : JSON minuscule (2 champs) -> appel très court.
-    "lang_session_select":   {"num_ctx": 2048, "num_predict": 160,  "temperature": 0.10},
+    # ── Séances du flux hérité ─────────────────────────────────────────────────
     # Plan d'une séance (10 slots, arc 4 temps) : thème + liste de types -> court.
     "lang_lesson_plan":      {"num_ctx": 2048, "num_predict": 320,  "temperature": 0.20},
     # Test de niveau (12-15 items, difficulté croissante). num_predict borné pour
@@ -751,9 +748,6 @@ LANG_DE_GENDER_COLORS = True    # code couleur der/die/das
 LANG_TRANSPARENT_MAX_DISTANCE = 0.34
 LANG_TRANSPARENT_FLAG_UNTIL_EPISODE = 15
 
-# T8-T11 — analyse hebdomadaire : usage interne (ton des messages de rappel et
-# de reprise). La montrer à l'apprenant est une décision ouverte (plan § 19.1).
-LANG_WEEKLY_ANALYSIS_VISIBLE = False
 LANG_WEEKLY_WINDOWS_DAYS = (7, 28)
 # Portrait d'une langue lu par le brainstorming (`lang_runs.learner_overview`) :
 # dernières séances MESURÉES dont la difficulté (`lang_progress.classify`) est

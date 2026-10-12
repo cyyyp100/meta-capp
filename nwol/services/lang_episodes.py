@@ -1347,10 +1347,3 @@ def relaunch_pending(profile_id: int | None = None, *, closed=None) -> list[int]
     if relaunched:
         logger.info("%d épisode(s) en attente relancé(s)", len(relaunched))
     return relaunched
-
-
-def wait_idle(timeout: float = 10.0) -> None:
-    """Tests : attend la fin des générations en cours."""
-    deadline = time.monotonic() + timeout
-    while _GENERATIONS.running_keys() and time.monotonic() < deadline:
-        time.sleep(0.02)

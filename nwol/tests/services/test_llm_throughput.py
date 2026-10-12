@@ -19,6 +19,7 @@ import pytest
 from config.settings import (
     OLLAMA_MAX_SLOWDOWN,
     OLLAMA_PROMPT_TOKENS_PER_S,
+    OLLAMA_TASK_OPTIONS,
     OLLAMA_TIMEOUT_MAX,
     OLLAMA_TOKENS_PER_S,
     OLLAMA_WALL_TIMEOUT_MAX,
@@ -26,6 +27,17 @@ from config.settings import (
     task_wall_timeout_s,
 )
 from llm import ollama_client, throughput
+
+
+# Tâche lourde de référence (3000 tokens à écrire). Synthétique : ces tests
+# portent sur la forme du calcul de budget, pas sur une tâche de production
+# susceptible de disparaître (l'ancien curriculum de langue, retiré).
+HEAVY_TASK = "tache_lourde"
+
+
+@pytest.fixture(autouse=True)
+def heavy_task(monkeypatch):
+    monkeypatch.setitem(OLLAMA_TASK_OPTIONS, HEAVY_TASK, {"num_ctx": 4096, "num_predict": 3000, "temperature": 0.1})
 
 NS = 1_000_000_000
 
@@ -43,7 +55,7 @@ def _ollama_reply(output_tps: float, prompt_tps: float, output_tokens: int = 200
 def test_unmeasured_machine_keeps_the_reference_budgets():
     assert throughput.slowdown() == (1.0, 1.0)
     # 25 s + 3000 / 18 tokens/s : la formule d'origine, inchangée.
-    assert task_timeout_s("lang_curriculum") == pytest.approx(25.0 + 3000 / OLLAMA_TOKENS_PER_S)
+    assert task_timeout_s(HEAVY_TASK) == pytest.approx(25.0 + 3000 / OLLAMA_TOKENS_PER_S)
 
 
 def test_slow_machine_gets_proportionally_more_time():
@@ -61,12 +73,12 @@ def test_slow_machine_gets_proportionally_more_time():
 
 
 def test_ceilings_stretch_with_the_machine():
-    """Sans plafond étiré, `lang_curriculum` (3000 tokens) restait bloqué à
+    """Sans plafond étiré, une tâche de 3000 tokens restait bloqué à
     240 s — 500 s de travail à 6 tokens/s : un échec à tous les coups."""
     throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=50.0))
-    assert task_timeout_s("lang_curriculum") > OLLAMA_TIMEOUT_MAX
-    assert task_timeout_s("lang_curriculum") >= 3000 / 6.0
-    assert task_wall_timeout_s("lang_curriculum") > OLLAMA_WALL_TIMEOUT_MAX
+    assert task_timeout_s(HEAVY_TASK) > OLLAMA_TIMEOUT_MAX
+    assert task_timeout_s(HEAVY_TASK) >= 3000 / 6.0
+    assert task_wall_timeout_s(HEAVY_TASK) > OLLAMA_WALL_TIMEOUT_MAX
 
 
 def test_fast_machine_never_shortens_a_budget():
@@ -108,7 +120,7 @@ def test_a_timeout_doubles_the_time_and_stays_bounded():
     for _ in range(10):
         throughput.record_timeout()
     assert throughput.slowdown() == (OLLAMA_MAX_SLOWDOWN, OLLAMA_MAX_SLOWDOWN)
-    assert task_timeout_s("lang_curriculum") <= OLLAMA_TIMEOUT_MAX * OLLAMA_MAX_SLOWDOWN
+    assert task_timeout_s(HEAVY_TASK) <= OLLAMA_TIMEOUT_MAX * OLLAMA_MAX_SLOWDOWN
 
 
 # ── Bout en bout : ce que renvoie (ou ne renvoie pas) Ollama ─────────────────

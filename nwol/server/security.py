@@ -69,10 +69,6 @@ def set_launch_token(token: str | None) -> None:
     _launch_token = token or None
 
 
-def get_launch_token() -> str | None:
-    return _launch_token
-
-
 def new_launch_token() -> str:
     return secrets.token_urlsafe(32)
 

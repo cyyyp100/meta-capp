@@ -79,10 +79,13 @@ def test_reader_ws_rephrase(client, monkeypatch):
 
 
 def test_reader_ws_mode_and_focus(client):
+    from i18n import t
+
     with client.websocket_connect("/api/reader/1/stream") as ws:
         ws.send_json({"type": "mode", "mode": "coach"})
         m = ws.receive_json()
-        assert m["type"] == "system" and "coach" in m["message"]
+        # Traduit côté serveur : le nom du mode, pas son identifiant interne.
+        assert m == {"type": "system", "message": t("assistant.mode_changed", mode=t("assistant.mode_coach"))}
 
         ws.send_json({"type": "focus"})
         f = ws.receive_json()

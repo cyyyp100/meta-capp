@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from services.flashcards import (
     create_flashcard,
     delete_flashcards,
-    due_flashcards,
     find_flashcard,
     list_flashcards,
     review_flashcard,
@@ -50,11 +49,6 @@ def list_cards(
     if tags:
         filters["tags"] = tags
     return list_flashcards(**filters)
-
-
-@router.get("/due")
-def due(doc_id: int | None = None, limit: int = 5) -> list[dict]:
-    return due_flashcards(doc_id, limit)
 
 
 @router.get("/session-start")

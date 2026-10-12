@@ -78,13 +78,13 @@ class NativeApi:
             "*.log;*.tf;*.proto;*.gradle;*.clj;*.ex;*.exs;*.hs;*.ml"
         )
         result = self.window.create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             allow_multiple=False,
             file_types=(
-                f"Documents lisibles (*.pdf;{code_glob})",
+                f"{t('desktop.files_readable')} (*.pdf;{code_glob})",
                 "PDF (*.pdf)",
-                f"Fichiers de code ({code_glob})",
-                "Tous les fichiers (*.*)",
+                f"{t('desktop.files_code')} ({code_glob})",
+                f"{t('desktop.files_all')} (*.*)",
             ),
         )
         if result:
@@ -665,6 +665,10 @@ def main(pdf_path: str | None = None, debug: bool = False) -> None:
     from config.logging_config import setup_logging
 
     setup_logging(debug=debug)
+    # pywebview pose son propre handler console (« [pywebview] … ») ET propage au
+    # logger racine : chaque message s'affichait deux fois, et sa copie à lui
+    # échappait au caviardage (S8). Les handlers de l'app suffisent.
+    logging.getLogger("pywebview").handlers.clear()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--server-only",

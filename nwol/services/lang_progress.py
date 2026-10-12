@@ -25,7 +25,6 @@ from config.settings import (
     LANG_ACQUIRED_MIN_EPISODES,
     LANG_ACQUIRED_RECOGNITIONS,
     LANG_CARDS_PER_EPISODE,
-    LANG_CEFR_ORDER,
     LANG_CEFR_TIER_INDEX,
     LANG_DIFFICULTY_LADDER,
     LANG_DUE_CARDS_CAP,
@@ -774,7 +773,3 @@ def due_cards(profile: dict, language: str, cap: int = LANG_DUE_CARDS_CAP) -> li
         (language, int(profile.get("user_id") or 1), int(cap)),
     ).fetchall()
     return [dict(r) for r in rows]
-
-
-def cefr_rank(cefr: str) -> int:
-    return LANG_CEFR_ORDER.index(cefr) if cefr in LANG_CEFR_ORDER else 0

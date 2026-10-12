@@ -147,13 +147,6 @@ def update_practice_details(
         conn.execute(f"UPDATE practice_sessions SET {', '.join(assignments)} WHERE id=?", params)
 
 
-def delete_practice_session(session_id: int) -> bool:
-    conn = get_connection()
-    with conn:
-        cur = conn.execute("DELETE FROM practice_sessions WHERE id=?", (session_id,))
-    return cur.rowcount > 0
-
-
 # ── Réponses d'un quiz ────────────────────────────────────────────────────────
 
 def save_quiz_answers(session_id: int, answers: list[dict]) -> None:

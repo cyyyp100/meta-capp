@@ -1,16 +1,7 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 
-
-MATH_SPAN_PATTERN = re.compile(
-    r"\$\$(.+?)\$\$"
-    r"|\\\[(.+?)\\\]"
-    r"|\\\((.+?)\\\)"
-    r"|\$(.+?)\$",
-    re.DOTALL,
-)
 
 _FOMAML_META_GRADIENT_SPLIT_RE = re.compile(
     r"\bg\s*FOMAM\s*\$+\s*L\s*=\s*g\s*\$+\s*k\b"
@@ -95,21 +86,6 @@ _MATH_SIGNAL_RE = re.compile(
 )
 
 
-def text_contains_math_signal(text: str | None) -> bool:
-    """Return True when text contains any LaTeX delimiter, command, or math symbol."""
-    return bool(_MATH_SIGNAL_RE.search(text or ""))
-
-
-def contains_renderable_math(text: str | None) -> bool:
-    """Return True only when repaired text contains a delimited math span."""
-    repaired = repair_common_inline_math_artifacts(text or "")
-    for match in MATH_SPAN_PATTERN.finditer(repaired):
-        latex = next((group for group in match.groups() if group is not None), "")
-        if latex.strip() and not _EMPTY_SQRT_COMMAND_RE.search(latex):
-            return True
-    return False
-
-
 def _repair_split_fomaml_meta_gradient(text: str) -> str:
     return _FOMAML_META_GRADIENT_SPLIT_RE.sub(r"$g^{FOMAML}=g^k$", text)
 
@@ -181,10 +157,6 @@ def _math_ranges(text: str) -> list[tuple[int, int]]:
         index += 1
 
     return ranges
-
-
-def _wrap_bare_subscripts(text: str) -> str:
-    return _wrap_undelimited_script_runs(text)
 
 
 def _repair_common_sqrt_fragments(text: str) -> str:
@@ -387,31 +359,6 @@ _MULTICHAR_REGEX_TO_LATEX: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
-def _is_latex_command(value: str) -> bool:
-    return value.startswith("\\") and len(value) > 1 and value[1].isalpha()
-
-
-def normalize_unicode_math(text: str) -> str:
-    """Convertit les symboles mathématiques Unicode en commandes LaTeX."""
-    text = unicodedata.normalize("NFC", text or "")
-    for pattern, replacement in _MULTICHAR_REGEX_TO_LATEX:
-        text = pattern.sub(lambda _match, value=replacement: f" {value} ", text)
-    for pattern, replacement in _MULTICHAR_UNICODE_TO_LATEX.items():
-        text = text.replace(pattern, f" {replacement} " if replacement.startswith("\\") else replacement)
-
-    parts: list[str] = []
-    for char in text:
-        replacement = _UNICODE_TO_LATEX.get(char)
-        if replacement is None:
-            parts.append(char)
-            continue
-        if _is_latex_command(replacement):
-            parts.append(f" {replacement} ")
-        else:
-            parts.append(replacement)
-    return re.sub(r"\s+", " ", "".join(parts)).strip()
-
-
 _SPLIT_COMMAND_RE = re.compile(r"\\(?:\s+[A-Za-z]){2,}")
 _SPACED_TEXT_CMD_RE = re.compile(r"\\t\s+e\s+x\s+t|\\tex\s+t|\\t\s+h\s+(?:e|ta)", re.I)
 _ORPHAN_SCRIPT_RE = re.compile(r"^\s*(?:\${1,2})?\s*[_^]\{")
@@ -420,60 +367,3 @@ _BROKEN_COMMAND_WITH_WORD_RE = re.compile(r"\\\s+[A-Za-z]\s+[A-Za-z](?:\s+[A-Za-
 _SINGLE_EMPTY_SCRIPT_RE = re.compile(r"[A-Za-z0-9]\s*[_^]\{\s*\}")
 _WORD_FRAGMENT_SUBSCRIPT_RE = re.compile(r"[_^]\{[A-Za-z]{5,}\}")
 _NAKED_DOLLAR_MID_FORMULA_RE = re.compile(r"[A-Za-z0-9]\$[A-Za-z]")
-
-
-def strip_formula_delimiters(text: str | None) -> str:
-    value = str(text or "").strip()
-    if value.startswith("$$") and value.endswith("$$") and len(value) >= 4:
-        return value[2:-2].strip()
-    if value.startswith("$") and value.endswith("$") and len(value) >= 2:
-        return value[1:-1].strip()
-    return value
-
-
-def latex_looks_corrupt(text: str | None) -> bool:
-    """Detect LaTeX that is very likely OCR/PDF span noise, not a usable formula."""
-    value = strip_formula_delimiters(text)
-    if not value:
-        return False
-    compact = re.sub(r"\s+", "", value)
-    if not compact:
-        return False
-
-    if _SPLIT_COMMAND_RE.search(value) or _SPACED_TEXT_CMD_RE.search(value):
-        return True
-    if _ORPHAN_SCRIPT_RE.search(value) and re.search(r"\\\s+[A-Za-z]|_\{\s*['`]?_\{", value):
-        return True
-    if _EMPTY_SCRIPT_RUN_RE.search(value):
-        return True
-    if _BROKEN_COMMAND_WITH_WORD_RE.search(value) and re.search(r"[_^{}=]", value):
-        return True
-
-    opened = value.count("{")
-    closed = value.count("}")
-    if abs(opened - closed) >= 2:
-        return True
-
-    commands = re.findall(r"\\([A-Za-z]+)", value)
-    if any(len(command) == 1 for command in commands) and _BROKEN_COMMAND_WITH_WORD_RE.search(value):
-        return True
-
-    if _SINGLE_EMPTY_SCRIPT_RE.search(value):
-        return True
-    if _NAKED_DOLLAR_MID_FORMULA_RE.search(value):
-        return True
-    if _WORD_FRAGMENT_SUBSCRIPT_RE.search(value) and (
-        _SINGLE_EMPTY_SCRIPT_RE.search(value)
-        or _NAKED_DOLLAR_MID_FORMULA_RE.search(value)
-        or abs(value.count("{") - value.count("}")) >= 1
-    ):
-        return True
-
-    return False
-
-
-def safe_formula_context_text(text: str | None) -> str:
-    value = strip_formula_delimiters(text)
-    if latex_looks_corrupt(value):
-        return ""
-    return value

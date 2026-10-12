@@ -104,96 +104,7 @@ def update_lang_profile(
 
 # ── Curriculum ────────────────────────────────────────────────────────────────
 
-def get_curriculum(language: str) -> list[dict]:
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM lang_curriculum WHERE language=? ORDER BY lesson_n",
-        (language,),
-    ).fetchall()
-    return [_decode_curriculum_row(r) for r in rows]
-
-
-def save_curriculum(language: str, lessons: list[dict]) -> None:
-    conn = get_connection()
-    with conn:
-        for lesson in lessons:
-            conn.execute(
-                """INSERT OR REPLACE INTO lang_curriculum
-                   (language, lesson_n, theme, grammar_point, vocabulary_json, level, reuses_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    language,
-                    int(lesson["lesson_n"]),
-                    lesson.get("theme", ""),
-                    lesson.get("grammar_point", ""),
-                    json.dumps(lesson.get("vocabulary", []), ensure_ascii=False),
-                    lesson.get("level", "A1"),
-                    json.dumps(lesson.get("reuses", []), ensure_ascii=False),
-                ),
-            )
-    logger.info("Curriculum '%s' enregistré (%d leçons)", language, len(lessons))
-
-
-def _decode_curriculum_row(row) -> dict:
-    d = dict(row)
-    for field, key in [("vocabulary_json", "vocabulary"), ("reuses_json", "reuses")]:
-        raw = d.pop(field, None)
-        try:
-            d[key] = json.loads(raw) if raw else []
-        except Exception:
-            d[key] = []
-    return d
-
-
 # ── Cache de leçon ────────────────────────────────────────────────────────────
-
-def get_lesson_cache(profile_id: int, lesson_n: int) -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM lang_lesson_cache WHERE profile_id=? AND lesson_n=?",
-        (profile_id, lesson_n),
-    ).fetchone()
-    return _decode_lesson_row(row) if row else None
-
-
-def save_lesson_cache(
-    profile_id: int,
-    lesson_n: int,
-    *,
-    dialogue: list,
-    notes: dict,
-    vocabulary: list,
-) -> None:
-    conn = get_connection()
-    with conn:
-        conn.execute(
-            """INSERT OR REPLACE INTO lang_lesson_cache
-               (profile_id, lesson_n, dialogue_json, notes_json, vocabulary_json)
-               VALUES (?, ?, ?, ?, ?)""",
-            (
-                profile_id,
-                lesson_n,
-                json.dumps(dialogue, ensure_ascii=False),
-                json.dumps(notes, ensure_ascii=False),
-                json.dumps(vocabulary, ensure_ascii=False),
-            ),
-        )
-
-
-def _decode_lesson_row(row) -> dict:
-    d = dict(row)
-    for field, key, default in [
-        ("dialogue_json", "dialogue", []),
-        ("notes_json", "notes", {}),
-        ("vocabulary_json", "vocabulary", []),
-    ]:
-        raw = d.pop(field, None)
-        try:
-            d[key] = json.loads(raw) if raw else default
-        except Exception:
-            d[key] = default
-    return d
-
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
@@ -362,9 +273,6 @@ SESSION_TYPES_SEED: list[tuple[str, str, str, str, str, str]] = [
 SESSION_TYPE_RENDER_KIND: dict[str, str] = {t[0]: t[5] for t in SESSION_TYPES_SEED}
 SESSION_TYPE_LABEL: dict[str, str] = {t[0]: t[3] for t in SESSION_TYPES_SEED}
 SESSION_TYPE_SKILL: dict[str, str] = {t[0]: t[2] for t in SESSION_TYPES_SEED}
-DEFAULT_SESSION_TYPE = "dialogue_ecoute"
-
-
 def seed_session_types() -> None:
     """Pose/rafraîchit le catalogue statique des types de session.
 
@@ -391,26 +299,6 @@ def get_session_types_for_phase(phase: str) -> list[dict]:
         (phase,),
     ).fetchall()
     return [dict(r) for r in rows]
-
-
-def get_session_type(code: str) -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM lang_session_types WHERE code=?", (code,)
-    ).fetchone()
-    return dict(row) if row else None
-
-
-def log_sequencer_decision(
-    profile_id: int, session_n: int, chosen_type: str, reason: str
-) -> None:
-    conn = get_connection()
-    with conn:
-        conn.execute(
-            """INSERT INTO lang_sequencer_log (profile_id, session_n, chosen_type, reason)
-               VALUES (?, ?, ?, ?)""",
-            (profile_id, session_n, chosen_type, reason),
-        )
 
 
 # ── Erreurs ───────────────────────────────────────────────────────────────────

@@ -111,7 +111,6 @@ async function apiError(res: Response): Promise<ApiError> {
 export const api = {
   health: () => getJSON<Health>("/api/health"),
   statsOverview: () => getJSON<MetacogOverview>("/api/stats/overview"),
-  recentDocuments: (limit = 12) => getJSON<DocumentSummary[]>(`/api/library/recent?limit=${limit}`),
   document: (id: number) => getJSON<DocumentDetail>(`/api/library/doc/${id}`),
 
   // ── Bibliothèque : catalogue, recherche et dossiers ──────────────────────
@@ -177,7 +176,6 @@ export const api = {
       if (!r.ok) throw new Error(`${r.status}`);
       return r.json();
     }),
-  importPdf: (path: string) => postJSON<DocumentDetail>("/api/library/import", { path }),
   /** Le choix de `pickDocument()`, quelle que soit la coque : un chemin lu sur
    *  place (fenêtre native) ou un fichier envoyé (navigateur). */
   importDocument: (picked: PickedDocument) =>
@@ -318,7 +316,6 @@ export const api = {
   // `warmup` : cartes révisées au sas d'entrée, décomptées du plafond de cartes de la séance.
   feuilletonRunStart: (language: string, warmup = 0) =>
     postJSON<RunPlan>(`/api/lang/${encodeURIComponent(language)}/run/start`, { warmup }),
-  feuilletonRun: (runId: number) => getJSON<RunPlan>(`/api/lang/run/${runId}`),
   feuilletonEvents: (runId: number, events: RunEvent[], currentStep: string | null) =>
     postJSON<EventsResult>(`/api/lang/run/${runId}/events`, { events, current_step: currentStep }),
   feuilletonComplete: (runId: number, endReason: "fini" | "plafond" | "quitte", feeling: string | null) =>
@@ -349,18 +346,6 @@ export const api = {
       tonal?: boolean;
       script_kind?: string;
     }>(`/api/lang/profile?language=${encodeURIComponent(language)}`),
-  // Vue par langue pour la page profil (score global + niveau + compétences).
-  languageLesson: (language: string) =>
-    postJSON<LangLesson>("/api/lang/lesson", { language }),
-  // Séquenceur adaptatif : décide + génère UNE session juste-à-temps.
-  languageSession: (language: string) => postJSON<LangSession>("/api/lang/session", { language }),
-  languageSessionComplete: (language: string, sessionType: string, score: number, durationS: number) =>
-    postJSON<{ ok: boolean; total_sessions: number }>("/api/lang/session/complete", {
-      language,
-      session_type: sessionType,
-      score,
-      duration_s: durationS,
-    }),
   languageCorrect: (language: string, targetPhrase: string, userAttempt: string) =>
     postJSON<LangCorrection>("/api/lang/correct", {
       language,
@@ -914,15 +899,6 @@ export type LangSessionContent =
       reading: { target: string; translit: string; translation: string }[];
       drill: LangQcm[];
     };
-
-export interface LangSession {
-  session_type: string;
-  render_kind: string;
-  label: string;
-  reason: string;
-  content: LangSessionContent;
-  error?: string;
-}
 
 // Un exercice de séance = un LangSessionContent enrichi de son rôle dans l'arc.
 export type LangExercise = LangSessionContent & {

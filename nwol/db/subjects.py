@@ -8,8 +8,6 @@ from db import get_connection
 
 logger = logging.getLogger("DB.subjects")
 
-SUBJECT_REALTIME_UPDATE_WEIGHT = 0.08
-
 # Les clés de matière (et leurs libellés) sont dans config/subjects.py ; ce module
 # ne fait que lire et écrire les niveaux.
 
@@ -78,71 +76,6 @@ def update_subject_from_answer(
     return new_level
 
 
-def update_subject_from_evaluation(
-    user_id: int,
-    subject: str,
-    evaluation: dict,
-    current_level: float | None = None,
-    alpha: float = SUBJECT_REALTIME_UPDATE_WEIGHT,
-    session_id: int | None = None,
-) -> float:
-    """Update subject mastery from an inline course answer."""
-    ensure_subject(user_id, subject)
-    row = get_subject(user_id, subject)
-    assert row is not None
-
-    old_level = _clamp(current_level if current_level is not None else float(row["level"]))
-    questions = int(row["questions_count"]) + 1
-    corrects = int(row["correct_count"]) + (1 if evaluation.get("verdict") == "correct" else 0)
-    weight = max(0.0, min(1.0, float(alpha)))
-    target = _subject_score_from_evaluation(evaluation)
-    new_level = _clamp(old_level * (1.0 - weight) + target * weight)
-
-    conn = get_connection()
-    with conn:
-        conn.execute(
-            """UPDATE subject_profile
-               SET level=?, questions_count=?, correct_count=?, updated_at=?
-               WHERE user_id=? AND subject=?""",
-            (new_level, questions, corrects, datetime.now().isoformat(), user_id, subject),
-        )
-        _insert_subject_history(conn, user_id, subject, old_level, new_level, session_id, "inline")
-    logger.info(
-        "Niveau matière (temps réel) : user=%s subject=%s level=%.1f",
-        user_id, subject, new_level,
-    )
-    return new_level
-
-
-def update_subject_from_session(
-    user_id: int,
-    subject: str,
-    session_score: float,
-    session_id: int | None = None,
-) -> float:
-    """Update subject level after a reading session using a gentle EMA (alpha=0.05)."""
-    ensure_subject(user_id, subject)
-    row = get_subject(user_id, subject)
-    assert row is not None
-    old_level = float(row["level"])
-    alpha = 0.05
-    new_level = max(0.0, min(100.0, old_level * (1.0 - alpha) + session_score * alpha))
-    conn = get_connection()
-    with conn:
-        conn.execute(
-            """UPDATE subject_profile
-               SET level=?, updated_at=?
-               WHERE user_id=? AND subject=?""",
-            (new_level, datetime.now().isoformat(), user_id, subject),
-        )
-        _insert_subject_history(conn, user_id, subject, old_level, new_level, session_id, "session")
-    logger.info(
-        "Niveau matière (lecture) : user=%s subject=%s level=%.1f",
-        user_id, subject, new_level,
-    )
-    return new_level
-
-
 def get_subject_history(
     user_id: int,
     subject: str | None = None,
@@ -186,29 +119,6 @@ def get_subject_history_by_subject(user_id: int) -> dict[str, list[tuple[int | N
         )]
 
     return dict(sorted(grouped.items()))
-
-
-def _subject_score_from_evaluation(evaluation: dict) -> float:
-    verdict_scores = {
-        "correct": 100.0,
-        "partial": 55.0,
-        "incorrect": 0.0,
-    }
-    verdict_score = verdict_scores.get(evaluation.get("verdict"), 50.0)
-    signals = evaluation.get("metacog_signals") or {}
-    if not isinstance(signals, dict):
-        signals = {}
-
-    signal_values: list[float] = []
-    for key in ("context_comprehension", "retention"):
-        try:
-            signal = float(signals.get(key, 0.0))
-        except (TypeError, ValueError):
-            signal = 0.0
-        signal_values.append(50.0 + max(-2.0, min(2.0, signal)) * 25.0)
-
-    signal_score = sum(signal_values) / len(signal_values) if signal_values else 50.0
-    return _clamp(verdict_score * 0.75 + signal_score * 0.25)
 
 
 def _clamp(value: float) -> float:

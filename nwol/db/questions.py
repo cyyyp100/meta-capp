@@ -55,17 +55,6 @@ def save_question(
     return int(cur.lastrowid)
 
 
-def save_questions(doc_id: int, scope_type: str, scope_label: str,
-                   page_start: int, page_end: int,
-                   questions: list[dict], llm_model: str | None = None) -> list[int]:
-    ids = [
-        save_question(doc_id, scope_type, scope_label, page_start, page_end, question, llm_model)
-        for question in questions
-    ]
-    logger.info(f"Questions sauvegardées ({len(questions)}) pour scope '{scope_label}'")
-    return ids
-
-
 def save_assistant_exchange(
     doc_id: int,
     page: int,
@@ -133,21 +122,6 @@ def count_assistant_questions(session_id: int) -> int:
         (session_id,),
     ).fetchone()
     return int(row["n"]) if row else 0
-
-
-def get_assistant_help_pages(session_id: int, top_n: int = 3) -> list[dict]:
-    """Pages où l'utilisateur a le plus sollicité l'assistant pendant la session."""
-    conn = get_connection()
-    rows = conn.execute(
-        """SELECT page_start AS page, COUNT(*) AS questions_count
-           FROM questions
-           WHERE session_id=? AND scope_type='assistant_follow_up' AND page_start IS NOT NULL
-           GROUP BY page_start
-           ORDER BY questions_count DESC, page_start
-           LIMIT ?""",
-        (session_id, int(top_n)),
-    ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def get_question(question_id: int) -> dict | None:

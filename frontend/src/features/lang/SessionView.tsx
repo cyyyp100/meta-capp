@@ -1,7 +1,8 @@
-// features/lang/SessionView.tsx — Rendu interactif d'une session de langue,
-// dispatché par render_kind. Chaque type du catalogue retombe sur l'un des 8
-// rendus ci-dessous. Les types interactifs (QCM, traduction, production, dictée,
-// révision) calculent un score remonté à la clôture (api.languageSessionComplete).
+// features/lang/SessionView.tsx — Rendu interactif d'un exercice de langue,
+// dispatché par render_kind (`KindBody`, joué par routes/LangLesson.tsx). Chaque
+// type du catalogue retombe sur l'un des 8 rendus ci-dessous. Les types
+// interactifs (QCM, traduction, production, dictée, révision) remontent un score
+// par `onScore`.
 import { useMemo, useRef, useState } from "react";
 
 import { api } from "../../api/client";
@@ -10,72 +11,11 @@ import type {
   LangPhoneticDrill,
   LangProductionStep,
   LangQcm,
-  LangSession,
   LangSessionContent,
 } from "../../api/client";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
 import { answersMatch } from "./normalize";
-
-export function SessionView({
-  session,
-  language,
-  onComplete,
-}: {
-  session: LangSession;
-  language: string;
-  onComplete: (score: number) => void;
-}) {
-  const t = useT();
-  const scores = useRef<number[]>([]);
-  const [finished, setFinished] = useState(false);
-  const [finalScore, setFinalScore] = useState(0);
-
-  function onScore(s: number) {
-    scores.current.push(Math.max(0, Math.min(1, s)));
-  }
-
-  function finish() {
-    const arr = scores.current;
-    const score = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 1;
-    setFinalScore(score);
-    setFinished(true);
-    onComplete(score);
-  }
-
-  const content = session.content;
-  return (
-    <div style={{ marginTop: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--accent-ink)", background: "var(--accent-soft)", padding: "3px 10px", borderRadius: 999 }}>
-          {t("lang.style_today")} · {session.label}
-        </span>
-      </div>
-      {session.reason && (
-        <p style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic", margin: "0 0 12px" }}>
-          {session.reason}
-        </p>
-      )}
-
-      <KindBody content={content} language={language} onScore={onScore} />
-
-      <div style={{ marginTop: 22, display: "flex", alignItems: "center", gap: 14 }}>
-        <button
-          onClick={finish}
-          disabled={finished}
-          style={{ border: "none", background: finished ? "var(--border)" : "var(--success)", color: finished ? "var(--text)" : "var(--on-status)", borderRadius: "var(--radius-sm)", padding: "10px 18px", fontWeight: 600, cursor: finished ? "default" : "pointer" }}
-        >
-          {finished ? t("lang.finished") : t("lang.finish")}
-        </button>
-        {finished && (
-          <span style={{ fontSize: 13, color: "var(--text-soft)" }}>
-            {t("lang.session_score")} : <strong>{Math.round(finalScore * 100)}%</strong>
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export function KindBody({ content, language, rtl, onScore }: { content: LangSessionContent; language: string; rtl?: boolean; onScore: (s: number) => void }) {
   switch (content.kind) {

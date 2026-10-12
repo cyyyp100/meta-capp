@@ -87,13 +87,14 @@ export function ProfileChangesBlock({ changes }: { changes: ProgressChange[] }) 
 }
 
 function ChangeRow({ change }: { change: ProgressChange }) {
+  const t = useT();
   const up = change.delta > 0.05;
   const down = change.delta < -0.05;
   const Icon = up ? ArrowUp : down ? ArrowDown : Minus;
   const tone = up ? "text-success" : down ? "text-warning" : "text-muted-foreground";
   return (
     <div className="flex items-center justify-between gap-3 rounded-sm bg-surface-soft px-3 py-2.5">
-      <span className="truncate text-sm font-semibold">{criterionLabel(change.criterion)}</span>
+      <span className="truncate text-sm font-semibold">{criterionLabel(t, change.criterion)}</span>
       <span className={`flex shrink-0 items-center gap-1.5 text-sm font-bold tabular-nums ${tone}`}>
         <Icon className="size-3.5" aria-hidden />
         {Math.round(change.before)} → {Math.round(change.after)}

@@ -54,39 +54,6 @@ _METADATA_CHAPTER_RE = re.compile(
 _PSEUDO_CHAPTER_RE = re.compile(r"^\s*pages?\s+\d+\s*[–-]\s*\d+\s*$", re.I)
 
 
-def _block_value(block: Any, key: str) -> Any:
-    if isinstance(block, dict):
-        return block.get(key)
-    return getattr(block, key, None)
-
-
-def _block_is_metadata(block: Any) -> bool:
-    metadata = _block_value(block, "metadata") or {}
-    if not isinstance(metadata, dict):
-        metadata = {}
-    return bool(_block_value(block, "is_metadata") or metadata.get("is_metadata"))
-
-
-def _block_page(block: Any) -> int | None:
-    for key in ("page", "page_number", "page_start"):
-        value = _block_value(block, key)
-        if value is None:
-            continue
-        try:
-            return max(1, int(value))
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _block_heading_level(block: Any, btype: str) -> int:
-    value = _block_value(block, "level")
-    try:
-        return min(3, max(1, int(value)))
-    except (TypeError, ValueError):
-        return {"heading": 1, "subheading": 2, "subsubheading": 3}.get(btype, 1)
-
-
 def _heading_level_from_title(title: str) -> int | None:
     clean = _clean_chapter_title(title)
     match = _SECTION_NUMBER_RE.match(clean)
@@ -94,41 +61,6 @@ def _heading_level_from_title(title: str) -> int | None:
         return None
     number = _normalize_section_number(match.group("number"))
     return min(3, max(1, number.count(".") + 1))
-
-
-def _looks_like_document_title(title: str, block: Any, previous_headings: list[dict]) -> bool:
-    if previous_headings:
-        return False
-    page = _block_page(block)
-    level = _block_heading_level(block, str(_block_value(block, "type") or "heading"))
-    if page != 1 or level != 1:
-        return False
-    return not bool(_SECTION_NUMBER_RE.match(title))
-
-
-def _looks_like_selectable_heading(title: str) -> bool:
-    clean = _clean_chapter_title(title)
-    if len(clean) < 4:
-        return False
-    if _looks_like_metadata_chapter_title(clean):
-        return False
-    if clean.endswith("-"):
-        return False
-    if _SECTION_CROSS_REFERENCE_RE.match(clean):
-        return False
-    if _DISCOURSE_NUMBERED_HEADING_RE.match(clean) and len(clean.split()) >= 8:
-        return False
-    if re.match(
-        r"^\s*\d+(?:\.\d+)*\.?(?:\s+|(?=[A-Za-zÀ-ÿ]))(?:Figure|Fig\.?|Table|Tableau)\b",
-        clean,
-        re.I,
-    ):
-        return False
-    if _SECTION_NUMBER_RE.match(clean):
-        return True
-    if re.match(r"^\s*(?:chapitre|chapter|partie|part|section|appendix|annexe)\b", clean, re.I):
-        return True
-    return _looks_like_back_matter_heading(clean)
 
 
 def _looks_like_back_matter_heading(title: str) -> bool:
@@ -139,26 +71,6 @@ def _looks_like_back_matter_heading(title: str) -> bool:
             re.I,
         )
     )
-
-
-def _merge_chapter_lists(existing: list[dict], extracted: list[dict], page_count: int) -> list[dict]:
-    combined: list[dict] = []
-
-    for chapter in [*existing, *extracted]:
-        title = _clean_chapter_title(str(chapter.get("title") or ""))
-        if not title:
-            continue
-        _append_or_replace_chapter(
-            combined,
-            {
-                "title": title,
-                "page_start": _coerce_positive_int(chapter.get("page_start"), 1),
-                "toc_level": _heading_level_from_title(title)
-                or _coerce_positive_int(chapter.get("toc_level"), 1),
-            },
-        )
-
-    return normalize_chapter_list(combined, page_count)
 
 
 def normalize_chapter_list(chapters: list[dict], page_count: int | None = None) -> list[dict]:
@@ -248,18 +160,6 @@ def _drop_toc_artifact_candidates(chapters: list[dict], page_count: int | None =
     ]
 
 
-def _looks_like_toc_artifact(title: str, page: int, blocks: list[Any]) -> bool:
-    if _looks_like_toc_heading(title):
-        return True
-    if not _looks_like_toc_entry_title(title):
-        return False
-    return any(
-        _block_page(block) == page
-        and _looks_like_toc_heading(str(_block_value(block, "text") or ""))
-        for block in blocks
-    )
-
-
 def _looks_like_toc_heading(title: str) -> bool:
     return bool(_TOC_HEADING_RE.match(_clean_chapter_title(title)))
 
@@ -325,13 +225,6 @@ def _looks_like_metadata_chapter_title(title: str) -> bool:
 
 def _looks_like_pseudo_chapter(title: str) -> bool:
     return bool(_PSEUDO_CHAPTER_RE.match(str(title or "")))
-
-
-def _dedupe_chapter_candidates(headings: list[dict]) -> list[dict]:
-    result: list[dict] = []
-    for heading in headings:
-        _append_or_replace_chapter(result, heading)
-    return result
 
 
 def _append_or_replace_chapter(chapters: list[dict], candidate: dict) -> None:
