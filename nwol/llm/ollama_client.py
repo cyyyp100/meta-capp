@@ -276,18 +276,41 @@ def _abort_inflight_generation(domain: str = "default") -> None:
         if conn is None or _inflight.get("domain", "default") != domain:
             return
         _inflight["cancelled"] = True
-    # `shutdown` réveille le `recv` bloqué dans l'autre thread ; `close` seul
-    # ne le ferait pas tant que la lecture est en cours.
+    # `shutdown` réveille le `recv` bloqué dans l'autre thread. Surtout pas
+    # `conn.close()` ici : il remet `conn.sock` à None, et si l'annulation tombe
+    # entre `connect()` et `request()`, `http.client` (auto_open) se RECONNECTE
+    # et envoie la requête quand même — l'appel reste bloqué jusqu'au timeout
+    # (vu en CI Windows). La socket coupée fait échouer envoi comme lecture ;
+    # c'est l'appelant qui ferme la connexion (`finally`). Si la socket n'existe
+    # pas encore, le drapeau posé ci-dessus est relu juste après `connect()`.
     sock = getattr(conn, "sock", None)
     if sock is not None:
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-    try:
-        conn.close()
-    except OSError:  # pragma: no cover - fermeture best-effort
-        pass
+        # Winsock ne réveille PAS de façon fiable un `recv` déjà bloqué sur un
+        # simple `shutdown` : le thread reste collé jusqu'au timeout socket (CI
+        # Windows, test_cancel_cuts_the_inflight_call_immediately). Là-bas, seul
+        # `closesocket()` fait échouer tout de suite le `select()` en cours.
+        #
+        # Or `sock.close()` NE FERME RIEN ici : `getresponse()` a ouvert un
+        # `makefile()` sur la socket, donc `_io_refs > 0`, et `socket.close()`
+        # se contente alors de marquer l'objet fermé (cf. Lib/socket.py) — le
+        # descripteur reste ouvert et le thread attend le timeout quand même.
+        # `detach()` + `socket.close(fd)` ferment le descripteur lui-même.
+        # On ne touche pas à `conn` : `conn.sock` garde l'objet socket (vidé),
+        # donc l'`auto_open` d'`http.client` ne se reconnecte pas, et le
+        # `finally` de l'appelant peut refermer `conn` sans effet.
+        try:
+            fd = sock.detach()
+        except OSError:
+            fd = -1
+        if fd != -1:
+            try:
+                socket.close(fd)
+            except OSError:
+                pass
 
 
 def _inflight_was_cancelled(conn) -> bool:
