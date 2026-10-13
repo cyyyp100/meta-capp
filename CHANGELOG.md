@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Clikoda's model is a setting** (`Settings ▸ Clikoda`). The gemma4 family is declared
+  in one table (`nwol/config/settings.py:LLM_MODELS`) with what each model downloads, the
+  RAM it needs and the speed it writes at. "Automatic" (the default) picks the most capable
+  model installed that this machine can actually load; an explicit choice is always
+  honoured — even one that is missing or too heavy, because nothing is disabled and the
+  reason is stated instead.
+- **`GET /api/llm/status`**: whether Ollama answers, which model runs, whether it fits in
+  this machine, the measured speed, and the `ollama pull` command to copy when something is
+  missing. The reader's status light now tells "connected" apart from "Clikoda can answer"
+  (green / amber / grey) — it used to stay green with Ollama switched off.
+
+### Changed
+
+- Time budgets follow the chosen model. The cost of a heavier model and the measured
+  slowness of the machine are two separate factors, so `OLLAMA_MAX_SLOWDOWN` again bounds
+  only the machine; measured throughput is kept per model. Each task's `num_ctx` is capped
+  by what the active model holds, in a single place.
+- A language episode, a point lesson and a written correction record the model that
+  actually wrote them, rather than a constant.
+
+### Fixed
+
+- The curiosity hook could read "Entre dans **non renseigné** en cherchant…". An empty
+  field wrote a placeholder into the prompt, and the offline fallback re-read its own
+  prompt and found it. Empty context lines are now omitted, the fallback receives the
+  context directly, and its sentences follow the interface language (they were hard-coded
+  French).
+
 ## [0.1.0] — 2026-10-12 — Public beta
 
 ### Added
