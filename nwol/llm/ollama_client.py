@@ -289,15 +289,26 @@ def _abort_inflight_generation(domain: str = "default") -> None:
             pass
         # Winsock ne réveille PAS de façon fiable un `recv` déjà bloqué sur un
         # simple `shutdown` : le thread reste collé jusqu'au timeout socket (CI
-        # Windows, test_cancel_cuts_the_inflight_call_immediately). Fermer la
-        # socket brute, elle, fait échouer l'appel en cours tout de suite. On
-        # ferme `sock`, pas `conn` : `conn.sock` garde la socket (fermée), donc
-        # l'`auto_open` d'`http.client` ne se reconnecte pas. Le `finally` de
-        # l'appelant refermera `conn` — fermer deux fois est sans effet.
+        # Windows, test_cancel_cuts_the_inflight_call_immediately). Là-bas, seul
+        # `closesocket()` fait échouer tout de suite le `select()` en cours.
+        #
+        # Or `sock.close()` NE FERME RIEN ici : `getresponse()` a ouvert un
+        # `makefile()` sur la socket, donc `_io_refs > 0`, et `socket.close()`
+        # se contente alors de marquer l'objet fermé (cf. Lib/socket.py) — le
+        # descripteur reste ouvert et le thread attend le timeout quand même.
+        # `detach()` + `socket.close(fd)` ferment le descripteur lui-même.
+        # On ne touche pas à `conn` : `conn.sock` garde l'objet socket (vidé),
+        # donc l'`auto_open` d'`http.client` ne se reconnecte pas, et le
+        # `finally` de l'appelant peut refermer `conn` sans effet.
         try:
-            sock.close()
+            fd = sock.detach()
         except OSError:
-            pass
+            fd = -1
+        if fd != -1:
+            try:
+                socket.close(fd)
+            except OSError:
+                pass
 
 
 def _inflight_was_cancelled(conn) -> bool:
