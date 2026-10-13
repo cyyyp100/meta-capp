@@ -13,11 +13,15 @@ import time
 
 import pytest
 
+from config import settings
 from config.settings import (
+    LLM_MODELS,
+    ModelProfile,
     OLLAMA_TASK_OPTIONS,
     OLLAMA_TIMEOUT,
     OLLAMA_TIMEOUT_MAX,
     OLLAMA_WALL_TIMEOUT_MAX,
+    task_options,
     task_timeout_s,
     task_wall_timeout_s,
 )
@@ -60,6 +64,53 @@ def test_budget_is_bounded_and_defined_for_every_declared_task():
         assert OLLAMA_TIMEOUT <= task_timeout_s(task) <= OLLAMA_TIMEOUT_MAX
     # Tâche inconnue : plancher, jamais d'exception.
     assert task_timeout_s("tache_inexistante") == OLLAMA_TIMEOUT
+
+
+def test_every_model_keeps_every_task_inside_its_own_bounds():
+    """Les budgets suivent le modèle choisi. Le plancher ne bouge pas (c'est le
+    temps en dessous duquel on n'attend pas) ; le plafond, lui, s'étire du coût
+    du modèle — `OLLAMA_TIMEOUT_MAX` ne borne plus que la machine de référence
+    sur le modèle de référence."""
+    for name, profile in LLM_MODELS.items():
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(settings, "_active_profile", lambda profile=profile: profile)
+            stretch = max(settings._model_factors(profile))
+            for task in OLLAMA_TASK_OPTIONS:
+                budget = task_timeout_s(task)
+                assert OLLAMA_TIMEOUT <= budget <= OLLAMA_TIMEOUT_MAX * stretch, (name, task)
+                assert task_wall_timeout_s(task) <= OLLAMA_WALL_TIMEOUT_MAX * stretch, (name, task)
+
+
+def test_a_slower_model_gets_more_time_for_the_same_task():
+    """`gemma4:31b` écrit trois fois moins vite que `gemma4:e2b` : une tâche qui
+    demande des centaines de tokens ne peut pas tenir dans le même budget."""
+    budgets = {}
+    for name in ("gemma4:e2b", "gemma4:31b"):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(settings, "_active_profile", lambda name=name: LLM_MODELS[name])
+            budgets[name] = {task: task_timeout_s(task) for task in OLLAMA_TASK_OPTIONS}
+    lourdes = [t for t, o in OLLAMA_TASK_OPTIONS.items() if (o.get("num_predict") or 0) > 200]
+    assert lourdes
+    for task in lourdes:
+        assert budgets["gemma4:31b"][task] > budgets["gemma4:e2b"][task], task
+
+
+def test_the_context_of_a_task_is_capped_by_what_the_model_holds():
+    """Ollama ne refuse pas un prompt plus long que `num_ctx` : il en tronque
+    silencieusement le DÉBUT. Le plafond du modèle doit donc s'appliquer là où
+    les options sont lues — en un seul endroit."""
+    etroit = ModelProfile(
+        name="test:etroit", rank=0, tier="tiny", download_gb=1.0, min_ram_gb=4.0,
+        tokens_per_s=20.0, prompt_tokens_per_s=300.0, load_overhead_s=10.0,
+        max_num_ctx=2048, supports_images=False,
+    )
+    assert task_options("assistant_answer")["num_ctx"] == 8192
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "_active_profile", lambda: etroit)
+        assert task_options("assistant_answer")["num_ctx"] == 2048
+        # Les autres options de la tâche sont intactes, et la table n'est pas touchée.
+        assert task_options("assistant_answer")["num_predict"] == 700
+    assert OLLAMA_TASK_OPTIONS["assistant_answer"]["num_ctx"] == 8192
 
 
 def test_heavy_task_gets_more_than_the_floor():

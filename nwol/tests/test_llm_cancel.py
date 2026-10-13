@@ -87,6 +87,30 @@ def test_cancel_cuts_the_inflight_call_immediately(silent_server):
     assert isinstance(outcome.get("exc"), ollama_client.GenerationCancelled)
 
 
+def test_cancel_between_connect_and_send_does_not_reconnect(silent_server, monkeypatch):
+    """L'annulation tombe juste après le contrôle qui suit `connect()` (fenêtre
+    que la CI Windows atteignait) : l'appel doit échouer, pas se reconnecter
+    tout seul (`auto_open` d'`http.client`) et attendre le timeout."""
+    from llm import ollama_client
+
+    real_check = ollama_client._inflight_was_cancelled
+    fired = []
+
+    def check_then_cancel(conn):
+        result = real_check(conn)
+        if not fired:
+            fired.append(1)
+            ollama_client._abort_inflight_generation("default")
+        return result
+
+    monkeypatch.setattr(ollama_client, "_inflight_was_cancelled", check_then_cancel)
+    t0 = time.monotonic()
+    with pytest.raises(ollama_client.GenerationCancelled):
+        ollama_client._call_ollama_http("prompt", "model", task="question")
+    assert time.monotonic() - t0 < 2
+    assert len(silent_server) <= 1, "l'appel annulé s'est reconnecté"
+
+
 def test_cancelled_generation_is_not_retried(monkeypatch):
     """`_generate_json` rejoue une panne ; une annulation, jamais."""
     from llm import ollama_client
@@ -171,21 +195,30 @@ def test_reader_cancel_never_touches_a_language_generation(monkeypatch, captured
 def test_inflight_abort_is_scoped_to_its_domain():
     from llm import ollama_client
 
-    class FakeConn:
+    class FakeSock:
+        shut = False
         closed = False
-        sock = None
+
+        def shutdown(self, _how):
+            self.shut = True
 
         def close(self):
             self.closed = True
+
+    class FakeConn:
+        sock = FakeSock()
+
+        def close(self):  # pragma: no cover - ne doit plus être appelé
+            raise AssertionError("close() rouvrirait la connexion (auto_open)")
 
     conn = FakeConn()
     with ollama_client._INFLIGHT_LOCK:
         ollama_client._inflight.update(conn=conn, cancelled=False, domain="lang")
     try:
         ollama_client._abort_inflight_generation("default")
-        assert not conn.closed and not ollama_client._inflight["cancelled"]
+        assert not conn.sock.shut and not ollama_client._inflight["cancelled"]
         ollama_client._abort_inflight_generation("lang")
-        assert conn.closed and ollama_client._inflight["cancelled"]
+        assert conn.sock.shut and conn.sock.closed and ollama_client._inflight["cancelled"]
     finally:
         with ollama_client._INFLIGHT_LOCK:
             ollama_client._inflight.update(conn=None, cancelled=False, domain="default")

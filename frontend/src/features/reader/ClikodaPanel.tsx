@@ -26,6 +26,7 @@ import { api } from "../../api/client";
 import { wsTokenSuffix } from "../../api/security";
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { useT } from "../../i18n";
+import { useLlmStatus } from "../shell/useLlmStatus";
 import type { ReadingPause } from "../session/PauseSas";
 import type { WarmUpTiming } from "../session/WarmUp";
 import { AnswerInput } from "../questions/AnswerInput";
@@ -361,6 +362,23 @@ export function ClikodaPanel({
     setMessages([{ role: "assistant", text: t("clikoda.welcome") }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Ollama répond-il, et avec quel modèle ? La pastille ne le savait pas : elle
+  // ne reflétait que le WebSocket du lecteur, et restait verte avec Clikoda
+  // éteinte. ⚠️ Pas de requête en démonstration : la visite guidée vit SANS
+  // WebSocket (`connected = true` plus bas), et rien n'y doit s'alarmer.
+  const { data: llm } = useLlmStatus(!demo);
+  const llmOk = demo || llm === undefined || llm.available;
+  const noticeSent = useRef(false);
+  useEffect(() => {
+    // Un mot dans le fil, une fois, quand il n'y a tout simplement pas de
+    // modèle : c'est le premier lancement d'une machine neuve, et se taire
+    // serait exactement le défaut qu'on corrige.
+    if (demo || noticeSent.current) return;
+    if (llm?.reason !== "model_missing" && llm?.reason !== "no_model") return;
+    noticeSent.current = true;
+    setMessages((m) => [...m, { role: "assistant", text: t("clikoda.model_missing") }]);
+  }, [demo, llm?.reason, t]);
 
   useEffect(() => {
     // Séance de démonstration : PAS de connexion. C'est la garantie centrale de
@@ -760,6 +778,22 @@ export function ClikodaPanel({
     return <ClikodaBubble scanning={scanning} onOpen={() => setOpen(true)} title={t("clikoda.open")} fixed={demo} />;
   }
 
+  // Vert : le socket est ouvert ET Clikoda a un modèle. Ambre : elle est là mais
+  // ne peut pas répondre (la raison vient du serveur, traduite ici). Gris : pas
+  // de socket. Tant que l'état n'est pas connu, on ne crie pas au loup.
+  const clikodaState = !connected
+    ? { tone: "bg-muted-light", label: t("clikoda.disconnected") }
+    : llmOk
+      ? { tone: "bg-success", label: t("clikoda.connected") }
+      : {
+          tone: "bg-warning",
+          label: t("clikoda.offline_reason", {
+            reason: t(`settings.clikoda.reason_${llm?.reason ?? "ollama_down"}`, {
+              model: llm?.requested_missing ?? llm?.model ?? "",
+            }),
+          }),
+        };
+
   return (
     <Rnd
       size={{ width: rect.width, height: rect.height }}
@@ -793,21 +827,24 @@ export function ClikodaPanel({
             Clikoda
             {/* Le voyant était 🟢/⚪️ : deux emoji dont le rendu change d'un OS à
                 l'autre, et dont personne ne devine le sens. Une pastille + une
-                infobulle disent la même chose, en toutes lettres au survol. */}
+                infobulle disent la même chose, en toutes lettres au survol.
+                TROIS états, parce que « connecté » ne voulait pas dire
+                « Clikoda répond » : le socket du lecteur peut être ouvert et le
+                modèle absent — c'est même le cas le plus fréquent d'une
+                installation neuve. Ambre dit « je suis là, mais je n'ai pas de
+                modèle », et l'infobulle donne la raison. */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span
                   role="status"
-                  aria-label={connected ? t("clikoda.connected") : t("clikoda.disconnected")}
+                  aria-label={clikodaState.label}
                   className={cn(
                     "size-2 rounded-full transition-colors duration-normal ease-brand",
-                    connected ? "bg-success" : "bg-muted-light",
+                    clikodaState.tone,
                   )}
                 />
               </TooltipTrigger>
-              <TooltipContent>
-                {connected ? t("clikoda.connected") : t("clikoda.disconnected")}
-              </TooltipContent>
+              <TooltipContent>{clikodaState.label}</TooltipContent>
             </Tooltip>
           </strong>
           <div className="clikoda-nodrag" style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -1,6 +1,7 @@
 # config/settings.py — Paramètres globaux MetaC-App
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # Racine du projet (V2/) : config/ → nwol/ → V2/
@@ -22,6 +23,12 @@ def _app_data_dir() -> Path:
 # `localhost` essaie d'abord `::1`, et Windows met ~2 s à accepter ce refus (il
 # retente le SYN) — à chaque génération, à chaque lot d'embeddings.
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+# Modèle de DERNIER RECOURS, et non le modèle en dur qu'il fut : celui qui tourne
+# est une préférence (`llm_model`, défaut « auto »), résolue par
+# `services/llm_models.py` d'après les modèles qu'Ollama a en magasin et la RAM de
+# la machine. Ce nom-ci répond à deux questions : quel modèle citer quand Ollama
+# n'en liste aucun (« ollama pull … » a besoin d'un nom), et quel profil sert de
+# RÉFÉRENCE aux débits mesurés (LLM_REFERENCE_PROFILE, plus bas).
 OLLAMA_MODEL = "gemma4:e4b"
 # Plancher du budget socket d'une génération (voir `task_timeout_s` plus bas :
 # le budget réel est DÉRIVÉ du num_predict de la tâche, jamais saisi à la main).
@@ -171,6 +178,78 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     "calibration":              {"num_ctx": 2048, "num_predict": 64, "temperature": 0.1},
 }
 
+# ── Catalogue des modèles ─────────────────────────────────────────────────────
+# Le modèle n'est plus un nom en dur : c'est une donnée. Cette table est le SEUL
+# endroit où un modèle existe — ce qu'il pèse à télécharger, la RAM qu'il exige,
+# ce qu'il écrit par seconde, le contexte qu'il tient. La politique (« lequel
+# faire tourner ? ») vit dans `services/llm_models.py` ; ici, les faits.
+#
+# `min_ram_gb` est la RAM de la MACHINE, pas la taille du fichier : Ollama garde
+# les poids résidents, le cache KV de 8192 tokens coûte 0,5 à 1,5 Go de plus, et
+# l'OS plus le webview en prennent ~3. D'où 9,6 Go de poids → 12 Go exigés, et
+# 18-20 → 32. Un 26b sur un Mac de 24 Go swappe et son premier token prend des
+# minutes : que le choix automatique le refuse est précisément le but.
+#
+# `rank` est l'ordre de PRÉFÉRENCE, et il ne se déduit d'aucun autre champ :
+# `gemma4:12b` se télécharge plus petit que `gemma4:e4b` (8,0 contre 9,6) tout en
+# répondant mieux et en écrivant moins vite — e4b est une tranche MatFormer à
+# 4 B actifs, 12b un dense de 12 B. « Le plus gros qui tient » trie donc sur
+# `rank`, jamais sur `download_gb` ni sur la RAM.
+#
+# Pas de champ `label` : l'étiquette lue à l'écran se construit côté interface
+# depuis `tier` et `download_gb`, pour que les mots vivent dans les deux
+# dictionnaires i18n et non dans un dict Python.
+LLM_MODEL_AUTO = "auto"
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    """Ce qu'il faut savoir d'un modèle pour décider s'il peut tourner et
+    combien de temps lui accorder.
+
+    Les débits sont ceux de la machine de RÉFÉRENCE (Apple Silicon, GPU intégré
+    via Metal), volontairement pessimistes. La lenteur de la machine réelle est
+    mesurée à part (`llm/throughput.py`) et se multiplie à ceux-ci : la taille du
+    modèle et la vitesse de la machine sont deux facteurs distincts, et les
+    confondre dépensait pour la première le plafond prévu pour la seconde."""
+
+    name: str
+    rank: int                   # ordre de préférence (le plus grand gagne en AUTO)
+    tier: str                   # "tiny" | "small" | "standard" | "large"
+    download_gb: float          # ce que « ollama pull » télécharge
+    min_ram_gb: float           # RAM TOTALE de la machine, cf. ci-dessus
+    tokens_per_s: float         # écriture, sur la machine de référence
+    prompt_tokens_per_s: float  # lecture du prompt, idem
+    load_overhead_s: float      # chargement à froid + évaluation du prompt
+    max_num_ctx: int            # plafond appliqué au num_ctx de chaque tâche
+    supports_images: bool       # page du PDF envoyée au modèle, ou écartée
+
+
+LLM_MODELS: dict[str, ModelProfile] = {
+    name: ModelProfile(name, *fields)
+    for name, fields in {
+        #  nom          rank  tier          dl    ram  tok/s  prompt charge  ctx  images
+        "gemma4:e2b": (2, "small",     7.2,  8.0, 22.0, 240.0, 20.0, 8192, True),
+        "gemma4:e4b": (3, "standard",  9.6, 12.0, 18.0, 200.0, 25.0, 8192, True),
+        "gemma4:12b": (4, "standard",  8.0, 12.0, 14.0, 170.0, 25.0, 8192, True),
+        "gemma4:26b": (5, "large",    18.0, 32.0,  7.0, 110.0, 45.0, 8192, True),
+        "gemma4:31b": (6, "large",    20.0, 32.0,  6.0, 100.0, 50.0, 8192, True),
+    }.items()
+}
+# Vocabulaire FERMÉ de la préférence `llm_model` (services/preferences.py) :
+# aucun réglage n'est du texte libre. L'ordre est celui de l'affichage.
+LLM_MODEL_CHOICES: tuple[str, ...] = (LLM_MODEL_AUTO, *LLM_MODELS)
+# Profil de RÉFÉRENCE : celui du modèle de dernier recours, par construction une
+# clé de la table. Il sert de repli à tout modèle inconnu (un modèle installé que
+# cette table ignore garde des budgets définis plutôt que rien) et de base aux
+# débits de référence ci-dessous.
+LLM_REFERENCE_PROFILE = LLM_MODELS[OLLAMA_MODEL]
+# Durée de vie du catalogue demandé à Ollama (`/api/tags`). Le modèle actif est
+# résolu à CHAQUE génération et à chaque calcul de budget : un aller-retour HTTP
+# par appel serait payé par l'étudiant qui attend.
+LLM_TAGS_CACHE_TTL_S = 30.0
+
+
 # ── Budget temps d'une génération ─────────────────────────────────────────────
 # Le timeout d'une tâche est DÉRIVÉ de ce qu'elle demande au modèle, pas choisi
 # à la main : un `num_predict` de 3000 ne peut pas tenir dans le même budget
@@ -178,24 +257,28 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
 # divergent — et un timeout applicatif plus long que le timeout socket est une
 # échéance que personne n'atteindra jamais.
 #
-# Débit de RÉFÉRENCE de gemma4:e4b, mesuré sur la machine de dev (Apple
-# Silicon, GPU intégré via Metal : ~29 tokens/s écrits, ~265 tokens/s lus).
-# Volontairement pessimiste : un budget trop court fait échouer une génération
-# correcte, un budget trop long ne coûte que dans le cas déjà anormal.
+# Débit de RÉFÉRENCE : celui du modèle de référence sur la machine de dev (Apple
+# Silicon, GPU intégré via Metal : ~29 tokens/s écrits, ~265 tokens/s lus ;
+# la table en retient 18 et 200, volontairement pessimistes — un budget trop
+# court fait échouer une génération correcte, un budget trop long ne coûte que
+# dans le cas déjà anormal). DÉRIVÉS de LLM_MODELS : ces deux nombres y étaient
+# écrits une seconde fois, et deux copies d'un même nombre divergent.
 #
-# Ce n'est qu'un point de départ. Une machine plus LENTE (PC sans GPU, Mac
-# Intel) est mesurée en cours de route (`llm/throughput.py`) et ses budgets
-# sont étirés d'autant ; une machine plus rapide garde ceux-ci.
-OLLAMA_TOKENS_PER_S = 18.0
-# Lecture du prompt (« prompt eval ») sur la même machine, même marge.
-OLLAMA_PROMPT_TOKENS_PER_S = 200.0
-# Chargement du modèle à froid + évaluation du prompt, avant le premier token.
-OLLAMA_TIMEOUT_OVERHEAD_S = 25.0
+# Ce n'est qu'un point de départ. Un modèle plus lourd a son propre débit dans
+# la table ; une machine plus LENTE (PC sans GPU, Mac Intel) est mesurée en
+# cours de route (`llm/throughput.py`). Les budgets étirent l'un ET l'autre, et
+# le chargement à froid du modèle est son `load_overhead_s` (ex-constante
+# OLLAMA_TIMEOUT_OVERHEAD_S, désormais par modèle).
+OLLAMA_TOKENS_PER_S = LLM_REFERENCE_PROFILE.tokens_per_s
+OLLAMA_PROMPT_TOKENS_PER_S = LLM_REFERENCE_PROFILE.prompt_tokens_per_s
 # Plafond dur : au-delà, l'utilisateur a déjà renoncé.
 OLLAMA_TIMEOUT_MAX = 240.0
 # Étirement maximal des budgets sur une machine lente (soit ~2 tokens/s écrits).
 # Au-delà, une réponse prendrait plus de dix minutes : on échoue plutôt que de
-# laisser l'écran attendre indéfiniment.
+# laisser l'écran attendre indéfiniment. Il borne la lenteur de la MACHINE et
+# elle seule : le coût d'un modèle plus lourd est un facteur à part
+# (`_model_factors`), sinon tourner en 31b consommait à lui seul la moitié de ce
+# plafond et il ne restait rien pour la machine qu'il est censé couvrir.
 OLLAMA_MAX_SLOWDOWN = 8.0
 
 
@@ -221,18 +304,64 @@ def _slowdown() -> tuple[float, float]:
     return slowdown()
 
 
+def _active_profile() -> ModelProfile:
+    """Profil du modèle qui tourne vraiment.
+
+    Import tardif, pour la même raison que `_slowdown()` : « quel modèle ? » est
+    une politique qui lit une préférence en base, donc elle vit dans un service
+    (cf. CLAUDE.md), et un service est au-dessus de ce module. Personne ne doit
+    « nettoyer » ceci en import de module : le cycle est réel, il est fermé
+    exprès dans un corps de fonction. `llm_models.active_profile()` ne lève
+    jamais — un budget temps n'a pas le droit d'échouer."""
+    from services.llm_models import active_profile
+
+    return active_profile()
+
+
+def _model_factors(profile: ModelProfile) -> tuple[float, float]:
+    """(écriture, lecture) : ce que CE modèle coûte face au modèle de référence.
+
+    Jamais sous 1 : un modèle plus rapide que la référence ne RACCOURCIT aucun
+    budget — même raison que `llm/throughput`. Facteur distinct de la lenteur
+    machine, pour que `OLLAMA_MAX_SLOWDOWN` continue de borner celle-ci seule."""
+    return (
+        max(1.0, OLLAMA_TOKENS_PER_S / profile.tokens_per_s),
+        max(1.0, OLLAMA_PROMPT_TOKENS_PER_S / profile.prompt_tokens_per_s),
+    )
+
+
+def task_options(task: str) -> dict:
+    """Options Ollama d'une tâche, `num_ctx` plafonné par ce que le modèle tient.
+
+    Point UNIQUE de lecture d'`OLLAMA_TASK_OPTIONS` : trois endroits le lisaient
+    (deux fois la même expression dans `llm/ollama_client`, plus le calibrage),
+    et un plafond par modèle appliqué à deux d'entre eux seulement est un
+    plafond qui ne protège rien. Ollama ne REFUSE pas un prompt plus long que
+    `num_ctx` : il en tronque silencieusement le DÉBUT (rôle, consignes,
+    profil)."""
+    options = OLLAMA_TASK_OPTIONS.get(task) or OLLAMA_OPTIONS
+    cap = _active_profile().max_num_ctx
+    if int(options.get("num_ctx") or 0) <= cap:
+        return options
+    return {**options, "num_ctx": cap}
+
+
 def task_timeout_s(task: str) -> float:
     """Budget d'UNE tentative, dérivé du `num_predict` de la tâche.
 
-    C'est le timeout socket appliqué par `urlopen` (llm/ollama_client). Une
-    tâche inconnue retombe sur les options par défaut. Sur une machine mesurée
-    plus lente que la référence, le temps de lecture du prompt, celui
-    d'écriture ET le plafond sont étirés du facteur mesuré."""
-    options = OLLAMA_TASK_OPTIONS.get(task) or OLLAMA_OPTIONS
+    C'est le timeout socket appliqué à l'appel (llm/ollama_client). Une tâche
+    inconnue retombe sur les options par défaut. Deux facteurs l'étirent, et ils
+    restent séparés : la lenteur MESURÉE de la machine (`_slowdown`, bornée par
+    `OLLAMA_MAX_SLOWDOWN`) et le coût du MODÈLE actif face à la référence
+    (`_model_factors`). Sur le modèle de référence, les seconds valent 1,0 et la
+    formule est celle d'avant, au nombre près."""
+    options = task_options(task)
     tokens = float(options.get("num_predict") or OLLAMA_OPTIONS["num_predict"])
+    profile = _active_profile()
     gen_slow, prompt_slow = _slowdown()
-    budget = OLLAMA_TIMEOUT_OVERHEAD_S * prompt_slow + tokens * gen_slow / OLLAMA_TOKENS_PER_S
-    ceiling = OLLAMA_TIMEOUT_MAX * max(gen_slow, prompt_slow)
+    model_gen, model_prompt = _model_factors(profile)
+    budget = profile.load_overhead_s * prompt_slow + tokens * gen_slow * model_gen / OLLAMA_TOKENS_PER_S
+    ceiling = OLLAMA_TIMEOUT_MAX * max(gen_slow * model_gen, prompt_slow * model_prompt)
     return min(ceiling, max(float(OLLAMA_TIMEOUT), budget))
 
 
@@ -242,7 +371,9 @@ def task_wall_timeout_s(task: str) -> float:
     Source unique de DEUX échéances qui doivent rester d'accord : la boucle de
     retry de `_generate_json` cesse de rejouer au-delà, et `run_llm_sync`
     attend exactement ça avant d'abandonner."""
-    ceiling = OLLAMA_WALL_TIMEOUT_MAX * max(_slowdown())
+    gen_slow, prompt_slow = _slowdown()
+    model_gen, model_prompt = _model_factors(_active_profile())
+    ceiling = OLLAMA_WALL_TIMEOUT_MAX * max(gen_slow * model_gen, prompt_slow * model_prompt)
     return min(ceiling, task_timeout_s(task) * OLLAMA_RETRY_BUDGET_FACTOR)
 
 # ── Systèmes d'écriture (module Langues) ──────────────────────────────────────

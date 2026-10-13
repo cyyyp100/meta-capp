@@ -7,6 +7,7 @@
 // Le panneau ouvre un WebSocket vers /api/reader/{id}/stream : on le bouchonne,
 // aucun serveur n'est nécessaire.
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,12 +53,21 @@ class FakeWebSocket {
  * par un `<div onClick>` — donc uniquement à la souris. C'est maintenant un
  * vrai bouton, ce que ce parcours vérifie au passage.
  */
-async function renderOpenPanel(props: Partial<React.ComponentProps<typeof ClikodaPanel>> = {}) {
-  const view = render(
-    <TooltipProvider>
-      <ClikodaPanel docId={1} currentPage={1} sessionId={null} {...props} />
-    </TooltipProvider>,
+/** Le panneau demande aussi l'état de Clikoda (`/api/llm/status`) pour sa
+ *  pastille : il lui faut un QueryClient, comme en production. Le même client
+ *  pour tout un test, sinon un `rerender` repartirait de zéro. */
+let queryClient: QueryClient;
+
+function wrap(node: React.ReactNode) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>{node}</TooltipProvider>
+    </QueryClientProvider>
   );
+}
+
+async function renderOpenPanel(props: Partial<React.ComponentProps<typeof ClikodaPanel>> = {}) {
+  const view = render(wrap(<ClikodaPanel docId={1} currentPage={1} sessionId={null} {...props} />));
   await userEvent.click(await screen.findByRole("button", { name: /clikoda|ouvrir|open/i }));
   return view;
 }
@@ -89,6 +99,7 @@ async function playOneQuestion(verdict: string, extra: Record<string, unknown> =
 
 describe("ClikodaPanel", () => {
   beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     vi.stubGlobal("WebSocket", FakeWebSocket);
     // Le panneau mémorise sa position et son état ouvert/fermé dans localStorage.
     localStorage.clear();
@@ -112,6 +123,39 @@ describe("ClikodaPanel", () => {
     // C'était 🟢 / ⚪️ — deux emoji dont personne ne devine le sens.
     const light = await screen.findByRole("status");
     expect(light).toHaveAttribute("aria-label", expect.stringMatching(/clikoda/i));
+  });
+
+  // La pastille ne reflétait QUE le socket du lecteur : elle restait verte avec
+  // Ollama éteint ou sans modèle installé — l'état le plus fréquent d'une
+  // machine neuve, et celui où l'élève a le plus besoin qu'on le lui dise.
+  it("distingue « connecté » de « Clikoda peut répondre »", async () => {
+    vi.spyOn(api, "llmStatus").mockResolvedValue({
+      available: false, ollama_up: true, model: "gemma4:e4b", preference: "auto",
+      tier: "standard", supports_images: true, installed: [], catalog: [],
+      ram_gb: 8, fits: true, reason: "no_model", requested_missing: null,
+      pull_command: "ollama pull gemma4:e4b",
+      throughput: { model: "gemma4:e4b", measured: false, output_tokens_per_s: null, prompt_tokens_per_s: null, slowdown: 1 },
+    });
+    await renderOpenPanel();
+
+    const light = await screen.findByRole("status");
+    await waitFor(() =>
+      expect(light).toHaveAttribute("aria-label", expect.stringMatching(/injoignable|unreachable/i)),
+    );
+    // Et un mot dans le fil, qui dit où aller : se taire était le défaut.
+    expect(await screen.findByText(/réglages ▸ clikoda|settings ▸ clikoda/i)).toBeInTheDocument();
+  });
+
+  it("ne demande pas l'état de Clikoda pendant la visite guidée", async () => {
+    // La démonstration vit SANS WebSocket : c'est la garantie centrale de la
+    // visite (ni jauges, ni profil touché). Une pastille qui s'alarmerait là
+    // contredirait la première minute d'utilisation de l'application.
+    vi.spyOn(api, "llmStatus").mockResolvedValue({} as never);
+    await renderOpenPanel({ demo: true });
+
+    const light = await screen.findByRole("status");
+    expect(light).toHaveAttribute("aria-label", expect.stringMatching(/connecté|connected/i));
+    expect(api.llmStatus).not.toHaveBeenCalled();
   });
 
   it("propose le mode d'accompagnement dans un sélecteur nommé et traduit", async () => {
@@ -182,11 +226,8 @@ describe("ClikodaPanel", () => {
   // rien lui envoyer de la présence de l'élève, et signaler l'arrêt et la reprise.
   it("signale la pause et la reprise, et se tait entre les deux", async () => {
     const sent = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m));
-    const panel = (paused: React.ComponentProps<typeof ClikodaPanel>["paused"]) => (
-      <TooltipProvider>
-        <ClikodaPanel docId={1} currentPage={1} sessionId={null} reading paused={paused} />
-      </TooltipProvider>
-    );
+    const panel = (paused: React.ComponentProps<typeof ClikodaPanel>["paused"]) =>
+      wrap(<ClikodaPanel docId={1} currentPage={1} sessionId={null} reading paused={paused} />);
     const view = await renderOpenPanel({ reading: true });
 
     view.rerender(panel({ source: "suggested", plannedMin: 5, startedAt: Date.now() }));
@@ -470,11 +511,7 @@ describe("ClikodaPanel", () => {
     const view = await renderOpenPanel({ reading: false });
     expect(sentTypes()).not.toContain("start_reading");
 
-    view.rerender(
-      <TooltipProvider>
-        <ClikodaPanel docId={1} currentPage={1} sessionId={null} reading />
-      </TooltipProvider>,
-    );
+    view.rerender(wrap(<ClikodaPanel docId={1} currentPage={1} sessionId={null} reading />));
     await waitFor(() => expect(sentTypes()).toContain("start_reading"));
   });
 

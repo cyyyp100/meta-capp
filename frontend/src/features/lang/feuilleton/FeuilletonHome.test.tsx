@@ -27,8 +27,8 @@ function status(extra: Partial<FeuilletonStatus> = {}): FeuilletonStatus {
 
 function preferences(dismissed: "true" | "false"): PreferencesPayload {
   return {
-    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: dismissed },
-    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [] },
+    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: dismissed , llm_model: "auto"},
+    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [], llm_model: ["auto"] },
     lang: "fr", supported_langs: ["fr", "en"], user: { id: 1, name: "Élève" },
   };
 }

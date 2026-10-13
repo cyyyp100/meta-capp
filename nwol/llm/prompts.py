@@ -21,6 +21,19 @@ from config.settings import (
 from config.subjects import DISCIPLINES, LANGUAGE_SUBJECTS
 
 
+def _context_line(label: str, value: str) -> str:
+    """Une ligne de contexte, ou RIEN du tout quand la valeur est vide.
+
+    Et surtout pas un mot-bouchon (« non renseigné »), pour deux raisons. Il est
+    RELISIBLE : le repli hors-ligne qui réanalyse son propre prompt le
+    récupérait et l'affichait à l'élève — « Entre dans non renseigné en
+    cherchant le lien… ». Et il APPREND au modèle qu'un champ peut porter ce
+    texte, qu'un petit modèle recopie volontiers dans sa réponse. Une ligne
+    absente, elle, ne dit rien de faux."""
+    value = (value or "").strip()
+    return f"{label} {value}\n" if value else ""
+
+
 def _t(fr: str, en: str) -> str:
     """Return fr or en string based on current UI language."""
     return en if _i18n.current_lang() == "en" else fr
@@ -240,7 +253,6 @@ def build_question_prompt(
             "the profile, and the most useful learning effort.",
         )
 
-    _na = _t("non renseigné", "not specified")
     _lang = "en" if _i18n.current_lang() == "en" else "fr"
     _types_str = ", ".join(f'"{key}"' for key in question_types.KEYS)
     # Une ligne « Pour …, privilégie "x" » par type, déclarée avec le type lui-même.
@@ -258,9 +270,7 @@ def build_question_prompt(
         return f"""You are the adaptive learning companion of MetaC-App.
 
 Context:
-- Document: {doc_title or _na}
-- Chapter: {chapter_title or _na}
-- Metacognitive profile: {_json(metacog_profile or {})}
+{_context_line("- Document:", doc_title)}{_context_line("- Chapter:", chapter_title)}- Metacognitive profile: {_json(metacog_profile or {})}
 - Current session gauges: {_json(session_gauges)}
 - Recent question types: {_json(recent_question_types)}
 - Last 5 session answers: {_json(history)}
@@ -336,9 +346,7 @@ Constraints:
     return f"""Tu es le compagnon d'apprentissage adaptatif de MetaC-App.
 
 Contexte :
-- Document : {doc_title or _na}
-- Chapitre : {chapter_title or _na}
-- Profil métacognitif : {_json(metacog_profile or {})}
+{_context_line("- Document :", doc_title)}{_context_line("- Chapitre :", chapter_title)}- Profil métacognitif : {_json(metacog_profile or {})}
 - Jauges courantes de la session : {_json(session_gauges)}
 - Types de questions récents : {_json(recent_question_types)}
 - 5 dernières réponses de la session : {_json(history)}
@@ -1381,13 +1389,10 @@ def build_chapter_summary_prompt(
     paragraphs_summary: list[dict] | list[str],
     metacog_profile: dict | None = None,
 ) -> str:
-    _na = _t("non renseigné", "not specified")
-
     if _i18n.current_lang() == "en":
         return f"""You are producing an end-of-chapter summary for MetaC-App.
 
-Chapter: {chapter_title or _na}
-Current metacognitive profile (use only to adapt the pedagogical level, never as chapter content):
+{_context_line("Chapter:", chapter_title)}Current metacognitive profile (use only to adapt the pedagogical level, never as chapter content):
 {_json(metacog_profile or {})}
 
 Elements read in the chapter:
@@ -1423,8 +1428,7 @@ Constraints:
 
     return f"""Tu produis une synthèse de fin de chapitre pour MetaC-App.
 
-Chapitre : {chapter_title or _na}
-Profil métacognitif courant (à utiliser seulement pour adapter le niveau pédagogique, jamais comme contenu du chapitre) :
+{_context_line("Chapitre :", chapter_title)}Profil métacognitif courant (à utiliser seulement pour adapter le niveau pédagogique, jamais comme contenu du chapitre) :
 {_json(metacog_profile or {})}
 
 Éléments lus dans le chapitre :
@@ -1466,7 +1470,6 @@ def build_curiosity_hook_prompt(
     chapter_excerpt: str,
     profile: dict | None = None,
 ) -> str:
-    _na = _t("non renseigné", "not specified")
     no_excerpt = not (chapter_excerpt or "").strip()
 
     if _i18n.current_lang() == "en":
@@ -1478,10 +1481,7 @@ def build_curiosity_hook_prompt(
         return f"""You are generating an opening hook for a reader about to read a chapter.
 
 Context:
-- Document: {doc_title or _na}
-- Chapter: {chapter_title or _na}
-- Sub-chapter: {subchapter_title or _na}
-- Metacognitive profile: {_json(profile or {})}
+{_context_line("- Document:", doc_title)}{_context_line("- Chapter:", chapter_title)}{_context_line("- Sub-chapter:", subchapter_title)}- Metacognitive profile: {_json(profile or {})}
 
 Chapter excerpt:
 ---
@@ -1513,10 +1513,7 @@ Constraints:
     return f"""Tu génères une phrase d'accroche pour un lecteur qui s'apprête à lire un chapitre.
 
 Contexte :
-- Document : {doc_title or _na}
-- Chapitre : {chapter_title or _na}
-- Sous-chapitre : {subchapter_title or _na}
-- Profil métacognitif : {_json(profile or {})}
+{_context_line("- Document :", doc_title)}{_context_line("- Chapitre :", chapter_title)}{_context_line("- Sous-chapitre :", subchapter_title)}- Profil métacognitif : {_json(profile or {})}
 
 Extrait du chapitre :
 ---

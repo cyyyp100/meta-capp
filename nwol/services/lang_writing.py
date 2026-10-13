@@ -34,6 +34,7 @@ from services import lang_arabic as arabic
 from services import lang_episodes as episodes
 from services import lang_mandarin as mandarin
 from services import lang_progress as progress
+from services import llm_models
 from services.lang_inflight import InflightRegistry
 from services.lang_text import fold, words
 
@@ -396,21 +397,24 @@ def correct(writing_id: int) -> str:
     log: list[dict] = []
     metrics: list[dict] = []
     started = time.monotonic()
+    # Résolu une fois : le journal de la correction nomme le modèle qui l'a
+    # écrite, et non celui que l'apprenant réglera après coup.
+    model = llm_models.active()
     try:
         feedback = episodes._attempts(
             "writing", llm.generate_lang_writing_feedback_async, params,
-            lambda r: validate_feedback(language, r, text, explain_lang), log, metrics,
+            lambda r: validate_feedback(language, r, text, explain_lang), log, metrics, model=model,
         )
     except episodes.GenerationFailed:
         store.update_writing(writing_id, status="failed", generation={
             "calls": log, "metrics": metrics, "duration_s": round(time.monotonic() - started, 1),
-            "model": llm.OLLAMA_MODEL})
+            "model": model})
         logger.info("Expression écrite %s : correction impossible", writing_id)
         return "failed"
     store.update_writing(
         writing_id, status="ready", feedback=feedback, corrected_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         generation={"calls": log, "metrics": metrics, "duration_s": round(time.monotonic() - started, 1),
-                    "model": llm.OLLAMA_MODEL},
+                    "model": model},
     )
     logger.info("Expression écrite %s corrigée en %.0f s", writing_id, time.monotonic() - started)
     return "ready"

@@ -239,8 +239,8 @@ Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
 | | App alone | With Clikoda (the assistant) |
 |---|---|---|
 | **OS** | macOS (Apple Silicon or Intel), Windows 10/11 x64, Linux x86_64 (glibc 2.35+) | same |
-| **RAM** | any recent machine | **16 GB recommended** — the model takes ~10 GB once loaded; 8 GB is not enough |
-| **Disk** | ~400 MB | **+10 GB** (`gemma4:e4b` 9.6 GB, optional `embeddinggemma` 0.6 GB) |
+| **RAM** | any recent machine | **12 GB or more** for the standard model; 8 GB runs the light one (see below) |
+| **Disk** | ~400 MB | **+7 to 20 GB** depending on the model, plus 0.6 GB for the optional `embeddinggemma` |
 | **GPU** | none | optional — Apple Silicon (Metal), NVIDIA (CUDA), some AMD (ROCm); CPU-only works, slowly |
 
 Clikoda is optional: without [Ollama](https://ollama.com) the reader, flashcards and
@@ -277,10 +277,23 @@ archive per platform, with a `SHA256SUMS.txt`:
 Signed and notarized releases open like any other application. Either way, check the
 archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <file> SHA256`).
 
-### Pull the model
+### Pull a model
+
+Clikoda runs on the **gemma4** family, and which one is a setting — not a hard-coded name.
+« Automatic » (the default) picks the most capable model you have installed that your
+machine's memory can actually load; **Settings ▸ Clikoda** shows what it chose, why, and
+the `ollama pull` command for anything you are missing. The table lives in
+`nwol/config/settings.py:LLM_MODELS`.
+
+| model | download | RAM needed | for |
+|---|---|---|---|
+| `gemma4:e2b` | 7.2 GB | 8 GB | a light machine |
+| `gemma4:e4b` | 9.6 GB | 12 GB | the standard choice |
+| `gemma4:12b` | 8.0 GB | 12 GB | better answers, a bit slower |
+| `gemma4:26b` / `gemma4:31b` | 18–20 GB | 32 GB | a workstation |
 
 ```bash
-ollama pull gemma4:e4b
+ollama pull gemma4:e4b       # or e2b on a lighter machine
 ollama pull embeddinggemma   # optional (~600 MB): semantic search inside the document you read
 ```
 
@@ -353,8 +366,9 @@ If the window still cannot open, Meta-Capp falls back to the browser and logs wh
 <details>
 <summary><b>Troubleshooting</b></summary>
 
-- **Clikoda stays asleep** — Ollama is not running or the model is missing: `ollama list`
-  must show `gemma4:e4b`.
+- **Clikoda stays asleep** — Ollama is not running, or no model is installed. **Settings ▸
+  Clikoda** says which of the two it is, names the model it would use and gives the
+  `ollama pull` command to copy.
 - **Clikoda is very slow** — `ollama ps` shows where the model runs (`PROCESSOR`: GPU,
   CPU or a split). On CPU this is expected; the log prints the measured speed at
   startup (`Débit de Clikoda sur cette machine`). Closing memory-hungry apps helps.
@@ -448,7 +462,7 @@ Meta-Capp **Pro** is a separate, hosted edition for people who want the same ped
 |---|:--:|:--:|
 | Price | **Free**, MIT | Subscription |
 | Setup | Install Ollama, pull a model | Nothing to install |
-| Inference | On your machine (`gemma4:e4b`) | Frontier hosted models via API |
+| Inference | On your machine (the gemma4 family, your choice) | Frontier hosted models via API |
 | Answer depth on hard material | Bounded by your hardware | Full-size reasoning models |
 | Renders any PDF as-is | ✅ | ✅ |
 | Scanned / handwritten PDFs | ❌ | ✅ **OCR reconstruction** |
