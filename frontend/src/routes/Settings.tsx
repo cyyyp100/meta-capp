@@ -8,6 +8,7 @@
 // La section vit dans l'URL (`/settings/updates`) pour la même raison.
 import { useQuery } from "@tanstack/react-query";
 import {
+  Cpu,
   Database,
   Download,
   Globe,
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 
 import { useT } from "../i18n";
 import { AppearanceSection } from "../features/settings/AppearanceSection";
+import { ClikodaSection } from "../features/settings/ClikodaSection";
 import { HelpSection } from "../features/settings/HelpSection";
 import { LanguageSection } from "../features/settings/LanguageSection";
 import { ProfileSection } from "../features/settings/ProfileSection";
@@ -37,6 +39,7 @@ const SECTIONS = [
   { id: "profile", labelKey: "settings.section.profile", Icon: User },
   { id: "appearance", labelKey: "settings.section.appearance", Icon: Palette },
   { id: "reading", labelKey: "settings.section.reading", Icon: Timer },
+  { id: "clikoda", labelKey: "settings.section.clikoda", Icon: Cpu },
   { id: "language", labelKey: "settings.section.language", Icon: Globe },
   { id: "data", labelKey: "settings.section.data", Icon: Database },
   { id: "updates", labelKey: "settings.section.updates", Icon: Download },
@@ -93,6 +96,7 @@ export function Settings() {
               {current === "profile" && <ProfileSection payload={data} streak={streak} />}
               {current === "appearance" && <AppearanceSection payload={data} />}
               {current === "reading" && <ReadingSection payload={data} />}
+              {current === "clikoda" && <ClikodaSection payload={data} />}
               {current === "language" && <LanguageSection payload={data} />}
               {current === "data" && <DataSection />}
               {current === "updates" && <UpdatesSection payload={data} />}

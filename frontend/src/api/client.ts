@@ -442,6 +442,11 @@ export const api = {
   setUserName: (name: string) =>
     postJSON<{ user: { id: number; name: string } }>("/api/preferences/name", { name }),
 
+  // ── Clikoda : quel modèle, et peut-il tourner ? ──────────────────────────
+  // Lecture seule : le modèle se CHOISIT par `setPreferences({ llm_model })`,
+  // et nulle part ailleurs (cf. nwol/server/routers/llm.py).
+  llmStatus: () => getJSON<LlmStatus>("/api/llm/status"),
+
   // ── Mises à jour ─────────────────────────────────────────────────────────
   // Opt-in strict : tant que `updates_check` est faux, cet appel ne déclenche
   // AUCUNE requête sortante côté serveur (cf. nwol/services/updates.py).
@@ -490,7 +495,8 @@ export type PreferenceKey =
   | "updates_check"
   | "tour_done"
   | "entry_sas_s"
-  | "lang_pro_note_dismissed";
+  | "lang_pro_note_dismissed"
+  | "llm_model";
 export type Preferences = Record<PreferenceKey, string>;
 
 export interface PreferencesPayload {
@@ -499,6 +505,47 @@ export interface PreferencesPayload {
   lang: string;
   supported_langs: string[];
   user: { id: number; name: string };
+}
+
+/** L'état de Clikoda (`GET /api/llm/status`).
+ *
+ *  `reason` est une énumération FERMÉE, et c'est délibéré : les phrases qui
+ *  l'expliquent vivent dans les dictionnaires i18n du front, en un seul
+ *  exemplaire. `null` = tout va bien. `pull_command` n'est que du texte à
+ *  copier — l'application ne télécharge pas de modèle elle-même. */
+export interface LlmModelEntry {
+  name: string;
+  size_gb?: number;
+  parameter_size?: string;
+  known?: boolean;
+  installed?: boolean;
+  fits: boolean;
+  tier?: string;
+  download_gb?: number;
+  min_ram_gb?: number;
+}
+
+export interface LlmStatus {
+  available: boolean;
+  ollama_up: boolean;
+  model: string;
+  preference: string;
+  tier: string;
+  supports_images: boolean;
+  installed: LlmModelEntry[];
+  catalog: LlmModelEntry[];
+  ram_gb: number | null;
+  fits: boolean;
+  reason: "ollama_down" | "model_missing" | "model_too_big" | "no_model" | null;
+  requested_missing: string | null;
+  pull_command: string;
+  throughput: {
+    model: string;
+    measured: boolean;
+    output_tokens_per_s: number | null;
+    prompt_tokens_per_s: number | null;
+    slowdown: number;
+  };
 }
 
 /** `checked: false` = la vérification n'a rien donné (hors ligne, panne, option

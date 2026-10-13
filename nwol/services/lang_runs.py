@@ -58,7 +58,6 @@ from config.settings import (
     LANG_UNDERSTOOD_TARGET_GAUGES,
     LANG_WRITING_TARGET_GAUGES,
     LANG_ZH_TONE_COLORS,
-    OLLAMA_MODEL,
     WARMUP_MAX_CARDS,
 )
 from db import lang_episode_db as store
@@ -79,6 +78,7 @@ from services import lang_games as games
 from services import lang_point_lesson as lessons
 from services import lang_progress as progress
 from services import lang_writing as writing
+from services import llm_models
 from services import practice
 from services.lang_scripts import (
     ARABIC_SCRIPT,
@@ -1418,7 +1418,10 @@ def language_status(language: str) -> dict:
     return {
         "language": language, "flow": "feuilleton", "family": _family(language),
         # Le modèle local qui écrit les épisodes, et quand en montrer les limites.
-        "model": OLLAMA_MODEL, "generation_failures": failures,
+        # Le modèle RÉSOLU (préférence + ce qu'Ollama a en magasin) : c'est cette
+        # valeur que l'encart Pro affiche, elle doit nommer ce qui tourne
+        # vraiment et non le repli de dernier recours.
+        "model": llm_models.active(), "generation_failures": failures,
         "pro_hints": pro_hints(language, order, failures),
         # Une correction d'expression écrite arrivée après sa séance.
         "unseen_writing": writing.unseen_for(profile["id"]),

@@ -26,7 +26,6 @@ from db.user import DEFAULT_USER_ID
 from llm.ollama_client import (
     generate_document_digest_async,
     is_cancelled_error,
-    is_ollama_available,
 )
 from pdf_viewer.chapter_index import build_chapter_index
 from pdf_viewer.pdf_document import PdfDocument
@@ -189,4 +188,13 @@ def import_code(path: str) -> dict:
 
 
 def llm_status() -> dict:
-    return {"available": is_ollama_available()}
+    """État de Clikoda tel que l'interface le montre (`GET /api/llm/status`).
+
+    Reste ici parce que c'est le foyer de l'« état LLM », mais ne décide plus de
+    rien : la politique « quel modèle, tient-il, que dire sinon » vit dans
+    `services/llm_models`. Jusqu'ici cette fonction répondait un unique
+    `available` — et personne ne l'appelait, si bien que l'application ne disait
+    jamais que Clikoda était absente."""
+    from services.llm_models import status
+
+    return status()

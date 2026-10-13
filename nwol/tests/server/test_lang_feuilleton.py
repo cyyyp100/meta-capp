@@ -1193,6 +1193,19 @@ def test_a_reprise_respiration_starts_from_the_step_of_the_played_episode(client
     assert _profile()["ladder_step"] == played_step
 
 
+def test_status_follows_the_chosen_model(client, monkeypatch):
+    """Changer de modèle dans Réglages change ce que l'accueil d'une langue
+    affiche : la valeur vient de la résolution, pas d'une constante."""
+    from llm import ollama_client
+    from services import llm_models
+
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [{"name": "gemma4:12b"}])
+    monkeypatch.setattr(llm_models, "preference", lambda: "gemma4:12b")
+    llm_models.invalidate()
+    _onboard(client)
+    assert client.get(f"/api/lang/{LANG}/status").json()["model"] == "gemma4:12b"
+
+
 def test_feuilleton_cards_are_never_reimported_backwards(client):
     """Les cartes du feuilleton ont le mot cible au recto : un profil recréé ne
     les importe pas comme des cartes héritées (verso = mot cible)."""
@@ -1201,13 +1214,16 @@ def test_feuilleton_cards_are_never_reimported_backwards(client):
 
 
 def test_status_names_the_local_model_and_when_to_mention_its_limits(client, fake, clock, monkeypatch):
-    from config.settings import OLLAMA_MODEL
     from db import lang_episode_db as store
     from llm import ollama_client
+    from services import llm_models
 
     _onboard(client)
     status = client.get(f"/api/lang/{LANG}/status").json()
-    assert status["model"] == OLLAMA_MODEL and status["pro_hints"] == [] and status["generation_failures"] == 0
+    # Le modèle RÉSOLU, et non un nom figé : c'est cette valeur que l'encart Pro
+    # affiche quand il dit les limites du modèle local.
+    assert status["model"] == llm_models.active()
+    assert status["pro_hints"] == [] and status["generation_failures"] == 0
     monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async",
                         lambda params, ok, err, on_metrics=None, model=None: err("panne"))
     _play(client, _start(client))  # l'épisode 2 échoue une fois…

@@ -23,10 +23,8 @@ from config.settings import (
     OLLAMA_EMBED_TIMEOUT,
     OLLAMA_EMBED_URL,
     OLLAMA_KEEP_ALIVE,
-    OLLAMA_MODEL,
-    OLLAMA_OPTIONS,
-    OLLAMA_TASK_OPTIONS,
     OLLAMA_URL,
+    task_options,
     task_timeout_s,
     task_wall_timeout_s,
 )
@@ -495,15 +493,40 @@ def is_ollama_available() -> bool:
         return False
 
 
-def _model_installed(model: str) -> bool:
-    """Vrai si Ollama liste `model` (`gemma4:e4b`, ou `x` pour `x:latest`)."""
+def list_models() -> list[dict] | None:
+    """Modèles qu'Ollama a en magasin (`/api/tags`) : `name`, `size` (octets),
+    `details.parameter_size`.
+
+    `None` quand Ollama n'a pas répondu — c'est une information DIFFÉRENTE d'une
+    liste vide (Ollama tourne, aucun modèle tiré), et l'écran de réglages dit
+    deux phrases différentes pour les deux. Passe par `_LOCAL_HTTP`, l'opener
+    sans proxy : derrière le proxy d'un réseau d'école, Clikoda passait pour
+    éteinte (cf. `test_ollama_is_reached_without_the_system_proxy`)."""
     try:
         url = OLLAMA_URL.replace("/api/generate", "/api/tags")
         with _LOCAL_HTTP.open(urllib.request.Request(url, method="GET"), timeout=3) as resp:
-            names = {str(m.get("name") or "") for m in json.loads(resp.read()).get("models") or []}
+            models = json.loads(resp.read()).get("models") or []
     except Exception:
-        return False
+        return None
+    return [m for m in models if isinstance(m, dict)]
+
+
+def _model_installed(model: str) -> bool:
+    """Vrai si Ollama liste `model` (`gemma4:e4b`, ou `x` pour `x:latest`)."""
+    names = {str(m.get("name") or "") for m in list_models() or []}
     return model in names or f"{model}:latest" in names
+
+
+def _active_model() -> str:
+    """Modèle à utiliser quand l'appelant n'en impose pas.
+
+    Import tardif : « quel modèle ? » est une politique qui lit une préférence
+    en base (`services/llm_models`), et ce module-ci est la couche transport. Le
+    cycle se ferme ICI, dans un corps de fonction — à ne pas « nettoyer » en
+    import de module."""
+    from services.llm_models import active
+
+    return active()
 
 
 # Texte neutre, assez long pour que la lecture du prompt soit mesurable
@@ -532,10 +555,20 @@ def calibrate_throughput() -> None:
     vraie génération (une génération expirée ne renvoie aucune durée). Un appel
     court, en tête de file, alimente `llm/throughput` avant toute tâche réelle —
     et charge le modèle en mémoire, ce que la première question aurait payé de
-    toute façon. Best-effort : Ollama éteint ou modèle absent, rien ne se passe.
-    Bloque le temps de deux requêtes HTTP locales : à lancer hors du chemin de
+    toute façon. Best-effort : Ollama éteint ou modèle absent, rien ne se passe,
+    mais les deux raisons sont DISTINGUABLES dans le journal — ce sont celles
+    que l'écran de réglages affiche, elles doivent être lisibles aussi ici.
+    Bloque le temps d'une requête HTTP locale : à lancer hors du chemin de
     démarrage (thread)."""
-    if not is_ollama_available() or not _model_installed(OLLAMA_MODEL):
+    from services.llm_models import status
+
+    state = status()
+    model = state["model"]
+    if not state["ollama_up"]:
+        logger.info("Calibrage du débit impossible : Ollama ne répond pas (127.0.0.1:11434).")
+        return
+    if not state["available"]:
+        logger.info("Calibrage du débit impossible : modèle %s absent — `ollama pull %s`.", model, model)
         return
 
     def _run() -> None:
@@ -547,15 +580,15 @@ def calibrate_throughput() -> None:
         prompt = f"[{uuid.uuid4().hex}]\n{_CALIBRATION_PROMPT}"
         try:
             _call_ollama(
-                prompt, OLLAMA_MODEL,
-                options=OLLAMA_TASK_OPTIONS["calibration"], format_json=False, task="calibration",
+                prompt, model,
+                options=task_options("calibration"), format_json=False, task="calibration",
             )
         except GenerationCancelled:
             return
         except Exception as exc:
             logger.info("Calibrage du débit de Clikoda impossible : %s", exc)
             return
-        logger.info("Débit de Clikoda sur cette machine : %s", throughput.snapshot())
+        logger.info("Débit de Clikoda sur cette machine : %s", throughput.snapshot(model))
 
     _LLM_QUEUE.put((_TASK_PRIORITY["calibration"], next(_QUEUE_COUNTER), _run))
 
@@ -598,7 +631,7 @@ def generate_question_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_question_prompt(
         paragraph=context.get("paragraph") or context.get("text") or "",
@@ -630,7 +663,7 @@ def evaluate_answer_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_evaluation_prompt(
         question=context.get("question") or {},
@@ -656,7 +689,7 @@ def answer_user_question_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Question libre posée à la bulle assistant (contexte = snapshot de page)."""
     prompt = build_assistant_answer_prompt(
@@ -689,7 +722,7 @@ def decide_intervention_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Décision d'intervention autonome de l'assistant pendant la lecture."""
     prompt = build_intervention_prompt(context)
@@ -707,7 +740,7 @@ def generate_rephrasing_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_rephrasing_prompt(
         paragraph=context.get("paragraph") or "",
@@ -728,7 +761,7 @@ def generate_quiz_session_analysis_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_quiz_session_analysis_prompt(
         answers_history=context.get("answers_history") or [],
@@ -743,7 +776,7 @@ def generate_quiz_distractors_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Génère en un seul appel 3 distracteurs par question pour une session de QCM."""
     prompt = build_quiz_distractors_prompt(context.get("items") or [])
@@ -754,7 +787,7 @@ def generate_session_summary_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     session_data = context.get("session_data") or {}
     profile = context.get("metacog_profile") or session_data.get("profile") or {}
@@ -771,7 +804,7 @@ def analyze_meta_cognition_answers_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_meta_cognition_analysis_prompt(
         questions=context.get("questions") or [],
@@ -786,7 +819,7 @@ def generate_profile_analysis_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Analyse générale (évolutive) de l'apprenant, affichée sur la page profil."""
     prompt = build_profile_analysis_prompt(
@@ -805,7 +838,7 @@ def make_standalone_flashcard_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Réécrit un échange (recto/verso bruts) en flashcard autoportante."""
     prompt = build_flashcard_prompt(
@@ -820,14 +853,15 @@ def generate_chapter_summary_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_chapter_summary_prompt(
         chapter_title=context.get("chapter_title", ""),
         paragraphs_summary=context.get("paragraphs_summary") or [],
         metacog_profile=context.get("metacog_profile") or {},
     )
-    return _run_json_async("chapter_summary", prompt, parse_chapter_summary, on_success, on_error, model)
+    return _run_json_async("chapter_summary", prompt, parse_chapter_summary, on_success, on_error, model,
+                           fallback_context=context)
 
 
 def generate_document_digest_async(
@@ -835,7 +869,7 @@ def generate_document_digest_async(
     excerpt: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_document_digest_prompt(doc_title, excerpt)
     return _run_json_async(
@@ -856,7 +890,7 @@ def generate_curiosity_hook_async(
     profile: dict | None,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     prompt = build_curiosity_hook_prompt(
         doc_title=doc_title,
@@ -865,7 +899,11 @@ def generate_curiosity_hook_async(
         chapter_excerpt=chapter_excerpt,
         profile=profile or {},
     )
-    return _run_json_async("curiosity_hook", prompt, parse_curiosity_hook, on_success, on_error, model)
+    # La signature est positionnelle (des chaînes) : le dict du repli est
+    # construit ici, donc aucune signature publique ne change.
+    return _run_json_async("curiosity_hook", prompt, parse_curiosity_hook, on_success, on_error, model,
+                           fallback_context={"chapter_title": chapter_title,
+                                             "subchapter_title": subchapter_title})
 
 
 def _split_paragraph_for_llm(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> list[str]:
@@ -1002,14 +1040,18 @@ def _run_json_async(
     on_metrics=None,
     system_lang: str | None = None,
     json_schema: dict | None = None,
+    fallback_context: dict | None = None,
 ) -> None:
     """`on_metrics(list[dict])`, s'il est fourni, reçoit les mesures de CHAQUE
     appel HTTP de la tâche (tentatives et réparations comprises), avant
     `on_success`/`on_error` — cf. `_record_call_metrics`. `system_lang` impose
     la langue de la consigne système (sinon : celle de l'interface).
     `json_schema` contraint le décodage d'Ollama (sorties structurées) au lieu
-    du simple mode JSON — cf. `generate_lang_episode_glossary_async`."""
-    task_options = OLLAMA_TASK_OPTIONS.get(label, OLLAMA_OPTIONS)
+    du simple mode JSON — cf. `generate_lang_episode_glossary_async`.
+    `fallback_context` porte au repli hors-ligne ce que l'appelant SAIT (titre
+    du chapitre, éléments lus) : sans lui, le repli réanalysait le prompt qu'il
+    venait de construire et y récupérait ses propres mots-bouchons."""
+    options = task_options(label)
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
     domain = _task_domain(label)
@@ -1030,10 +1072,11 @@ def _run_json_async(
         _CALL_METRICS.value = [] if on_metrics is not None else None
         _SYSTEM_LANG.value = system_lang
         try:
-            logger.info("Génération LLM %s lancée modèle=%s", label, model)
+            logger.info("Génération LLM %s lancée modèle=%s", label, model or _active_model())
             try:
                 parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [],
-                                        options=task_options, json_schema=json_schema)
+                                        options=options, json_schema=json_schema,
+                                        fallback_context=fallback_context)
             finally:
                 _flush_call_metrics(on_metrics)
                 _SYSTEM_LANG.value = None
@@ -1070,7 +1113,7 @@ def _run_text_async(
     contenir du markdown, ce que le mode JSON d'Ollama gère mal. On passe par la même
     file priorisée pour rester sérialisé avec les autres tâches LLM.
     """
-    task_options = OLLAMA_TASK_OPTIONS.get(label, OLLAMA_OPTIONS)
+    options = task_options(label)
     priority = _TASK_PRIORITY.get(label, 6)
     seq = next(_QUEUE_COUNTER)
     domain = _task_domain(label)
@@ -1089,17 +1132,17 @@ def _run_text_async(
             return
         _start_task_clock(label, slot)
         try:
-            logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model)
+            logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model or _active_model())
             images = _load_ollama_images(image_paths or [])
             try:
-                raw = _call_ollama(prompt, model, images=images, options=task_options, format_json=False, task=label)
+                raw = _call_ollama(prompt, model, images=images, options=options, format_json=False, task=label)
             except (GenerationCancelled, ModelOutOfMemory):
                 raise
             except Exception as exc:
                 if images:
                     logger.warning("Génération %s avec image échouée : %s — nouvel essai sans image.",
                                    label, _image_retry_reason(exc))
-                    raw = _call_ollama(prompt, model, images=[], options=task_options, format_json=False, task=label)
+                    raw = _call_ollama(prompt, model, images=[], options=options, format_json=False, task=label)
                 else:
                     raise
             logger.info("Génération LLM %s terminée", label)
@@ -1127,6 +1170,7 @@ def _generate_json(
     image_paths: list[str] | None = None,
     options: dict | None = None,
     json_schema: dict | None = None,
+    fallback_context: dict | None = None,
 ) -> dict:
     attempts = retries + 1
     json_format: bool | dict = json_schema or True
@@ -1200,7 +1244,7 @@ def _generate_json(
     logger.debug("Dernière réponse JSON invalide %s: %s", parser, last_raw[:500])
     if isinstance(last_error, ModelOutOfMemory) and label in _OOM_EXPLAINED_TASKS:
         raise last_error
-    fallback = _fallback_json_result(label, prompt, parser, last_raw)
+    fallback = _fallback_json_result(label, prompt, parser, last_raw, fallback_context)
     if fallback is not None:
         reason = f"erreur appel: {last_error}" if last_error else "JSON invalide"
         logger.warning("LLM %s non exploitable après %s tentative(s), repli local (%s).", label, attempts, reason)
@@ -1321,7 +1365,14 @@ Prompt initial utile en cas de réponse tronquée :
 ---"""
 
 
-def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str = "") -> dict | None:
+def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str = "",
+                          context: dict | None = None) -> dict | None:
+    """Réponse de secours quand le modèle n'a rien d'exploitable à donner.
+
+    `context` est ce que l'appelant savait (cf. `fallback_context`). Les deux
+    replis qui nommaient un titre le lisent là ; les quinze autres continuent
+    de réanalyser le prompt, sans modification — réécrire les dix-sept serait
+    un refactor sans rapport avec le bouchon qui fuyait."""
     if last_raw:
         parsed = parser(_closed_json_candidate(last_raw))
         if parsed is not None:
@@ -1343,9 +1394,9 @@ def _fallback_json_result(label: str, prompt: str, parser: Parser, last_raw: str
     if label == "meta_cognition_analysis":
         return _fallback_meta_cognition_analysis_from_prompt(prompt)
     if label == "chapter_summary":
-        return _fallback_chapter_summary_from_prompt(prompt)
+        return _fallback_chapter_summary(context or {}, prompt)
     if label == "curiosity_hook":
-        return _fallback_curiosity_hook_from_prompt(prompt)
+        return _fallback_curiosity_hook(context or {}, prompt)
     # quiz_analysis : pas de repli local. Cours à renforcer et matières faibles
     # sont calculés par `services.quiz` ; sans LLM, le bilan s'affiche sans texte
     # d'analyse plutôt qu'avec une phrase générique qui ne dirait rien de vrai.
@@ -1908,38 +1959,37 @@ def _fallback_meta_cognition_analysis_from_prompt(prompt: str) -> dict | None:
     return parse_meta_cognition_analysis(analysis)
 
 
-def _fallback_chapter_summary_from_prompt(prompt: str) -> dict | None:
-    title = _extract_line_after_prefix(prompt, "Chapitre :") or "Chapitre"
-    items = _extract_prompt_json(prompt, "Éléments lus dans le chapitre")
+def _fallback_chapter_summary(context: dict, prompt: str = "") -> dict | None:
+    """Synthèse de chapitre sans LLM, dans la langue de l'interface."""
+    title = (context.get("chapter_title") or "").strip() or _extract_line_after_prefix(prompt, "Chapitre :")
+    items = context.get("paragraphs_summary") or _extract_prompt_json(prompt, "Éléments lus dans le chapitre")
     overview = _fallback_overview_from_items(items)
     return parse_chapter_summary({
         "chapter_summary": {
-            "title": title.strip() or "Chapitre",
+            "title": title or t("llm.fallback.chapter"),
             "overview": overview,
             "recap_qa": [
-                {
-                    "question": "Quelle est l'idée principale à retenir ?",
-                    "answer": overview,
-                },
-                {
-                    "question": "Quel élément du chapitre dois-tu pouvoir réexpliquer ?",
-                    "answer": "La notion centrale, avec ses conditions ou notations importantes.",
-                },
-                {
-                    "question": "Quel point vérifier avant de continuer ?",
-                    "answer": "Vérifier que les définitions et relations utilisées sont comprises.",
-                },
+                {"question": t("llm.fallback.recap_q1"), "answer": overview},
+                {"question": t("llm.fallback.recap_q2"), "answer": t("llm.fallback.recap_a2")},
+                {"question": t("llm.fallback.recap_q3"), "answer": t("llm.fallback.recap_a3")},
             ],
         }
     })
 
 
-def _fallback_curiosity_hook_from_prompt(prompt: str) -> dict | None:
-    chapter = _extract_line_after_prefix(prompt, "- Chapitre :") or _extract_line_after_prefix(prompt, "Chapitre :")
-    subchapter = _extract_line_after_prefix(prompt, "- Sous-chapitre :")
-    target = subchapter or chapter or "ce passage"
+def _fallback_curiosity_hook(context: dict, prompt: str = "") -> dict | None:
+    """Accroche sans LLM, dans la langue de l'interface.
+
+    Le titre vient du CONTEXTE de l'appelant. La ré-analyse du prompt reste en
+    dernier recours (un appelant qui ne passe rien continue de marcher) — mais
+    elle ne peut plus ramener de mot-bouchon : les prompts n'en écrivent plus
+    (cf. `prompts._context_line`). C'est la panne de la capture : « Entre dans
+    non renseigné en cherchant le lien… »."""
+    chapter = (context.get("chapter_title") or "").strip() or _extract_line_after_prefix(prompt, "- Chapitre :")
+    subchapter = (context.get("subchapter_title") or "").strip() or _extract_line_after_prefix(prompt, "- Sous-chapitre :")
+    target = subchapter or chapter
     return parse_curiosity_hook({
-        "curiosity_hook": f"Entre dans {target} en cherchant le lien entre l'idée principale et un exemple concret.",
+        "curiosity_hook": t("llm.fallback.hook", target=target) if target else t("llm.fallback.hook_untitled"),
         "tone": "concrete",
         "link_with_chapter": chapter or target,
         "estimated_accessibility": 0.7,
@@ -2170,9 +2220,16 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
                       format_json: bool | dict = True, task: str = "") -> str:
     """Implémentation HTTP brute vers Ollama local (appelée par llm_provider).
 
+    `model` vide = le modèle ACTIF (`services/llm_models.active`), résolu ici et
+    non à l'import : c'est le seul endroit où toutes les générations passent, et
+    les 31 valeurs par défaut d'argument qui portaient le nom en dur étaient
+    évaluées une fois pour toutes au chargement du module. Un appelant qui
+    impose un modèle n'est jamais écrasé.
+
     Le timeout socket est dérivé du budget de `task` (`settings.task_timeout_s`) :
     une tâche qui demande 3000 tokens ne peut pas tenir dans le budget d'une qui
     en demande 160."""
+    model = model or _active_model()
     # La langue de l'interface voyage en position système (cf. build_system_prompt) :
     # c'est ce qui empêche un document anglais d'entraîner la réponse en anglais.
     payload_data = {
@@ -2181,7 +2238,9 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         "prompt": prompt,
         "stream": False,
         "think": False,
-        "options": options if options is not None else OLLAMA_OPTIONS,
+        # Options du modèle ACTIF : `task_options` plafonne le num_ctx de la
+        # tâche par ce que ce modèle tient (source unique, cf. settings).
+        "options": options if options is not None else task_options(task),
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     if format_json:
@@ -2234,7 +2293,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
             raise RuntimeError(f"Ollama error: {data['error']}")
         response = data.get("response", "")
         _record_call_metrics(task, data, time.monotonic() - started)
-        throughput.record_call(data)
+        throughput.record_call(data, model)
         _warn_if_context_overflow(task, data, payload_data["options"], bool(images))
     except GenerationCancelled:
         raise
@@ -2245,10 +2304,10 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         if isinstance(exc, TimeoutError) and not capped:
             # Le modèle travaillait, mais plus lentement que le budget ne le
             # supposait : les tentatives suivantes obtiendront plus de temps.
-            throughput.record_timeout()
+            throughput.record_timeout(model)
             logger.warning(
                 "Génération %s expirée après %.0f s — machine plus lente que prévu, budgets étirés (%s)",
-                task or "?", time.monotonic() - started, throughput.snapshot(),
+                task or "?", time.monotonic() - started, throughput.snapshot(model),
             )
         raise RuntimeError(f"Ollama indisponible: {exc}") from exc
     except json.JSONDecodeError as exc:
@@ -2316,7 +2375,7 @@ def generate_lang_correction_async(
     user_attempt: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     from llm.prompts import build_lang_correction_prompt
     from llm.schema_json import parse_lang_correction
@@ -2351,7 +2410,7 @@ def plan_lesson_async(
     phase: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Appel court : propose le THÈME d'une séance (l'arc des 10 slots est construit côté code)."""
     from llm.prompts import build_lang_lesson_plan_prompt
@@ -2367,7 +2426,7 @@ def generate_placement_test_async(
     script: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Génère un test de niveau complet (~15-20 items de difficulté croissante)."""
     from llm.prompts import build_lang_placement_prompt
@@ -2383,7 +2442,7 @@ def evaluate_placement_async(
     summary: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Estime le niveau CEFR d'entrée à partir d'un résumé des réponses au test."""
     from llm.prompts import build_lang_placement_eval_prompt
@@ -2401,7 +2460,7 @@ def generate_session_content_async(
     weak_points,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
     due_cards=None,
 ) -> None:
     """Génère le contenu d'UNE session, scope réduit, dispatché par render_kind.
@@ -2451,7 +2510,7 @@ def generate_session_content_async(
 # ne les attend (services/lang_episodes.py). `params` est construit par le
 # service ; `on_metrics` reçoit les mesures réelles de chaque appel (G19).
 
-def generate_lang_story_bible_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_story_bible_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_story_bible_prompt
     from llm.schema_json import parse_lang_story_bible
     return _run_json_async(
@@ -2461,7 +2520,7 @@ def generate_lang_story_bible_async(params: dict, on_success, on_error, on_metri
     )
 
 
-def generate_lang_story_arc_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_story_arc_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_story_arc_prompt
     from llm.schema_json import parse_lang_story_arc
     return _run_json_async(
@@ -2471,7 +2530,7 @@ def generate_lang_story_arc_async(params: dict, on_success, on_error, on_metrics
     )
 
 
-def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     """`params["task"]` choisit le budget : `lang_episode_text_hanzi` pour le
     mandarin (les jetons doublent presque la sortie)."""
     from llm.prompts import build_lang_episode_text_prompt
@@ -2484,7 +2543,7 @@ def generate_lang_episode_text_async(params: dict, on_success, on_error, on_metr
     )
 
 
-def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     """`params["pron"]` (langues latines) : chaque entrée porte aussi sa
     prononciation, d'où un budget de sortie plus large.
 
@@ -2503,7 +2562,7 @@ def generate_lang_episode_glossary_async(params: dict, on_success, on_error, on_
     )
 
 
-def generate_lang_episode_notes_point_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_episode_notes_point_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_episode_notes_point_prompt
     from llm.schema_json import parse_lang_episode_notes_point
     return _run_json_async(
@@ -2513,7 +2572,7 @@ def generate_lang_episode_notes_point_async(params: dict, on_success, on_error, 
     )
 
 
-def generate_lang_point_lesson_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_point_lesson_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_point_lesson_prompt
     from llm.schema_json import parse_lang_point_lesson
     return _run_json_async(
@@ -2523,7 +2582,7 @@ def generate_lang_point_lesson_async(params: dict, on_success, on_error, on_metr
     )
 
 
-def generate_lang_writing_feedback_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_writing_feedback_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_writing_feedback_prompt
     from llm.schema_json import parse_lang_writing_feedback
     return _run_json_async(
@@ -2533,7 +2592,7 @@ def generate_lang_writing_feedback_async(params: dict, on_success, on_error, on_
     )
 
 
-def generate_lang_episode_hook_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_episode_hook_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_episode_hook_prompt
     from llm.schema_json import parse_lang_episode_hook
     return _run_json_async(
@@ -2543,7 +2602,7 @@ def generate_lang_episode_hook_async(params: dict, on_success, on_error, on_metr
     )
 
 
-def generate_lang_weekly_analysis_async(params: dict, on_success, on_error, on_metrics=None, model: str = OLLAMA_MODEL) -> None:
+def generate_lang_weekly_analysis_async(params: dict, on_success, on_error, on_metrics=None, model: str = "") -> None:
     from llm.prompts import build_lang_weekly_analysis_prompt
     from llm.schema_json import parse_lang_weekly_analysis
     return _run_json_async(
@@ -2574,7 +2633,7 @@ def decide_brainstorm_search_async(
     user_message: str,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
     scope: dict | None = None,
     languages: list[str] | None = None,
 ) -> None:
@@ -2595,7 +2654,7 @@ def answer_brainstorm_async(
     context: dict,
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Réponse conversationnelle (texte libre) avec mémoire de la discussion + sources DB."""
     from llm.prompts import build_brainstorm_answer_prompt
@@ -2615,7 +2674,7 @@ def summarize_brainstorm_async(
     new_messages: list[dict],
     on_success,
     on_error,
-    model: str = OLLAMA_MODEL,
+    model: str = "",
 ) -> None:
     """Met à jour le résumé glissant d'une discussion (mémoire longue compactée)."""
     from llm.prompts import build_brainstorm_summary_prompt

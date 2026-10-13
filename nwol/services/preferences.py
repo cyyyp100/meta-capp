@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from config.settings import LLM_MODEL_AUTO, LLM_MODEL_CHOICES
 from db.app_settings import get_settings, set_setting
 
 logger = logging.getLogger("services.preferences")
@@ -74,6 +75,15 @@ PREFERENCES: dict[str, Pref] = {
     # ce que va plus loin la version Pro : masqué une fois pour toutes quand
     # l'apprenant le ferme. Texte statique : aucun appel, rien de bloqué.
     "lang_pro_note_dismissed": Pref("lang_pro_note_dismissed", "false", kind="bool"),
+    # Le modèle qui fait tourner Clikoda. « auto » = le plus capable de ceux
+    # qu'Ollama a en magasin et que la RAM de la machine peut charger
+    # (services/llm_models). Une énumération, et elle n'est pas écrite ici : le
+    # vocabulaire EST la table des modèles (config/settings.LLM_MODELS), donc
+    # ajouter un modèle suffit — la préférence, le `choices` servi à l'interface
+    # et les budgets temps suivent. Un modèle absent ou trop gros reste
+    # choisissable : c'est un choix, pas un accident, et `/api/llm/status` dit
+    # pourquoi ça ne marchera pas plutôt que de l'interdire.
+    "llm_model": Pref("llm_model", LLM_MODEL_AUTO, choices=LLM_MODEL_CHOICES),
 }
 
 
@@ -122,6 +132,9 @@ def _safe_read() -> dict[str, str]:
 
 
 def _validate(pref: Pref, value: object) -> str:
+    # Minuscules : toute valeur admise doit donc être égale à son `.lower()`.
+    # Un `Qwen3:1.7B` ajouté à la table rendrait la préférence inécrivable (400)
+    # sans que rien d'autre ne le dise — d'où le test dédié (test_preferences).
     if pref.kind == "bool":
         if isinstance(value, bool):
             return "true" if value else "false"

@@ -444,6 +444,42 @@ def quick_reading(monkeypatch):
     return 0.3
 
 
+@pytest.fixture
+def reading_clock(monkeypatch):
+    """Horloge de la mémoire de séance, pilotée par le test.
+
+    Le temps passé sur une page se mesurait en temps réel : le défilement
+    ci-dessous exigeait que chacun des vingt `viewport` soit traité en moins de
+    PAGE_READ_MIN_DWELL_S. Sur un runner Windows chargé — treize minutes pour
+    une suite qui en prend une ici, et un ticker à 0,05 s qui écrit en base —
+    un seul creux suffisait à faire « lire » une page traversée (CI
+    backend-windows, `assert 2 == 1`). Le test avance lui-même l'horloge : le
+    défilement ne prend littéralement aucun temps, la page où l'on reste en
+    prend autant qu'il faut."""
+    import time
+
+    from services import session_memory
+
+    class _Clock:
+        """Figée au temps réel du départ : les mesures qui gardent leur propre
+        horloge (attention passive, politique d'intervention) lisent des durées
+        cohérentes avec celle-ci au lieu d'un écart de plusieurs milliers de
+        secondes."""
+
+        def __init__(self) -> None:
+            self.value = time.monotonic()
+
+        def monotonic(self) -> float:
+            return self.value
+
+        def advance(self, seconds: float) -> None:
+            self.value += seconds
+
+    clock = _Clock()
+    monkeypatch.setattr(session_memory, "time", clock)
+    return clock
+
+
 def _long_session(client, tmp_path, make_pdf) -> tuple[int, int]:
     path = make_pdf(tmp_path / "long.pdf", [f"Page {n}" for n in range(1, 21)])
     doc_id = client.post("/api/library/import", json={"path": path}).json()["id"]
@@ -451,7 +487,8 @@ def _long_session(client, tmp_path, make_pdf) -> tuple[int, int]:
     return doc_id, sid
 
 
-def test_scrolling_fast_reads_nothing_staying_reads_the_page(client, tmp_path, make_pdf, quick_reading):
+def test_scrolling_fast_reads_nothing_staying_reads_the_page(client, tmp_path, make_pdf, quick_reading,
+                                                             reading_clock):
     """Défiler vingt pages pour en trouver une n'en lit qu'une : celle où l'on
     reste. Le compte est écrit en direct (dernier tick), puis à la fermeture."""
     import time
@@ -465,8 +502,14 @@ def test_scrolling_fast_reads_nothing_staying_reads_the_page(client, tmp_path, m
             ws.send_json({"type": "viewport", "page": page, "session_id": sid})
         ws.send_json({"type": "viewport", "page": 7, "session_id": sid})
         _sync(ws)
-        time.sleep(quick_reading * 3)
-        _sync(ws)
+        # Le défilement n'a pris aucun temps : rien n'a pu être lu en passant,
+        # quelle que soit la lenteur de la machine.
+        assert get_session(sid)["pages_read"] == 0
+        reading_clock.advance(quick_reading * 3)  # on reste sur la page 7
+        # Attendre le tick qui écrit : on borne l'attente, pas le runner.
+        deadline = time.monotonic() + 10
+        while get_session(sid)["pages_read"] != 1 and time.monotonic() < deadline:
+            time.sleep(0.02)
         assert get_session(sid)["pages_read"] == 1  # écrit par le tick, socket ouvert
     assert get_session(sid)["pages_read"] == 1
 

@@ -43,6 +43,7 @@ from llm import ollama_client as llm
 from services import lang_arabic as arabic
 from services import lang_episodes as episodes
 from services import lang_mandarin as mandarin
+from services import llm_models
 from services import lang_progress as progress
 from services.lang_inflight import InflightRegistry
 from services.lang_static import lessons_file, localized
@@ -281,10 +282,13 @@ def _write_lesson(language: str, point: dict, explain_lang: str, digest: str, pr
     log: list[dict] = []
     metrics: list[dict] = []
     started = time.monotonic()
+    # Le modèle qui écrit la leçon, résolu une fois : c'est lui que la table
+    # enregistre (colonne `model`), pas celui qui serait réglé plus tard.
+    model = llm_models.active()
     try:
         lesson = episodes._attempts(
             "lesson", llm.generate_lang_point_lesson_async, params,
-            lambda r: validate_lesson(language, r, explain_lang, pausal=pausal), log, metrics,
+            lambda r: validate_lesson(language, r, explain_lang, pausal=pausal), log, metrics, model=model,
         )
         status = "ready"
     except episodes.GenerationFailed:
@@ -292,7 +296,7 @@ def _write_lesson(language: str, point: dict, explain_lang: str, digest: str, pr
     calls = sum(1 for c in log if c.get("task") == "lesson") or LANG_GEN_MAX_ATTEMPTS_PER_CALL
     store.save_point_lesson(
         language, point["id"], explain_lang, status=status, lesson=lesson, point_hash=digest,
-        model=llm.OLLAMA_MODEL, attempts=previous + calls,
+        model=model, attempts=previous + calls,
         generation={"calls": log, "metrics": metrics, "duration_s": round(time.monotonic() - started, 1)},
     )
     logger.info("Leçon %s (%s) : %s en %.0f s", point["id"], explain_lang, status, time.monotonic() - started)

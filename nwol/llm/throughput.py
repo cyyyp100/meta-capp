@@ -16,11 +16,7 @@ from __future__ import annotations
 
 import threading
 
-from config.settings import (
-    OLLAMA_MAX_SLOWDOWN,
-    OLLAMA_PROMPT_TOKENS_PER_S,
-    OLLAMA_TOKENS_PER_S,
-)
+from config.settings import OLLAMA_MAX_SLOWDOWN
 
 # En dessous, la mesure est dominée par les frais fixes de l'appel (et un
 # prompt court est souvent servi par le cache de préfixe d'Ollama).
@@ -35,10 +31,40 @@ _ALPHA_FASTER = 0.2
 # dire de combien : on double le temps accordé, dans la limite du plafond.
 _TIMEOUT_FACTOR = 2.0
 
-_REFERENCE = {"output": OLLAMA_TOKENS_PER_S, "prompt": OLLAMA_PROMPT_TOKENS_PER_S}
-
+# Mesures PAR MODÈLE, et la référence avec elles. Un seul jeu de mesures et une
+# seule référence (celles du modèle de dev) donnaient à `gemma4:31b` un facteur
+# de lenteur de 18/6 = 3 avant même d'avoir rien mesuré : le plafond prévu pour
+# une machine lente était dépensé pour la TAILLE DU MODÈLE, et il ne restait
+# rien pour la machine. Ici, `slowdown()` ne mesure plus que machine-contre-
+# attente-de-ce-modèle ; le coût du modèle est un facteur à part
+# (`settings._model_factors`). Changer de modèle ne jette rien : son entrée
+# cesse d'être consultée, et y revenir réutilise ce qu'on savait de lui. Le dict
+# est borné par le vocabulaire fermé de la préférence (config/settings.LLM_MODELS).
 _LOCK = threading.Lock()
-_rates: dict[str, float | None] = {"output": None, "prompt": None}
+_rates: dict[str, dict[str, float | None]] = {}
+
+
+def _reference(model: str) -> dict[str, float]:
+    """Débit ATTENDU de CE modèle sur la machine de référence. Import tardif :
+    la table des profils est une politique (cf. services/llm_models)."""
+    from services.llm_models import profile
+
+    p = profile(model)
+    return {"output": p.tokens_per_s, "prompt": p.prompt_tokens_per_s}
+
+
+def _resolved(model: str) -> str:
+    """Modèle visé ; vide = le modèle actif."""
+    if model:
+        return model
+    from services.llm_models import active
+
+    return active()
+
+
+def _entry(model: str) -> dict[str, float | None]:
+    """Sous `_LOCK`."""
+    return _rates.setdefault(model, {"output": None, "prompt": None})
 
 
 def _rate(count, duration_ns, minimum: int) -> float | None:
@@ -59,11 +85,7 @@ def _blend(current: float | None, observed: float) -> float:
     return current + alpha * (observed - current)
 
 
-def _floor(key: str) -> float:
-    return _REFERENCE[key] / OLLAMA_MAX_SLOWDOWN
-
-
-def record_call(data: dict) -> None:
+def record_call(data: dict, model: str = "") -> None:
     """Intègre les durées d'une réponse d'Ollama (`eval_*`, `prompt_eval_*`, en ns).
 
     La lecture du prompt n'apprend que des observations plus LENTES que
@@ -76,47 +98,61 @@ def record_call(data: dict) -> None:
         "output": _rate(data.get("eval_count"), data.get("eval_duration"), _MIN_OUTPUT_TOKENS),
         "prompt": _rate(data.get("prompt_eval_count"), data.get("prompt_eval_duration"), _MIN_PROMPT_TOKENS),
     }
+    model = _resolved(model)
+    reference = _reference(model)
     with _LOCK:
+        rates = _entry(model)
         for key, rate in observed.items():
             if not rate:
                 continue
-            current = _rates[key]
+            current = rates[key]
             if key == "prompt" and current is not None and rate > current:
                 continue
-            _rates[key] = max(_floor(key), _blend(current, rate))
+            rates[key] = max(reference[key] / OLLAMA_MAX_SLOWDOWN, _blend(current, rate))
 
 
-def record_timeout() -> None:
+def record_timeout(model: str = "") -> None:
     """Une tentative a expiré : on double le temps accordé aux suivantes.
 
     Sans ce repli, une machine très lente dont la PREMIÈRE génération expire
     n'apprendrait jamais rien (une génération expirée ne renvoie pas de durées)
     et chaque tâche suivante expirerait de la même façon."""
+    model = _resolved(model)
+    reference = _reference(model)
     with _LOCK:
-        for key in _rates:
-            current = _rates[key] if _rates[key] is not None else _REFERENCE[key]
-            _rates[key] = max(_floor(key), current / _TIMEOUT_FACTOR)
+        rates = _entry(model)
+        for key in rates:
+            current = rates[key] if rates[key] is not None else reference[key]
+            rates[key] = max(reference[key] / OLLAMA_MAX_SLOWDOWN, current / _TIMEOUT_FACTOR)
 
 
-def _factor(key: str, rate: float | None) -> float:
+def _factor(reference: float, rate: float | None) -> float:
     if not rate:
         return 1.0
-    return min(OLLAMA_MAX_SLOWDOWN, max(1.0, _REFERENCE[key] / rate))
+    return min(OLLAMA_MAX_SLOWDOWN, max(1.0, reference / rate))
 
 
-def slowdown() -> tuple[float, float]:
-    """(écriture, lecture du prompt) : facteurs appliqués aux budgets, dans [1, OLLAMA_MAX_SLOWDOWN]."""
+def slowdown(model: str = "") -> tuple[float, float]:
+    """(écriture, lecture du prompt) : facteurs appliqués aux budgets, dans
+    [1, OLLAMA_MAX_SLOWDOWN]. Lenteur de la MACHINE face à ce qu'on attend de ce
+    modèle — la taille du modèle, elle, est comptée ailleurs."""
+    model = _resolved(model)
+    reference = _reference(model)
     with _LOCK:
-        output, prompt = _rates["output"], _rates["prompt"]
-    return _factor("output", output), _factor("prompt", prompt)
+        rates = dict(_entry(model))
+    return (_factor(reference["output"], rates["output"]),
+            _factor(reference["prompt"], rates["prompt"]))
 
 
-def snapshot() -> dict:
+def snapshot(model: str = "") -> dict:
     """Diagnostic (journal, Réglages) : débits estimés et facteur appliqué."""
+    model = _resolved(model)
     with _LOCK:
-        output, prompt = _rates["output"], _rates["prompt"]
-    gen_slow, prompt_slow = slowdown()
+        rates = dict(_entry(model))
+    output, prompt = rates["output"], rates["prompt"]
+    gen_slow, prompt_slow = slowdown(model)
     return {
+        "model": model,
         "measured": output is not None or prompt is not None,
         "output_tokens_per_s": round(output, 1) if output else None,
         "prompt_tokens_per_s": round(prompt, 1) if prompt else None,
@@ -124,8 +160,10 @@ def snapshot() -> dict:
     }
 
 
-def reset() -> None:
-    """Oublie toute mesure (tests)."""
+def reset(model: str | None = None) -> None:
+    """Oublie les mesures d'un modèle, ou de tous (tests)."""
     with _LOCK:
-        _rates["output"] = None
-        _rates["prompt"] = None
+        if model is None:
+            _rates.clear()
+        else:
+            _rates.pop(model, None)

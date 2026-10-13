@@ -598,8 +598,11 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 continue
             # Écrit (au plus une fois par minute) dans session_gauges : executor.
             # Le compte des pages lues se lit ici, dans la boucle qui fait vivre
-            # la mémoire de séance.
-            read = len(memory.pages_read(now))
+            # la mémoire de séance. Sans `now` : le temps passé sur une page est
+            # mesuré par la mémoire de séance, qui a son horloge — le ticker lui
+            # en imposait une seconde, pour la même mesure (la fermeture, elle,
+            # appelle déjà `pages_read()` sans argument).
+            read = len(memory.pages_read())
             await loop.run_in_executor(None, passive_attention, elapsed, now, read)
             if state["gated"] or now < state["focus_until"]:
                 # Question bloquante en cours ou mode focus : Clikoda se tait.

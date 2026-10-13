@@ -52,6 +52,36 @@ def test_stored_garbage_falls_back_to_the_default(client):
     assert client.get("/api/preferences").json()["preferences"]["theme"] == "light"
 
 
+def test_the_model_choice_is_the_table_of_models_itself(client):
+    """Le vocabulaire de `llm_model` n'est pas écrit dans `preferences.py` : il
+    EST la table des modèles. Ajouter un modèle suffit — la préférence, le
+    `choices` servi à l'interface et les budgets temps suivent."""
+    from config.settings import LLM_MODELS
+
+    body = client.get("/api/preferences").json()
+    assert body["preferences"]["llm_model"] == "auto"
+    assert body["choices"]["llm_model"] == ["auto", *LLM_MODELS]
+
+
+def test_every_model_name_survives_the_lowercasing_of_a_preference():
+    """`_validate` met les valeurs en minuscules. Un `Qwen3:1.7B` ajouté à la
+    table rendrait la préférence inécrivable (400) sans qu'aucun test ne le
+    dise — l'interface proposerait un modèle qu'on ne peut pas choisir."""
+    from services.preferences import PREFERENCES
+
+    for value in PREFERENCES["llm_model"].choices:
+        assert value == value.lower(), value
+
+
+def test_a_model_retired_from_the_table_falls_back_to_auto(client):
+    """Le modèle stocké a disparu du catalogue (version suivante) : on retombe
+    sur « auto », qui choisira ce qui est là, au lieu de remonter un nom mort."""
+    from db.app_settings import set_setting
+
+    set_setting("llm_model", "gemma3:2b")
+    assert client.get("/api/preferences").json()["preferences"]["llm_model"] == "auto"
+
+
 def test_user_name_round_trip(client):
     assert client.post("/api/preferences/name", json={"name": "  Ada  "}).json()["user"]["name"] == "Ada"
     assert client.get("/api/preferences").json()["user"]["name"] == "Ada"

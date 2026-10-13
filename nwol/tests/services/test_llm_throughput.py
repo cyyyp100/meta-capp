@@ -123,6 +123,40 @@ def test_a_timeout_doubles_the_time_and_stays_bounded():
     assert task_timeout_s(HEAVY_TASK) <= OLLAMA_TIMEOUT_MAX * OLLAMA_MAX_SLOWDOWN
 
 
+# ── Une mesure par modèle ────────────────────────────────────────────────────
+
+
+def test_a_heavier_model_at_its_own_pace_is_not_a_slow_machine():
+    """Tout l'objet de la clé par modèle : `gemma4:31b` écrit 6 tokens/s, c'est
+    sa nature, pas la lenteur de la machine. Avec une référence unique (celle du
+    modèle de dev, 18 tok/s), il consommait d'emblée un facteur 3 — la moitié du
+    plafond prévu pour une machine lente, dépensée pour la TAILLE du modèle."""
+    throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=100.0), "gemma4:31b")
+    assert throughput.slowdown("gemma4:31b") == (1.0, 1.0)
+
+
+def test_two_models_never_mix_their_measures():
+    throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=50.0), "gemma4:e4b")
+    assert throughput.slowdown("gemma4:e4b")[0] > 1.0
+    # Changer de modèle ne jette rien et n'emporte rien : revenir à e4b
+    # réutilisera sa mesure, et e2b part vierge.
+    assert throughput.slowdown("gemma4:e2b") == (1.0, 1.0)
+
+
+def test_a_timeout_only_degrades_its_own_model():
+    throughput.record_timeout("gemma4:e2b")
+    assert throughput.slowdown("gemma4:e2b") == (pytest.approx(2.0), pytest.approx(2.0))
+    assert throughput.slowdown("gemma4:31b") == (1.0, 1.0)
+
+
+def test_an_unknown_model_keeps_the_reference_rates():
+    """Un modèle installé que la table ignore (l'utilisateur a tiré le sien)
+    garde des budgets définis plutôt que pas de budget du tout."""
+    throughput.record_call(_ollama_reply(output_tps=9.0, prompt_tps=100.0), "llama3:8b")
+    assert throughput.slowdown("llama3:8b")[0] == pytest.approx(OLLAMA_TOKENS_PER_S / 9.0)
+    assert throughput.snapshot("llama3:8b")["model"] == "llama3:8b"
+
+
 # ── Bout en bout : ce que renvoie (ou ne renvoie pas) Ollama ─────────────────
 
 
@@ -174,9 +208,9 @@ def fake_ollama(monkeypatch):
 
 def test_every_successful_call_feeds_the_measure(fake_ollama):
     fake_ollama["body"] = _ollama_reply(output_tps=6.0, prompt_tps=50.0)
-    ollama_client._call_ollama_http("prompt", "model", task="question")
-    assert throughput.snapshot()["output_tokens_per_s"] == pytest.approx(6.0)
-    assert throughput.slowdown()[0] > 1.0
+    ollama_client._call_ollama_http("prompt", "gemma4:e4b", task="question")
+    assert throughput.snapshot("gemma4:e4b")["output_tokens_per_s"] == pytest.approx(6.0)
+    assert throughput.slowdown("gemma4:e4b")[0] > 1.0
 
 
 def test_an_expired_call_teaches_that_the_machine_is_slow(fake_ollama, monkeypatch):
@@ -185,8 +219,8 @@ def test_an_expired_call_teaches_that_the_machine_is_slow(fake_ollama, monkeypat
     fake_ollama["delay"] = 2.0
     monkeypatch.setattr(ollama_client, "task_timeout_s", lambda _task: 0.3)
     with pytest.raises(RuntimeError):
-        ollama_client._call_ollama_http("prompt", "model", task="question")
-    assert throughput.slowdown() == (pytest.approx(2.0), pytest.approx(2.0))
+        ollama_client._call_ollama_http("prompt", "gemma4:e4b", task="question")
+    assert throughput.slowdown("gemma4:e4b") == (pytest.approx(2.0), pytest.approx(2.0))
 
 
 def test_an_attempt_never_outlives_its_task(fake_ollama):
@@ -198,11 +232,11 @@ def test_an_attempt_never_outlives_its_task(fake_ollama):
     started = time.monotonic()
     try:
         with pytest.raises(RuntimeError):
-            ollama_client._call_ollama_http("prompt", "model", task="question")
+            ollama_client._call_ollama_http("prompt", "gemma4:e4b", task="question")
     finally:
         ollama_client._TASK_DEADLINE.value = None
     assert time.monotonic() - started < 3.0
-    assert throughput.slowdown() == (1.0, 1.0)
+    assert throughput.slowdown("gemma4:e4b") == (1.0, 1.0)
 
 
 def test_the_budget_is_set_when_the_task_leaves_the_queue():
@@ -221,9 +255,12 @@ def test_the_budget_is_set_when_the_task_leaves_the_queue():
         ollama_client._TASK_DEADLINE.value = None
 
 
-def test_ollama_is_reached_without_the_system_proxy(fake_ollama, monkeypatch):
+def test_ollama_is_reached_without_the_system_proxy(fake_ollama, monkeypatch, reference_model):
     """`urlopen` applique le proxy du système même à 127.0.0.1 : derrière celui
     d'un réseau d'école, Clikoda passait pour éteinte."""
+    # Ce test-ci veut le VRAI aller-retour HTTP, que la fixture neutralise pour
+    # toute la suite (le catalogue dépendrait de la machine qui la lance).
+    monkeypatch.setattr(ollama_client, "list_models", reference_model.list_models)
     fake_ollama["tags"] = {"models": [{"name": "gemma4:e4b"}]}
     for name in ("http_proxy", "HTTP_PROXY"):
         monkeypatch.setenv(name, "http://127.0.0.1:9")  # proxy injoignable
@@ -278,21 +315,33 @@ def test_out_of_memory_keeps_the_silent_fallback_of_background_tasks(fake_ollama
 def test_calibration_is_skipped_when_ollama_is_off(monkeypatch):
     queued: list = []
     monkeypatch.setattr(ollama_client._LLM_QUEUE, "put", queued.append)
-    monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: False)
+    monkeypatch.setattr(ollama_client, "list_models", lambda: None)  # Ollama muet
+    ollama_client.calibrate_throughput()
+    assert queued == []
+
+
+def test_calibration_is_skipped_when_the_model_is_missing(monkeypatch):
+    """Ollama répond, mais le modèle n'a pas été tiré : rien à calibrer — et ce
+    n'est PAS la même panne (le journal et l'écran de réglages le disent
+    autrement : « ollama pull … »)."""
+    queued: list = []
+    monkeypatch.setattr(ollama_client._LLM_QUEUE, "put", queued.append)
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [])
     ollama_client.calibrate_throughput()
     assert queued == []
 
 
 def test_calibration_runs_first_and_measures(monkeypatch):
     queued: list = []
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
     monkeypatch.setattr(ollama_client._LLM_QUEUE, "put", queued.append)
-    monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: True)
-    monkeypatch.setattr(ollama_client, "_model_installed", lambda _model: True)
+    # Ollama répond et liste le modèle : c'est le seul aller-retour dont dépend
+    # le calibrage, et il passe par le catalogue (pas par deux prédicats).
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [{"name": "gemma4:e4b"}])
 
-    def fake_call(_prompt, _model, images=None, options=None, format_json=True, task=""):
-        calls.append(task)
-        throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=50.0))
+    def fake_call(_prompt, model, images=None, options=None, format_json=True, task=""):
+        calls.append((task, model))
+        throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=50.0), model)
         return "ok"
 
     monkeypatch.setattr(ollama_client, "_call_ollama", fake_call)
@@ -302,8 +351,9 @@ def test_calibration_runs_first_and_measures(monkeypatch):
     priority, _seq, run = queued[0]
     assert priority == min(ollama_client._TASK_PRIORITY.values())
     run()
-    assert calls == ["calibration"]
-    assert throughput.slowdown()[0] > 1.0
+    # Le modèle ACTIF, et non un nom figé à l'import.
+    assert calls == [("calibration", "gemma4:e4b")]
+    assert throughput.slowdown("gemma4:e4b")[0] > 1.0
 
 
 def test_each_calibration_starts_differently(monkeypatch):
@@ -312,8 +362,7 @@ def test_each_calibration_starts_differently(monkeypatch):
     queued: list = []
     prompts: list[str] = []
     monkeypatch.setattr(ollama_client._LLM_QUEUE, "put", queued.append)
-    monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: True)
-    monkeypatch.setattr(ollama_client, "_model_installed", lambda _model: True)
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [{"name": "gemma4:e4b"}])
     monkeypatch.setattr(
         ollama_client, "_call_ollama",
         lambda prompt, _model, images=None, options=None, format_json=True, task="": prompts.append(prompt) or "ok",

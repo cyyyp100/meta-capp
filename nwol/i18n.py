@@ -170,6 +170,17 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Erreurs du modèle local (llm/ollama_client) ───────────────────
         "llm.error.memory": "Clikoda ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
         "llm.error.memory_generic": "Clikoda ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
+        # Replis hors-ligne (llm/ollama_client) : ce que l'élève LIT quand Clikoda
+        # est muette. C'était du français en dur au milieu du client HTTP — une
+        # interface en anglais recevait une accroche française.
+        "llm.fallback.chapter": "Chapitre",
+        "llm.fallback.hook": "Entre dans {target} en cherchant le lien entre l'idée principale et un exemple concret.",
+        "llm.fallback.hook_untitled": "Entre dans ce chapitre en cherchant le lien entre l'idée principale et un exemple concret.",
+        "llm.fallback.recap_q1": "Quelle est l'idée principale à retenir ?",
+        "llm.fallback.recap_q2": "Quel élément du chapitre dois-tu pouvoir réexpliquer ?",
+        "llm.fallback.recap_a2": "La notion centrale, avec ses conditions ou notations importantes.",
+        "llm.fallback.recap_q3": "Quel point vérifier avant de continuer ?",
+        "llm.fallback.recap_a3": "Vérifier que les définitions et relations utilisées sont comprises.",
     },
     "en": {
         # ── Home ──────────────────────────────────────────────────────────
@@ -315,6 +326,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.note.component": "Radical {char} ({meaning}) in {word}: you will find it in {examples}.",
         "llm.error.memory": "Clikoda does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
         "llm.error.memory_generic": "Clikoda does not fit in this computer's memory. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
+        "llm.fallback.chapter": "Chapter",
+        "llm.fallback.hook": "Step into {target} looking for the link between the main idea and a concrete example.",
+        "llm.fallback.hook_untitled": "Step into this chapter looking for the link between the main idea and a concrete example.",
+        "llm.fallback.recap_q1": "What is the main idea to remember?",
+        "llm.fallback.recap_q2": "Which element of the chapter should you be able to explain again?",
+        "llm.fallback.recap_a2": "The central notion, with its important conditions or notations.",
+        "llm.fallback.recap_q3": "What should you check before moving on?",
+        "llm.fallback.recap_a3": "Check that the definitions and relations used are understood.",
     },
 }
 

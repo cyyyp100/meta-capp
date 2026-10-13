@@ -56,6 +56,7 @@ from llm import ollama_client as llm
 from services import lang_arabic as arabic
 from services import lang_mandarin as mandarin
 from services import lang_progress as progress
+from services import llm_models
 from services.lang_inflight import InflightRegistry
 from services.lang_latin import de_article, de_gender_conflict_pairs, faux_ami, is_transparent
 from services.lang_static import LANG_ISO, localized, onboarding, onboarding_prompt_params
@@ -204,13 +205,18 @@ def _speaker_names(bible: dict) -> set[str]:
     return names
 
 
-def _llm(fn, params: dict, log: list[dict], metrics: list[dict], task: str):
-    """Un appel LLM bloquant (thread de fond) ; les mesures vont dans `metrics`."""
+def _llm(fn, params: dict, log: list[dict], metrics: list[dict], task: str, model: str = ""):
+    """Un appel LLM bloquant (thread de fond) ; les mesures vont dans `metrics`.
+
+    `model` vide = le modèle actif, résolu au moment de l'appel. Un épisode le
+    résout UNE fois et le passe ici, pour que le modèle inscrit à son journal
+    soit celui qui a écrit l'épisode — un réglage changé en cours de génération
+    rendait sinon l'enregistrement faux."""
     started = time.monotonic()
     try:
         # Tâche de fond : le budget de l'appel ne court qu'une fois parti chez
         # Ollama, pas pendant qu'il attend derrière le lecteur (§ 14, n° 6).
-        return run_llm_sync(lambda ok, err: fn(params, ok, err, on_metrics=metrics.extend),
+        return run_llm_sync(lambda ok, err: fn(params, ok, err, on_metrics=metrics.extend, model=model),
                             queue_wait_s=OLLAMA_BACKGROUND_QUEUE_WAIT_S)
     except Exception as exc:  # panne d'Ollama, timeout, JSON inexploitable
         log.append({"task": task, "ok": False, "errors": [f"appel : {exc}"[:300]],
@@ -219,7 +225,7 @@ def _llm(fn, params: dict, log: list[dict], metrics: list[dict], task: str):
 
 
 def _attempts(task: str, fn, build_params, validate, log: list[dict], metrics: list[dict], *,
-              soft_ok: bool = False):
+              soft_ok: bool = False, model: str = ""):
     """Rejoue un appel jusqu'à LANG_GEN_MAX_ATTEMPTS_PER_CALL ; chaque refus
     alimente le prompt suivant (`rejected`) et le journal (G10).
 
@@ -236,7 +242,7 @@ def _attempts(task: str, fn, build_params, validate, log: list[dict], metrics: l
             if soft_retries >= LANG_SOFT_PROBLEM_RETRIES:
                 break
             soft_retries += 1
-        result = _llm(fn, build_params(rejected), log, metrics, task)
+        result = _llm(fn, build_params(rejected), log, metrics, task, model)
         if result is None:
             continue
         value, errors = validate(result)
@@ -276,7 +282,7 @@ def _excerpt(result) -> str:
 # ── Bible et arc ──────────────────────────────────────────────────────────────
 
 def ensure_bible(profile: dict, language: str, log: list[dict] | None = None,
-                 metrics: list[dict] | None = None) -> dict:
+                 metrics: list[dict] | None = None, model: str = "") -> dict:
     """La bible du feuilleton : générée une fois (centres d'intérêt de
     l'apprenant), bible par défaut de la langue si Clikoda échoue. Ses appels
     rejoignent le journal de l'épisode qui l'a déclenchée."""
@@ -294,7 +300,7 @@ def ensure_bible(profile: dict, language: str, log: list[dict] | None = None,
             "language_label": params["language_label"], "interests": interests,
             "register": params.get("register", ""), "characters_min": 3, "characters_max": 4,
             "explain_lang": lang,
-        }, log, metrics, "bible")
+        }, log, metrics, "bible", model)
         problems = _bible_problems(result, language, lang) if result else []
         if result and not problems:
             log.append({"task": "bible", "ok": True, "errors": []})
@@ -335,7 +341,7 @@ def arc_number(episode_n: int) -> int:
 
 
 def ensure_arc(profile: dict, language: str, arc_n: int, bible: dict, log: list[dict] | None = None,
-               metrics: list[dict] | None = None) -> dict:
+               metrics: list[dict] | None = None, model: str = "") -> dict:
     """Arc narratif de LANG_ARC_LENGTH épisodes ; repli déterministe (un temps
     fort par point à venir) si Clikoda échoue."""
     existing = store.get_arc(profile["id"], arc_n)
@@ -359,7 +365,7 @@ def ensure_arc(profile: dict, language: str, arc_n: int, bible: dict, log: list[
             "setting": bible.get("setting", ""), "comic_springs": bible.get("comic_springs", ""),
             "recent": list(reversed(recent)), "explain_lang": lang,
             "points": [{"title": localized(p, "title", lang), "notice": p["notice"]} for p in upcoming],
-        }, log, metrics, "arc")
+        }, log, metrics, "arc", model)
         if result and len(result.get("beats") or []) > len(best):
             best = result["beats"][: len(upcoming)]
         if result and len(result.get("beats") or []) >= len(upcoming):
@@ -1059,9 +1065,13 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
     metrics: list[dict] = []
     failures = _previous_failures(episode)
     store.update_episode(episode["id"], status="generating")
+    # Le modèle, résolu UNE fois pour tout l'épisode : ses six appels et la ligne
+    # de journal qui les raconte doivent nommer le même, même si le réglage
+    # change pendant la génération.
+    model = llm_models.active()
     try:
-        bible = ensure_bible(profile, language, log, metrics)
-        arc = ensure_arc(profile, language, arc_number(episode_n), bible, log, metrics)
+        bible = ensure_bible(profile, language, log, metrics, model)
+        arc = ensure_arc(profile, language, arc_number(episode_n), bible, log, metrics, model)
         ctx = _context(profile, language, episode, bible)
         point = store.get_point(language, episode["program_point_id"]) if episode["program_point_id"] else None
         lang = ctx["explain_lang"]
@@ -1089,11 +1099,11 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
             }
 
         text = _attempts("text", llm.generate_lang_episode_text_async, text_params,
-                         lambda r: validate_text(language, r, ctx), log, metrics, soft_ok=True)
+                         lambda r: validate_text(language, r, ctx), log, metrics, soft_ok=True, model=model)
         lines = build_tokens(language, text["lines"])
         asked, known_entries = glossary_request(language, lines, ctx)
 
-        asked_entries = _glossary_in_chunks(language, lines, ctx, asked, pp, log, metrics)
+        asked_entries = _glossary_in_chunks(language, lines, ctx, asked, pp, log, metrics, model)
         glossary = _order_glossary(language, lines, asked_entries + known_entries)
 
         def notes_params(rejected: str) -> dict:
@@ -1110,7 +1120,7 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
 
         notes_point = _attempts(
             "notes_point", llm.generate_lang_episode_notes_point_async, notes_params,
-            lambda r: validate_notes_point(language, r, lines, lang), log, metrics,
+            lambda r: validate_notes_point(language, r, lines, lang), log, metrics, model=model,
         )
         glossary = enrich_glossary(language, glossary, ctx["lexicon"], lang)
         link_glossary(language, lines, glossary)
@@ -1121,7 +1131,7 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
             lines=lines, glossary=glossary, notes=notes_point["notes"], point=notes_point["point"], aids=aids,
             status="ready", ready_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             generation={"calls": log, "metrics": metrics, "duration_s": round(time.monotonic() - started, 1),
-                        "new_words": new_count, "beat": beat, "model": llm.OLLAMA_MODEL, "explain_lang": lang,
+                        "new_words": new_count, "beat": beat, "model": model, "explain_lang": lang,
                         **_journal_extras(log, text), "failures": failures},
         )
         logger.info("Épisode %s prêt (profil %s, %.0f s)", episode_n, profile_id, time.monotonic() - started)
@@ -1130,7 +1140,7 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
         store.update_episode(
             episode["id"], status="failed",
             generation={"calls": log, "metrics": metrics, "error": str(exc)[:300],
-                        "duration_s": round(time.monotonic() - started, 1), "model": llm.OLLAMA_MODEL,
+                        "duration_s": round(time.monotonic() - started, 1), "model": model,
                         **_journal_extras(log, None), "failures": failures + 1},
         )
         return False
@@ -1170,7 +1180,7 @@ def _journal_extras(log: list[dict], text: dict | None) -> dict:
 
 
 def _glossary_in_chunks(language: str, lines: list[dict], ctx: dict, asked: list[str], pp: dict,
-                        log: list[dict], metrics: list[dict]) -> list[dict]:
+                        log: list[dict], metrics: list[dict], model: str = "") -> list[dict]:
     """Glossaire cumulatif : par lots de LANG_GLOSSARY_CHUNK mots ; chaque
     tentative ne redemande que les mots du lot encore sans entrée VALIDE. Une
     entrée refusée (nom allemand sans genre, ou au genre contredit par le
@@ -1189,7 +1199,7 @@ def _glossary_in_chunks(language: str, lines: list[dict], ctx: dict, asked: list
                 "language_label": pp["language_label"], "words": remaining, "lines": text_lines,
                 "form_rule": pp.get("form_rule", ""), "rejected": rejected, "explain_lang": lang,
                 "pron": pron_from_clikoda(language), "register": pp.get("register", ""),
-            }, log, metrics, "glossary")
+            }, log, metrics, "glossary", model)
             if result is None:
                 continue
             check = check_glossary(language, result, lines, ctx, remaining)

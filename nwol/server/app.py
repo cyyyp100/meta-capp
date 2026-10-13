@@ -24,6 +24,7 @@ from server.routers import (
     highlights,
     lang,
     library,
+    llm,
     onboarding,
     preferences,
     progress,
@@ -58,12 +59,14 @@ async def _lifespan(_app: FastAPI):
     from services.lang_runs import on_startup as lang_on_startup
 
     lang_on_startup()
-    # Débit réel de Clikoda sur cette machine : dimensionne les budgets temps de
-    # toutes les générations (llm/throughput). En thread : deux requêtes HTTP
-    # vers Ollama, qui peut être éteint, n'ont rien à faire dans le démarrage.
-    from llm.ollama_client import calibrate_throughput
+    # Quel modèle fait tourner Clikoda (préférence + ce qu'Ollama a en magasin +
+    # la RAM de la machine), journalisé, puis son débit RÉEL sur cette machine —
+    # c'est lui qui dimensionne les budgets temps de toutes les générations
+    # (llm/throughput). En thread : une requête HTTP vers Ollama, qui peut être
+    # éteint, n'a rien à faire dans le chemin de démarrage.
+    from services.llm_models import refresh_active
 
-    threading.Thread(target=calibrate_throughput, daemon=True, name="llm-calibration").start()
+    threading.Thread(target=refresh_active, daemon=True, name="llm-calibration").start()
     # Empreinte des documents importés avant qu'elle existe : c'est elle qui
     # les reconnaîtra s'ils sont déplacés (services/relink). En thread : relire
     # chaque fichier n'a rien à faire dans le démarrage. Importée ICI et non en
@@ -170,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(progress.router, prefix="/api")
     app.include_router(preferences.router, prefix="/api")
     app.include_router(lang.router, prefix="/api")
+    app.include_router(llm.router, prefix="/api")
     app.include_router(brainstorming.router, prefix="/api")
     app.include_router(data.router, prefix="/api")
     app.include_router(updates.router, prefix="/api")

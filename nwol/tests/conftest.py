@@ -38,14 +38,37 @@ def no_real_generation(monkeypatch):
     main, et `test_llm_cancel.py` appelle `_call_ollama_http` directement contre
     son propre faux serveur."""
     from llm import ollama_client
-    from services import llm_provider, orchestrator
+    from services import llm_provider
 
     def _offline(*_args, **_kwargs):
         raise RuntimeError("Ollama indisponible (tests)")
 
     monkeypatch.setattr(llm_provider, "_ollama_generate", _offline)
     monkeypatch.setattr(ollama_client, "is_ollama_available", lambda: False)
-    monkeypatch.setattr(orchestrator, "is_ollama_available", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def reference_model(monkeypatch):
+    """Le modèle actif est une PRÉFÉRENCE en base et une liste demandée à Ollama
+    (`/api/tags`) : les deux dépendent de la machine qui lance la suite — celle
+    de dev a trois `gemma4` installés, la CI aucun, et les budgets temps
+    dépendent du modèle. On fige donc les deux : catalogue injoignable et réglage
+    « auto », soit le modèle de référence (`config/settings.OLLAMA_MODEL`), dont
+    les budgets sont ceux d'avant la table des modèles. Un test qui veut un autre
+    modèle remplace `list_models` et `preference` (cf. tests/server/test_llm_status.py) ;
+    celui qui veut le vrai chemin les reçoit par cette fixture (`.list_models`,
+    `.preference`)."""
+    from types import SimpleNamespace
+
+    from llm import ollama_client
+    from services import llm_models
+
+    real = SimpleNamespace(list_models=ollama_client.list_models, preference=llm_models.preference)
+    monkeypatch.setattr(ollama_client, "list_models", lambda: None)
+    monkeypatch.setattr(llm_models, "preference", lambda: llm_models.LLM_MODEL_AUTO)
+    llm_models.invalidate()
+    yield real
+    llm_models.invalidate()
 
 
 @pytest.fixture(autouse=True)
