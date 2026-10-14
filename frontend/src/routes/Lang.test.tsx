@@ -11,8 +11,8 @@ import type { FeuilletonStatus } from "../api/feuilleton";
 import { Lang } from "./Lang";
 
 const preferences: PreferencesPayload = {
-  preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: "true" , llm_model: "auto"},
-  choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [], llm_model: ["auto"] },
+  preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: "true" , llm_model: "auto", llm_economy: "auto", llm_tiny_note_dismissed: "false"},
+  choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [], llm_model: ["auto"], llm_economy: ["auto", "on", "off"], llm_tiny_note_dismissed: [] },
   lang: "fr",
   supported_langs: ["fr", "en"],
   user: { id: 1, name: "Élève" },
@@ -24,7 +24,7 @@ function status(language: string): FeuilletonStatus {
     episode_n: 2, next_episode: 3, next_status: "ready", generating: false, bilan_due: false, relecture_due: false,
     sas: true, level: "A1", program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3,
     episodes_played: 2, open_run: null, has_placement: true, model: "gemma4:e4b", generation_failures: 0,
-    pro_hints: [], unseen_writing: null,
+    pro_hints: [], background_suspended: false, unseen_writing: null,
   };
 }
 

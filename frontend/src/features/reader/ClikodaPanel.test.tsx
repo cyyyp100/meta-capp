@@ -135,6 +135,7 @@ describe("ClikodaPanel", () => {
       ram_gb: 8, fits: true, reason: "no_model", requested_missing: null,
       pull_command: "ollama pull gemma4:e4b",
       throughput: { model: "gemma4:e4b", measured: false, output_tokens_per_s: null, prompt_tokens_per_s: null, slowdown: 1 },
+      economy: false, economy_preference: "auto", economy_reason: null,
     });
     await renderOpenPanel();
 
@@ -524,5 +525,45 @@ describe("ClikodaPanel", () => {
       const start = (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m)).find((m) => m.type === "start_reading");
       expect(start).toEqual({ type: "start_reading", session_id: 12, warmup });
     });
+  });
+  // Sur la machine de 4 Go, une réponse se chiffre en minutes : sans un mot, un
+  // panneau qui « réfléchit » trois minutes ressemble à un panneau figé.
+  it("annonce l'attente que le serveur chiffre, et laisse annuler", async () => {
+    const cancel = vi.spyOn(api, "cancelGenerations").mockResolvedValue({ cancelled: true });
+    await renderOpenPanel();
+    await userEvent.type(chatBox(), "Pourquoi le moment aide-t-il ?");
+    await userEvent.click(screen.getByRole("button", { name: /envoyer|send/i }));
+    // Machine rapide : rien n'est annoncé.
+    await act(async () => FakeWebSocket.last?.emit({ type: "loading", estimate_s: null }));
+    expect(screen.queryByRole("button", { name: /^(annuler|cancel)$/i })).toBeNull();
+    // Le budget republié au départ de la tâche : 3 min 20 → « 4 min au plus ».
+    await act(async () => FakeWebSocket.last?.emit({ type: "loading", estimate_s: 200 }));
+    expect(screen.getByText(/4 min/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^(annuler|cancel)$/i }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    // La main est rendue tout de suite, sans attendre la réponse du serveur.
+    expect(screen.queryByText(/réfléchit|thinking/i)).toBeNull();
+    expect(screen.getByText(/demande annulée|request cancelled/i)).toBeInTheDocument();
+    expect(chatBox()).not.toBeDisabled();
+
+    // L'annulation revient du serveur : rien à redire, et surtout pas « ⚠️ ».
+    await act(async () =>
+      FakeWebSocket.last?.emit({ type: "error", message: "Demande annulée.", cancelled: true }),
+    );
+    expect(screen.getAllByText(/demande annulée|request cancelled/i)).toHaveLength(1);
+    expect(screen.queryByText(/⚠️/)).toBeNull();
+  });
+
+  it("une annulation venue d'ailleurs se dit sans alarme", async () => {
+    await renderOpenPanel();
+    await userEvent.type(chatBox(), "Une question");
+    await userEvent.click(screen.getByRole("button", { name: /envoyer|send/i }));
+    await act(async () =>
+      FakeWebSocket.last?.emit({ type: "error", message: "Demande annulée.", cancelled: true }),
+    );
+    expect(screen.getByText("Demande annulée.")).toBeInTheDocument();
+    expect(screen.queryByText(/⚠️/)).toBeNull();
+    expect(screen.queryByText(/réfléchit|thinking/i)).toBeNull();
   });
 });

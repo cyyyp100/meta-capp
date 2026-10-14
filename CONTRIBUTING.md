@@ -55,7 +55,7 @@ cd frontend && npm install && cd ..
 
 ollama pull gemma4:e4b      # optional: the app degrades gracefully without it
                             # (any model of `config/settings.py:LLM_MODELS` works;
-                            #  `gemma4:e2b` is the lighter one)
+                            #  `qwen3:1.7b` is the tiny one, for 4 GB machines)
 
 python main.py              # native app window
 ```

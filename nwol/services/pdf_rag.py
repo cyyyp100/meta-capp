@@ -56,20 +56,20 @@ from config.settings import (
     ASSISTANT_RAG_EMBED_BATCH,
     ASSISTANT_RAG_EMBED_RETRY_S,
     ASSISTANT_RAG_HISTORY_WEIGHT,
-    ASSISTANT_RAG_MAX_CHARS,
     ASSISTANT_RAG_MIN_SIMILARITY,
     ASSISTANT_RAG_PAGE_COVERAGE,
     ASSISTANT_RAG_RRF_K,
-    ASSISTANT_RAG_SEARCH_TOP_K,
     ASSISTANT_RAG_SYNONYM_WEIGHT,
     ASSISTANT_RAG_TABLE_CHUNK_CHARS,
     ASSISTANT_RAG_TOP_K,
     OLLAMA_EMBED_MODEL,
+    prompt_limits,
 )
 from db import embeddings as embeddings_db
 from db.documents import get_document
 from llm.ollama_client import embed_texts
 from pdf_viewer.pdf_document import PdfDocument
+from services import llm_models
 from services.brainstorm_search import _fold, extract_terms
 from services.rag_lexicon import synonyms, translations
 
@@ -545,8 +545,20 @@ def warm_index(doc_id: int) -> None:
     question ne paie ni l'extraction du texte ni l'embedding des passages.
     Silencieux ; à appeler hors de la boucle asyncio (executor)."""
     index = _build_index(doc_id)
-    if index and index["chunks"]:
+    if index and index["chunks"] and _semantic_wanted():
         _ensure_vectors(doc_id, index)
+
+
+def _semantic_wanted() -> bool:
+    """La couche sémantique doit-elle tourner ? Pas en mode économe : le modèle
+    d'embeddings se chargerait en mémoire À CÔTÉ de celui de Clikoda (0,6 Go
+    de plus sur une machine de 4), et l'indexation d'un livre occuperait le
+    processeur pendant que l'étudiant attend sa réponse. La recherche reste
+    lexicale (BM25), la dégradation déjà prévue quand le modèle manque.
+
+    La porte est ici, chez les deux appelants, et non dans `_embed` : celui-ci
+    reste la couche de transport, qui ne sait que réussir ou échouer."""
+    return not llm_models.economy()
 
 
 # ── Couche sémantique ────────────────────────────────────────────────────────
@@ -906,14 +918,19 @@ def retrieve(
     question: str,
     current_page: int,
     top_k: int | None = None,
-    max_chars: int = ASSISTANT_RAG_MAX_CHARS,
+    max_chars: int | None = None,
     *,
     recent_questions: list[str] | None = None,
 ) -> list[dict]:
     """Passages du document pertinents pour la question → [{"page", "text", "table"}].
 
     Renvoie [] si aucun mot-clé exploitable ou aucun match (prompt inchangé).
+    Nombre et longueur des passages : ceux du contexte de travail
+    (`settings.prompt_limits`) — moins nombreux et plus courts en contexte
+    compact, pour que la réponse tienne dans 4096 tokens.
     """
+    lim = prompt_limits()
+    max_chars = lim.rag_chars if max_chars is None else max_chars
     index = _build_index(doc_id)
     if not index or not index["chunks"]:
         return []
@@ -934,7 +951,7 @@ def retrieve(
             "table": bool(chunk.get("table")),
             "text": _truncate(
                 _render_table(chunk["text"]) if chunk.get("table") else chunk["text"],
-                max(max_chars, ASSISTANT_RAG_TABLE_CHUNK_CHARS) if chunk.get("table") else max_chars,
+                max(max_chars, lim.rag_table_chars) if chunk.get("table") else max_chars,
                 keep_lines=bool(chunk.get("table")),
             ),
         }
@@ -957,7 +974,8 @@ def _ranked_candidates(
     # La page visible d'abord : la recherche ne s'élargit que si l'étudiant le
     # demande ou si la page ne parle pas du sujet de la question.
     wide = search or page_coverage(chunks, resolved, current_page) < ASSISTANT_RAG_PAGE_COVERAGE
-    depth = ASSISTANT_RAG_SEARCH_TOP_K if wide else ASSISTANT_RAG_TOP_K
+    lim = prompt_limits()
+    depth = lim.rag_search_top_k if wide else lim.rag_top_k
 
     lexical = _lexical_order(chunks, expand_terms(terms, resolved, chunks), current_page) if resolved else []
     # Un suivi (« cherche dans tout l'article ») ne dit pas de quoi il parle :
@@ -965,6 +983,8 @@ def _ranked_candidates(
     query = question
     if (search or len(terms) < 2) and recent_questions:
         query = f"{recent_questions[-1]} {question}"
-    _ensure_vectors(doc_id, index, sync_max=_EMBED_SYNC_MAX_CHUNKS)
-    semantic = _semantic_order(index, query, current_page)
+    semantic = []
+    if _semantic_wanted():
+        _ensure_vectors(doc_id, index, sync_max=_EMBED_SYNC_MAX_CHUNKS)
+        semantic = _semantic_order(index, query, current_page)
     return fuse_rankings(lexical, semantic), depth

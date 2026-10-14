@@ -1423,6 +1423,9 @@ def language_status(language: str) -> dict:
         # vraiment et non le repli de dernier recours.
         "model": llm_models.active(), "generation_failures": failures,
         "pro_hints": pro_hints(language, order, failures),
+        # Mode économe : Clikoda n'écrit pas d'épisode sur cette machine. Dit à
+        # l'accueil, qui sinon montrerait « pas encore prêt » sans fin.
+        "background_suspended": episodes.background_suspended(),
         # Une correction d'expression écrite arrivée après sa séance.
         "unseen_writing": writing.unseen_for(profile["id"]),
         "onboarding_done": bool(profile.get("onboarding_done")),
@@ -1554,12 +1557,17 @@ def generation_failures(upcoming: dict | None) -> int:
 def pro_hints(language: str, order: int, failures: int) -> list[str]:
     """Où l'accueil rappelle les limites du modèle local (une ligne statique,
     aucun appel, rien de bloqué) : après LANG_GEN_FAILURES_PRO_HINT échecs
-    d'écriture d'un même épisode, et en fin de programme."""
+    d'écriture d'un même épisode, en fin de programme, et quand Clikoda tourne
+    sur le palier minuscule — c'est alors l'encart lui-même qui change de texte
+    (`tiny_model`). La condition vit ICI : jamais de nom de modèle comparé dans
+    un composant."""
     hints = []
     if failures >= LANG_GEN_FAILURES_PRO_HINT:
         hints.append("generation")
     if progress.program_ended(language, order):
         hints.append("program_end")
+    if llm_models.tier(llm_models.active()) == "tiny":
+        hints.append("tiny_model")
     return hints
 
 

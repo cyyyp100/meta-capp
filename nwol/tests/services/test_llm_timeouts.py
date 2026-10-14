@@ -102,7 +102,7 @@ def test_the_context_of_a_task_is_capped_by_what_the_model_holds():
     etroit = ModelProfile(
         name="test:etroit", rank=0, tier="tiny", download_gb=1.0, min_ram_gb=4.0,
         tokens_per_s=20.0, prompt_tokens_per_s=300.0, load_overhead_s=10.0,
-        max_num_ctx=2048, supports_images=False,
+        max_num_ctx=2048, supports_images=False, tokenizer="qwen",
     )
     assert task_options("assistant_answer")["num_ctx"] == 8192
     with pytest.MonkeyPatch.context() as mp:

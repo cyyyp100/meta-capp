@@ -178,6 +178,12 @@ def maybe_trigger_weekly(profile: dict, language: str, today: str | None = None)
         return False
     if not store.last_counted_study_date(profile["id"], before=week):
         return False  # aucune semaine écoulée à analyser
+    from llm.ollama_client import background_suspended
+
+    if background_suspended("lang_weekly_analysis"):
+        # Mode économe : pas d'analyse, et pas de ligne « échouée » non plus —
+        # la première séance de la semaine suivante la redemandera.
+        return False
     aggregates = weekly_aggregates(profile["id"], week)
     store.save_weekly(profile["id"], week, aggregates=aggregates, analysis=None, status="pending")
 

@@ -1358,3 +1358,72 @@ def test_the_bilan_and_the_library_reuse_the_lesson(client, fake, clock):
     library = client.get(f"/api/lang/{LANG}/library").json()
     view = client.get(f"/api/lang/episode/{library[0]['id']}").json()
     assert view["lesson"]["rule"] and view["lesson"]["examples"]
+
+
+# ── Mode économe : rien ne s'écrit en fond, et rien n'est compté comme un échec ─
+
+def _economy_on(monkeypatch):
+    from services import llm_models
+
+    monkeypatch.setattr(llm_models, "economy_preference", lambda: "on")
+
+
+def test_economy_writes_no_episode_and_counts_no_failure(client, fake, clock, ollama_up, monkeypatch):
+    """Sur la machine visée, écrire un épisode occupe le processeur près d'une
+    heure. En mode économe, l'épisode suivant attend — sans échec compté, donc
+    sans approcher la mention Pro — et l'accueil dit pourquoi."""
+    from services import lang_episodes, llm_models
+
+    _onboard(client)
+    _economy_on(monkeypatch)
+    before = len(fake.CALLS)
+    _play(client, _start(client))  # joue l'épisode 1 : l'épisode 2 serait réservé et écrit
+    episode = _episode(2)
+    assert episode["status"] == "queued"
+    assert lang_episodes._previous_failures(episode) == 0
+    assert not [c for c in fake.CALLS[before:] if c in ("text", "glossary", "notes")]
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["background_suspended"] is True and status["next_status"] == "queued"
+    assert status["generation_failures"] == 0 and "generation" not in status["pro_hints"]
+    assert lang_episodes.relaunch_pending() == []
+    assert client.post(f"/api/lang/{LANG}/next/ensure").json()["relaunched"] == []
+
+    # Le mode s'arrête : l'épisode repart, comme n'importe quel épisode en attente.
+    monkeypatch.setattr(llm_models, "economy_preference", lambda: "off")
+    assert client.get(f"/api/lang/{LANG}/status").json()["background_suspended"] is False
+    assert client.post(f"/api/lang/{LANG}/next/ensure").json()["relaunched"] == [episode["id"]]
+    assert _episode(2)["status"] == "ready"
+
+
+def test_economy_switched_on_mid_episode_puts_it_back_in_the_queue(client, fake, clock, monkeypatch):
+    """La file refuse la tâche suivante (`SUSPENDED_MESSAGE`) : l'épisode en
+    cours retourne en attente, son compte d'échecs intact, et la bible par
+    défaut ne remplace pas pour toujours celle que Clikoda écrira."""
+    from llm import ollama_client
+
+    _onboard(client)
+    monkeypatch.setattr(ollama_client, "generate_lang_episode_text_async",
+                        lambda params, ok, err, on_metrics=None, model=None: err(ollama_client.SUSPENDED_MESSAGE))
+    _play(client, _start(client))
+    episode = _episode(2)
+    assert episode["status"] == "queued"
+    assert (episode.get("generation") or {}).get("failures", 0) == 0
+
+
+def test_the_tiny_tier_gets_its_own_note_on_the_language_home(client, monkeypatch):
+    """La CONDITION vit dans le service (`pro_hints`) : le composant n'a jamais à
+    comparer un nom de modèle."""
+    from llm import ollama_client
+    from services import llm_models
+
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [{"name": "qwen3:1.7b", "size": 1_400_000_000}])
+    monkeypatch.setattr(llm_models, "host_ram_gb", lambda: 4.0)
+    llm_models.invalidate()
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["model"] == "qwen3:1.7b"
+    assert "tiny_model" in status["pro_hints"]
+    assert status["background_suspended"] is True  # « auto » : palier minuscule → mode économe
+    # Le mode économe forcé coupé : l'écriture repart, l'encart reste.
+    monkeypatch.setattr(llm_models, "economy_preference", lambda: "off")
+    status = client.get(f"/api/lang/{LANG}/status").json()
+    assert status["background_suspended"] is False and "tiny_model" in status["pro_hints"]

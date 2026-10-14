@@ -30,6 +30,7 @@ from config.settings import (
     ASSISTANT_REVISIT_TRIGGER,
     ASSISTANT_WARMUP_S,
 )
+from services import llm_models
 from services.session_memory import SessionMemory
 
 logger = logging.getLogger("services.intervention")
@@ -150,6 +151,14 @@ class AssistantInterventionPolicy:
     def tick(self) -> None:
         mode = self._get_mode()
         if mode == "discret" or self._busy or self._paused or self._pending:
+            return
+        if llm_models.economy():
+            # Mode économe : Clikoda ne parle que quand on lui parle. Une
+            # décision d'intervenir coûte un appel complet (~2 000 tokens lus)
+            # qui, sur la machine visée, occupe l'unique worker plusieurs
+            # minutes — la question que l'étudiant poserait entre-temps
+            # attendrait derrière. Le mode du lecteur, lui, ne change pas : il
+            # reprend ses droits dès que le mode économe s'arrête.
             return
         if self._interventions_count >= ASSISTANT_MAX_INTERVENTIONS:
             return

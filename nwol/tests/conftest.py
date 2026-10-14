@@ -57,15 +57,24 @@ def reference_model(monkeypatch):
     les budgets sont ceux d'avant la table des modèles. Un test qui veut un autre
     modèle remplace `list_models` et `preference` (cf. tests/server/test_llm_status.py) ;
     celui qui veut le vrai chemin les reçoit par cette fixture (`.list_models`,
-    `.preference`)."""
+    `.preference`, `.host_ram_gb`, `.economy_preference`).
+
+    Le mode économe dépend, lui, de la RAM de la machine et d'un second réglage :
+    un runner CI de 7 Go (macOS) l'activerait en « auto » et changerait tous les
+    budgets. RAM figée à « inconnue » (qui n'active rien) et réglage « auto »."""
     from types import SimpleNamespace
 
     from llm import ollama_client
     from services import llm_models
 
-    real = SimpleNamespace(list_models=ollama_client.list_models, preference=llm_models.preference)
+    real = SimpleNamespace(
+        list_models=ollama_client.list_models, preference=llm_models.preference,
+        host_ram_gb=llm_models.host_ram_gb, economy_preference=llm_models.economy_preference,
+    )
     monkeypatch.setattr(ollama_client, "list_models", lambda: None)
     monkeypatch.setattr(llm_models, "preference", lambda: llm_models.LLM_MODEL_AUTO)
+    monkeypatch.setattr(llm_models, "host_ram_gb", lambda: None)
+    monkeypatch.setattr(llm_models, "economy_preference", lambda: llm_models.LLM_ECONOMY_AUTO)
     llm_models.invalidate()
     yield real
     llm_models.invalidate()

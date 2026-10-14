@@ -233,11 +233,14 @@ def ensure_point_lesson(language: str, point_id: str | None, explain_lang: str) 
     Ne lève JAMAIS : appelée après qu'un épisode est prêt, son échec ne doit
     pas le toucher. Renvoie ce qui s'est passé : « file » ou « db » (déjà là),
     « ready », « failed », « gave_up » (trop d'échecs pour ce point),
-    « running » (déjà en cours ailleurs) ou « none » (pas de point)."""
+    « running » (déjà en cours ailleurs), « suspended » (mode économe : rien
+    n'est tenté, rien n'est compté) ou « none » (pas de point)."""
     key = (language, point_id, explain_lang)
     try:
         if not point_id:
             return "none"
+        if llm.background_suspended("lang_point_lesson"):
+            return "suspended"  # mode économe : la leçon s'écrira plus tard, sans échec compté
         found = lesson_for(language, point_id, explain_lang)
         if found:
             return found["source"]

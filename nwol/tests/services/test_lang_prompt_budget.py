@@ -5,38 +5,67 @@
 # § 3.6). Chaque prompt est construit ici sur son cas MAXIMAL (dernier palier,
 # bible complète, trois résumés longs, refus précédent, écriture la plus
 # coûteuse) et comparé au budget de sa tâche avec une estimation pessimiste.
+#
+# PAR MACHINE depuis la table des modèles (fixture `machine`) : un profil par
+# couple (tokenizer, plafond de contexte) de config/settings.LLM_MODELS, en mode
+# normal et en mode économe. Ce sont les options EFFECTIVES qui comptent
+# (`settings.task_options` : plafond du modèle, contexte unique du mode
+# économe) et le tokenizer de CE modèle qui compte les tokens — qwen3 paie
+# l'arabe vocalisé un tiers plus cher que Gemma, dans une fenêtre de 4096 au
+# lieu de 5120. Un budget vérifié pour le seul modèle de référence débordait
+# en silence sur le palier minuscule. En mode économe, les tâches de fond ne
+# partent pas (OLLAMA_BACKGROUND_TASKS) : elles ne sont pas vérifiées là.
+from types import SimpleNamespace
+
 import pytest
 
+from config import settings
 from config.settings import (
     LANG_EXPLANATION_MAX_CHARS,
-    LANG_GLOSSARY_MAX_ENTRIES,
+    LANG_GLOSSARY_CHUNK,
     LANG_KNOWN_WORDS_PROMPT_TOKENS,
-    LANG_MAX_UNITS_PER_EPISODE,
     LANG_MAX_UNITS_PER_LINE,
     LANG_NOTE_MAX_CHARS,
     LANG_SUMMARY_MAX_CHARS,
-    OLLAMA_TASK_OPTIONS,
+    LLM_MODELS,
+    OLLAMA_BACKGROUND_TASKS,
+    max_units_per_episode,
+    task_options,
 )
 from llm import prompts
 from llm.prompts import estimate_prompt_tokens
 
-# Le prompt système (build_system_prompt) voyage avec chaque génération, dans
-# la langue d'explication du profil (§ 14, n° 14) : les deux sont vérifiées.
-SYSTEM = {lang: estimate_prompt_tokens(prompts.build_system_prompt(lang)) for lang in ("fr", "en")}
 LANGS = ["fr", "en"]
+
+# Un profil par (tokenizer, plafond de contexte) : deux modèles qui partagent
+# les deux ont exactement les mêmes budgets.
+_PROFILES: dict = {}
+for _profile in LLM_MODELS.values():
+    _PROFILES.setdefault((_profile.tokenizer, _profile.max_num_ctx), _profile)
+_PROFILES = list(_PROFILES.values())
+
+
+@pytest.fixture(params=[(p, eco) for p in _PROFILES for eco in (False, True)],
+                ids=lambda param: f"{param[0].name}-{'econome' if param[1] else 'normal'}")
+def machine(request, monkeypatch):
+    profile, economy = request.param
+    monkeypatch.setattr(settings, "_active_profile", lambda: profile)
+    monkeypatch.setattr(settings, "_economy", lambda: economy)
+    return SimpleNamespace(profile=profile, economy=economy, tokenizer=profile.tokenizer)
+
 
 LONG_FR = "Une phrase française assez longue pour occuper la place maximale autorisée, " * 4
 CHARACTERS = [
     {"name": f"Personnage{i}", "role": LONG_FR[:80], "trait": LONG_FR[:120]} for i in range(4)
 ]
 MAX_LINES = 24
-# Épisode le plus long admis par le validateur (LANG_MAX_UNITS_PER_EPISODE, par
-# écriture), réparti sur le nombre de répliques maximal, avec des longueurs de
-# mots réalistes : 5 lettres en espagnol, 9 caractères pour un mot arabe
-# vocalisé ; la traduction française compte un peu plus de mots que l'original
-# (1,5 par caractère chinois).
-def _line(family: str) -> tuple[str, str]:
-    units = min(LANG_MAX_UNITS_PER_LINE, LANG_MAX_UNITS_PER_EPISODE[family] // MAX_LINES)
+# Épisode le plus long admis par le validateur (`max_units_per_episode`, par
+# écriture ET par tokenizer), réparti sur le nombre de répliques maximal, avec
+# des longueurs de mots réalistes : 5 lettres en espagnol, 9 caractères pour un
+# mot arabe vocalisé ; la traduction française compte un peu plus de mots que
+# l'original (1,5 par caractère chinois).
+def _line(family: str, tokenizer: str) -> tuple[str, str]:
+    units = min(LANG_MAX_UNITS_PER_LINE, max_units_per_episode(family, tokenizer) // MAX_LINES)
     fr_words = int(units * (1.2 if family != "hanzi" else 0.7))
     translation = " ".join(["mots"] * fr_words).replace("mots", "texte")
     if family == "hanzi":
@@ -46,17 +75,26 @@ def _line(family: str) -> tuple[str, str]:
     return " ".join(["palab"] * units), translation
 
 
-LINE = {family: _line(family) for family in ("latin", "hanzi", "arabe")}
-# Mots connus de l'apprenant au plafond de leur budget, dans chaque écriture.
-KNOWN = {family: prompts.fit_word_list([word] * 5000, LANG_KNOWN_WORDS_PROMPT_TOKENS)
-         for family, word in (("latin", "palabra"), ("hanzi", "我"), ("arabe", "كِتَابُهُ"))}
+def _known(family: str) -> list[str]:
+    """Mots connus de l'apprenant au plafond de leur budget, dans chaque
+    écriture — comptés par le tokenizer du modèle actif, comme en production."""
+    word = {"latin": "palabra", "hanzi": "我", "arabe": "كِتَابُهُ"}[family]
+    return prompts.fit_word_list([word] * 5000, LANG_KNOWN_WORDS_PROMPT_TOKENS)
+
+
 REJECTED = "; ".join(["réplique 12 : vocalisation incomplète : chaque consonne doit porter sa voyelle"] * 5)
 
 
-def _check(task: str, prompt: str, lang: str = "fr") -> None:
-    options = OLLAMA_TASK_OPTIONS[task]
-    used = SYSTEM[lang] + estimate_prompt_tokens(prompt) + options["num_predict"]
-    assert used <= options["num_ctx"], f"{task} ({lang}) : {used} tokens estimés > num_ctx {options['num_ctx']}"
+def _check(task: str, prompt: str, lang: str, machine) -> None:
+    if machine.economy and task in OLLAMA_BACKGROUND_TASKS:
+        return  # suspendue en mode économe : ce prompt ne part jamais
+    options = task_options(task)
+    system = estimate_prompt_tokens(prompts.build_system_prompt(lang), machine.tokenizer)
+    used = system + estimate_prompt_tokens(prompt, machine.tokenizer) + options["num_predict"]
+    assert used <= options["num_ctx"], (
+        f"{task} ({lang}, {machine.profile.name}{', économe' if machine.economy else ''}) : "
+        f"{used} tokens estimés > num_ctx {options['num_ctx']}"
+    )
 
 
 def _longest_point_fields():
@@ -80,7 +118,7 @@ def _longest_point_fields():
 
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
-def test_episode_text_prompt_fits(family, lang):
+def test_episode_text_prompt_fits(family, lang, machine):
     point = _longest_point_fields()
     rules = prompts.LANG_FORMAT_RULES_EN if lang == "en" else prompts.LANG_FORMAT_RULES
     prompt = prompts.build_lang_episode_text_prompt({
@@ -92,31 +130,33 @@ def test_episode_text_prompt_fits(family, lang):
         "constraints": "entre 18 et 24 répliques ; longueur des répliques libre, phrases naturelles ; "
                        "au plus 16 mots nouveaux pour l'apprenant ; le reste doit être très courant.",
         "recycle": ["palabra"] * 10, "script_rules": LONG_FR[:400], "lines_target": 24,
-        "known_words": KNOWN[family], "known_chars": family == "hanzi",
+        "known_words": _known(family), "known_chars": family == "hanzi",
         "line_schema": '{"speaker": "prénom", "text": "réplique", "tokens": ["mot"], "translation": "traduction"}',
         "rejected": REJECTED,
     })
-    assert KNOWN[family][0] in prompt
-    _check("lang_episode_text_hanzi" if family == "hanzi" else "lang_episode_text", prompt, lang)
+    assert _known(family)[0] in prompt
+    _check("lang_episode_text_hanzi" if family == "hanzi" else "lang_episode_text", prompt, lang, machine)
 
 
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
-def test_glossary_prompt_fits(family, lang):
-    text, tr = LINE[family]
+def test_glossary_prompt_fits(family, lang, machine):
+    text, tr = _line(family, machine.tokenizer)
     word = text.split(" ")[0] if " " in text else text[:2]
+    # Au plus LANG_GLOSSARY_CHUNK mots par appel (`_glossary_in_chunks`) : c'est
+    # le vrai maximum d'un prompt de glossaire, refus compris.
     prompt = prompts.build_lang_episode_glossary_prompt({
-        "language_label": "arabe littéraire", "words": [word] * max(LANG_GLOSSARY_MAX_ENTRIES),
+        "language_label": "arabe littéraire", "words": [word] * LANG_GLOSSARY_CHUNK,
         "lines": [(text, tr)] * MAX_LINES, "form_rule": LONG_FR[:300], "rejected": REJECTED,
         "explain_lang": lang, "pron": family == "latin", "register": LONG_FR[:120],
     })
-    _check("lang_episode_glossary_pron" if family == "latin" else "lang_episode_glossary", prompt, lang)
+    _check("lang_episode_glossary_pron" if family == "latin" else "lang_episode_glossary", prompt, lang, machine)
 
 
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
-def test_notes_point_prompt_fits(family, lang):
-    text, tr = LINE[family]
+def test_notes_point_prompt_fits(family, lang, machine):
+    text, tr = _line(family, machine.tokenizer)
     point = _longest_point_fields()
     prompt = prompts.build_lang_episode_notes_point_prompt({
         "explain_lang": lang,
@@ -125,21 +165,21 @@ def test_notes_point_prompt_fits(family, lang):
         "notes_min": 3, "notes_max": 5, "examples_min": 2, "examples_max": 4,
         "note_max": LANG_NOTE_MAX_CHARS, "explanation_max": LANG_EXPLANATION_MAX_CHARS, "rejected": REJECTED,
     })
-    _check("lang_episode_notes_point", prompt, lang)
+    _check("lang_episode_notes_point", prompt, lang, machine)
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_bible_arc_and_weekly_prompts_fit(lang):
+def test_bible_arc_and_weekly_prompts_fit(lang, machine):
     _check("lang_story_bible", prompts.build_lang_story_bible_prompt({
         "language_label": "arabe littéraire", "interests": ["un centre d'intérêt assez long"] * 8,
         "register": LONG_FR[:400], "characters_min": 3, "characters_max": 4, "explain_lang": lang,
-    }), lang)
+    }), lang, machine)
     point = _longest_point_fields()
     _check("lang_story_arc", prompts.build_lang_story_arc_prompt({
         "language_label": "arabe littéraire", "characters": CHARACTERS, "setting": LONG_FR[:200],
         "comic_springs": LONG_FR[:300], "recent": [LONG_FR[:LANG_SUMMARY_MAX_CHARS]] * 6,
         "points": [{"title": point["title"], "notice": point["notice"]}] * 6, "explain_lang": lang,
-    }), lang)
+    }), lang, machine)
     evolution = [{"week": "2026-09-07", "study_days": 7, "reveal_rate": 12.5, "understood": 0.5, "games": 0.75}] * 5
     _check("lang_weekly_analysis", prompts.build_lang_weekly_analysis_prompt({
         "language_label": "arabe littéraire", "explain_lang": lang,
@@ -147,22 +187,22 @@ def test_bible_arc_and_weekly_prompts_fit(lang):
                        "usual_hour": 20, "mean_minutes": 14.5, "modes_7": {"episode": 5, "bilan": 1, "relecture": 1},
                        "evolution": evolution, "reveal_rate_regular_weeks": 8.2,
                        "reveal_rate_irregular_weeks": 14.1},
-    }), lang)
+    }), lang, machine)
 
 
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
-def test_episode_hook_prompt_fits(family, lang):
+def test_episode_hook_prompt_fits(family, lang, machine):
     from config.settings import LANG_HOOK_MAX_CHARS, LANG_HOOK_OPENING_LINES, LANG_TITLE_MAX_CHARS
 
-    _text, tr = LINE[family]
+    _text, tr = _line(family, machine.tokenizer)
     prompt = prompts.build_lang_episode_hook_prompt({
         "language_label": "arabe littéraire", "episode_n": 270, "title": LONG_FR[:LANG_TITLE_MAX_CHARS],
         "summary": LONG_FR[:LANG_SUMMARY_MAX_CHARS], "previous": LONG_FR[:LANG_SUMMARY_MAX_CHARS],
         "opening": [("Personnage0", tr)] * LANG_HOOK_OPENING_LINES, "characters": CHARACTERS,
         "max_chars": LANG_HOOK_MAX_CHARS, "explain_lang": lang,
     })
-    _check("lang_episode_hook", prompt, lang)
+    _check("lang_episode_hook", prompt, lang, machine)
 
 
 def test_episode_hook_prompt_carries_no_target_word():
@@ -184,7 +224,7 @@ def test_estimator_is_pessimistic_on_known_counts():
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_point_lesson_prompt_fits(lang):
+def test_point_lesson_prompt_fits(lang, machine):
     from config.settings import (
         LANG_LESSON_EXAMPLES,
         LANG_LESSON_FORMS_MAX,
@@ -205,12 +245,12 @@ def test_point_lesson_prompt_fits(lang):
         "examples_min": LANG_LESSON_EXAMPLES[0], "examples_max": LANG_LESSON_EXAMPLES[1],
         "rejected": REJECTED, "explain_lang": lang,
     })
-    _check("lang_point_lesson", prompt, lang)
+    _check("lang_point_lesson", prompt, lang, machine)
 
 
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
-def test_writing_feedback_prompt_fits(family, lang):
+def test_writing_feedback_prompt_fits(family, lang, machine):
     from config.settings import LANG_WRITING_ERROR_TYPES, LANG_WRITING_MAX_CHARS
 
     # Le texte le plus long qu'accepte l'envoi, dans l'écriture la plus coûteuse.
@@ -220,7 +260,7 @@ def test_writing_feedback_prompt_fits(family, lang):
         "text": text[:LANG_WRITING_MAX_CHARS], "writing_rules": LONG_FR[:300], "errors_max": 3,
         "error_types": list(LANG_WRITING_ERROR_TYPES), "rejected": REJECTED, "explain_lang": lang,
     })
-    _check("lang_writing_feedback", prompt, lang)
+    _check("lang_writing_feedback", prompt, lang, machine)
 
 
 def test_lesson_and_feedback_prompts_carry_no_target_word():

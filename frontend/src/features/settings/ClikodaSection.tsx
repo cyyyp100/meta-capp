@@ -12,6 +12,9 @@
 //      (la vérification de mise à jour, opt-in). On donne la commande à copier.
 //   3. Le vocabulaire des modèles vient du SERVEUR (`payload.choices.llm_model`,
 //      lui-même la table `config/settings.LLM_MODELS`) : il n'est pas réécrit ici.
+//      Même chose pour le mode économe : ses valeurs (`choices.llm_economy`), sa
+//      décision et sa raison (`status.economy_reason`) viennent du serveur ; le
+//      composant ne compare jamais un nom de modèle ni une quantité de mémoire.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Cpu } from "lucide-react";
 import { useState } from "react";
@@ -80,6 +83,24 @@ export function ClikodaSection({ payload }: { payload: PreferencesPayload }) {
         }}
       />
 
+      <ChoiceRow
+        label={t("settings.clikoda.economy")}
+        hint={t("settings.clikoda.economy_hint")}
+        value={payload.preferences.llm_economy}
+        options={(payload.choices.llm_economy ?? []).map((value) => ({
+          value,
+          label: t(`settings.clikoda.economy_${value}`),
+        }))}
+        onChange={(value) => {
+          // Le mode change les budgets de toutes les générations : l'état est
+          // redemandé, comme après un changement de modèle.
+          setPreference.mutate(
+            { llm_economy: value },
+            { onSuccess: () => queryClient.invalidateQueries({ queryKey: LLM_STATUS_KEY }) },
+          );
+        }}
+      />
+
       {status && <ClikodaState status={status} onCopy={(text) => copy.mutate(text)} copied={copied} />}
     </SettingsCard>
   );
@@ -118,7 +139,10 @@ function ClikodaState({
             : t("settings.clikoda.speed_unmeasured")}{" "}
           {installed.length
             ? t("settings.clikoda.installed", { names: installed.join(", ") })
-            : t("settings.clikoda.installed_none")}
+            : t("settings.clikoda.installed_none")}{" "}
+          {status.economy && status.economy_reason
+            ? t("settings.clikoda.economy_state_on", { why: t(`settings.clikoda.economy_why_${status.economy_reason}`) })
+            : t("settings.clikoda.economy_state_off")}
         </span>
       </p>
 

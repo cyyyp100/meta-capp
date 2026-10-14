@@ -239,8 +239,8 @@ Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
 | | App alone | With Clikoda (the assistant) |
 |---|---|---|
 | **OS** | macOS (Apple Silicon or Intel), Windows 10/11 x64, Linux x86_64 (glibc 2.35+) | same |
-| **RAM** | any recent machine | **12 GB or more** for the standard model; 8 GB runs the light one (see below) |
-| **Disk** | ~400 MB | **+7 to 20 GB** depending on the model, plus 0.6 GB for the optional `embeddinggemma` |
+| **RAM** | any recent machine | **12 GB or more** for the standard model; 8 GB runs the light one, 4 GB the tiny one in economy mode (see below) |
+| **Disk** | ~400 MB | **+1.4 to 20 GB** depending on the model, plus 0.6 GB for the optional `embeddinggemma` |
 | **GPU** | none | optional — Apple Silicon (Metal), NVIDIA (CUDA), some AMD (ROCm); CPU-only works, slowly |
 
 Clikoda is optional: without [Ollama](https://ollama.com) the reader, flashcards and
@@ -251,8 +251,15 @@ derived from Clikoda's *measured* speed on your machine (a short calibration cal
 startup, then every answer): a CPU-only laptop gets slow answers instead of
 timeouts. Below ~2 tokens/s (8× slower than the reference Apple Silicon machine),
 budgets stop stretching and long answers give up rather than leave the screen waiting
-indefinitely.
-If the model does not fit in memory, the reader says so plainly.
+indefinitely — down to ~0.9 token/s in economy mode, never more than a quarter of an
+hour per answer. If the model does not fit in memory, the reader says so plainly.
+
+**Economy mode** (Settings ▸ Clikoda) is what makes a 4 GB laptop usable: one context
+for every request so the model is never reloaded, compact prompts that fit in it, no
+background work (document summaries, language episodes), no spontaneous help, lexical
+search only, the model unloaded after five idle minutes — and the reader announces the
+wait ("answer within N min at most") with a **Cancel** button. "Automatic" turns it on
+with the tiny model or below 8 GB of RAM; you can force it either way.
 
 ### Ready-to-run builds
 
@@ -279,7 +286,8 @@ archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <
 
 ### Pull a model
 
-Clikoda runs on the **gemma4** family, and which one is a setting — not a hard-coded name.
+Clikoda runs on the **gemma4** family — plus one tiny model for 4 GB machines — and which
+one is a setting, not a hard-coded name.
 « Automatic » (the default) picks the most capable model you have installed that your
 machine's memory can actually load; **Settings ▸ Clikoda** shows what it chose, why, and
 the `ollama pull` command for anything you are missing. The table lives in
@@ -287,13 +295,14 @@ the `ollama pull` command for anything you are missing. The table lives in
 
 | model | download | RAM needed | for |
 |---|---|---|---|
+| `qwen3:1.7b` | 1.4 GB | 4 GB | a 4 GB laptop: slower, more mistakes, text only (no page image), economy mode on |
 | `gemma4:e2b` | 7.2 GB | 8 GB | a light machine |
 | `gemma4:e4b` | 9.6 GB | 12 GB | the standard choice |
 | `gemma4:12b` | 8.0 GB | 12 GB | better answers, a bit slower |
 | `gemma4:26b` / `gemma4:31b` | 18–20 GB | 32 GB | a workstation |
 
 ```bash
-ollama pull gemma4:e4b       # or e2b on a lighter machine
+ollama pull gemma4:e4b       # or e2b on a lighter machine, qwen3:1.7b on a 4 GB one
 ollama pull embeddinggemma   # optional (~600 MB): semantic search inside the document you read
 ```
 
@@ -370,10 +379,12 @@ If the window still cannot open, Meta-Capp falls back to the browser and logs wh
   Clikoda** says which of the two it is, names the model it would use and gives the
   `ollama pull` command to copy.
 - **Clikoda is very slow** — `ollama ps` shows where the model runs (`PROCESSOR`: GPU,
-  CPU or a split). On CPU this is expected; the log prints the measured speed at
-  startup (`Débit de Clikoda sur cette machine`). Closing memory-hungry apps helps.
-- **"Clikoda does not fit in this computer's memory"** — free some RAM; with 8 GB in
-  total the model cannot load, the rest of the app keeps working.
+  CPU or a split). On CPU this is expected: the reader announces the wait and offers
+  **Cancel**, and the log prints the measured speed at startup (`Débit de Clikoda sur
+  cette machine`). A lighter model, economy mode and closing memory-hungry apps help.
+- **"Clikoda does not fit in this computer's memory"** — the message says what the model
+  needs; free some RAM or pick a lighter model in Settings ▸ Clikoda (`qwen3:1.7b` runs
+  from 4 GB). The rest of the app keeps working.
 - **"Le port 8756 est occupé…"** — another program, or an instance that cannot be
   reopened (an older version), holds the port: close it or reboot.
 - **Behind a proxy** (school or company network) — nothing to configure: Meta-Capp
@@ -462,7 +473,7 @@ Meta-Capp **Pro** is a separate, hosted edition for people who want the same ped
 |---|:--:|:--:|
 | Price | **Free**, MIT | Subscription |
 | Setup | Install Ollama, pull a model | Nothing to install |
-| Inference | On your machine (the gemma4 family, your choice) | Frontier hosted models via API |
+| Inference | On your machine (the gemma4 family, or a tiny model on 4 GB — your choice) | Frontier hosted models via API |
 | Answer depth on hard material | Bounded by your hardware | Full-size reasoning models |
 | Renders any PDF as-is | ✅ | ✅ |
 | Scanned / handwritten PDFs | ❌ | ✅ **OCR reconstruction** |

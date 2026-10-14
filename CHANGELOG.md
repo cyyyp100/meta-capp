@@ -20,8 +20,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing. The reader's status light now tells "connected" apart from "Clikoda can answer"
   (green / amber / grey) — it used to stay green with Ollama switched off.
 
+- **A tiny tier for 4 GB machines**: `qwen3:1.7b` (1.4 GB) joins the model table — no
+  gemma4 variant fits in 4 GB. "Automatic" picks it only when nothing bigger fits.
+- **Economy mode** (`Settings ▸ Clikoda`, Automatic / On / Off; automatic with the tiny
+  model or below 8 GB of RAM): one context for every task (Ollama no longer reloads the
+  model between requests), compact prompts that fit in it, budgets that stretch down to
+  ~0.9 token/s but never past a quarter of an hour per answer, the model unloaded after
+  five idle minutes, and no background work, autonomous help or embeddings.
+- **The reader announces slow answers**: on a slow machine or in economy mode, "answer
+  within N min at most" (the server's total budget, republished when the task leaves the
+  queue) and a **Cancel** button.
+- A dismissible note on the language home page for the tiny model, separate from the
+  general one; the home page says when economy mode keeps episodes from being written.
+
 ### Changed
 
+- Prompt sizes are estimated **per tokenizer** (five character classes, calibrated on 60
+  measured prompts): vocalized Arabic costs 0.6 token per character with Gemma and 0.8
+  with qwen3, not 0.5, and digits cost one each. The budget benches now run for every
+  model of the table, in normal and economy mode; a new bench covers the reader's
+  prompts in a compact context. Episode content tasks get a 5120-token window (Gemma),
+  and the Arabic episode length cap is 180 words with qwen3's tokenizer.
+- In a compact context (economy mode, or the tiny model) the question uses a compact
+  prompt (only the type already chosen, ~4× shorter), and the visible page, the answer
+  being evaluated and the passages found elsewhere are bounded in estimated tokens.
+- A model that cannot see images never receives the page image, and no prompt claims
+  one is attached.
+- The out-of-memory message names the active model and the RAM it needs (it said
+  "about 16 GB" for every model).
 - Time budgets follow the chosen model. The cost of a heavier model and the measured
   slowness of the machine are two separate factors, so `OLLAMA_MAX_SLOWDOWN` again bounds
   only the machine; measured throughput is kept per model. Each task's `num_ctx` is capped
