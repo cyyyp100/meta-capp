@@ -16,8 +16,12 @@
 #                       franchi -> départ du warm-up de la première question
 #                       (aucune intervention avant) ; `warmup` = temps passés sur
 #                       chaque face de la révision éclair (services/warmup)
-# serveur -> client : {"type":"loading"} | {"type":"answer","answer","highlights"}
-#                     {"type":"error","message"} | {"type":"intervention",...}
+# serveur -> client : {"type":"loading","estimate_s":int|null}  # attente annoncée
+#                       (« au plus ~N min », services/llm_models.wait_estimate_s) ;
+#                       republié quand la tâche sort de la file avec un budget
+#                       différent. null = rien à annoncer (machine rapide).
+#                     {"type":"answer","answer","highlights"}
+#                     {"type":"error","message","cancelled":bool} | {"type":"intervention",...}
 #                     {"type":"system","message"}
 #                     {"type":"scanning","active":bool}  # Clikoda inspecte la page (décide
 #                       d'intervenir ou non) -> l'UI tourne la bulle vers le PDF
@@ -34,7 +38,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Literal
+from contextlib import contextmanager
+from typing import Iterator, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -60,10 +65,25 @@ from db.session_pauses import save_pause
 from db.sessions import get_session, update_session_progress
 from db.user import DEFAULT_USER_ID
 from i18n import t
-from llm.ollama_client import cancel_pending_generations, decide_intervention_async
+from llm.ollama_client import (
+    cancel_pending_generations,
+    close_caller_slot,
+    decide_intervention_async,
+    is_cancelled_error,
+    open_caller_slot,
+)
 from metacog.reflection import augment_evaluation_with_response_signals
 from server.events import push_threadsafe
-from services import assistant, flashcards as flashcards_service, library, pdf_rag, session, session_memory, warmup
+from services import (
+    assistant,
+    flashcards as flashcards_service,
+    library,
+    llm_models,
+    pdf_rag,
+    session,
+    session_memory,
+    warmup,
+)
 from services.intervention import AssistantInterventionPolicy
 from services.pause import PAUSE_SOURCES, PauseTracker, attention_credit
 from services.session_memory import SessionMemory
@@ -286,9 +306,44 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
 
         def on_error(message: str) -> None:
             end_generation()
-            push_threadsafe(loop, out, {"type": "error", "message": str(message)})
+            # Une demande annulée (bouton « Annuler » du panneau, ou lecteur
+            # quitté) n'est pas une panne : le panneau, qui a déjà rendu la
+            # main, ne la redit pas avec un « ⚠️ ».
+            cancelled = is_cancelled_error(message)
+            push_threadsafe(loop, out, {
+                "type": "error",
+                "message": t("assistant.cancelled") if cancelled else str(message),
+                "cancelled": cancelled,
+            })
 
         return on_success, on_error
+
+    def loading(task: str) -> dict:
+        """Le `loading` d'une demande, avec l'attente à annoncer (ou null).
+
+        Le chiffre vient du service (le budget TOTAL de la tâche) et nulle part
+        ailleurs : l'interface l'affiche, elle n'en recalcule aucun."""
+        return {"type": "loading", "estimate_s": llm_models.wait_estimate_s(task)}
+
+    @contextmanager
+    def announced(task: str) -> Iterator[None]:
+        """Enfile la génération dans un CallerSlot : quand la tâche sort de la
+        file, son budget est recalculé (`ollama_client._start_task_clock` — le
+        calibrage du démarrage a pu révéler une machine lente entre-temps), et
+        l'attente annoncée suit si elle a changé."""
+        first = llm_models.wait_estimate_s(task)
+        slot = open_caller_slot()
+
+        def on_start(_budget_s: float) -> None:
+            estimate = llm_models.wait_estimate_s(task)
+            if estimate is not None and estimate != first:
+                push_threadsafe(loop, out, {"type": "loading", "estimate_s": estimate})
+
+        slot.on_start = on_start
+        try:
+            yield
+        finally:
+            close_caller_slot()
 
     def emit_question(result: dict, page: int, sid, gated: bool) -> None:
         """Persiste une question Q&R générée et l'émet vers le client.
@@ -717,7 +772,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 recent_exchanges = list(state["exchanges"])
                 session_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
                 selected_snippets = msg.selected_snippets
-                await out.put({"type": "loading"})
+                await out.put(loading("assistant_answer"))
 
                 def on_ask_success(result: dict, _q=question, _page=page, _sid=state["session_id"]) -> None:
                     end_generation()
@@ -734,37 +789,42 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     on_success(result)
 
                 start_generation()
-                assistant.answer_question(
-                    doc_id, page, question, on_ask_success, on_error,
-                    recent_exchanges=recent_exchanges,
-                    session_gauges=session_gauges,
-                    selected_snippets=selected_snippets,
-                )
+                with announced("assistant_answer"):
+                    assistant.answer_question(
+                        doc_id, page, question, on_ask_success, on_error,
+                        recent_exchanges=recent_exchanges,
+                        session_gauges=session_gauges,
+                        selected_snippets=selected_snippets,
+                    )
             elif kind == "rephrase":
-                await out.put({"type": "loading"})
+                await out.put(loading("rephrasing"))
                 start_generation()
-                assistant.rephrase_page(doc_id, page, on_success, on_error)
+                with announced("rephrasing"):
+                    assistant.rephrase_page(doc_id, page, on_success, on_error)
             elif kind == "recap":
-                await out.put({"type": "loading"})
+                await out.put(loading("chapter_summary"))
                 start_generation()
-                assistant.chapter_recap(doc_id, page, on_success, on_error)
+                with announced("chapter_summary"):
+                    assistant.chapter_recap(doc_id, page, on_success, on_error)
             elif kind == "hook":
-                await out.put({"type": "loading"})
+                await out.put(loading("curiosity_hook"))
                 start_generation()
-                assistant.curiosity_hook(doc_id, page, on_success, on_error)
+                with announced("curiosity_hook"):
+                    assistant.curiosity_hook(doc_id, page, on_success, on_error)
             elif kind == "start_qa":
                 sid = msg.session_id
-                await out.put({"type": "loading"})
+                await out.put(loading("question"))
                 qa_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
                 start_generation()
-                assistant.generate_page_question(
-                    doc_id, page,
-                    lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
-                    on_error,
-                    session_gauges=qa_gauges,
-                    recent_question_types=list(state["recent_qtypes"]),
-                    history=list(state["qa_history"]),
-                )
+                with announced("question"):
+                    assistant.generate_page_question(
+                        doc_id, page,
+                        lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
+                        on_error,
+                        session_gauges=qa_gauges,
+                        recent_question_types=list(state["recent_qtypes"]),
+                        history=list(state["qa_history"]),
+                    )
             elif kind == "qa_answer":
                 sid = msg.session_id
                 question = msg.question or ""
@@ -772,7 +832,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 if not answer:
                     continue
                 qid = state.get("qa_qid")
-                await out.put({"type": "loading"})
+                await out.put(loading("evaluation"))
 
                 def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
                     end_generation()
@@ -854,14 +914,15 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     })
 
                 start_generation()
-                assistant.evaluate_page_answer(
-                    doc_id, page, question, answer, on_eval, on_error,
-                    question_type=state.get("qa_question_type") or "",
-                    # La question persistée porte sa réponse canonique et ses
-                    # propositions : le service s'en sert pour corriger.
-                    question_id=qid,
-                    history=list(state["qa_history"]),
-                )
+                with announced("evaluation"):
+                    assistant.evaluate_page_answer(
+                        doc_id, page, question, answer, on_eval, on_error,
+                        question_type=state.get("qa_question_type") or "",
+                        # La question persistée porte sa réponse canonique et ses
+                        # propositions : le service s'en sert pour corriger.
+                        question_id=qid,
+                        history=list(state["qa_history"]),
+                    )
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover

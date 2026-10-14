@@ -8,10 +8,12 @@
 // place à ce qui compte — épisodes joués, mots rencontrés, niveau. Aucun
 // compteur de jours : le décompte existe côté serveur, il n'est pas une série.
 //
-// Deux annonces, décidées par le serveur : une correction d'expression écrite
-// arrivée après sa séance (« Ta correction est prête »), et les limites du
-// modèle local — un encart masquable, plus une ligne là où la limite se voit
-// (`pro_hints`). Texte statique : aucun appel réseau, rien de bloqué.
+// Trois annonces, décidées par le serveur : une correction d'expression écrite
+// arrivée après sa séance (« Ta correction est prête »), les limites du modèle
+// local — un encart masquable, plus une ligne là où la limite se voit
+// (`pro_hints` ; `tiny_model` change le texte de l'encart et sa clé de
+// masquage) — et le mode économe, qui suspend l'écriture des épisodes
+// (`background_suspended`). Texte statique : aucun appel réseau, rien de bloqué.
 //
 // L'épisode suivant réservé mais ni prêt ni en cours d'écriture (application
 // fermée pendant qu'il s'écrivait, échec) est relancé UNE fois à l'ouverture
@@ -87,7 +89,11 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
   else if (relecture) main = t("feuil.home.relecture", { n: status.next_episode });
   else if (status.bilan_due) main = t("feuil.home.bilan");
   const hints = status.pro_hints ?? [];
-  const showNote = !noteClosed && preferences !== undefined && preferences.preferences.lang_pro_note_dismissed !== "true";
+  // Le palier minuscule a son propre encart, et sa propre clé de masquage : la
+  // CONDITION est celle du serveur (`tiny_model`), jamais un nom de modèle.
+  const tiny = hints.includes("tiny_model");
+  const noteKey = tiny ? "llm_tiny_note_dismissed" : "lang_pro_note_dismissed";
+  const showNote = !noteClosed && preferences !== undefined && preferences.preferences[noteKey] !== "true";
 
   async function closeWriting(id: number) {
     setOpenWriting(false);
@@ -111,7 +117,11 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
       ) : (
         status.onboarding_done && !ready && !status.bilan_due && !status.open_run && (
           <p style={{ color: "var(--muted)", fontSize: 13, margin: "8px 0 0" }}>
-            {status.generating ? t("feuil.home.writing", { n: status.next_episode }) : t("feuil.home.not_ready")}
+            {status.generating
+              ? t("feuil.home.writing", { n: status.next_episode })
+              : status.background_suspended
+                ? t("feuil.home.suspended")
+                : t("feuil.home.not_ready")}
           </p>
         )
       )}
@@ -160,9 +170,10 @@ export function FeuilletonHome({ language, label, rtl }: { language: string; lab
       {showNote && (
         <ProNote
           model={status.model}
+          kind={tiny ? "tiny" : "lang"}
           onDismiss={() => {
             setNoteClosed(true);
-            setPreference.mutate({ lang_pro_note_dismissed: true });
+            setPreference.mutate({ [noteKey]: true });
           }}
         />
       )}

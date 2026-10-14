@@ -25,7 +25,7 @@ from llm.ollama_client import (
     generate_rephrasing_async,
     make_standalone_flashcard_async,
 )
-from services import library, pdf_rag, selection
+from services import library, llm_models, pdf_rag, selection
 from utils.text import fold
 
 __all__ = [
@@ -84,7 +84,13 @@ def _page_image_paths(doc_id: int, page: int) -> list[str]:
 
     Un document servi en blocs (fichier de code) n'a rien à montrer au modèle
     que le texte ne dise déjà : on n'y joint pas d'image. Un rendu PDFium de
-    code coûte du temps et des tokens de vision pour zéro information."""
+    code coûte du temps et des tokens de vision pour zéro information.
+
+    Un modèle qui ne lit pas les images (le palier minuscule) n'en reçoit pas
+    non plus : le client l'écarterait de toute façon avant l'appel, mais le
+    rendu, lui, aurait déjà coûté son temps et tenu le verrou PDFium."""
+    if not llm_models.active_profile().supports_images:
+        return []
     if _served_as_text_blocks(doc_id, page):
         return []
     path = _safe(lambda: library.render_page(doc_id, page, _ASSISTANT_IMAGE_ZOOM), None)

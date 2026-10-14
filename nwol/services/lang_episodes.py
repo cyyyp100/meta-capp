@@ -34,7 +34,6 @@ from config.settings import (
     LANG_GLOSSARY_MAX_ENTRIES,
     LANG_GLOSSARY_MAX_MISSING,
     LANG_LINES_SLACK,
-    LANG_MAX_UNITS_PER_EPISODE,
     LANG_MAX_UNITS_PER_LINE,
     LANG_NEW_WORDS_TOLERANCE,
     LANG_NOTE_MAX_CHARS,
@@ -49,6 +48,7 @@ from config.settings import (
     LANG_TITLE_MAX_CHARS,
     LANG_WORDS_SLACK,
     OLLAMA_BACKGROUND_QUEUE_WAIT_S,
+    max_units_per_episode,
 )
 from db import lang_episode_db as store
 from db.lang_db import get_lang_profile_by_id
@@ -103,6 +103,24 @@ _LINGUISTIC_TRAITS = ("anglicisme", "jargon", "grammaire", "grammatical", "vocab
                       "langue étrangère", "accent", "argot",
                       # la même chose dans une bible écrite en anglais
                       "anglicism", "grammar", "vocabulary", "big words", "foreign language", "slang")
+
+
+class GenerationSuspended(RuntimeError):
+    """Le travail de fond est suspendu (mode économe, llm/ollama_client) : ce
+    n'est PAS un échec d'écriture. L'épisode reste en attente, sans journal ni
+    échec compté — comme quand Ollama est éteint, il ne doit pas s'approcher de
+    la mention Pro (LANG_GEN_FAILURES_PRO_HINT)."""
+
+
+# Le label qui représente l'épisode auprès de la porte de la file : toutes ses
+# tâches (bible, arc, texte, glossaire, notes) sont des tâches de fond, et la
+# porte les suspend ensemble.
+_EPISODE_TASK = "lang_episode_text"
+
+
+def background_suspended() -> bool:
+    """L'écriture des épisodes est-elle suspendue en ce moment ?"""
+    return llm.background_suspended(_EPISODE_TASK)
 
 
 class GenerationFailed(RuntimeError):
@@ -219,6 +237,11 @@ def _llm(fn, params: dict, log: list[dict], metrics: list[dict], task: str, mode
         return run_llm_sync(lambda ok, err: fn(params, ok, err, on_metrics=metrics.extend, model=model),
                             queue_wait_s=OLLAMA_BACKGROUND_QUEUE_WAIT_S)
     except Exception as exc:  # panne d'Ollama, timeout, JSON inexploitable
+        if llm.is_suspended_error(exc):
+            # Ni tentative ratée, ni repli : la bible par défaut ou l'arc
+            # déterministe ne doivent pas remplacer pour toujours ce que
+            # Clikoda écrira quand le mode économe s'arrêtera.
+            raise GenerationSuspended(str(exc)) from exc
         log.append({"task": task, "ok": False, "errors": [f"appel : {exc}"[:300]],
                     "duration_s": round(time.monotonic() - started, 2)})
         return None
@@ -565,7 +588,7 @@ def validate_text(language: str, result: dict, ctx: dict) -> tuple[dict, list[st
             errors.append(_tr(lang, f"répliques trop longues (une phrase par réplique) : n° {', '.join(map(str, too_long[:4]))}",
                               f"lines too long (one sentence per line): no. {', '.join(map(str, too_long[:4]))}"))
     total = sum(_line_units(language, ln["text"]) for ln in lines)
-    cap = LANG_MAX_UNITS_PER_EPISODE[progress.family(language)]
+    cap = max_units_per_episode(progress.family(language))
     if total > cap:
         errors.append(_tr(lang, f"texte trop long ({total} {unit}, {cap} au plus) : raccourcis",
                           f"text too long ({total} {unit}, {cap} at most): shorten it"))
@@ -1058,6 +1081,8 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
     episode = store.get_episode_by_n(profile_id, episode_n)
     if not profile or not episode or episode["status"] in ("ready", "played"):
         return bool(episode and episode["status"] in ("ready", "played"))
+    if background_suspended():
+        return False  # reste `queued` : il partira quand le mode économe s'arrêtera
     profile = store.decode_profile(profile)
     language = profile["language"]
     started = time.monotonic()
@@ -1135,6 +1160,12 @@ def generate_episode(profile_id: int, episode_n: int) -> bool:
                         **_journal_extras(log, text), "failures": failures},
         )
         logger.info("Épisode %s prêt (profil %s, %.0f s)", episode_n, profile_id, time.monotonic() - started)
+    except GenerationSuspended:
+        # Le mode économe s'est activé pendant l'écriture : l'épisode retourne
+        # en attente, son journal et son compte d'échecs tels qu'ils étaient.
+        logger.info("Épisode %s remis en attente (profil %s) : mode économe", episode_n, profile_id)
+        store.update_episode(episode["id"], status="queued")
+        return False
     except Exception as exc:
         logger.warning("Épisode %s non généré (profil %s) : %s", episode_n, profile_id, exc)
         store.update_episode(
@@ -1247,7 +1278,7 @@ def trigger_generation(profile_id: int, episode_n: int) -> bool:
     """Lance la génération d'un épisode réservé ; une seule à la fois par
     (profil, épisode) (G15). Renvoie False si elle tournait déjà."""
     key = (profile_id, int(episode_n))
-    if _GENERATIONS.is_running(key):
+    if _GENERATIONS.is_running(key) or background_suspended():
         return False
 
     def _job() -> None:
@@ -1347,6 +1378,9 @@ def relaunch_pending(profile_id: int | None = None, *, closed=None) -> list[int]
         return []
     if not llm.is_ollama_available():
         logger.info("Ollama ne répond pas : %d épisode(s) en attente, rien n'est relancé", len(pending))
+        return []
+    if background_suspended():
+        logger.info("Mode économe : %d épisode(s) en attente, rien n'est relancé", len(pending))
         return []
     relaunched = []
     for episode in pending:

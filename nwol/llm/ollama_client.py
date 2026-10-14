@@ -19,11 +19,12 @@ from pathlib import Path
 from typing import Callable
 from config import question_types
 from config.settings import (
+    OLLAMA_BACKGROUND_TASKS,
     OLLAMA_EMBED_MODEL,
     OLLAMA_EMBED_TIMEOUT,
     OLLAMA_EMBED_URL,
-    OLLAMA_KEEP_ALIVE,
     OLLAMA_URL,
+    keep_alive,
     task_options,
     task_timeout_s,
     task_wall_timeout_s,
@@ -217,14 +218,21 @@ def _image_retry_reason(exc: Exception) -> str:
 _OOM_EXPLAINED_TASKS = frozenset({"assistant_answer", "rephrasing"})
 
 
-def _raise_if_out_of_memory(detail: str) -> None:
+def _raise_if_out_of_memory(detail: str, model: str = "") -> None:
     if not _OOM_RE.search(detail or ""):
         return
+    # Ce que CE modèle demande à la machine (config/settings.LLM_MODELS) : le
+    # message disait « environ 16 Go » quel que soit le modèle — faux pour le
+    # palier minuscule (4) comme pour un 31b (32).
+    from services.llm_models import profile
+
+    ram = f"{profile(model or _active_model()).min_ram_gb:g}"
     sizes = _OOM_SIZES_RE.search(detail)
     if sizes:
-        message = t("llm.error.memory", required=sizes.group(1), available=sizes.group(2))
+        message = t("llm.error.memory", required=sizes.group(1), available=sizes.group(2),
+                    model=model or _active_model(), ram=ram)
     else:
-        message = t("llm.error.memory_generic")
+        message = t("llm.error.memory_generic", model=model or _active_model(), ram=ram)
     logger.error("Ollama : mémoire insuffisante pour le modèle (%s)", detail[:200])
     raise ModelOutOfMemory(message)
 
@@ -238,6 +246,29 @@ CANCELLED_MESSAGE = "génération annulée"
 
 def is_cancelled_error(message) -> bool:
     return str(message) == CANCELLED_MESSAGE
+
+
+# Message passé à `on_error` quand une tâche de FOND est refusée parce que le
+# mode économe est actif (config/settings.OLLAMA_BACKGROUND_TASKS). Comme
+# l'annulation, ce n'est PAS un échec d'écriture : un épisode de langue reste en
+# attente sans s'approcher de la mention Pro (services/lang_episodes).
+SUSPENDED_MESSAGE = "travail de fond suspendu (mode économe)"
+
+
+def is_suspended_error(message) -> bool:
+    return str(message) == SUSPENDED_MESSAGE
+
+
+def background_suspended(label: str) -> bool:
+    """Cette tâche est-elle suspendue en ce moment ? Vrai pour une tâche de fond
+    quand le mode économe est actif. La règle vit ICI, à côté de la porte de la
+    file qui l'applique ; un service ne la lit que pour ne pas lancer un travail
+    voué à être refusé (services/lang_episodes.relaunch_pending)."""
+    if label not in OLLAMA_BACKGROUND_TASKS:
+        return False
+    from services.llm_models import economy
+
+    return economy()
 
 
 # Connexion HTTP de la génération en vol — il n'y a qu'un worker, donc au plus
@@ -383,12 +414,16 @@ class CallerSlot:
         fait partir le budget de là, pas de la mise en file.
     """
 
-    __slots__ = ("abandon", "started", "timeout_s")
+    __slots__ = ("abandon", "on_start", "started", "timeout_s")
 
     def __init__(self) -> None:
         self.abandon = threading.Event()
         self.started = threading.Event()
         self.timeout_s: float | None = None
+        # Appelé (thread du worker) quand la tâche sort de la file, avec son
+        # budget recalculé : le lecteur republie alors son « au plus ~N min »
+        # (server/routers/reading.py). Une erreur n'y touche jamais la tâche.
+        self.on_start: Callable[[float], None] | None = None
 
 
 _caller_slot = threading.local()
@@ -442,6 +477,11 @@ def _start_task_clock(label: str, slot: "CallerSlot | None") -> None:
     if slot is not None:
         slot.timeout_s = wall_s  # avant `started` : un appelant de fond le lit dès ce signal
         slot.started.set()
+        if slot.on_start is not None:
+            try:
+                slot.on_start(wall_s)
+            except Exception:  # pragma: no cover - une annonce ne casse pas une génération
+                logger.debug("on_start a échoué (%s)", label, exc_info=True)
 
 
 def _queue_worker() -> None:
@@ -607,7 +647,7 @@ def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[
         "model": model,
         "input": list(texts),
         "truncate": True,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "keep_alive": keep_alive(),
     }).encode()
     req = urllib.request.Request(
         OLLAMA_EMBED_URL, data=payload, method="POST",
@@ -1068,6 +1108,17 @@ def _run_json_async(
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
+        if background_suspended(label):
+            # Vérifié au DÉPART et non à la mise en file : le mode a pu changer
+            # pendant l'attente (réglage modifié, autre modèle).
+            fallback = _fallback_json_result(label, prompt, parser, "", fallback_context)
+            if fallback is not None:
+                logger.info("Tâche de fond %s : mode économe, repli local sans appel au modèle", label)
+                on_success(fallback)
+            else:
+                logger.info("Tâche de fond %s suspendue : mode économe", label)
+                on_error(SUSPENDED_MESSAGE)
+            return
         _start_task_clock(label, slot)
         _CALL_METRICS.value = [] if on_metrics is not None else None
         _SYSTEM_LANG.value = system_lang
@@ -1130,10 +1181,14 @@ def _run_text_async(
         if slot is not None and slot.abandon.is_set():
             logger.debug("Tâche LLM %s jetée (appelant parti)", label)
             return
+        if background_suspended(label):
+            logger.info("Tâche de fond %s suspendue : mode économe", label)
+            on_error(SUSPENDED_MESSAGE)
+            return
         _start_task_clock(label, slot)
         try:
             logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model or _active_model())
-            images = _load_ollama_images(image_paths or [])
+            images = _images_for(model, image_paths)
             try:
                 raw = _call_ollama(prompt, model, images=images, options=options, format_json=False, task=label)
             except (GenerationCancelled, ModelOutOfMemory):
@@ -1182,7 +1237,7 @@ def _generate_json(
     deadline = getattr(_TASK_DEADLINE, "value", None) or time.monotonic() + task_wall_timeout_s(label)
     last_raw = ""
     last_error: Exception | None = None
-    images = _load_ollama_images(image_paths or [])
+    images = _images_for(model, image_paths)
     current_prompt = prompt
     for attempt in range(1, attempts + 1):
         try:
@@ -2241,7 +2296,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         # Options du modèle ACTIF : `task_options` plafonne le num_ctx de la
         # tâche par ce que ce modèle tient (source unique, cf. settings).
         "options": options if options is not None else task_options(task),
-        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "keep_alive": keep_alive(),
     }
     if format_json:
         # Un schéma JSON (sorties structurées d'Ollama, ≥ 0.5 — tout Ollama qui
@@ -2285,11 +2340,11 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
         body = resp.read()
         if resp.status >= 400:
             detail = body.decode(errors="replace")[:500]
-            _raise_if_out_of_memory(detail)
+            _raise_if_out_of_memory(detail, model)
             raise RuntimeError(f"Ollama HTTP {resp.status}: {detail}")
         data = json.loads(body)
         if "error" in data:
-            _raise_if_out_of_memory(str(data["error"]))
+            _raise_if_out_of_memory(str(data["error"]), model)
             raise RuntimeError(f"Ollama error: {data['error']}")
         response = data.get("response", "")
         _record_call_metrics(task, data, time.monotonic() - started)
@@ -2610,6 +2665,23 @@ def generate_lang_weekly_analysis_async(params: dict, on_success, on_error, on_m
         on_success, on_error, model, on_metrics=on_metrics,
         system_lang=params.get("explain_lang"),
     )
+
+
+def _images_for(model: str, image_paths: list[str] | None) -> list[str]:
+    """Les images d'une tâche, si le modèle qui va la traiter les voit.
+
+    Un modèle sans vision (`supports_images=False`, le palier minuscule) reçoit
+    le texte seul, décidé AVANT l'appel : sinon la première tentative, image
+    jointe, échouait — une génération perdue, des minutes sur la machine visée —
+    avant le repli texte. Le fichier n'est même pas relu."""
+    if not image_paths:
+        return []
+    from services.llm_models import profile
+
+    if not profile(model or _active_model()).supports_images:
+        logger.debug("Image de page écartée : le modèle %s ne lit pas les images", model or _active_model())
+        return []
+    return _load_ollama_images(image_paths)
 
 
 def _load_ollama_images(image_paths: list[str]) -> list[str]:

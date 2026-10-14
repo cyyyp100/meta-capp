@@ -136,16 +136,25 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # Six temps forts et leurs accroches en français : ~110 tokens par épisode
     # au banc (2026-09-24), où 400 coupait l'arc à chaque essai.
     "lang_story_arc":           {"num_ctx": 3072, "num_predict": 800,  "temperature": 0.70},
+    # num_ctx 5120 pour les cinq tâches de contenu d'un épisode (texte,
+    # glossaire, notes) et la leçon qui le suit : mesuré le 2026-10-13, un
+    # épisode arabe maximal laissait 46 tokens de marge RÉELLE au glossaire dans
+    # 4096, et l'estimation pessimiste corrigée (l'arabe vocalisé coûte 0,6
+    # token par caractère, pas 0,5) ne l'y faisait plus tenir. Les six partagent
+    # la même fenêtre : aucun rechargement du modèle entre elles. Un modèle qui
+    # ne tient pas 5120 (le palier minuscule, 4096) est plafonné par
+    # `task_options`, et ses épisodes sont raccourcis en conséquence
+    # (`max_units_per_episode`).
     # num_predict mesuré au banc (tools/lang_bench.py, 2026-09-24) : à 900, un
     # texte B1 de 17 à 23 répliques était coupé avant son résumé. Une réplique
     # et sa traduction coûtent ~60 tokens au palier le plus long. La génération
     # s'arrête à la fin du JSON : un texte A1 ne paie pas ce plafond.
-    "lang_episode_text":        {"num_ctx": 4096, "num_predict": 1600, "temperature": 0.70},
+    "lang_episode_text":        {"num_ctx": 5120, "num_predict": 1600, "temperature": 0.70},
     # Mandarin : les jetons (segmentation) allongent la sortie.
-    "lang_episode_text_hanzi":  {"num_ctx": 4096, "num_predict": 1900, "temperature": 0.70},
+    "lang_episode_text_hanzi":  {"num_ctx": 5120, "num_predict": 1900, "temperature": 0.70},
     # Une entrée par mot inconnu de l'apprenant (au plus LANG_GLOSSARY_CHUNK par
     # appel), ~20 tokens chacune en liste compacte, sens du lemme compris.
-    "lang_episode_glossary":    {"num_ctx": 4096, "num_predict": 900,  "temperature": 0.20},
+    "lang_episode_glossary":    {"num_ctx": 5120, "num_predict": 900,  "temperature": 0.20},
     # Langues latines : ~10 tokens de plus par entrée pour la prononciation en API
     # qu'écrit Clikoda (le pinyin et la translittération arabe sont calculés).
     # Banc du 12 octobre (lots de 20 mots, sens du lemme compris) : 549 tokens en
@@ -153,13 +162,13 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # entières, chacune écrite cinq fois. 1 100 est le plafond qui garde le prompt
     # du pire cas dans num_ctx (tests/services/test_lang_prompt_budget.py) ; une
     # coupure ne toucherait que les expressions, écrites après les entrées.
-    "lang_episode_glossary_pron": {"num_ctx": 4096, "num_predict": 1100, "temperature": 0.20},
+    "lang_episode_glossary_pron": {"num_ctx": 5120, "num_predict": 1100, "temperature": 0.20},
     # Notes + explication + micro-exercices : 700 coupait au banc dès l'A2.
-    "lang_episode_notes_point": {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
+    "lang_episode_notes_point": {"num_ctx": 5120, "num_predict": 1000, "temperature": 0.20},
     "lang_weekly_analysis":     {"num_ctx": 2048, "num_predict": 300,  "temperature": 0.20},
     # Leçon d'un point, une fois par point et par langue d'explication, après
     # l'épisode qui l'introduit : règle, formes, emplois, pièges, exemples.
-    "lang_point_lesson":        {"num_ctx": 4096, "num_predict": 1500, "temperature": 0.30},
+    "lang_point_lesson":        {"num_ctx": 5120, "num_predict": 1500, "temperature": 0.30},
     # Correction d'une expression écrite : trois erreurs au plus et le texte corrigé.
     "lang_writing_feedback":    {"num_ctx": 4096, "num_predict": 1000, "temperature": 0.20},
     # Accroche du sas d'entrée, écrite pendant le sas : une phrase (~60 tokens
@@ -199,6 +208,23 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
 # Pas de champ `label` : l'étiquette lue à l'écran se construit côté interface
 # depuis `tier` et `download_gb`, pour que les mots vivent dans les deux
 # dictionnaires i18n et non dans un dict Python.
+#
+# Le palier « tiny » est hors gemma4, et ce n'est pas un choix de goût : aucune
+# variante de gemma4 ne tient dans 4 Gio (`gemma4:e2b` pèse 7,2 Go — le « e »
+# réduit le calcul, pas les poids résidents). `qwen3:1.7b` (1,4 Go) a été retenu
+# pour son avance en suivi de consignes sur `gemma3:1b` ; le payload envoie déjà
+# `"think": false`, qui coupe son mode raisonnement. Mesuré le 2026-10-13 sur un
+# Apple M4 : 70 tokens/s écrits, ~740 lus, 0,6 s de chargement à froid, et un
+# JSON exploitable sur la question, l'évaluation, la réponse et l'accroche du
+# lecteur (8 essais sur 8). La table en retient 42 et 540, pessimistes comme les
+# autres lignes. Son contexte est plafonné à 4096 : c'est ce qui lui permet de
+# tenir dans `min_ram_gb` (1,75 Gio chargé à 4096, mesuré par `/api/ps`).
+#
+# `tokenizer` : le même texte ne coûte pas le même nombre de tokens à tous les
+# modèles (qwen3 compte ~18 % de plus que Gemma en français, 33 % de plus en
+# arabe vocalisé). Les budgets de prompt s'estiment par tokenizer
+# (PROMPT_TOKEN_WEIGHTS, plus bas), sans quoi un budget vérifié pour Gemma
+# déborderait en silence sur qwen3.
 LLM_MODEL_AUTO = "auto"
 
 
@@ -223,17 +249,19 @@ class ModelProfile:
     load_overhead_s: float      # chargement à froid + évaluation du prompt
     max_num_ctx: int            # plafond appliqué au num_ctx de chaque tâche
     supports_images: bool       # page du PDF envoyée au modèle, ou écartée
+    tokenizer: str              # clé de PROMPT_TOKEN_WEIGHTS
 
 
 LLM_MODELS: dict[str, ModelProfile] = {
     name: ModelProfile(name, *fields)
     for name, fields in {
-        #  nom          rank  tier          dl    ram  tok/s  prompt charge  ctx  images
-        "gemma4:e2b": (2, "small",     7.2,  8.0, 22.0, 240.0, 20.0, 8192, True),
-        "gemma4:e4b": (3, "standard",  9.6, 12.0, 18.0, 200.0, 25.0, 8192, True),
-        "gemma4:12b": (4, "standard",  8.0, 12.0, 14.0, 170.0, 25.0, 8192, True),
-        "gemma4:26b": (5, "large",    18.0, 32.0,  7.0, 110.0, 45.0, 8192, True),
-        "gemma4:31b": (6, "large",    20.0, 32.0,  6.0, 100.0, 50.0, 8192, True),
+        #  nom          rank  tier          dl    ram  tok/s  prompt charge  ctx  images tokenizer
+        "qwen3:1.7b": (1, "tiny",      1.4,  4.0, 42.0, 540.0, 10.0, 4096, False, "qwen"),
+        "gemma4:e2b": (2, "small",     7.2,  8.0, 22.0, 240.0, 20.0, 8192, True,  "gemma"),
+        "gemma4:e4b": (3, "standard",  9.6, 12.0, 18.0, 200.0, 25.0, 8192, True,  "gemma"),
+        "gemma4:12b": (4, "standard",  8.0, 12.0, 14.0, 170.0, 25.0, 8192, True,  "gemma"),
+        "gemma4:26b": (5, "large",    18.0, 32.0,  7.0, 110.0, 45.0, 8192, True,  "gemma"),
+        "gemma4:31b": (6, "large",    20.0, 32.0,  6.0, 100.0, 50.0, 8192, True,  "gemma"),
     }.items()
 }
 # Vocabulaire FERMÉ de la préférence `llm_model` (services/preferences.py) :
@@ -248,6 +276,28 @@ LLM_REFERENCE_PROFILE = LLM_MODELS[OLLAMA_MODEL]
 # résolu à CHAQUE génération et à chaque calcul de budget : un aller-retour HTTP
 # par appel serait payé par l'étudiant qui attend.
 LLM_TAGS_CACHE_TTL_S = 30.0
+# Coût en tokens d'un caractère, par tokenizer et par classe de caractères
+# (`llm.prompts.estimate_prompt_tokens`). Ollama ne signale pas un prompt
+# tronqué : les budgets se vérifient AVANT, sur les cas maximaux, avec une
+# estimation PESSIMISTE (tests/services/test_*_prompt_budget.py). Calibré le
+# 2026-10-13 sur 60 cas mesurés (`prompt_eval_count` de gemma4:e4b et
+# qwen3:1.7b : les prompts maximaux des bancs, plus des textes purs en
+# français, anglais, espagnol, allemand, arabe et chinois) ; chaque estimation
+# dépasse le réel, de 2,4 % au pire, de 24 à 28 % en médiane.
+#   - han    : un caractère chinois, un token (exact sur un caractère répété) ;
+#   - arabic : l'arabe VOCALISÉ coûte 0,60 token par caractère chez Gemma, 0,80
+#              chez qwen3 — l'ancienne estimation unique (0,5) le sous-estimait
+#              chez les deux, et le banc de budget ne passait que grâce à la
+#              marge du français autour ;
+#   - digit  : les chiffres se tokenisent un par un (les agrégats JSON de
+#              l'analyse hebdomadaire étaient sous-estimés de 12 %) ;
+#   - punct  : ponctuation ASCII, guillemets et accolades du JSON compris ;
+#   - rest   : lettres et espaces — qwen3 compte 0,31 token par caractère en
+#              espagnol, Gemma 0,26.
+PROMPT_TOKEN_WEIGHTS: dict[str, dict[str, float]] = {
+    "gemma": {"han": 1.0, "arabic": 0.65, "digit": 1.0, "punct": 0.7, "rest": 0.30},
+    "qwen": {"han": 1.0, "arabic": 0.9, "digit": 1.0, "punct": 0.6, "rest": 0.32},
+}
 
 
 # ── Budget temps d'une génération ─────────────────────────────────────────────
@@ -295,6 +345,70 @@ OLLAMA_WALL_TIMEOUT_MAX = 300.0
 OLLAMA_BACKGROUND_QUEUE_WAIT_S = 1800.0
 
 
+# ── Mode économe ──────────────────────────────────────────────────────────────
+# Une machine de 4 Gio ne fait tourner que le palier minuscule, sur son seul
+# processeur : 2 à 6 tokens écrits par seconde, une lecture de prompt dix fois
+# plus lente que sur la machine de référence, et une mémoire où le modèle, l'OS
+# et le webview se disputent chaque gigaoctet. Le mode économe y rend Clikoda
+# lente mais réelle, plutôt que muette :
+#   - un contexte UNIQUE pour toutes les tâches (ECONOMY_NUM_CTX) et un lot de
+#     lecture réduit (ECONOMY_NUM_BATCH) : Ollama recharge le modèle à CHAQUE
+#     changement de `num_ctx` ou de `num_batch` (mesuré le 2026-10-13 sur
+#     qwen3:1.7b : chaque alternance 2048/4096 coûte un chargement complet) ;
+#   - des prompts compacts (PROMPT_LIMITS_COMPACT, plus bas), qui tiennent dans
+#     ce contexte sans que rien n'en soit tronqué ;
+#   - des budgets temps qui couvrent une machine jusqu'à ~0,9 token/s, bornés à
+#     un quart d'heure par réponse : au-delà, une réponse n'en est plus une ;
+#   - un modèle déchargé après cinq minutes sans demande, pour rendre la mémoire
+#     au reste de la machine ;
+#   - aucun travail de fond (OLLAMA_BACKGROUND_TASKS), aucune aide autonome
+#     (services/intervention.py), aucun embedding (services/pdf_rag.py : la
+#     recherche du lecteur reste lexicale) — Clikoda ne parle que quand on lui
+#     parle, et l'unique worker reste libre pour la question de l'étudiant.
+#
+# La DÉCISION vit dans `services/llm_models.economy()` (préférence `llm_economy` :
+# auto / on / off, il faut pouvoir forcer dans les deux sens) ; ce module n'en
+# lit que le résultat. Ce que le mode NE fait PAS : réduire `num_predict`. Au
+# banc du 2026-10-13, qwen3:1.7b écrivait 110 à 450 tokens sur des plafonds de
+# 180 à 700 — couper le plafond ne raccourcissait aucune réponse, et tronquait
+# celles dont la taille est structurelle (dix questions de QCM, un glossaire).
+# Sur cette machine, chaque nouvelle tentative coûte des minutes.
+LLM_ECONOMY_AUTO = "auto"
+LLM_ECONOMY_CHOICES: tuple[str, ...] = (LLM_ECONOMY_AUTO, "on", "off")
+# « auto » l'active pour le palier minuscule, ou sous la RAM qu'exige le plus
+# petit gemma4 de la table : en dessous, même un modèle qui « tient » laisse
+# l'OS swapper dès que le webview grossit.
+LLM_ECONOMY_RAM_GB = 8.0
+# Étirement maximal des budgets (≈ 0,9 token/s écrit : 18 / 20). Le plafond de
+# la lecture du prompt et celui de l'écriture sont le MÊME nombre, lu par
+# `max_slowdown()` à la fois ici et dans `llm/throughput` (plancher des débits
+# mesurés) : deux copies divergeraient d'un facteur 2,5.
+OLLAMA_MAX_SLOWDOWN_ECONOMY = 20.0
+# Plafonds durs d'une tentative et d'une tâche, tentatives comprises.
+OLLAMA_TIMEOUT_MAX_ECONOMY = 900.0
+OLLAMA_WALL_TIMEOUT_MAX_ECONOMY = 1200.0
+OLLAMA_KEEP_ALIVE_ECONOMY = "5m"
+ECONOMY_NUM_CTX = 4096
+ECONOMY_NUM_BATCH = 128
+# Le lecteur annonce l'attente (« au plus ~N min », avec un bouton Annuler) en
+# mode économe, ou dès que la machine s'est révélée au moins aussi lente que ce
+# facteur face à la référence de son modèle (llm/throughput). En deçà, la
+# réponse arrive avant qu'on ait lu l'annonce.
+LLM_SLOW_MACHINE_FACTOR = 1.5
+# Tâches de fond suspendues en mode économe (`llm/ollama_client`, la file est le
+# seul endroit qui voit passer toutes les tâches avec leur label). Liste
+# EXPLICITE et non un préfixe : `lang_episode_hook` (l'accroche du sas, attendue
+# à l'écran) et `lang_writing_feedback` (la correction de fin de séance) restent
+# servies, comme le calibrage du débit.
+OLLAMA_BACKGROUND_TASKS: frozenset[str] = frozenset({
+    "document_digest",
+    "lang_story_bible", "lang_story_arc",
+    "lang_episode_text", "lang_episode_text_hanzi",
+    "lang_episode_glossary", "lang_episode_glossary_pron", "lang_episode_notes_point",
+    "lang_point_lesson", "lang_weekly_analysis",
+})
+
+
 def _slowdown() -> tuple[float, float]:
     """(écriture, lecture) : lenteur MESURÉE de cette machine face à la
     référence, ≥ 1. Import tardif : `llm.throughput` lit les constantes de ce
@@ -318,6 +432,44 @@ def _active_profile() -> ModelProfile:
     return active_profile()
 
 
+def _economy() -> bool:
+    """Le mode économe est-il actif ? Import tardif, même cycle et même raison
+    que `_active_profile()` : la décision lit une préférence en base, elle vit
+    dans `services/llm_models`, et elle ne lève jamais."""
+    from services.llm_models import economy
+
+    return economy()
+
+
+def max_slowdown() -> float:
+    """Étirement maximal des budgets par la lenteur de la machine. Lu ICI et
+    dans `llm/throughput` (plancher des débits mesurés) : un seul nombre."""
+    return OLLAMA_MAX_SLOWDOWN_ECONOMY if _economy() else OLLAMA_MAX_SLOWDOWN
+
+
+def keep_alive() -> str:
+    """Durée pendant laquelle Ollama garde le modèle chargé après un appel."""
+    return OLLAMA_KEEP_ALIVE_ECONOMY if _economy() else OLLAMA_KEEP_ALIVE
+
+
+def context_ceiling() -> int:
+    """Le plus grand `num_ctx` qu'une tâche peut recevoir en ce moment : le
+    plafond du modèle actif, et en mode économe le contexte unique."""
+    cap = _active_profile().max_num_ctx
+    return min(cap, ECONOMY_NUM_CTX) if _economy() else cap
+
+
+def compact_context() -> bool:
+    """Les prompts doivent-ils tenir dans le contexte du mode économe ?
+
+    Vrai en mode économe, ET pour un modèle qui ne tient pas davantage (le
+    palier minuscule) même mode économe coupé : c'est la taille du contexte qui
+    décide de la taille du prompt, pas le réglage qui l'a produite. Lu par les
+    constructeurs de prompts du lecteur (`prompt_limits`) et par la recherche
+    plein-document (services/pdf_rag)."""
+    return context_ceiling() <= ECONOMY_NUM_CTX
+
+
 def _model_factors(profile: ModelProfile) -> tuple[float, float]:
     """(écriture, lecture) : ce que CE modèle coûte face au modèle de référence.
 
@@ -338,12 +490,26 @@ def task_options(task: str) -> dict:
     et un plafond par modèle appliqué à deux d'entre eux seulement est un
     plafond qui ne protège rien. Ollama ne REFUSE pas un prompt plus long que
     `num_ctx` : il en tronque silencieusement le DÉBUT (rôle, consignes,
-    profil)."""
+    profil).
+
+    En mode économe, toutes les tâches reçoivent le MÊME contexte et le même
+    lot de lecture : c'est ce qui évite un rechargement du modèle entre deux
+    tâches. Les prompts, eux, sont compacts (`prompt_limits`) pour y tenir."""
     options = OLLAMA_TASK_OPTIONS.get(task) or OLLAMA_OPTIONS
     cap = _active_profile().max_num_ctx
+    if _economy():
+        return {**options, "num_ctx": min(cap, ECONOMY_NUM_CTX), "num_batch": ECONOMY_NUM_BATCH}
     if int(options.get("num_ctx") or 0) <= cap:
         return options
     return {**options, "num_ctx": cap}
+
+
+def prompt_budget_tokens(task: str) -> int:
+    """Tokens que le prompt d'une tâche peut occuper (consigne système
+    comprise) : son contexte effectif moins la sortie réservée. C'est la borne
+    que vérifient les bancs de budget (tests/services/test_*_prompt_budget.py)."""
+    options = task_options(task)
+    return int(options.get("num_ctx") or 0) - int(options.get("num_predict") or 0)
 
 
 def task_timeout_s(task: str) -> float:
@@ -362,6 +528,10 @@ def task_timeout_s(task: str) -> float:
     model_gen, model_prompt = _model_factors(profile)
     budget = profile.load_overhead_s * prompt_slow + tokens * gen_slow * model_gen / OLLAMA_TOKENS_PER_S
     ceiling = OLLAMA_TIMEOUT_MAX * max(gen_slow * model_gen, prompt_slow * model_prompt)
+    if _economy():
+        # La lenteur admise monte à OLLAMA_MAX_SLOWDOWN_ECONOMY ; le quart
+        # d'heure, lui, ne s'étire pas.
+        ceiling = min(ceiling, OLLAMA_TIMEOUT_MAX_ECONOMY)
     return min(ceiling, max(float(OLLAMA_TIMEOUT), budget))
 
 
@@ -370,10 +540,14 @@ def task_wall_timeout_s(task: str) -> float:
 
     Source unique de DEUX échéances qui doivent rester d'accord : la boucle de
     retry de `_generate_json` cesse de rejouer au-delà, et `run_llm_sync`
-    attend exactement ça avant d'abandonner."""
+    attend exactement ça avant d'abandonner. C'est aussi l'attente annoncée à
+    l'étudiant (« au plus ~N min », services/llm_models.wait_estimate_s) : le
+    lecteur n'a pas d'autre chiffre, et l'interface n'en recalcule aucun."""
     gen_slow, prompt_slow = _slowdown()
     model_gen, model_prompt = _model_factors(_active_profile())
     ceiling = OLLAMA_WALL_TIMEOUT_MAX * max(gen_slow * model_gen, prompt_slow * model_prompt)
+    if _economy():
+        ceiling = min(ceiling, OLLAMA_WALL_TIMEOUT_MAX_ECONOMY)
     return min(ceiling, task_timeout_s(task) * OLLAMA_RETRY_BUDGET_FACTOR)
 
 # ── Systèmes d'écriture (module Langues) ──────────────────────────────────────
@@ -704,11 +878,30 @@ LANG_EXTRA_SPEAKERS_MAX = 1
 LANG_EXTRA_SPEAKER_SHARE = 0.34
 # Longueur totale d'un épisode (mots ; caractères pour le hanzi), tous paliers :
 # c'est elle qui garantit que glossaire et notes, qui relisent le texte ET sa
-# traduction, tiennent dans num_ctx 4096 (G2). Un mot arabe vocalisé (clitiques
+# traduction, tiennent dans leur fenêtre (G2). Un mot arabe vocalisé (clitiques
 # et voyelles compris) coûte près de deux fois les tokens d'un mot espagnol.
 # Au-delà, il faudrait élargir num_ctx — et Ollama recharge le modèle à chaque
 # changement de fenêtre.
-LANG_MAX_UNITS_PER_EPISODE: dict[str, int] = {"latin": 450, "hanzi": 700, "arabe": 300}
+#
+# PAR TOKENIZER, parce que la garantie l'est : qwen3 compte l'arabe vocalisé un
+# tiers plus cher que Gemma, dans une fenêtre plafonnée à 4096 au lieu de
+# 5120. Le plafond arabe y descend donc à 180 mots (mesuré le 2026-10-13 : à
+# 300, son glossaire débordait de 650 tokens réels). Lu par
+# `max_units_per_episode`, jamais directement — le banc de budget
+# (tests/services/test_lang_prompt_budget.py) le vérifie pour chaque tokenizer.
+LANG_MAX_UNITS_PER_EPISODE: dict[str, dict[str, int]] = {
+    "gemma": {"latin": 450, "hanzi": 700, "arabe": 300},
+    "qwen": {"latin": 450, "hanzi": 700, "arabe": 180},
+}
+
+
+def max_units_per_episode(family: str, tokenizer: str | None = None) -> int:
+    """Plafond de longueur d'un épisode pour le tokenizer du modèle actif (ou
+    celui donné : les bancs de budget les parcourent tous)."""
+    caps = LANG_MAX_UNITS_PER_EPISODE.get(tokenizer or _active_profile().tokenizer)
+    return (caps or LANG_MAX_UNITS_PER_EPISODE["gemma"])[family]
+
+
 # Mots nouveaux (G4/G7) : le contrôle ne s'applique qu'une fois le lexique
 # amorcé — au premier épisode, tout est nouveau — et avec une marge.
 LANG_NEW_WORDS_CHECK_MIN_LEXICON = 60
@@ -1283,3 +1476,63 @@ ASSISTANT_RAG_MIN_SIMILARITY = 0.2
 # Après un échec d'embedding (modèle absent, Ollama arrêté), on n'insiste pas
 # avant ce délai : chaque question ne doit pas payer un timeout.
 ASSISTANT_RAG_EMBED_RETRY_S = 600
+
+
+# ── Taille des prompts du lecteur : pleine ou compacte ───────────────────────
+# Ce qu'un prompt du lecteur embarque (texte de page, réponses de la séance,
+# passages trouvés ailleurs…) est dimensionné pour le `num_ctx` que sa tâche
+# déclare. Quand le contexte de travail est celui du mode économe
+# (`compact_context()` : mode économe, ou palier minuscule), les trois tâches
+# qui déclarent plus que lui — la question (6144), l'évaluation (6144) et la
+# réponse libre (8192) — reçoivent moins : mesuré le 2026-10-13 avec le
+# tokenizer de qwen3 sur leurs cas maximaux, leurs prompts pleins font 5645,
+# 4318 et 4967 tokens, avant même les 700 réservés à la sortie. Ollama en
+# aurait coupé le début (le rôle, la page) sans un mot. Le banc qui le
+# garantit : tests/services/test_reader_prompt_budget.py.
+#
+# Les valeurs pleines sont celles d'avant, à l'identique : un prompt du modèle
+# de référence ne change pas d'un octet.
+#
+# En contexte compact, les trois blocs dont le contenu est celui du DOCUMENT ou
+# de l'étudiant (la page, la réponse évaluée, les passages trouvés ailleurs)
+# sont bornés en tokens ESTIMÉS (`*_tokens`, tokenizer du modèle actif) et pas
+# seulement en caractères : une page de chinois ou un tableau de chiffres coûte
+# un token par caractère, trois fois une page de français. Une borne en
+# caractères n'y garantissait rien ; celle-ci tient quel que soit le document.
+# La page a une borne PAR TÂCHE : c'est la place que laisse son squelette (~600
+# tokens pour la question compacte, ~1 650 pour l'évaluation) une fois les
+# autres blocs comptés à leur maximum — calibrée et vérifiée par le banc.
+@dataclass(frozen=True)
+class PromptLimits:
+    page_chars: int        # texte de la page visible (question, évaluation, réponse, reformulation)
+    answer_chars: int      # réponse de l'étudiant soumise à l'évaluation
+    history: int           # questions-réponses de la séance relayées (question, évaluation)
+    exchanges: int         # échanges récents relayés à la réponse libre
+    quotes: int            # extraits sélectionnés, et autant de surlignages
+    struggles: int         # difficultés passées
+    rag_top_k: int         # passages trouvés ailleurs (question ordinaire)
+    rag_search_top_k: int  # … quand la recherche s'élargit
+    rag_chars: int         # longueur d'un passage
+    rag_table_chars: int   # longueur d'une table (coupée entre deux rangées)
+    page_tokens: dict[str, int] | None = None  # par tâche ; None : contexte plein
+    answer_tokens: int | None = None
+    rag_tokens: int | None = None     # pour l'ensemble des passages
+
+
+PROMPT_LIMITS_FULL = PromptLimits(
+    page_chars=3500, answer_chars=2000, history=5, exchanges=4, quotes=5, struggles=3,
+    rag_top_k=ASSISTANT_RAG_TOP_K, rag_search_top_k=ASSISTANT_RAG_SEARCH_TOP_K,
+    rag_chars=ASSISTANT_RAG_MAX_CHARS, rag_table_chars=ASSISTANT_RAG_TABLE_CHUNK_CHARS,
+)
+PROMPT_LIMITS_COMPACT = PromptLimits(
+    page_chars=2000, answer_chars=1200, history=2, exchanges=2, quotes=2, struggles=2,
+    rag_top_k=2, rag_search_top_k=3, rag_chars=500, rag_table_chars=900,
+    page_tokens={"question": 900, "evaluation": 500, "assistant_answer": 380, "rephrasing": 1100,
+                 "curiosity_hook": 800},
+    answer_tokens=250, rag_tokens=400,
+)
+
+
+def prompt_limits() -> PromptLimits:
+    """Les limites du contexte de travail courant (cf. `compact_context`)."""
+    return PROMPT_LIMITS_COMPACT if compact_context() else PROMPT_LIMITS_FULL

@@ -53,6 +53,8 @@ from config.settings import (
     LANG_TEXT_FORMATS,
     LANG_TRANSLATED_SHARE_EASY,
     LANG_TRANSLATED_SHARE_HARD,
+    LLM_REFERENCE_PROFILE,
+    max_units_per_episode,
 )
 from db import get_connection
 from db import lang_episode_db as store
@@ -134,10 +136,18 @@ def prompt_constraints(language: str, params: dict, kind: str, explain_lang: str
     new_max = new_words_cap(params, kind)
     wpl = params.get("words_per_line")
     lo, hi = params["lines"]
+    # Un modèle dont le tokenizer compte plus cher a un plafond de longueur plus
+    # bas (config/settings.max_units_per_episode) : il doit le savoir AVANT
+    # d'écrire, sinon le validateur refuse un texte que rien ne lui interdisait.
+    # Le modèle de référence n'en reçoit pas la mention : son prompt ne change pas.
+    total = max_units_per_episode(family(language))
+    capped = total < max_units_per_episode(family(language), LLM_REFERENCE_PROFILE.tokenizer)
     if explain_lang == "en":
         unit = "characters" if hanzi else "words"
         parts = [f"between {lo} and {hi} lines",
                  f"{wpl[0]} to {wpl[1]} {unit} per line" if wpl else "free line length, natural sentences"]
+        if capped:
+            parts.append(f"at most {total} {unit} in total")
         if kind == "respiration":
             parts.append(f"BREATHER episode: same point as the previous episode, at most {new_max} new {unit}, "
                          "and as many already-seen words as possible")
@@ -149,6 +159,8 @@ def prompt_constraints(language: str, params: dict, kind: str, explain_lang: str
     parts.append(
         f"de {wpl[0]} à {wpl[1]} {unit} par réplique" if wpl else "longueur des répliques libre, phrases naturelles"
     )
+    if capped:
+        parts.append(f"au plus {total} {unit} au total")
     if kind == "respiration":
         parts.append(
             f"épisode de RESPIRATION : même point que l'épisode précédent, au plus {new_max} {unit} nouveaux, "

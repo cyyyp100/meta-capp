@@ -2,21 +2,23 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
+import string
 
 import i18n as _i18n
 from config import question_types
 from config.settings import (
-    ASSISTANT_RAG_MAX_CHARS,
-    ASSISTANT_RAG_SEARCH_TOP_K,
-    ASSISTANT_RAG_TABLE_CHUNK_CHARS,
     DOCUMENT_DIGEST_PROMPT_CHARS,
     LANGUAGE_SCRIPTS,
     LATIN_SCRIPT,
+    PROMPT_TOKEN_WEIGHTS,
     SCRIPT_HINTS,
     SCRIPTS,
     TONAL_LANGUAGES,
+    compact_context,
+    prompt_limits,
 )
 from config.subjects import DISCIPLINES, LANGUAGE_SUBJECTS
 
@@ -59,7 +61,7 @@ _NUMBERED_STEP_RE = re.compile(r"(?m)^\s*(?:\d+[.)]|[-•*])\s+\S")
 def _format_struggles(past_struggles: list[dict] | None) -> str:
     """Liste compacte des difficultés récurrentes (budget contexte serré)."""
     lines: list[str] = []
-    for item in (past_struggles or [])[:3]:
+    for item in (past_struggles or [])[:prompt_limits().struggles]:
         question = " ".join(str((item or {}).get("question") or "").split())[:120]
         if not question:
             continue
@@ -83,10 +85,11 @@ def _format_related_flashcards(cards: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
-def _format_quote_lines(items: list[str] | None, limit: int = 5) -> str:
-    """Liste compacte de citations (extraits sélectionnés / surlignages)."""
+def _format_quote_lines(items: list[str] | None, limit: int | None = None) -> str:
+    """Liste compacte de citations (extraits sélectionnés / surlignages). Sans
+    `limit`, celle du contexte courant (`prompt_limits`)."""
     lines: list[str] = []
-    for raw in (items or [])[:limit]:
+    for raw in (items or [])[:prompt_limits().quotes if limit is None else limit]:
         text = " ".join(str(raw or "").split())[:200]
         if text:
             lines.append(f"- « {text} »")
@@ -128,17 +131,27 @@ def _retrieved_passages_block(passages: list[dict] | None) -> str:
     réponse ; une table (déjà bornée par services.pdf_rag) est signalée comme
     telle et n'est pas retronquée : coupée, elle perdrait ses valeurs.
     """
+    lim = prompt_limits()
     lines: list[str] = []
-    for item in (passages or [])[:ASSISTANT_RAG_SEARCH_TOP_K]:
+    used = 0
+    for item in (passages or [])[:lim.rag_search_top_k]:
         item = item or {}
         is_table = bool(item.get("table"))
         raw = str(item.get("text") or "")
         if is_table:
             # Une rangée par ligne : c'est ce qui rend les valeurs lisibles.
             text = "\n".join(" ".join(ln.split()) for ln in raw.splitlines() if ln.strip())
-            text = text[:ASSISTANT_RAG_TABLE_CHUNK_CHARS]
+            text = _cut_at_line(text, lim.rag_table_chars)
         else:
-            text = " ".join(raw.split())[:ASSISTANT_RAG_MAX_CHARS]
+            text = " ".join(raw.split())[:lim.rag_chars]
+        if lim.rag_tokens is not None:
+            # Contexte compact : un budget pour TOUS les passages — deux tables
+            # de chiffres coûtent davantage que la page elle-même.
+            room = lim.rag_tokens - used
+            if room < _MIN_PASSAGE_TOKENS:
+                break
+            text = _fit_tokens(text, room, keep_lines=is_table)
+            used += estimate_prompt_tokens(text)
         if not text:
             continue
         page = item.get("page")
@@ -158,6 +171,56 @@ def _retrieved_passages_block(passages: list[dict] | None) -> str:
         "Ailleurs dans le document (autres pages que celle affichée) :\n" + body,
         "Elsewhere in the document (pages other than the one displayed):\n" + body,
     ) + "\n"
+
+
+# En dessous, un passage trouvé ailleurs ne dit plus rien d'utile : on s'arrête
+# plutôt que d'en citer un moignon.
+_MIN_PASSAGE_TOKENS = 60
+
+
+def _fit_tokens(text: str, budget: int | None, *, keep_lines: bool = False) -> str:
+    """Le plus long début de `text` qui tient dans `budget` tokens estimés
+    (tokenizer du modèle actif), coupé entre deux mots — ou entre deux lignes
+    pour une table. `budget` None : rien à couper (contexte plein)."""
+    if budget is None or estimate_prompt_tokens(text) <= budget:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:  # recherche dichotomique du plus long préfixe qui tient
+        mid = (lo + hi + 1) // 2
+        if estimate_prompt_tokens(text[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    cut = text[:lo]
+    boundary = cut.rfind("\n" if keep_lines else " ")
+    return cut[:boundary] if boundary > 0 else cut
+
+
+def _page_excerpt(text: str, lim, task: str) -> str:
+    """Le texte de page que le prompt de `task` embarque : borné en caractères,
+    et en contexte compact en tokens (cf. config/settings.PromptLimits)."""
+    budget = lim.page_tokens.get(task) if lim.page_tokens else None
+    return _fit_tokens((text or "")[:lim.page_chars], budget)
+
+
+def _cut_at_line(text: str, limit: int) -> str:
+    """Coupe une table à `limit` caractères, entre deux rangées : une rangée
+    coupée en son milieu perd la valeur que la question cherchait. Une seule
+    rangée trop longue est coupée quand même (au-delà, le prompt déborde)."""
+    if len(text) <= limit:
+        return text
+    cut = text.rfind("\n", 0, limit + 1)
+    return text[:cut] if cut > 0 else text[:limit]
+
+
+def _image_attached() -> bool:
+    """Le modèle actif voit-il la page ? Sinon, aucune consigne ne parle d'une
+    image : `llm/ollama_client` l'écarte avant l'appel (`supports_images`), et
+    un petit modèle à qui l'on dit « une image est jointe » en invente le
+    contenu. Import tardif : la politique « quel modèle » est un service."""
+    from services.llm_models import active_profile
+
+    return active_profile().supports_images
 
 
 def build_question_prompt(
@@ -182,6 +245,8 @@ def build_question_prompt(
 ) -> str:
     history = history or []
     session_gauges = session_gauges or {}
+    lim = prompt_limits()
+    page = _page_excerpt(paragraph, lim, "question")
     student_context = _student_context_block(None, user_highlights)
     recent_question_types = _normalize_recent_question_types(
         recent_question_types or _question_types_from_history(history)
@@ -197,6 +262,12 @@ def build_question_prompt(
         has_prior_context=bool(history or past_struggles or user_highlights),
     )
     sid = source_block_id or ""
+    if compact_context():
+        return _build_question_prompt_compact(
+            paragraph=paragraph, chapter_title=chapter_title, doc_title=doc_title, history=history,
+            adaptation=adaptation, past_struggles=past_struggles, student_context=student_context,
+            has_existing_question=has_existing_question, standalone=standalone, sid=sid,
+        )
 
     if history:
         history_instruction = _t(
@@ -258,6 +329,10 @@ def build_question_prompt(
     # Une ligne « Pour …, privilégie "x" » par type, déclarée avec le type lui-même.
     _prefer_rules = "\n".join(f"- {rule}" for rule in question_types.prefer_rules(_lang))
     _type_enum = question_types.json_enum(_lang)
+    _image_rule = _t(
+        "- Une image est jointe : c'est la PAGE PDF COMPLÈTE que lit l'étudiant. Le texte ci-dessous en est l'extraction (imparfaite). Considère l'image comme la source primaire — fonde ta question sur ce qui est réellement visible sur la page (texte, formules, figures, tableaux) et sers-toi de l'image pour lever toute ambiguïté OCR du texte.\n",
+        "- An image is attached: it is the FULL PDF page the student is reading. The text below is its (imperfect) extraction. Treat the image as the primary source — base your question on what is actually visible on the page (text, formulas, figures, tables) and use the image to resolve any OCR ambiguity in the text.\n",
+    ) if _image_attached() else ""
 
     if _i18n.current_lang() == "en":
         _standalone_constraint = (
@@ -277,7 +352,7 @@ Context:
 {struggles_block}{student_context}
 Paragraph to assess:
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Available question types:
@@ -331,8 +406,7 @@ Constraints:
 - The source text may contain raw Unicode symbols (≠, →, ∞): treat them as mathematical content.
 - If the paragraph contains [Table: ...] or a [Table N×M rows×columns] annotation, ask a question about the data or trends in the table.
 - If the paragraph mentions [Figure: ...] or [Figure on this page: ...], use the caption to contextualize your question.
-- An image is attached: it is the FULL PDF page the student is reading. The text below is its (imperfect) extraction. Treat the image as the primary source — base your question on what is actually visible on the page (text, formulas, figures, tables) and use the image to resolve any OCR ambiguity in the text.
-- paragraph_mask.enabled is true only if masking a short portion of the paragraph genuinely helps the student reason without copying. It is MANDATORY for question_type "recall".
+{_image_rule}- paragraph_mask.enabled is true only if masking a short portion of the paragraph genuinely helps the student reason without copying. It is MANDATORY for question_type "recall".
 - If paragraph_mask.enabled is true, start_char and end_char are exact indices in the provided paragraph, covering between 80 and 600 characters.
 {_standalone_constraint}"""
 
@@ -353,7 +427,7 @@ Contexte :
 {struggles_block}{student_context}
 Paragraphe à vérifier :
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Types de questions disponibles :
@@ -407,10 +481,202 @@ Contraintes :
 - Le texte source peut contenir des symboles Unicode bruts (≠, →, ∞) : traite-les comme du contenu mathématique.
 - Si le paragraphe contient [Tableau: ...] ou une annotation [Tableau N×M lignes×colonnes], pose une question sur les données ou les tendances du tableau.
 - Si le paragraphe mentionne [Figure: ...] ou [Figure sur cette page : ...], utilise la légende pour contextualiser ta question.
-- Une image est jointe : c'est la PAGE PDF COMPLÈTE que lit l'étudiant. Le texte ci-dessous en est l'extraction (imparfaite). Considère l'image comme la source primaire — fonde ta question sur ce qui est réellement visible sur la page (texte, formules, figures, tableaux) et sers-toi de l'image pour lever toute ambiguïté OCR du texte.
-- paragraph_mask.enabled vaut true seulement si masquer une courte portion du paragraphe aide vraiment l'étudiant à raisonner sans recopier. Il est OBLIGATOIRE pour le question_type "recall".
+{_image_rule}- paragraph_mask.enabled vaut true seulement si masquer une courte portion du paragraphe aide vraiment l'étudiant à raisonner sans recopier. Il est OBLIGATOIRE pour le question_type "recall".
 - Si paragraph_mask.enabled vaut true, start_char et end_char sont des indices exacts dans le paragraphe fourni, couvrant entre 80 et 600 caractères.
 {_standalone_constraint_fr}"""
+
+
+# Règle de forme propre au type, pour le prompt compact (contexte du mode
+# économe). Le prompt plein les énumère toutes pour seize types — c'est l'essentiel
+# de ses ~3 000 tokens ; le compact ne garde que celle du type déjà choisi.
+_COMPACT_TYPE_RULES: dict[str, tuple[str, str]] = {
+    "qcm": (
+        "choices contient 3 ou 4 propositions plausibles ; expected_answer recopie la bonne.",
+        "choices holds 3 or 4 plausible options; expected_answer copies the right one.",
+    ),
+    "ordering": (
+        "choices contient 3 à 6 étapes courtes DANS L'ORDRE CORRECT (l'interface les mélange) ; "
+        "expected_answer les reprend sous la forme « 1. … 2. … 3. … ».",
+        "choices holds 3 to 6 short steps IN THE CORRECT ORDER (the interface shuffles them); "
+        "expected_answer restates them as \"1. … 2. … 3. …\".",
+    ),
+    "estimation": (
+        "choices contient 3 ou 4 ordres de grandeur, ou [] pour une réponse libre.",
+        "choices holds 3 or 4 orders of magnitude, or [] for a free answer.",
+    ),
+    "recall": (
+        "paragraph_mask.enabled vaut true : start_char et end_char encadrent exactement le passage à "
+        "restituer (80 à 600 caractères du paragraphe), et la question n'en répète pas le contenu ; choices vaut [].",
+        "paragraph_mask.enabled is true: start_char and end_char frame exactly the passage to recall "
+        "(80 to 600 characters of the paragraph), and the question does not repeat its content; choices is [].",
+    ),
+    "error_detection": (
+        "la question contient elle-même une reformulation FAUSSE du passage ; expected_answer nomme "
+        "l'erreur puis la corrige ; choices vaut [].",
+        "the question itself contains a WRONG restatement of the passage; expected_answer names the "
+        "error then corrects it; choices is [].",
+    ),
+    "metacognition": (
+        "expected_answer décrit les éléments d'une bonne réponse, pas une solution unique ; choices vaut [].",
+        "expected_answer describes the elements of a good answer, not a single solution; choices is [].",
+    ),
+    "anticipation": (
+        "expected_answer décrit les éléments d'une bonne réponse, pas une solution unique ; choices vaut [].",
+        "expected_answer describes the elements of a good answer, not a single solution; choices is [].",
+    ),
+    "curiosity": (
+        "la question peut ouvrir une piste, mais expected_answer reste ancrée dans le paragraphe ; choices vaut [].",
+        "the question may open a lead, but expected_answer stays grounded in the paragraph; choices is [].",
+    ),
+}
+_COMPACT_DEFAULT_RULE = ("choices vaut [].", "choices is [].")
+_COMPACT_CHOICES_EXAMPLE = {"qcm": '["A", "B", "C", "D"]', "ordering": '["étape 1", "étape 2", "étape 3"]'}
+
+
+def _compact_history_lines(history: list[dict]) -> str:
+    """Les réponses récentes en une ligne chacune : en JSON, les clés et les
+    guillemets coûtaient presque autant que le contenu."""
+    lines = []
+    for item in history:
+        question = " ".join(str((item or {}).get("question") or "").split())[:160]
+        answer = " ".join(str((item or {}).get("answer") or "").split())[:160]
+        verdict = str((item or {}).get("verdict") or "").strip()
+        if question:
+            lines.append(f"- « {question} » → « {answer} »" + (f" ({verdict})" if verdict else ""))
+    return "\n".join(lines)
+
+
+def _build_question_prompt_compact(
+    *, paragraph: str, chapter_title: str, doc_title: str, history: list[dict], adaptation: dict,
+    past_struggles: list[dict] | None, student_context: str, has_existing_question: bool,
+    standalone: bool, sid: str,
+) -> str:
+    """La question, pour le contexte du mode économe (`compact_context`).
+
+    Mêmes champs JSON que le prompt plein — donc le même `parse_question` et le
+    même repli, qui relit « Paragraphe à vérifier », « Type pédagogique cible »
+    et le seuil d'attention : ces intitulés sont repris tels quels — mais un
+    seul type décrit : celui que `_question_adaptation` a
+    déjà choisi d'après les jauges et les types récents. Le prompt plein laisse
+    le modèle choisir parmi seize types avec leurs règles ; ce choix-là est déjà
+    fait côté serveur, et décrire les quinze autres ne servait plus qu'à remplir
+    un contexte de 4096 tokens (et une lecture de prompt qui se chiffre en
+    minutes sur la machine visée). Ni profil ni jauges en JSON : ils ont servi
+    au choix du type, il en reste les deux consignes qu'ils dictent."""
+    lim = prompt_limits()
+    en = _i18n.current_lang() == "en"
+    i = 1 if en else 0
+    qtype = adaptation.get("preferred_type") or "comprehension"
+    spec = question_types.spec(qtype) or question_types.spec("comprehension")
+    rule = _COMPACT_TYPE_RULES.get(qtype, _COMPACT_DEFAULT_RULE)[i]
+    choices_example = _COMPACT_CHOICES_EXAMPLE.get(qtype, "[]")
+    mask_enabled = "true" if qtype == "recall" else "false"
+    page = _page_excerpt(paragraph, lim, "question")
+
+    history_lines = _compact_history_lines(history[-lim.history:])
+    struggles = _format_struggles(past_struggles)
+    context = _context_line("Document:" if en else "Document :", doc_title)
+    context += _context_line("Chapter:" if en else "Chapitre :", chapter_title)
+    extra = []
+    if history_lines:
+        extra.append(_t(
+            f"Réponses récentes de l'étudiant (fais-y un lien si c'est utile, sans le culpabiliser) :\n{history_lines}",
+            f"The student's recent answers (link to them when useful, without making them feel guilty):\n{history_lines}",
+        ))
+    if struggles:
+        extra.append(_t(
+            f"Difficultés passées (recible la notion sous un angle NOUVEAU, ne repose pas la même question) :\n{struggles}",
+            f"Past struggles (re-target the notion from a NEW angle, never repeat the same question):\n{struggles}",
+        ))
+    extra_block = ("\n".join(extra) + "\n") if extra else ""
+
+    guidance = []
+    if has_existing_question and not standalone:
+        guidance.append(_t("Le paragraphe contient déjà une question : demande à l'étudiant d'y répondre.",
+                           "The paragraph already contains a question: ask the student to answer it."))
+    if adaptation.get("attention_break"):
+        guidance.append(_t("Attention actuelle sous le seuil 45 : propose une pause courte dans session_hint, "
+                           "et pose une question très légère.",
+                           "Current attention below threshold 45: suggest a short break in session_hint, "
+                           "and ask a very light question."))
+    if adaptation.get("simplify"):
+        guidance.append(_t("Pose une question simple, en une étape, à la réponse courte et concrète.",
+                           "Ask a simple, single-step question with a short, concrete answer."))
+    guidance_block = ("\n".join(f"- {line}" for line in guidance) + "\n") if guidance else ""
+    standalone_rule = (
+        _t("La question tient seule : jamais « selon le passage » ni « d'après ce texte » — nomme le concept.",
+           "The question stands on its own: never \"according to the passage\" or \"based on this text\" — name the concept.")
+        if standalone else
+        _t("La question dépend du paragraphe, pas d'un savoir externe.",
+           "The question depends on the paragraph, not on outside knowledge.")
+    )
+    image_rule = _t(
+        "- Une image de la page est jointe : fie-toi à elle pour les formules, les figures et les tableaux.\n",
+        "- An image of the page is attached: trust it for formulas, figures and tables.\n",
+    ) if _image_attached() else ""
+
+    if en:
+        return f"""You are MetaC-App's learning companion. Ask the student ONE question about the paragraph below.
+
+{context}{extra_block}{student_context}
+Paragraph to assess:
+---
+{page}
+---
+
+Target pedagogical type: "{qtype}" — {spec.label[i]}: {spec.purpose[i]}. Example: {spec.example[i]}
+{guidance_block}
+Respond only with valid JSON, without Markdown:
+{{
+  "question_type": "{qtype}",
+  "question": "question text",
+  "choices": {choices_example},
+  "expected_answer": "short but precise expected answer",
+  "evaluation_criteria": ["criterion 1", "criterion 2"],
+  "session_hint": "",
+  "source_excerpt": "the exact sentences of the paragraph the question is about",
+  "source_block_id": "{sid}",
+  "paragraph_mask": {{"enabled": {mask_enabled}, "start_char": 0, "end_char": 0, "placeholder": "temporarily masked answer"}}
+}}
+
+Constraints:
+- Every field the student reads is in English.
+- {rule}
+- source_excerpt copies 60 to 400 characters of the paragraph WORD FOR WORD.
+- {standalone_rule}
+- Write mathematics between $...$ in valid LaTeX; in JSON, double every backslash: "$u_n \\\\sim n$".
+{image_rule}"""
+
+    return f"""Tu es le compagnon d'apprentissage de MetaC-App. Pose UNE question à l'étudiant sur le paragraphe ci-dessous.
+
+{context}{extra_block}{student_context}
+Paragraphe à vérifier :
+---
+{page}
+---
+
+Type pédagogique cible : "{qtype}" — {spec.label[i]} : {spec.purpose[i]}. Exemple : {spec.example[i]}
+{guidance_block}
+Réponds uniquement en JSON valide, sans Markdown :
+{{
+  "question_type": "{qtype}",
+  "question": "texte de la question",
+  "choices": {choices_example},
+  "expected_answer": "réponse attendue courte mais précise",
+  "evaluation_criteria": ["critère 1", "critère 2"],
+  "session_hint": "",
+  "source_excerpt": "les phrases exactes du paragraphe sur lesquelles porte la question",
+  "source_block_id": "{sid}",
+  "paragraph_mask": {{"enabled": {mask_enabled}, "start_char": 0, "end_char": 0, "placeholder": "réponse masquée temporairement"}}
+}}
+
+Contraintes :
+- Tout ce que lit l'étudiant est en français.
+- {rule}
+- source_excerpt recopie MOT POUR MOT 60 à 400 caractères du paragraphe.
+- {standalone_rule}
+- Écris les mathématiques entre $...$ en LaTeX valide ; dans le JSON, double chaque backslash : "$u_n \\\\sim n$".
+{image_rule}"""
 
 
 def _question_type_guide() -> str:
@@ -768,7 +1034,13 @@ def build_evaluation_prompt(
     past_struggles: list[dict] | None = None,
     objective_verdict: str = "",
 ) -> str:
-    history = history or []
+    lim = prompt_limits()
+    history = (history or [])[-lim.history:]
+    # En contexte compact, une ligne par réponse : en JSON, les clés et les
+    # guillemets coûtaient presque autant que le contenu.
+    history_text = _compact_history_lines(history) if lim.page_tokens else _json(history)
+    page = _page_excerpt(paragraph, lim, "evaluation")
+    answer = _fit_tokens((user_answer or "")[:lim.answer_chars], lim.answer_tokens)
     if history:
         history_instruction = _t(
             "\nSi une réponse antérieure aide à expliquer le verdict ou le feedback, référence-la explicitement"
@@ -801,6 +1073,10 @@ def build_evaluation_prompt(
     # rejuge pas, il commente. Sans cette annonce, son feedback féliciterait
     # une réponse que le serveur vient de compter fausse.
     _verdict_rule_fr, _verdict_rule_en = _eval_objective_verdict_rule(objective_verdict)
+    _image_rule = _t(
+        "- Une image est jointe : c'est la page PDF complète lue (le texte en est l'extraction). Utilise-la pour confirmer les notations et rester fidèle à ce qui figure réellement sur la page.\n",
+        "- An image is attached: it is the full PDF page being read (the text is its extraction). Use it to confirm notation and stay faithful to what is actually on the page.\n",
+    ) if _image_attached() else ""
     if not question_types.flashcard_eligible(question_type):
         _flashcard_constraint = _t(
             "- flashcard DOIT être null : ce type de question ne génère jamais de flashcard.",
@@ -835,11 +1111,11 @@ def build_evaluation_prompt(
         return f"""You are evaluating a student's answer in MetaC-App.
 
 Metacognitive profile: {_json(metacog_profile or {})}
-Recent session history: {_json(history)}
+Recent session history: {history_text}
 {struggles_block}
 Source paragraph:
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Question:
@@ -847,7 +1123,7 @@ Question:
 
 Student's answer:
 ---
-{user_answer[:2000]}
+{answer}
 ---
 
 Evaluate strictly against the paragraph and the expected answer.
@@ -899,8 +1175,7 @@ Constraints:
 - If the student's answer contains a follow-up question, a clarification request, an example request, or a request for deeper understanding, increase the curiosity signal and set curiosity_signals.
 - Do not answer this question in answer_to_user_question during evaluation: set answer_to_user_question to null. The follow-up question will be handled by the dedicated "Ask a question about this paragraph" field.
 - If the answer goes beyond the minimum expected, makes connections, reformulates in their own words, proposes an analogy or a hypothesis, increase the creativity signal and set creativity_signals.
-- An image is attached: it is the full PDF page being read (the text is its extraction). Use it to confirm notation and stay faithful to what is actually on the page.
-{_dim_hint_en}
+{_image_rule}{_dim_hint_en}
 {_type_rule_en}
 {_verdict_rule_en}
 {_flashcard_constraint}
@@ -909,11 +1184,11 @@ Constraints:
     return f"""Tu évalues une réponse d'étudiant dans MetaC-App.
 
 Profil métacognitif : {_json(metacog_profile or {})}
-Historique récent de la session : {_json(history)}
+Historique récent de la session : {history_text}
 {struggles_block}
 Paragraphe source :
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Question :
@@ -921,7 +1196,7 @@ Question :
 
 Réponse de l'étudiant :
 ---
-{user_answer[:2000]}
+{answer}
 ---
 
 Évalue strictement par rapport au paragraphe et à la réponse attendue.
@@ -973,8 +1248,7 @@ Contraintes :
 - Si la réponse de l'étudiant contient une question de suivi, une demande de clarification, d'exemple ou d'approfondissement, augmente le signal curiosity et renseigne curiosity_signals.
 - Ne réponds pas à cette question dans answer_to_user_question pendant l'évaluation : mets answer_to_user_question à null. La question de suivi sera traitée par le champ dédié "Poser une question sur ce paragraphe".
 - Si la réponse dépasse le minimum attendu, fait des liens, reformule avec ses mots, propose une analogie ou une hypothèse, augmente le signal creativity et renseigne creativity_signals.
-- Une image est jointe : c'est la page PDF complète lue (le texte en est l'extraction). Utilise-la pour confirmer les notations et rester fidèle à ce qui figure réellement sur la page.
-{_dim_hint_fr}
+{_image_rule}{_dim_hint_fr}
 {_type_rule_fr}
 {_verdict_rule_fr}
 {_flashcard_constraint}
@@ -982,6 +1256,11 @@ Contraintes :
 
 
 def build_rephrasing_prompt(paragraph: str, attempt_count: int) -> str:
+    page = _page_excerpt(paragraph, prompt_limits(), "rephrasing")
+    image_rule = _t(
+        "\n- Une image est jointe : c'est la page PDF complète lue (le texte en est l'extraction) : utilise-la pour préserver les notations que l'OCR aurait pu dégrader.",
+        "\n- An image is attached: it is the full PDF page being read (the text is its extraction): use it to preserve notation that OCR may have degraded.",
+    ) if _image_attached() else ""
     if _i18n.current_lang() == "en":
         return f"""You are rephrasing a course paragraph to unblock a student.
 
@@ -989,7 +1268,7 @@ Number of consecutive incorrect attempts: {attempt_count}
 
 Original paragraph:
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Respond only in valid JSON, without Markdown, in the exact format:
@@ -1003,8 +1282,7 @@ Respond only in valid JSON, without Markdown, in the exact format:
 Constraints:
 - highlights: 0 to 3 quotes copied WORD FOR WORD from the original paragraph (never rephrased), pointing at the passages your reformulation clarifies. Use an empty list if nothing relevant.
 - Do not simplify to the point of changing the content.
-- Keep important formulas and notation.
-- An image is attached: it is the full PDF page being read (the text is its extraction): use it to preserve notation that OCR may have degraded."""
+- Keep important formulas and notation.{image_rule}"""
 
     return f"""Tu reformules un paragraphe de cours pour débloquer un étudiant.
 
@@ -1012,7 +1290,7 @@ Nombre de tentatives incorrectes consécutives : {attempt_count}
 
 Paragraphe original :
 ---
-{paragraph[:3500]}
+{page}
 ---
 
 Réponds uniquement en JSON valide, sans Markdown, au format exact :
@@ -1026,8 +1304,7 @@ Réponds uniquement en JSON valide, sans Markdown, au format exact :
 Contraintes :
 - highlights : 0 à 3 citations copiées MOT POUR MOT du paragraphe original (jamais reformulées), désignant les passages que ta reformulation éclaire. Liste vide si rien de pertinent.
 - Ne simplifie pas au point de changer le contenu.
-- Garde les formules et notations importantes.
-- Une image est jointe : c'est la page PDF complète lue (le texte en est l'extraction) : utilise-la pour préserver les notations que l'OCR aurait pu dégrader."""
+- Garde les formules et notations importantes.{image_rule}"""
 
 
 def build_flashcard_prompt(front: str, back: str, paragraph: str = "") -> str:
@@ -1463,6 +1740,11 @@ Contraintes :
 - Formule les réponses pour aider l'étudiant à vérifier sa compréhension."""
 
 
+def _hook_tokens() -> int | None:
+    lim = prompt_limits()
+    return lim.page_tokens.get("curiosity_hook") if lim.page_tokens else None
+
+
 def build_curiosity_hook_prompt(
     doc_title: str,
     chapter_title: str,
@@ -1476,7 +1758,7 @@ def build_curiosity_hook_prompt(
         excerpt_section = (
             "No excerpt available: base yourself only on the document and chapter title."
             if no_excerpt
-            else chapter_excerpt[:2500]
+            else _fit_tokens(chapter_excerpt[:2500], _hook_tokens())
         )
         return f"""You are generating an opening hook for a reader about to read a chapter.
 
@@ -1508,7 +1790,7 @@ Constraints:
     excerpt_section = (
         "Aucun extrait disponible : base-toi uniquement sur le titre du document et du chapitre."
         if no_excerpt
-        else chapter_excerpt[:2500]
+        else _fit_tokens(chapter_excerpt[:2500], _hook_tokens())
     )
     return f"""Tu génères une phrase d'accroche pour un lecteur qui s'apprête à lire un chapitre.
 
@@ -2479,19 +2761,39 @@ def _explain_en(p: dict) -> bool:
     return p.get("explain_lang") == "en"
 
 
-def estimate_prompt_tokens(text: str) -> int:
+_ASCII_PUNCT = frozenset(string.punctuation)
+
+
+def estimate_prompt_tokens(text: str, tokenizer: str | None = None) -> int:
     """Estimation PESSIMISTE du nombre de tokens d'un prompt (G2).
 
     Ollama ne signale pas un prompt tronqué (cf. `_warn_if_context_overflow`) :
     le budget se vérifie avant, sur les cas maximaux (tests/services/
-    test_lang_prompt_budget.py). Un caractère chinois compte pour un token, une
-    lettre arabe pour un demi, le reste un token pour trois caractères — le
-    français tourne plutôt autour de quatre avec le tokenizer de Gemma. Le
-    banc (tools/lang_bench.py) relève les vrais `prompt_eval_count`."""
-    han = sum(1 for c in text if "\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf")
-    arabic = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
-    rest = len(text) - han - arabic
-    return han + (arabic + 1) // 2 + (rest + 2) // 3
+    test_lang_prompt_budget.py, test_reader_prompt_budget.py). Chaque classe de
+    caractères a son coût, PAR TOKENIZER (config/settings.PROMPT_TOKEN_WEIGHTS,
+    calibré sur les vrais `prompt_eval_count`) : le même texte arabe coûte un
+    tiers de plus à qwen3 qu'à Gemma. `tokenizer` absent = celui du modèle
+    actif — c'est à lui que le prompt partira."""
+    if tokenizer is None:
+        from config.settings import _active_profile
+
+        tokenizer = _active_profile().tokenizer
+    weights = PROMPT_TOKEN_WEIGHTS.get(tokenizer) or PROMPT_TOKEN_WEIGHTS["gemma"]
+    han = arabic = digit = punct = 0
+    for c in text:
+        if "\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf":
+            han += 1
+        elif "\u0600" <= c <= "\u06ff":
+            arabic += 1
+        elif "0" <= c <= "9":
+            digit += 1
+        elif c in _ASCII_PUNCT:
+            punct += 1
+    rest = len(text) - han - arabic - digit - punct
+    return math.ceil(
+        weights["han"] * han + weights["arabic"] * arabic + weights["digit"] * digit
+        + weights["punct"] * punct + weights["rest"] * rest
+    )
 
 
 def fit_word_list(words: list[str], budget_tokens: int, sep: str = ", ") -> list[str]:
@@ -3187,8 +3489,10 @@ def build_assistant_answer_prompt(
             "- La question porte sur une figure : décris d'abord ce qui est RÉELLEMENT VISIBLE sur l'image de la page (blocs, flèches, couleurs, ce qui distingue la gauche de la droite, axes et légendes internes), puis seulement ce que dit la légende. Paraphraser la légende ne suffit pas. Si aucune image n'est jointe ou si la figure n'y est pas lisible, dis-le en une demi-phrase plutôt que d'inventer des détails visuels.\n",
             "- The question is about a figure: first describe what is ACTUALLY VISIBLE in the page image (blocks, arrows, colours, what sets the left apart from the right, axes and inner labels), and only then what the caption says. Paraphrasing the caption is not enough. If no image is attached or the figure is not legible in it, say so in half a sentence rather than inventing visual details.\n",
         )
+    lim = prompt_limits()
+    page = _page_excerpt(page_text, lim, "assistant_answer")
     exchanges_lines = []
-    for item in (recent_exchanges or [])[-4:]:
+    for item in (recent_exchanges or [])[-lim.exchanges:]:
         question = str(item.get("question") or "").strip()
         answer = str(item.get("answer") or "").strip()
         if question:
@@ -3212,7 +3516,7 @@ Existing student flashcards related to this document (fronts):
 {student_context}{retrieved_context}
 Paragraphe source (text of the page visible when the student pressed Send):
 ---
-{(page_text or "")[:3500]}
+{page}
 ---
 
 Question de l'étudiant:
@@ -3267,7 +3571,7 @@ Flashcards existantes de l'étudiant liées à ce document (rectos) :
 {student_context}{retrieved_context}
 Paragraphe source (texte de la page visible au moment où l'étudiant a envoyé sa question) :
 ---
-{(page_text or "")[:3500]}
+{page}
 ---
 
 Question de l'étudiant :

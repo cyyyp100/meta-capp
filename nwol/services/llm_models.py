@@ -7,6 +7,10 @@
 # trois questions que personne ne posait : quel modèle tourne, tient-il dans
 # cette machine, et que dire à l'étudiant quand non.
 #
+# Et une quatrième, depuis le palier minuscule : faut-il économiser ? Le mode
+# économe (`economy()`) se décide ici, une fois, et tout le reste n'en lit que
+# la réponse (cf. config/settings.py, § Mode économe).
+#
 # Il vit dans `services/` et non dans `llm/` pour deux raisons :
 #   1. c'est une POLITIQUE, et elle lit une préférence en base (`llm_model` →
 #      `db/app_settings`) — cf. CLAUDE.md, « la politique vit dans un service » ;
@@ -16,9 +20,10 @@
 # ⚠️ Les cycles d'import sont RÉELS et tous fermés dans des corps de fonction,
 # comme `settings._slowdown()` le fait déjà. Personne ne doit les « nettoyer »
 # en imports de module :
-#       config.settings     → (tardif) services.llm_models.active_profile()
+#       config.settings     → (tardif) services.llm_models.active_profile() / economy()
 #       llm.throughput      → (tardif) services.llm_models.profile()
 #       services.llm_models → (tardif) llm.ollama_client.list_models()
+#       services.llm_models → (tardif) llm.throughput.slowdown() (wait_estimate_s)
 #
 # Et rien ici ne lève : un budget temps, une génération ou l'écran de réglages
 # n'ont pas le droit d'échouer parce qu'Ollama est éteint ou la base verrouillée.
@@ -30,9 +35,12 @@ import threading
 import time
 
 from config.settings import (
+    LLM_ECONOMY_AUTO,
+    LLM_ECONOMY_RAM_GB,
     LLM_MODEL_AUTO,
     LLM_MODELS,
     LLM_REFERENCE_PROFILE,
+    LLM_SLOW_MACHINE_FACTOR,
     LLM_TAGS_CACHE_TTL_S,
     OLLAMA_MODEL,
     ModelProfile,
@@ -42,9 +50,9 @@ from services import preferences
 logger = logging.getLogger("services.llm_models")
 
 __all__ = [
-    "MODELS", "active", "active_profile", "auto_pick", "fits", "host_ram_gb",
-    "installed", "invalidate", "preference", "profile", "refresh_active",
-    "resolve", "status", "tier",
+    "MODELS", "active", "active_profile", "auto_pick", "economy", "economy_decision",
+    "economy_preference", "economy_reason", "fits", "host_ram_gb", "installed", "invalidate", "preference",
+    "profile", "refresh_active", "resolve", "status", "tier", "wait_estimate_s",
 ]
 
 # Ré-export : le catalogue est déclaré avec les autres faits du modèle
@@ -55,6 +63,9 @@ MODELS = LLM_MODELS
 # que les phrases qui les expliquent doivent vivre dans un seul couple de
 # dictionnaires i18n (celui du front), et pas en double.
 REASONS = ("ollama_down", "model_missing", "model_too_big", "no_model")
+# Pourquoi le mode économe est actif — même règle : une énumération, des mots
+# dans les dictionnaires. `None` = mode économe coupé.
+ECONOMY_REASONS = ("preference", "tiny_model", "low_ram")
 
 _LOCK = threading.Lock()
 # Catalogue d'Ollama, mis en cache : `active()` est appelé à chaque génération et
@@ -246,6 +257,79 @@ def active_profile() -> ModelProfile:
     return profile(active())
 
 
+# ── Le mode économe ──────────────────────────────────────────────────────────
+
+
+def economy_decision(preference_value: str, model_tier: str, ram_gb: float | None) -> str | None:
+    """Pourquoi le mode économe est actif (une de ECONOMY_REASONS), ou None.
+
+    Pure, comme `resolve` : c'est la seule écriture de cette règle, et elle se
+    teste seule. « on » et « off » sont des choix explicites, toujours
+    respectés — il faut pouvoir forcer dans les deux sens : une machine de
+    16 Go qui veut économiser sa batterie, une de 4 Go qui accepte d'attendre
+    pour garder l'aide autonome. « auto » : le palier minuscule, ou une machine
+    sous LLM_ECONOMY_RAM_GB. Une RAM inconnue n'active rien (`host_ram_gb`)."""
+    value = (preference_value or LLM_ECONOMY_AUTO).strip().lower()
+    if value == "on":
+        return "preference"
+    if value == "off":
+        return None
+    if model_tier == "tiny":
+        return "tiny_model"
+    if ram_gb is not None and ram_gb < LLM_ECONOMY_RAM_GB:
+        return "low_ram"
+    return None
+
+
+def economy_preference() -> str:
+    """Le réglage `llm_economy` (« auto » par défaut), jamais une exception."""
+    try:
+        return preferences.get_preferences().get("llm_economy") or LLM_ECONOMY_AUTO
+    except Exception:  # pragma: no cover - base absente/verrouillée
+        logger.debug("Préférence du mode économe illisible", exc_info=True)
+        return LLM_ECONOMY_AUTO
+
+
+def economy_reason() -> str | None:
+    """`economy_decision` appliquée au modèle actif et à cette machine."""
+    try:
+        return economy_decision(economy_preference(), tier(active()), host_ram_gb())
+    except Exception:  # pragma: no cover - un budget temps ne doit jamais échouer ici
+        logger.debug("Décision du mode économe impossible", exc_info=True)
+        return None
+
+
+def economy() -> bool:
+    """Le mode économe est-il actif ? Décidé ICI et nulle part ailleurs : les
+    budgets (config/settings), la file (llm/ollama_client), l'aide autonome
+    (services/intervention) et la recherche (services/pdf_rag) n'en lisent que
+    la réponse. Sans effet de bord ; appelé à chaque calcul de budget."""
+    return economy_reason() is not None
+
+
+def wait_estimate_s(task: str) -> int | None:
+    """L'attente à annoncer à l'étudiant pour `task`, en secondes — ou None
+    quand il n'y a rien à annoncer.
+
+    C'est le budget TOTAL de la tâche (`settings.task_wall_timeout_s`), celui
+    après lequel le serveur renonce : un « au plus », honnête par construction,
+    et le seul chiffre — l'interface n'en recalcule aucun. Annoncé en mode
+    économe, ou quand la machine s'est révélée nettement plus lente que la
+    référence de son modèle (LLM_SLOW_MACHINE_FACTOR) : sur une machine rapide,
+    la réponse arrive avant qu'on ait lu l'annonce."""
+    from config.settings import task_wall_timeout_s
+    from llm import throughput
+
+    try:
+        slow = max(throughput.slowdown()) >= LLM_SLOW_MACHINE_FACTOR
+        if not (slow or economy()):
+            return None
+        return int(round(task_wall_timeout_s(task)))
+    except Exception:  # pragma: no cover - une annonce ne casse jamais une demande
+        logger.debug("Estimation de l'attente impossible", exc_info=True)
+        return None
+
+
 def refresh_active() -> str:
     """Comme `active()`, mais c'est LA fonction à effets : elle rafraîchit le
     catalogue, journalise un changement de modèle et calibre le débit du nouveau
@@ -258,12 +342,17 @@ def refresh_active() -> str:
     invalidate()
     state = status()
     model = state["model"]
-    if model != _last_logged:
-        _last_logged = model
+    # Le mode économe change les budgets de toutes les générations : il se lit
+    # dans la même ligne que le modèle, et un changement de l'un OU de l'autre
+    # se journalise.
+    logged = f"{model}|{state['economy_reason']}"
+    if logged != _last_logged:
+        _last_logged = logged
         logger.info(
-            "Modèle de Clikoda : %s (réglage %s, RAM %s Gio%s)",
+            "Modèle de Clikoda : %s (réglage %s, RAM %s Gio%s) — mode économe %s",
             model, state["preference"], state["ram_gb"],
             f", {state['reason']}" if state["reason"] else "",
+            f"actif ({state['economy_reason']})" if state["economy"] else "coupé",
         )
     if state["available"] and model not in _calibrated:
         _calibrated.add(model)
@@ -292,6 +381,8 @@ def status() -> dict:
     resolution = resolve(preference(), names, ram_gb)
     model = resolution["model"]
     available = bool(state["reachable"] and model in names)
+    economy_value = economy_preference()
+    economy_why = economy_decision(economy_value, tier(model), ram_gb)
     return {
         "available": available,
         "ollama_up": bool(state["reachable"]),
@@ -319,6 +410,10 @@ def status() -> dict:
         # tourne en attendant.
         "pull_command": f"ollama pull {resolution['requested_missing'] or model}",
         "throughput": throughput.snapshot(model),
+        # Le mode économe, son réglage et sa raison (une de ECONOMY_REASONS).
+        "economy": economy_why is not None,
+        "economy_preference": economy_value,
+        "economy_reason": economy_why,
     }
 
 

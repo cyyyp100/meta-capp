@@ -95,10 +95,12 @@ def test_an_unknown_model_keeps_the_reference_profile():
 # ── La machine ───────────────────────────────────────────────────────────────
 
 
-def test_host_ram_is_a_number_or_an_honest_unknown():
-    ram = llm_models.host_ram_gb()
+def test_host_ram_is_a_number_or_an_honest_unknown(reference_model):
+    # La VRAIE mesure : la fixture autouse la fige à « inconnue » pour le reste
+    # de la suite (le mode économe en dépend).
+    ram = reference_model.host_ram_gb()
     assert ram is None or (isinstance(ram, float) and ram > 0.5)
-    assert llm_models.host_ram_gb() == ram  # mémoïsé, une mesure par processus
+    assert reference_model.host_ram_gb() == ram  # mémoïsé, une mesure par processus
 
 
 # ── Le catalogue d'Ollama ────────────────────────────────────────────────────

@@ -130,3 +130,43 @@ def test_the_preference_decides_and_the_status_follows(client, ollama, monkeypat
     # Une valeur hors du catalogue est refusée, pas persistée en silence.
     assert client.post("/api/preferences", json={"llm_model": "gpt-5"}).status_code == 400
     assert client.get("/api/llm/status").json()["model"] == "gemma4:e2b"
+
+
+def test_a_4_gb_machine_runs_the_tiny_tier_in_economy(client, ollama):
+    """La machine du lot 2 : seul `qwen3:1.7b` tient. Le choix automatique le
+    prend, le mode économe s'active de lui-même, et l'état dit pourquoi."""
+    ollama["models"] = [
+        {"name": "qwen3:1.7b", "size": 1_400_000_000},
+        {"name": "gemma4:e4b", "size": 9_600_000_000},
+    ]
+    ollama["ram"] = 4.0
+    body = client.get("/api/llm/status").json()
+    assert body["model"] == "qwen3:1.7b" and body["tier"] == "tiny"
+    assert body["reason"] is None and body["fits"] is True
+    assert body["economy"] is True and body["economy_reason"] == "tiny_model"
+    assert body["economy_preference"] == "auto"
+    assert body["supports_images"] is False
+    catalog = {entry["name"]: entry for entry in body["catalog"]}
+    assert catalog["qwen3:1.7b"]["fits"] is True and catalog["gemma4:e2b"]["fits"] is False
+
+
+def test_economy_is_forced_both_ways_through_the_one_write_path(client, ollama, monkeypatch, reference_model):
+    """Une machine de 4 Go qui préfère attendre que perdre l'aide autonome, une
+    de 16 Go qui veut économiser : `POST /api/preferences`, et l'état suit."""
+    from services import llm_models
+
+    monkeypatch.setattr(llm_models, "economy_preference", reference_model.economy_preference)
+    choices = client.get("/api/preferences").json()["choices"]["llm_economy"]
+    assert choices == ["auto", "on", "off"]
+    assert client.get("/api/llm/status").json()["economy"] is False  # 16 Go, gemma4:e4b
+
+    assert client.post("/api/preferences", json={"llm_economy": "on"}).status_code == 200
+    body = client.get("/api/llm/status").json()
+    assert body["economy"] is True and body["economy_reason"] == "preference"
+
+    ollama["models"] = [{"name": "qwen3:1.7b", "size": 1_400_000_000}]
+    ollama["ram"] = 4.0
+    assert client.post("/api/preferences", json={"llm_economy": "off"}).status_code == 200
+    body = client.get("/api/llm/status").json()
+    assert body["model"] == "qwen3:1.7b" and body["economy"] is False and body["economy_reason"] is None
+    assert client.post("/api/preferences", json={"llm_economy": "maybe"}).status_code == 400

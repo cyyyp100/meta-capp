@@ -40,6 +40,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "menu.about": "À propos",
         # ── Bulle assistante ──────────────────────────────────────────────
         "assistant.mode_changed": "Mode d'accompagnement : {mode}",
+        "assistant.cancelled": "Demande annulée.",
         "assistant.mode_discret": "Discret",
         "assistant.mode_normal": "Normal",
         "assistant.mode_coach": "Coach",
@@ -168,8 +169,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.note.sandhi.bu": "不 se prononce bú devant un 4e ton.",
         "lang.feuilleton.note.component": "Clé {char} ({meaning}) dans {word} : on la retrouve dans {examples}.",
         # ── Erreurs du modèle local (llm/ollama_client) ───────────────────
-        "llm.error.memory": "Clikoda ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
-        "llm.error.memory_generic": "Clikoda ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Clikoda a besoin d'environ 16 Go de RAM au total ; le reste de Meta-Capp fonctionne sans elle.",
+        # {model} et {ram} : le modèle actif et la RAM que la table lui prête
+        # (config/settings.LLM_MODELS) — ce n'est plus « ~16 Go » pour tous.
+        "llm.error.memory": "Clikoda ne tient pas dans la mémoire de cet ordinateur : le modèle demande {required} et il n'en reste que {available}. Ferme les applications gourmandes puis réessaie. Avec {model}, Clikoda a besoin d'environ {ram} Go de RAM au total ; un modèle plus léger (Réglages ▸ Clikoda) en demande moins, et le reste de Meta-Capp fonctionne sans elle.",
+        "llm.error.memory_generic": "Clikoda ne tient pas dans la mémoire de cet ordinateur. Ferme les applications gourmandes puis réessaie. Avec {model}, Clikoda a besoin d'environ {ram} Go de RAM au total ; un modèle plus léger (Réglages ▸ Clikoda) en demande moins, et le reste de Meta-Capp fonctionne sans elle.",
         # Replis hors-ligne (llm/ollama_client) : ce que l'élève LIT quand Clikoda
         # est muette. C'était du français en dur au milieu du client HTTP — une
         # interface en anglais recevait une accroche française.
@@ -210,6 +213,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "menu.about": "About",
         # ── Assistant bubble ──────────────────────────────────────────────
         "assistant.mode_changed": "Guidance mode: {mode}",
+        "assistant.cancelled": "Request cancelled.",
         "assistant.mode_discret": "Discreet",
         "assistant.mode_normal": "Normal",
         "assistant.mode_coach": "Coach",
@@ -324,8 +328,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "lang.feuilleton.note.sandhi.yi": "一 is pronounced {dst} here, because of the next syllable's tone.",
         "lang.feuilleton.note.sandhi.bu": "不 is pronounced bú before a fourth tone.",
         "lang.feuilleton.note.component": "Radical {char} ({meaning}) in {word}: you will find it in {examples}.",
-        "llm.error.memory": "Clikoda does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
-        "llm.error.memory_generic": "Clikoda does not fit in this computer's memory. Close memory-hungry applications and try again. Clikoda needs about 16 GB of RAM in total; the rest of Meta-Capp works without it.",
+        "llm.error.memory": "Clikoda does not fit in this computer's memory: the model needs {required} and only {available} is free. Close memory-hungry applications and try again. With {model}, Clikoda needs about {ram} GB of RAM in total; a lighter model (Settings ▸ Clikoda) needs less, and the rest of Meta-Capp works without it.",
+        "llm.error.memory_generic": "Clikoda does not fit in this computer's memory. Close memory-hungry applications and try again. With {model}, Clikoda needs about {ram} GB of RAM in total; a lighter model (Settings ▸ Clikoda) needs less, and the rest of Meta-Capp works without it.",
         "llm.fallback.chapter": "Chapter",
         "llm.fallback.hook": "Step into {target} looking for the link between the main idea and a concrete example.",
         "llm.fallback.hook_untitled": "Step into this chapter looking for the link between the main idea and a concrete example.",

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from config.settings import LLM_MODEL_AUTO, LLM_MODEL_CHOICES
+from config.settings import LLM_ECONOMY_AUTO, LLM_ECONOMY_CHOICES, LLM_MODEL_AUTO, LLM_MODEL_CHOICES
 from db.app_settings import get_settings, set_setting
 
 logger = logging.getLogger("services.preferences")
@@ -84,6 +84,17 @@ PREFERENCES: dict[str, Pref] = {
     # choisissable : c'est un choix, pas un accident, et `/api/llm/status` dit
     # pourquoi ça ne marchera pas plutôt que de l'interdire.
     "llm_model": Pref("llm_model", LLM_MODEL_AUTO, choices=LLM_MODEL_CHOICES),
+    # Le mode économe (config/settings.py, § Mode économe). « auto » le décide
+    # d'après le modèle et la RAM (services/llm_models.economy) ; « on » et
+    # « off » le forcent, dans les deux sens — une machine de 4 Go qui préfère
+    # attendre que perdre l'aide autonome doit pouvoir le dire.
+    "llm_economy": Pref("llm_economy", LLM_ECONOMY_AUTO, choices=LLM_ECONOMY_CHOICES),
+    # L'encart qui dit, sur l'accueil d'une langue, ce que le plus petit modèle
+    # ne sait pas faire et ce que va plus loin la version Pro. Distinct de
+    # `lang_pro_note_dismissed` : quelqu'un qui a fermé l'encart général sur une
+    # machine de 16 Go, puis tourne sur le palier minuscule, apprend quelque
+    # chose de neuf. Texte statique : aucun appel, rien de bloqué.
+    "llm_tiny_note_dismissed": Pref("llm_tiny_note_dismissed", "false", kind="bool"),
 }
 
 

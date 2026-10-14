@@ -34,8 +34,12 @@ export interface FeuilletonStatus {
   episodes_played: number;
   open_run: number | null;
   has_placement: boolean;
-  /** Le modèle local qui écrit les épisodes (config/settings.py:OLLAMA_MODEL). */
+  /** Le modèle local qui écrit les épisodes : celui qui tourne VRAIMENT
+   * (préférence + ce qu'Ollama a en magasin, services/llm_models). */
   model: string;
+  /** Mode économe : Clikoda n'écrit pas d'épisode en arrière-plan sur cette
+   * machine. L'accueil le dit, plutôt qu'un « pas encore prêt » sans fin. */
+  background_suspended: boolean;
   /** Échecs d'écriture de l'épisode à jouer, tant qu'il n'est pas prêt. */
   generation_failures: number;
   /** Où rappeler les limites du modèle local (le service décide, le front affiche). */
@@ -44,7 +48,7 @@ export interface FeuilletonStatus {
   unseen_writing: { id: number; run_id: number | null } | null;
 }
 
-export type ProHint = "generation" | "program_end";
+export type ProHint = "generation" | "program_end" | "tiny_model";
 
 /** L'épisode suivant d'une langue ouverte (`GET /api/lang/upcoming`, lecture seule). */
 export interface UpcomingEpisode {

@@ -496,7 +496,9 @@ export type PreferenceKey =
   | "tour_done"
   | "entry_sas_s"
   | "lang_pro_note_dismissed"
-  | "llm_model";
+  | "llm_model"
+  | "llm_economy"
+  | "llm_tiny_note_dismissed";
 export type Preferences = Record<PreferenceKey, string>;
 
 export interface PreferencesPayload {
@@ -546,6 +548,11 @@ export interface LlmStatus {
     prompt_tokens_per_s: number | null;
     slowdown: number;
   };
+  /** Mode économe (contexte unique, aucun travail de fond, aucune aide
+   *  autonome) : décidé par le serveur, comme sa raison — énumération fermée. */
+  economy: boolean;
+  economy_preference: string;
+  economy_reason: "preference" | "tiny_model" | "low_ram" | null;
 }
 
 /** `checked: false` = la vérification n'a rien donné (hors ligne, panne, option

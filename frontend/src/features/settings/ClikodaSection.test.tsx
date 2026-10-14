@@ -6,7 +6,7 @@
 // modèles proposés viennent du SERVEUR, aucun n'est interdit, et quand il en
 // manque un on donne la commande — sans jamais la lancer soi-même.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,13 +17,14 @@ function preferences(model = "auto"): PreferencesPayload {
   return {
     preferences: {
       theme: "light", density: "comfortable", text_size: "normal", updates_check: "false",
-      tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: "false", llm_model: model,
+      tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: "false", llm_model: model, llm_economy: "auto", llm_tiny_note_dismissed: "false",
     },
     // Le vocabulaire vient du serveur (la table `LLM_MODELS`), pas du composant.
     choices: {
       theme: [], density: [], text_size: [], updates_check: [], tour_done: [],
       entry_sas_s: [], lang_pro_note_dismissed: [],
       llm_model: ["auto", "gemma4:e2b", "gemma4:e4b", "gemma4:31b"],
+      llm_economy: ["auto", "on", "off"], llm_tiny_note_dismissed: [],
     },
     lang: "fr", supported_langs: ["fr", "en"], user: { id: 1, name: "Élève" },
   };
@@ -42,6 +43,7 @@ function status(extra: Partial<LlmStatus> = {}): LlmStatus {
     ram_gb: 16, fits: true, reason: null, requested_missing: null,
     pull_command: "ollama pull gemma4:e4b",
     throughput: { model: "gemma4:e4b", measured: true, output_tokens_per_s: 27.4, prompt_tokens_per_s: 240, slowdown: 1 },
+    economy: false, economy_preference: "auto", economy_reason: null,
     ...extra,
   };
 }
@@ -68,7 +70,8 @@ describe("ClikodaSection", () => {
 
   it("propose les modèles que le serveur déclare, avec ce qu'ils coûtent", async () => {
     await renderSection();
-    expect(screen.getByRole("button", { name: /automatique|automatic/i })).toBeInTheDocument();
+    const models = screen.getByRole("group", { name: /^(modèle|model)$/i });
+    expect(within(models).getByRole("button", { name: /automatique|automatic/i })).toBeInTheDocument();
     // Taille et palier, pour choisir en connaissance de cause.
     expect(await screen.findByRole("button", { name: /gemma4:e4b.*9\.6/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /gemma4:31b.*20/i })).toBeInTheDocument();
@@ -114,6 +117,26 @@ describe("ClikodaSection", () => {
     expect(await screen.findByText("ollama pull gemma4:31b")).toBeInTheDocument();
     // La phrase nomme le modèle demandé, pas le repli qui tourne en attendant.
     expect(screen.getByText(/gemma4:31b\)/)).toBeInTheDocument();
+  });
+
+  it("propose le mode économe dans les deux sens, avec le vocabulaire du serveur", async () => {
+    await renderSection();
+    const economy = screen.getByRole("group", { name: /mode économe|economy mode/i });
+    const buttons = within(economy).getAllByRole("button").map((b) => b.textContent);
+    expect(buttons).toHaveLength(3);
+    expect(within(economy).getByRole("button", { name: /automatique|automatic/i })).toHaveAttribute("aria-pressed", "true");
+    await act(async () => userEvent.click(within(economy).getByRole("button", { name: /coupé|^off$/i })));
+    expect(api.setPreferences).toHaveBeenCalledWith({ llm_economy: "off" });
+  });
+
+  it("dit si le mode économe est actif, et pourquoi — la raison vient du serveur", async () => {
+    await renderSection(preferences(), status({
+      model: "qwen3:1.7b", tier: "tiny", supports_images: false,
+      economy: true, economy_preference: "auto", economy_reason: "tiny_model",
+    }));
+    const state = await screen.findByText(/clikoda tourne avec|clikoda is running/i);
+    expect(state).toHaveTextContent(/mode économe actif|economy mode on/i);
+    expect(state).toHaveTextContent(/plus petit modèle|smallest model/i);
   });
 
   it("dit qu'Ollama est éteint sans le confondre avec un modèle absent", async () => {

@@ -5,6 +5,11 @@
 // où une ligne se justifie (`pro_hints` : deux échecs d'écriture d'un épisode,
 // fin du programme) ; le front l'affiche. L'encart de l'accueil se masque une
 // fois pour toutes (`lang_pro_note_dismissed`).
+//
+// Deux textes pour le même encart : le général, et celui du palier minuscule
+// (`kind="tiny"`, quand le service renvoie `tiny_model`), masquable à part
+// (`llm_tiny_note_dismissed`) — il dit quelque chose de neuf à qui avait fermé
+// le premier sur une autre machine. Le composant ne connaît aucun nom de modèle.
 import { PRO_EDITION_URL } from "../../../config/links";
 import { useT } from "../../../i18n";
 import { ghostBtn } from "./ui";
@@ -19,7 +24,15 @@ function ProLink() {
 }
 
 /** L'encart de l'accueil d'une langue, masquable. */
-export function ProNote({ model, onDismiss }: { model: string; onDismiss: () => void }) {
+export function ProNote({
+  model,
+  onDismiss,
+  kind = "lang",
+}: {
+  model: string;
+  onDismiss: () => void;
+  kind?: "lang" | "tiny";
+}) {
   const t = useT();
   return (
     <aside
@@ -32,7 +45,7 @@ export function ProNote({ model, onDismiss }: { model: string; onDismiss: () => 
           {t("feuil.pro.dismiss")}
         </button>
       </div>
-      <p style={{ margin: "6px 0 0" }}>{t("feuil.pro.local", { model })}</p>
+      <p style={{ margin: "6px 0 0" }}>{t(kind === "tiny" ? "feuil.pro.tiny" : "feuil.pro.local", { model })}</p>
       <p style={{ margin: "6px 0 0" }}>
         {t("feuil.pro.more")} <ProLink />
       </p>

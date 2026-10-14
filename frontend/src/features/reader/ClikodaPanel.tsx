@@ -219,6 +219,13 @@ export function ClikodaPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // L'attente que le serveur annonce pour la demande en cours, en secondes —
+  // son budget TOTAL, un « au plus » (services/llm_models.wait_estimate_s).
+  // null : rien à annoncer, la machine répond vite. Jamais recalculée ici.
+  const [wait, setWait] = useState<number | null>(null);
+  // « Annuler » vient d'être cliqué : l'erreur d'annulation que le serveur
+  // renverra ensuite n'a rien à ajouter au fil.
+  const cancelledRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [mode, setMode] = useState<(typeof MODES)[number]>("normal");
   // L'encadré de question en jeu (à répondre, puis à clore) ; les encadrés
@@ -399,6 +406,20 @@ export function ClikodaPanel({
       const evt = JSON.parse(e.data);
       if (evt.type === "scanning") {
         setScanning(!!evt.active);
+        return;
+      }
+      if (evt.type === "loading") {
+        // Republié quand la tâche sort de la file : la machine a pu se révéler
+        // plus lente entre-temps (calibrage du démarrage).
+        setWait(typeof evt.estimate_s === "number" ? evt.estimate_s : null);
+        return;
+      }
+      if (evt.type === "error" && evt.cancelled) {
+        // Une demande annulée n'est pas une panne : pas de « ⚠️ ».
+        setBusy(false);
+        if (!cancelledRef.current) setMessages((m) => [...m, { role: "system", text: evt.message || t("clikoda.cancelled") }]);
+        cancelledRef.current = false;
+        restoreGate();
         return;
       }
       if (evt.type === "answer") {
@@ -661,12 +682,19 @@ export function ClikodaPanel({
     return true;
   }
 
+  /** Une demande part : l'attente annoncée pour la précédente ne la suit pas
+   *  (elle n'est affichée que pendant `busy`, et repart de rien ici). */
+  function beginRequest() {
+    setWait(null);
+    setBusy(true);
+  }
+
   function ask() {
     const text = draft.trim();
     if (!text || busy) return;
     setMessages((m) => [...m, { role: "user", text }]);
     setDraft("");
-    setBusy(true);
+    beginRequest();
     const snippets = (contextChipsRef.current ?? []).map((c) => c.text);
     // Message non parti : on rend la main. Sans ça, l'indicateur « Clikoda
     // réfléchit… » tournait indéfiniment sur une connexion fermée.
@@ -680,12 +708,24 @@ export function ClikodaPanel({
   function action(type: "rephrase" | "recap" | "hook", label: string) {
     if (busy) return;
     setMessages((m) => [...m, { role: "user", text: label }]);
-    setBusy(true);
+    beginRequest();
     if (!sendRaw({ type, page: pageRef.current })) {
       setBusy(false);
       return;
     }
     releaseWhileThinking();
+  }
+
+  /** « Annuler » : la main est rendue tout de suite, et le serveur coupe la
+   *  génération en vol par le même chemin que la fermeture du lecteur
+   *  (`POST /api/reader/cancel`). Sur une machine lente, la file peut tenir
+   *  la réponse d'annulation plusieurs minutes : on ne l'attend pas. */
+  function cancelRequest() {
+    cancelledRef.current = true;
+    setBusy(false);
+    setMessages((m) => [...m, { role: "system", text: t("clikoda.cancelled") }]);
+    restoreGate();
+    api.cancelGenerations().catch(() => {});
   }
 
   function changeMode(m: (typeof MODES)[number]) {
@@ -705,7 +745,7 @@ export function ClikodaPanel({
     // « Nouvelle question » / « Réessayer » : la précédente et sa correction
     // restent dans le fil, en lecture seule ; la suivante viendra à la suite.
     endQa();
-    setBusy(true);
+    beginRequest();
     if (!sendRaw({ type: "start_qa", page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
       restoreGate();
@@ -736,7 +776,7 @@ export function ClikodaPanel({
       patchQa(qa.id, { feedback: { verdict: DEMO_QUESTION.verdict, feedback: t(DEMO_QUESTION.feedbackKey) } });
       return;
     }
-    setBusy(true);
+    beginRequest();
     if (!sendRaw({ type: "qa_answer", question: qa.question, answer, page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
       return;
@@ -981,23 +1021,32 @@ export function ClikodaPanel({
           )}
           {pause && <PauseCard pause={pause} onStart={acceptPause} onDismiss={() => setPause(null)} />}
           {busy && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="flex items-center gap-2 self-start text-xs text-muted-foreground"
-            >
-              {/* Le texte italique « Clikoda réfléchit… » était immobile : rien ne
-                  distinguait une attente en cours d'une interface figée. */}
-              <span className="flex gap-1" aria-hidden>
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="size-1.5 animate-bounce rounded-full bg-muted-light"
-                    style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }}
-                  />
-                ))}
-              </span>
-              {t("clikoda.thinking")}
+            <div className="flex flex-col gap-1.5 self-start">
+              <div role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-muted-foreground">
+                {/* Le texte italique « Clikoda réfléchit… » était immobile : rien ne
+                    distinguait une attente en cours d'une interface figée. */}
+                <span className="flex gap-1" aria-hidden>
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="size-1.5 animate-bounce rounded-full bg-muted-light"
+                      style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }}
+                    />
+                  ))}
+                </span>
+                {t("clikoda.thinking")}
+              </div>
+              {/* Machine lente ou mode économe : l'attente se chiffre en minutes.
+                  On la dit, et on laisse partir — la minute affichée est une
+                  conversion d'unité, pas un budget. */}
+              {wait !== null && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{t("clikoda.wait", { minutes: Math.max(1, Math.ceil(wait / 60)) })}</span>
+                  <Button variant="chip" size="sm" onClick={cancelRequest}>
+                    {t("clikoda.cancel")}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>

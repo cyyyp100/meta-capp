@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import threading
 
-from config.settings import OLLAMA_MAX_SLOWDOWN
+# Le MODULE et non la constante : `max_slowdown()` change avec le mode économe,
+# et une valeur importée à l'import serait figée au plafond normal. Le plancher
+# des débits (ici) et le plafond des budgets (config/settings) divergeraient
+# alors d'un facteur 2,5 — la panne exacte que décrit settings.py.
+from config import settings
 
 # En dessous, la mesure est dominée par les frais fixes de l'appel (et un
 # prompt court est souvent servi par le cache de préfixe d'Ollama).
@@ -100,6 +104,7 @@ def record_call(data: dict, model: str = "") -> None:
     }
     model = _resolved(model)
     reference = _reference(model)
+    ceiling = settings.max_slowdown()
     with _LOCK:
         rates = _entry(model)
         for key, rate in observed.items():
@@ -108,7 +113,7 @@ def record_call(data: dict, model: str = "") -> None:
             current = rates[key]
             if key == "prompt" and current is not None and rate > current:
                 continue
-            rates[key] = max(reference[key] / OLLAMA_MAX_SLOWDOWN, _blend(current, rate))
+            rates[key] = max(reference[key] / ceiling, _blend(current, rate))
 
 
 def record_timeout(model: str = "") -> None:
@@ -119,29 +124,35 @@ def record_timeout(model: str = "") -> None:
     et chaque tâche suivante expirerait de la même façon."""
     model = _resolved(model)
     reference = _reference(model)
+    ceiling = settings.max_slowdown()
     with _LOCK:
         rates = _entry(model)
         for key in rates:
             current = rates[key] if rates[key] is not None else reference[key]
-            rates[key] = max(reference[key] / OLLAMA_MAX_SLOWDOWN, current / _TIMEOUT_FACTOR)
+            rates[key] = max(reference[key] / ceiling, current / _TIMEOUT_FACTOR)
 
 
-def _factor(reference: float, rate: float | None) -> float:
+def _factor(reference: float, rate: float | None, ceiling: float) -> float:
     if not rate:
         return 1.0
-    return min(OLLAMA_MAX_SLOWDOWN, max(1.0, reference / rate))
+    return min(ceiling, max(1.0, reference / rate))
 
 
 def slowdown(model: str = "") -> tuple[float, float]:
     """(écriture, lecture du prompt) : facteurs appliqués aux budgets, dans
-    [1, OLLAMA_MAX_SLOWDOWN]. Lenteur de la MACHINE face à ce qu'on attend de ce
-    modèle — la taille du modèle, elle, est comptée ailleurs."""
+    [1, settings.max_slowdown()]. Lenteur de la MACHINE face à ce qu'on attend
+    de ce modèle — la taille du modèle, elle, est comptée ailleurs.
+
+    Le plafond est relu à chaque appel : une mesure prise en mode économe (un
+    débit jusqu'à 20 fois sous la référence) n'est pas jetée quand le mode
+    s'arrête, elle est simplement bornée au plafond normal."""
     model = _resolved(model)
     reference = _reference(model)
+    ceiling = settings.max_slowdown()
     with _LOCK:
         rates = dict(_entry(model))
-    return (_factor(reference["output"], rates["output"]),
-            _factor(reference["prompt"], rates["prompt"]))
+    return (_factor(reference["output"], rates["output"], ceiling),
+            _factor(reference["prompt"], rates["prompt"], ceiling))
 
 
 def snapshot(model: str = "") -> dict:

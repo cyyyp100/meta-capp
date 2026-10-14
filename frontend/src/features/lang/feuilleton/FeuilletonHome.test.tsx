@@ -21,14 +21,14 @@ function status(extra: Partial<FeuilletonStatus> = {}): FeuilletonStatus {
     sas: true, level: "A1",
     program: { order: 2, size: 270, point: "Saluer" }, words_seen: 40, words_acquired: 3, episodes_played: 2,
     open_run: null, has_placement: true, model: "gemma4:e4b", generation_failures: 0, pro_hints: [],
-    unseen_writing: null, ...extra,
+    background_suspended: false, unseen_writing: null, ...extra,
   };
 }
 
 function preferences(dismissed: "true" | "false"): PreferencesPayload {
   return {
-    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: dismissed , llm_model: "auto"},
-    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [], llm_model: ["auto"] },
+    preferences: { theme: "light", density: "comfortable", text_size: "normal", updates_check: "false", tour_done: "true", entry_sas_s: "60", lang_pro_note_dismissed: dismissed , llm_model: "auto", llm_economy: "auto", llm_tiny_note_dismissed: "false"},
+    choices: { theme: [], density: [], text_size: [], updates_check: [], tour_done: [], entry_sas_s: [], lang_pro_note_dismissed: [], llm_model: ["auto"], llm_economy: ["auto", "on", "off"], llm_tiny_note_dismissed: [] },
     lang: "fr", supported_langs: ["fr", "en"], user: { id: 1, name: "Élève" },
   };
 }
@@ -107,6 +107,31 @@ describe("FeuilletonHome", () => {
     expect(await screen.findByText(/peine à écrire cet épisode|struggling to write/i)).toBeInTheDocument();
     expect(screen.getByText(/tout le programme|whole programme/i)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /version pro|pro edition/i })).toHaveLength(2);
+  });
+
+  it("sur le palier minuscule, l'encart dit ce que CE modèle ne sait pas faire, et se masque à part", async () => {
+    // L'encart général a été fermé sur une autre machine : celui du palier
+    // minuscule dit quelque chose de neuf, et a sa propre clé.
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(status({ model: "qwen3:1.7b", pro_hints: ["tiny_model"] }));
+    await renderHome();
+    const note = await screen.findByRole("complementary");
+    expect(note).toHaveTextContent("qwen3:1.7b");
+    expect(note).toHaveTextContent(/plus petit modèle|smallest model/i);
+    expect(screen.getByRole("link", { name: /version pro|pro edition/i })).toHaveAttribute("href", PRO_EDITION_URL);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /masquer|hide/i })));
+    expect(api.setPreferences).toHaveBeenCalledWith({ llm_tiny_note_dismissed: true });
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("dit pourquoi l'épisode suivant ne s'écrit pas en mode économe, et où le changer", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("true"));
+    vi.spyOn(api, "feuilletonStatus").mockResolvedValue(
+      status({ next_status: "queued", background_suspended: true }),
+    );
+    await renderHome();
+    expect(await screen.findByText(/mode économe|economy mode/i)).toHaveTextContent(/Clikoda/);
+    expect(screen.queryByText(/pas encore prêt|not ready yet/i)).toBeNull();
   });
 
   it("montre pourquoi « Bibliothèque » est inactive", async () => {

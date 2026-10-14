@@ -1125,3 +1125,82 @@ def test_leaving_the_entry_sas_cuts_clikoda_right_away(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json() == {"cancelled": True}
     assert calls["n"] == 1
+
+
+# ── L'attente annoncée et le bouton Annuler (mode économe, machine lente) ─────
+
+
+def test_loading_announces_nothing_on_a_fast_machine(client, monkeypatch):
+    from services import assistant
+
+    monkeypatch.setattr(assistant, "answer_question", lambda d, p, q, ok, err, **kw: ok({"answer": "ok"}))
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Q ?", "page": 1})
+        assert ws.receive_json() == {"type": "loading", "estimate_s": None}
+        assert ws.receive_json()["type"] == "answer"
+
+
+def test_loading_announces_the_total_budget_in_economy(client, monkeypatch):
+    """Le chiffre vient du serveur (`task_wall_timeout_s`, le budget TOTAL de la
+    tâche) : l'interface l'affiche, elle n'en recalcule aucun."""
+    from config.settings import task_wall_timeout_s
+    from services import assistant, llm_models
+
+    monkeypatch.setattr(llm_models, "economy_preference", lambda: "on")
+    monkeypatch.setattr(assistant, "rephrase_page", lambda d, p, ok, err, **kw: ok({"answer": "ok"}))
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "rephrase", "page": 1})
+        loading = ws.receive_json()
+        assert loading["type"] == "loading"
+        assert loading["estimate_s"] == round(task_wall_timeout_s("rephrasing"))
+
+
+def test_the_estimate_is_republished_when_the_task_leaves_the_queue(client, monkeypatch):
+    """Le calibrage du démarrage passe en tête de file et peut révéler une
+    machine lente : la tâche s'accorde alors plus de temps en partant, et le
+    lecteur le redit plutôt que d'afficher une attente fausse."""
+    from llm import ollama_client
+    from services import assistant, llm_models
+
+    estimates = iter([60, 60, 240])
+    monkeypatch.setattr(llm_models, "wait_estimate_s", lambda task: next(estimates))
+
+    def fake_answer(doc_id, page, question, on_success, on_error, **_kw):
+        slot = ollama_client._current_caller_slot()
+        slot.on_start(240.0)  # ce que fait `_start_task_clock` au départ de la tâche
+        on_success({"answer": "ok"})
+
+    monkeypatch.setattr(assistant, "answer_question", fake_answer)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Q ?", "page": 1})
+        assert ws.receive_json() == {"type": "loading", "estimate_s": 60}
+        assert ws.receive_json() == {"type": "loading", "estimate_s": 240}
+        assert ws.receive_json()["type"] == "answer"
+    # Le slot est refermé : une tâche enfilée plus tard n'en hérite pas.
+    assert ollama_client._current_caller_slot() is None
+
+
+def test_a_cancelled_request_is_not_reported_as_a_failure(client, monkeypatch):
+    from i18n import t
+    from llm.ollama_client import CANCELLED_MESSAGE
+    from services import assistant
+
+    monkeypatch.setattr(assistant, "answer_question", lambda d, p, q, ok, err, **kw: err(CANCELLED_MESSAGE))
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Q ?", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        error = ws.receive_json()
+        assert error == {"type": "error", "message": t("assistant.cancelled"), "cancelled": True}
+
+
+def test_cancelling_reaches_the_generation_in_flight(client, monkeypatch):
+    """« Annuler » appelle `POST /api/reader/cancel` : un seul mécanisme, celui
+    qui coupe déjà les générations quand le lecteur se ferme."""
+    from llm import ollama_client
+    from server.routers import reading
+
+    cancelled = []
+    monkeypatch.setattr(reading, "cancel_pending_generations", lambda *a: cancelled.append(a))
+    assert client.post("/api/reader/cancel").json() == {"cancelled": True}
+    assert cancelled == [()]
+    assert ollama_client.is_cancelled_error(ollama_client.CANCELLED_MESSAGE)
