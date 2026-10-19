@@ -247,6 +247,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         # réponse) : une question automatique en génération le compare à sa
         # valeur de départ, et s'efface si l'élève a pris la main entre-temps.
         "user_turn": 0,
+        # Dernier échange de CETTE séance — {"kind", "lines": [(qui, texte)]} —,
+        # relayé à la réponse libre : une question de suivi (« développe »)
+        # renvoie souvent à la question de Clikoda ou à sa correction, que les
+        # `exchanges` (questions posées dans la barre) ne contiennent pas.
+        # Jamais réhydraté depuis la base : un suivi parle de ce qui vient
+        # d'être dit.
+        "last_turn": None,
         "away": False,  # fenêtre masquée / application au second plan
         "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
@@ -305,6 +312,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     def end_generation() -> None:
         state["generating"] = max(0, state["generating"] - 1)
         refresh_busy()
+
+    def remember_turn(kind: str, *lines: tuple[str, str]) -> None:
+        """Retient le dernier échange de la séance (cf. state["last_turn"]) ;
+        `lines` : (« student » | « clikoda », texte), les vides écartés."""
+        kept = [(who, str(text or "").strip()) for who, text in lines if str(text or "").strip()]
+        if kept:
+            state["last_turn"] = {"kind": kind, "lines": kept}
 
     def make_callbacks():
         def on_success(result: dict) -> None:
@@ -386,6 +400,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         del state["recent_qtypes"][:-5]
         state["generating"] = max(0, state["generating"] - 1)
         state["qa_pending"] = True
+        remember_turn("question", ("clikoda", result.get("question", "")))
         session_hint = str(result.get("session_hint") or "").strip()
         if session_hint:
             # Conseil de régulation du LLM : une pause prise juste après le suit.
@@ -503,6 +518,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             )
             return
         kind = str(payload.get("kind") or "offer_help")
+        remember_turn("intervention", ("clikoda", "\n".join(
+            text for text in (str(payload.get("message") or ""), str(payload.get("question") or "")) if text.strip()
+        )))
         push_threadsafe(loop, out, {
             "type": "intervention",
             "message": payload.get("message", ""),
@@ -808,6 +826,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     if state["live_gauges"] is not None:
                         state["live_gauges"].apply(result)
                     answer = result.get("answer", "")
+                    remember_turn("ask", ("student", _q), ("clikoda", answer))
                     state["exchanges"].append({"question": _q, "answer": answer})
                     del state["exchanges"][:-6]  # ne garder que les 6 derniers échanges
                     if answer:
@@ -824,22 +843,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         recent_exchanges=recent_exchanges,
                         session_gauges=session_gauges,
                         selected_snippets=selected_snippets,
+                        previous_turn=state["last_turn"],
                     )
-            elif kind == "rephrase":
-                await out.put(loading("rephrasing"))
+            elif kind in ("rephrase", "recap", "hook"):
+                # Reformuler, résumer, curiosité : ce que Clikoda en dit devient
+                # le dernier échange (« redis-le plus simplement » y renvoie).
+                def on_command_success(result: dict, _ok=on_success) -> None:
+                    remember_turn("command", ("clikoda", result.get("answer", "")))
+                    _ok(result)
+
+                task, run = {
+                    "rephrase": ("rephrasing", assistant.rephrase_page),
+                    "recap": ("chapter_summary", assistant.chapter_recap),
+                    "hook": ("curiosity_hook", assistant.curiosity_hook),
+                }[kind]
+                await out.put(loading(task))
                 start_generation()
-                with announced("rephrasing"):
-                    assistant.rephrase_page(doc_id, page, on_success, on_error)
-            elif kind == "recap":
-                await out.put(loading("chapter_summary"))
-                start_generation()
-                with announced("chapter_summary"):
-                    assistant.chapter_recap(doc_id, page, on_success, on_error)
-            elif kind == "hook":
-                await out.put(loading("curiosity_hook"))
-                start_generation()
-                with announced("curiosity_hook"):
-                    assistant.curiosity_hook(doc_id, page, on_success, on_error)
+                with announced(task):
+                    run(doc_id, page, on_command_success, on_error)
             elif kind == "start_qa":
                 sid = msg.session_id
                 await out.put(loading("question"))
@@ -907,6 +928,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         "verdict": verdict or "",
                     })
                     del state["qa_history"][:-_MAX_HISTORY]
+                    remember_turn(
+                        "answer",
+                        ("clikoda", _q or state.get("qa_text") or ""),
+                        ("student", _answer),
+                        ("clikoda", ev.get("feedback", "")),
+                    )
                     try:
                         save_answer(
                             question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,

@@ -123,15 +123,19 @@ def _student_context_block(
     return "\n" + "\n\n".join(parts) + "\n"
 
 
-def _retrieved_passages_block(passages: list[dict] | None) -> str:
+def _retrieved_passages_block(passages: list[dict] | None, ceded_tokens: int = 0) -> str:
     """Bloc optionnel : passages pertinents trouvés AILLEURS dans le document (RAG).
 
     Inséré uniquement dans le prompt de réponse à une question. Chaque passage
     indique sa page source pour que le LLM puisse la citer en clair dans sa
     réponse ; une table (déjà bornée par services.pdf_rag) est signalée comme
     telle et n'est pas retronquée : coupée, elle perdrait ses valeurs.
+
+    `ceded_tokens` : la part du budget compact cédée au dernier échange, quand
+    il est dans le prompt (cf. `build_assistant_answer_prompt`).
     """
     lim = prompt_limits()
+    rag_tokens = None if lim.rag_tokens is None else lim.rag_tokens - ceded_tokens
     lines: list[str] = []
     used = 0
     for item in (passages or [])[:lim.rag_search_top_k]:
@@ -144,10 +148,10 @@ def _retrieved_passages_block(passages: list[dict] | None) -> str:
             text = _cut_at_line(text, lim.rag_table_chars)
         else:
             text = " ".join(raw.split())[:lim.rag_chars]
-        if lim.rag_tokens is not None:
+        if rag_tokens is not None:
             # Contexte compact : un budget pour TOUS les passages — deux tables
             # de chiffres coûtent davantage que la page elle-même.
-            room = lim.rag_tokens - used
+            room = rag_tokens - used
             if room < _MIN_PASSAGE_TOKENS:
                 break
             text = _fit_tokens(text, room, keep_lines=is_table)
@@ -176,6 +180,40 @@ def _retrieved_passages_block(passages: list[dict] | None) -> str:
 # En dessous, un passage trouvé ailleurs ne dit plus rien d'utile : on s'arrête
 # plutôt que d'en citer un moignon.
 _MIN_PASSAGE_TOKENS = 60
+
+
+def _previous_turn_block(previous_turn: dict | None) -> tuple[str, str]:
+    """(bloc, consigne) du dernier échange de la séance, pour la réponse libre.
+
+    `previous_turn` : {"kind", "lines": [(qui, texte)]}, `qui` valant
+    « student » ou « clikoda » (cf. server/routers/reading.py). Sans lui, une
+    question de suivi (« développe ») ne savait pas à quoi elle renvoyait : les
+    « Échanges récents » ne gardent que les questions posées dans la barre,
+    jamais la question de Clikoda ni sa correction. Chaque réplique est bornée
+    en caractères, et l'ensemble en tokens en contexte compact. La consigne ne
+    cite aucune tournure d'exemple : Gemma recopie les exemples.
+
+    Pas pour le palier minuscule : sa fenêtre de 4096 tokens n'a pas la place
+    du bloc sans rogner les passages trouvés ailleurs dans le document, et un
+    modèle de 1,7 milliard de paramètres n'en tire pas une réponse de suivi."""
+    if not _previous_turn_allowed():
+        return "", ""
+    lines = [(who, " ".join(str(text or "").split())) for who, text in (previous_turn or {}).get("lines") or []]
+    lines = [(who, text) for who, text in lines if text]
+    if not lines:
+        return "", ""
+    lim = prompt_limits()
+    share = lim.last_turn_tokens // len(lines) if lim.last_turn_tokens is not None else None
+    rendered = []
+    for who, text in lines:
+        speaker = _t("Toi (Clikoda)", "You (Clikoda)") if who == "clikoda" else _t("L'étudiant", "The student")
+        rendered.append(f"- {speaker} : {_fit_tokens(text[:lim.last_turn_chars], share)}")
+    header = _t("Dernier échange (juste avant cette question) :", "Last exchange (just before this question):")
+    rule = _t(
+        "- Si la question de l'étudiant renvoie au dernier échange (un pronom, une allusion à ta réponse ou à la question d'avant), réponds en t'appuyant sur lui ; sinon, ignore-le.\n",
+        "- If the student's question refers to the last exchange (a pronoun, an allusion to your answer or to the previous question), answer from it; otherwise, ignore it.\n",
+    )
+    return header + "\n" + "\n".join(rendered) + "\n", rule
 
 
 def _fit_tokens(text: str, budget: int | None, *, keep_lines: bool = False) -> str:
@@ -211,6 +249,14 @@ def _cut_at_line(text: str, limit: int) -> str:
         return text
     cut = text.rfind("\n", 0, limit + 1)
     return text[:cut] if cut > 0 else text[:limit]
+
+
+def _previous_turn_allowed() -> bool:
+    """Le modèle actif reçoit-il le dernier échange ? Pas le palier minuscule
+    (cf. `_previous_turn_block`). Import tardif : même raison que `_image_attached`."""
+    from services.llm_models import active_profile
+
+    return active_profile().tier != "tiny"
 
 
 def _image_attached() -> bool:
@@ -3550,6 +3596,7 @@ def build_assistant_answer_prompt(
     user_highlights: list[str] | None = None,
     retrieved_passages: list[dict] | None = None,
     whole_document_search: bool = False,
+    previous_turn: dict | None = None,
 ) -> str:
     """Réponse de l'assistant à une question libre posée pendant la lecture.
 
@@ -3563,9 +3610,18 @@ def build_assistant_answer_prompt(
     lit la p.1), mais ils ne servent jamais de source aux `highlights`, qui
     restent copiés de la seule page visible. `whole_document_search` : l'étudiant
     a explicitement demandé de chercher dans tout le document.
+
+    `previous_turn` : le dernier échange de la séance (cf. `_previous_turn_block`).
+    S'il vient lui-même d'une question posée dans la barre, il n'est pas répété
+    dans les « Échanges récents ».
     """
     student_context = _student_context_block(selected_snippets, user_highlights)
-    retrieved_context = _retrieved_passages_block(retrieved_passages)
+    previous_block, previous_rule = _previous_turn_block(previous_turn)
+    # En contexte compact, le dernier échange prend sa place sur les passages
+    # trouvés ailleurs — seulement quand il est là : la première question
+    # d'une séance, et le palier minuscule, gardent tout leur budget.
+    ceded = (prompt_limits().last_turn_tokens or 0) if previous_block else 0
+    retrieved_context = _retrieved_passages_block(retrieved_passages, ceded)
     search_rule = ""
     if whole_document_search:
         # Un suivi (« cherche dans tout l'article ») ne dit pas SUR QUOI chercher :
@@ -3594,7 +3650,10 @@ def build_assistant_answer_prompt(
     lim = prompt_limits()
     page = _page_excerpt(page_text, lim, "assistant_answer")
     exchanges_lines = []
-    for item in (recent_exchanges or [])[-lim.exchanges:]:
+    shown_exchanges = list(recent_exchanges or [])
+    if previous_block and (previous_turn or {}).get("kind") == "ask":
+        shown_exchanges = shown_exchanges[:-1]
+    for item in shown_exchanges[-lim.exchanges:]:
         question = str(item.get("question") or "").strip()
         answer = str(item.get("answer") or "").strip()
         if question:
@@ -3613,7 +3672,7 @@ Metacognitive profile: {_json(metacog_profile or {})}
 Session gauges (0-100): {_json(session_gauges or {})}
 Recent exchanges with the assistant:
 {exchanges}
-Existing student flashcards related to this document (fronts):
+{previous_block}Existing student flashcards related to this document (fronts):
 {flashcards}
 {student_context}{retrieved_context}
 Paragraphe source (text of the page visible when the student pressed Send):
@@ -3655,7 +3714,7 @@ Constraints:
 - Sources, in priority order: (1) the visible page, when it actually contains the answer; (2) otherwise what lies elsewhere in the document (the "Elsewhere in the document" block) — it is reliable: answer precisely from it and give the page (e.g. "Table I, p.5"). When the answer is in a table, COPY the values of the relevant row or column into the answer (e.g. "Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps"); never just say that they are listed there; (3) only then general knowledge, introduced by "More generally, ...". If the visible page does not hold the answer, say so in half a sentence and move on to the other pages — no apology, no filler.
 - NEVER copy text from other pages into highlights — every highlight quote must come from the visible page text only.
 - Never mention "excerpts", "passages", "search" or "context" to the student: as far as they are concerned, you have simply read the document. Say "on page 5" or "in Table I (p.5)", never "in the excerpts".
-{search_rule}{figure_rule}- Never invent facts about the document that neither the page nor the other pages show.
+{search_rule}{figure_rule}{previous_rule}- Never invent facts about the document that neither the page nor the other pages show.
 - If one of the listed flashcards already covers the question, naturally point it out ("You already have a flashcard on this") and connect your answer to it.
 - Keep the answer compact (4-8 sentences): it is displayed in a small floating panel.
 - meta_cognition stays at 0.0.
@@ -3668,7 +3727,7 @@ Profil métacognitif : {_json(metacog_profile or {})}
 Jauges de session (0-100) : {_json(session_gauges or {})}
 Échanges récents avec l'assistant :
 {exchanges}
-Flashcards existantes de l'étudiant liées à ce document (rectos) :
+{previous_block}Flashcards existantes de l'étudiant liées à ce document (rectos) :
 {flashcards}
 {student_context}{retrieved_context}
 Paragraphe source (texte de la page visible au moment où l'étudiant a envoyé sa question) :
@@ -3710,7 +3769,7 @@ Contraintes :
 - Sources, par ordre de priorité : (1) la page visible, quand elle contient vraiment la réponse ; (2) sinon ce qui se trouve ailleurs dans le document (bloc « Ailleurs dans le document ») — c'est fiable : réponds précisément à partir de là et indique la page (ex. « Table I, p.5 »). Quand la réponse est dans une table, RECOPIE les valeurs de la ligne ou de la colonne concernée dans la réponse (ex. « Outer step ε = 0.335, inner lr = 5.75×10−4, 5 / 20 steps ») ; ne dis jamais seulement qu'elles y sont listées ; (3) seulement ensuite les connaissances générales, introduites par "Plus généralement, ...". Si la page visible ne contient pas la réponse, dis-le en une demi-phrase et passe aux autres pages — sans excuse ni remplissage.
 - Ne recopie JAMAIS du texte d'autres pages dans highlights — toute citation surlignée doit provenir uniquement du texte de la page visible.
 - Ne parle jamais d'« extraits », de « passages », de « recherche » ni de « contexte » à l'étudiant : pour lui, tu as simplement lu le document. Dis « à la page 5 » ou « dans la Table I (p.5) », jamais « dans les extraits ».
-{search_rule}{figure_rule}- N'invente jamais de fait sur le document que ni la page ni les autres pages ne montrent.
+{search_rule}{figure_rule}{previous_rule}- N'invente jamais de fait sur le document que ni la page ni les autres pages ne montrent.
 - Si une des flashcards listées couvre déjà la question, signale-le naturellement ("Tu as déjà une flashcard sur ce point") et relie ta réponse à elle.
 - Réponse compacte (4 à 8 phrases) : elle s'affiche dans un petit panneau flottant.
 - meta_cognition reste à 0.0.

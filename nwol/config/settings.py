@@ -1530,22 +1530,29 @@ class PromptLimits:
     rag_search_top_k: int  # … quand la recherche s'élargit
     rag_chars: int         # longueur d'un passage
     rag_table_chars: int   # longueur d'une table (coupée entre deux rangées)
+    last_turn_chars: int   # une réplique du dernier échange (réponse libre)
     page_tokens: dict[str, int] | None = None  # par tâche ; None : contexte plein
     answer_tokens: int | None = None
     rag_tokens: int | None = None     # pour l'ensemble des passages
+    last_turn_tokens: int | None = None  # pour tout le dernier échange
 
 
 PROMPT_LIMITS_FULL = PromptLimits(
     page_chars=3500, answer_chars=2000, history=5, exchanges=4, quotes=5, struggles=3,
     rag_top_k=ASSISTANT_RAG_TOP_K, rag_search_top_k=ASSISTANT_RAG_SEARCH_TOP_K,
     rag_chars=ASSISTANT_RAG_MAX_CHARS, rag_table_chars=ASSISTANT_RAG_TABLE_CHUNK_CHARS,
+    last_turn_chars=600,
 )
 PROMPT_LIMITS_COMPACT = PromptLimits(
     page_chars=2000, answer_chars=1200, history=2, exchanges=2, quotes=2, struggles=2,
-    rag_top_k=2, rag_search_top_k=3, rag_chars=500, rag_table_chars=900,
+    rag_top_k=2, rag_search_top_k=3, rag_chars=500, rag_table_chars=900, last_turn_chars=400,
     page_tokens={"question": 900, "evaluation": 500, "assistant_answer": 380, "rephrasing": 1100,
                  "curiosity_hook": 800},
-    answer_tokens=250, rag_tokens=400,
+    # `last_turn_tokens` : le dernier échange (question de suivi), que le
+    # palier minuscule ne reçoit pas (llm/prompts._previous_turn_block). Quand
+    # il est dans le prompt, il prend autant sur `rag_tokens` : mesuré le
+    # 2026-10-19, Gemma en mode économe garde 42 tokens de marge au pire cas.
+    answer_tokens=250, rag_tokens=400, last_turn_tokens=150,
 )
 
 

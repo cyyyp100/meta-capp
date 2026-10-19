@@ -749,6 +749,7 @@ def answer_user_question_async(
         user_highlights=context.get("user_highlights") or [],
         retrieved_passages=context.get("retrieved_passages") or [],
         whole_document_search=bool(context.get("whole_document_search")),
+        previous_turn=context.get("previous_turn"),
     )
     return _run_json_async(
         "assistant_answer",

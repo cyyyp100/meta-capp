@@ -1365,3 +1365,74 @@ def test_an_automatic_question_is_dropped_when_the_student_takes_over(client, mo
         ws.send_json({"type": "mode", "mode": "coach"})
         assert _next_event(ws)["type"] == "system"
     assert saved == []
+
+
+# ── Mémoire de l'échange précédent pour les questions de suivi ──────────────
+
+def test_a_follow_up_question_receives_the_previous_exchange(client, monkeypatch):
+    """Le second « ask » reçoit le premier échange ; un « ask » qui suit une
+    question de Clikoda reçoit cette question."""
+    from services import assistant
+
+    received: list = []
+
+    def fake_answer(d, p, q, ok, err, **kw):
+        received.append(kw.get("previous_turn"))
+        ok({"answer": f"Réponse à {q}", "highlights": []})
+
+    monkeypatch.setattr(assistant, "answer_question", fake_answer)
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Quel est le rôle du pas ?", "choices": None, "question_type": "open"}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "C'est quoi le pas ?", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+        ws.send_json({"type": "ask", "question": "Développe ta réponse.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "qa_question"
+        ws.send_json({"type": "ask", "question": "Je ne comprends pas ta question.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+    assert received[0] is None  # rien avant la première question de la séance
+    assert received[1] == {"kind": "ask", "lines": [("student", "C'est quoi le pas ?"),
+                                                    ("clikoda", "Réponse à C'est quoi le pas ?")]}
+    assert received[2] == {"kind": "question", "lines": [("clikoda", "Quel est le rôle du pas ?")]}
+
+
+def test_an_evaluated_answer_becomes_the_last_exchange(client, monkeypatch):
+    from services import assistant
+
+    received: list = []
+    monkeypatch.setattr(
+        assistant, "answer_question",
+        lambda d, p, q, ok, err, **kw: (received.append(kw.get("previous_turn")), ok({"answer": "…", "highlights": []})),
+    )
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Quel est le rôle du pas ?", "choices": None, "question_type": "open"}),
+    )
+    monkeypatch.setattr(
+        assistant, "evaluate_page_answer",
+        lambda d, p, q, a, ok, err, **kw: ok({"verdict": "partial", "feedback": "Il manque la direction."}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        ws.send_json({"type": "qa_answer", "question": q["question"], "answer": "Il règle la vitesse.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "qa_feedback"
+        ws.send_json({"type": "ask", "question": "Quelle direction ?", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+    assert received[0] == {"kind": "answer", "lines": [
+        ("clikoda", "Quel est le rôle du pas ?"), ("student", "Il règle la vitesse."), ("clikoda", "Il manque la direction."),
+    ]}

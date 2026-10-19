@@ -149,6 +149,7 @@ def build_answer_context(
     recent_exchanges: list[dict] | None = None,
     session_gauges: dict | None = None,
     selected_snippets: list[str] | None = None,
+    previous_turn: dict | None = None,
 ) -> dict:
     doc = _get_document(doc_id) or {}
     # Un suivi (« cherche dans tout l'article ») ne porte aucun mot-clé : la
@@ -166,6 +167,9 @@ def build_answer_context(
         "session_gauges": session_gauges or {},
         "related_flashcards": _safe(lambda: _varied_related_flashcards(doc_id), []),
         "recent_exchanges": list(recent_exchanges or []),
+        # Dernier échange de la séance (question de Clikoda, correction,
+        # reformulation…) : ce à quoi renvoie une question de suivi.
+        "previous_turn": previous_turn,
         "selected_snippets": list(selected_snippets or []),
         "user_highlights": _safe(lambda: get_highlight_quotes(doc_id, page=page), []),
         # RAG plein-document : passages pertinents trouvés AILLEURS que sur la page
@@ -193,12 +197,13 @@ def answer_question(
     recent_exchanges: list[dict] | None = None,
     session_gauges: dict | None = None,
     selected_snippets: list[str] | None = None,
+    previous_turn: dict | None = None,
     answerer: Callable = answer_user_question_async,
 ) -> None:
     """Lance la réponse LLM (asynchrone, via callbacks). Non bloquant."""
     answerer(
         build_answer_context(
-            doc_id, page, question, recent_exchanges, session_gauges, selected_snippets,
+            doc_id, page, question, recent_exchanges, session_gauges, selected_snippets, previous_turn,
         ),
         on_success,
         on_error,
