@@ -502,6 +502,7 @@ const FR: Record<string, string> = {
   "verdict.correct": "Correct",
   "verdict.partial": "Partiel",
   "verdict.incorrect": "À retravailler",
+  "verdict.reflection": "Réflexion notée",
   // SAS
   "entry.label": "PRÉPARATION À LA LECTURE",
   "entry.text": "Respire, pose ton attention. On lit une chose à la fois, sans se presser.",
@@ -1577,6 +1578,7 @@ const EN: Record<string, string> = {
   "verdict.correct": "Correct",
   "verdict.partial": "Partial",
   "verdict.incorrect": "Needs work",
+  "verdict.reflection": "Reflection noted",
   "entry.label": "GETTING READY TO READ",
   "entry.text": "Breathe, settle your attention. One thing at a time, no rush.",
   "entry.continue": "Continue",

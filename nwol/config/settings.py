@@ -1315,6 +1315,13 @@ GAUGE_VERDICT_TARGETS: dict[str, float] = {"correct": 100.0, "partial": 60.0, "i
 # réponses, la jauge dit la séance plutôt que son amorce (profil × 0,8).
 GAUGE_VERDICT_WEIGHT = 0.2
 
+# Question réflexive (métacognition, anticipation : `no_wrong_answer` dans
+# config/question_types.py) : il n'y a pas de mauvaise réponse, donc pas de
+# bonus de verdict. C'est l'analyse du LLM — `metacog_signals.meta_cognition`,
+# entre -2 et 2 — qui fait bouger la jauge de métacognition, multipliée par ce
+# facteur : de -3 à +3 points par réponse, à la hausse comme à la baisse.
+GAUGE_REFLECTION_META_SCALE = 1.5
+
 # Jauge(s) que chaque mesure d'une séance de langue informe — toujours parmi
 # les trois critères de performance ci-dessus. Un jeu de lexique travaille la
 # mémoire, un jeu sur le dialogue la compréhension, un repérage l'attention.

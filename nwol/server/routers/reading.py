@@ -911,6 +911,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         # l'erreur : surlignés comme pour une réponse libre.
                         "highlights": ev.get("highlights", []),
                         "flashcard_created": flashcard_created,
+                        # Question réflexive : pas de bonne ni de mauvaise réponse,
+                        # l'UI referme la carte et dit « réflexion notée ».
+                        "no_wrong_answer": bool(ev.get("no_wrong_answer")),
                     })
 
                 start_generation()

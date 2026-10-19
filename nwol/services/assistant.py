@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from config import question_types
 from config.settings import ASSISTANT_FLASHCARD_POOL, FORCE_QUESTION_TYPE
 from db.answers import get_recurring_struggles
 from db.chapters import get_chapters
@@ -465,6 +466,15 @@ def evaluate_page_answer(
                 evaluation["hint"] = ""
             if verdict != "partial":
                 evaluation["completion"] = ""
+        # Question réflexive : pas de mauvaise réponse. Le prompt le dit, mais un
+        # « incorrect » qui passerait relancerait le verrou du lecteur sur une
+        # réflexion sincère : la règle est tenue ici.
+        if question_types.no_wrong_answer(qtype):
+            if evaluation.get("verdict") == "incorrect":
+                evaluation["verdict"] = "partial"
+            evaluation["hint"] = ""
+            evaluation["completion"] = ""
+            evaluation["no_wrong_answer"] = True
         on_success(evaluation)
 
     evaluator(context, _settled, on_error)

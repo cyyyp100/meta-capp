@@ -477,6 +477,36 @@ describe("ClikodaPanel", () => {
     expect(onGatedChange.mock.calls.at(-1)?.[0]).toBe(false);
   });
 
+  // Métacognition, anticipation : pas de mauvaise réponse. La carte se clôt
+  // comme sur une bonne réponse, le verrou tombe, et aucun verdict coloré ne
+  // juge une réflexion — même un « partiel ».
+  it("referme une question réflexive et lève le verrou, sans verdict", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Comment as-tu trouvé ta réponse ?",
+        question_type: "metacognition",
+        choices: null,
+        mask: null,
+        page: 2,
+      });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 2);
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "J'ai relu.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "partial", feedback: "Noté.", hint: "", no_wrong_answer: true });
+    });
+
+    expect(onGatedChange.mock.calls.at(-1)?.[0]).toBe(false);
+    const card = screen.getByTestId("qa-card");
+    expect(card).not.toHaveAttribute("data-live");
+    expect(card).toHaveTextContent(/réflexion notée|reflection noted/i);
+    expect(card).not.toHaveTextContent(/partiel|partial/i);
+  });
+
   // La zone visée par la question remonte au lecteur avec sa page, et se
   // retire quand la carte se referme.
   it("transmet la zone de la question au lecteur, puis la retire", async () => {

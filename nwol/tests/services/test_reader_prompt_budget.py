@@ -124,9 +124,12 @@ def test_question_prompt_fits(machine, lang, page_kind):
 
 
 @pytest.mark.parametrize("page_kind", list(PAGES))
-def test_evaluation_prompt_fits(machine, lang, page_kind):
+# Une question réflexive remplace les consignes de verdict par les siennes :
+# elle a son propre cas maximal.
+@pytest.mark.parametrize("question_type", ["open", "metacognition"])
+def test_evaluation_prompt_fits(machine, lang, page_kind, question_type):
     prompt = prompts.build_evaluation_prompt(
-        question={"question": LONG[:300], "question_type": "open", "expected_answer": LONG[:400],
+        question={"question": LONG[:300], "question_type": question_type, "expected_answer": LONG[:400],
                   "choices": ["choix " + LONG[:60]] * 4},
         user_answer=PAGES[page_kind][:3000], paragraph=PAGES[page_kind], metacog_profile=PROFILE,
         history=HISTORY, past_struggles=STRUGGLES,

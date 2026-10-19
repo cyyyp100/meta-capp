@@ -1001,6 +1001,60 @@ def test_open_types_keep_the_llm_verdict(client, monkeypatch):
     assert out["verdict"] == "partial" and out["completion"] == "précise"
 
 
+@pytest.mark.parametrize("question_type", ["metacognition", "anticipation"])
+def test_a_reflective_question_has_no_wrong_answer(client, monkeypatch, question_type):
+    """Une réflexion n'est jamais fausse : un « incorrect » du LLM devient
+    « partial », sans indice ni complément — il relançait le verrou du lecteur."""
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, question_type, "")
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "Je ne sais pas trop.", lambda r: out.update(r), lambda m: None,
+        question_type=question_type, question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "incorrect", "feedback": "…", "hint": "Relis.", "completion": "x"}),
+    )
+    assert out["verdict"] == "partial"
+    assert out["hint"] == "" and out["completion"] == ""
+    assert out["no_wrong_answer"] is True
+
+
+def test_a_comprehension_question_can_still_be_wrong(client, monkeypatch):
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, "comprehension", "La définition donnée.")
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "Autre chose.", lambda r: out.update(r), lambda m: None,
+        question_type="comprehension", question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "incorrect", "feedback": "…", "hint": "Relis."}),
+    )
+    assert out["verdict"] == "incorrect" and out["hint"] == "Relis."
+    assert "no_wrong_answer" not in out
+
+
+def test_reader_ws_feedback_says_when_there_was_no_wrong_answer(client, monkeypatch):
+    from services import assistant
+
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Comment as-tu procédé ?", "choices": None,
+                                        "question_type": "metacognition"}),
+    )
+    monkeypatch.setattr(
+        assistant, "evaluate_page_answer",
+        lambda d, p, q, a, ok, err, **kw: ok({"verdict": "partial", "feedback": "Noté.", "no_wrong_answer": True}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        ws.send_json({"type": "qa_answer", "question": q["question"], "answer": "J'ai relu.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        fb = ws.receive_json()
+        assert fb["type"] == "qa_feedback" and fb["no_wrong_answer"] is True
+
+
 def test_assistant_exchanges_are_rehydrated_from_the_db(client, monkeypatch):
     """Rouvrir un document retrouve la conversation précédente.
 

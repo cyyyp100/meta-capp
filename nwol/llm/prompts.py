@@ -1006,6 +1006,51 @@ def _eval_type_rule(question_type: str) -> tuple[str, str]:
     return _EVAL_TYPE_RULES.get(question_type or "", ("", ""))
 
 
+def _eval_verdict_rules(question_type: str) -> tuple[str, str]:
+    """Consignes de verdict et de `meta_cognition`, selon que la question a une
+    bonne réponse ou non. Renvoie (fr, en).
+
+    Une question réflexive (`no_wrong_answer` dans config/question_types.py) n'a
+    pas de mauvaise réponse : son verdict dit l'engagement, et c'est
+    `meta_cognition` qui porte l'analyse de la réflexion — au lieu de rester à
+    0.0 jusqu'au sas de sortie. Aucun mot d'exemple dans la consigne : Gemma
+    recopie les exemples des consignes."""
+    spec = question_types.spec(question_type or "")
+    if spec is not None and spec.no_wrong_answer:
+        fr = (
+            f"- Cette question est réflexive ({spec.label[0]} : {spec.purpose[0]}) : il n'y a pas de"
+            " mauvaise réponse. verdict vaut \"correct\" si l'étudiant s'engage vraiment dans la"
+            " réflexion demandée, \"partial\" si sa réflexion reste vague ou générique ; jamais"
+            " \"incorrect\". hint reste une chaîne vide.\n"
+            "- metacog_signals.meta_cognition porte ton analyse de cette réflexion, entre -2.0 et"
+            " 2.0 : négative si elle est évasive ou de pure forme, positive si elle est lucide et"
+            " précise, d'autant plus loin de 0 que c'est net."
+        )
+        en = (
+            f"- This question is reflective ({spec.label[1]}: {spec.purpose[1]}): there is no wrong"
+            " answer. verdict is \"correct\" if the student genuinely engages in the requested"
+            " reflection, \"partial\" if their reflection stays vague or generic; never"
+            " \"incorrect\". hint stays an empty string.\n"
+            "- metacog_signals.meta_cognition carries your analysis of this reflection, between -2.0"
+            " and 2.0: negative if it is evasive or a mere formality, positive if it is lucid and"
+            " precise, further from 0 the clearer it is."
+        )
+        return fr, en
+    fr = (
+        "- meta_cognition reste à 0.0 ici : elle sera évaluée uniquement dans le sas de fin de session.\n"
+        "- verdict vaut \"correct\" si l'idée attendue est présente, même si l'étudiant ajoute une réflexion personnelle, une réserve ou une question qui ne contredit pas le paragraphe.\n"
+        "- verdict vaut \"partial\" seulement si l'idée principale est présente mais trop imprécise ou incomplète.\n"
+        "- verdict vaut \"incorrect\" seulement si l'idée principale est absente, contredite ou hors sujet."
+    )
+    en = (
+        "- meta_cognition stays at 0.0 here: it will only be evaluated in the end-of-session debrief.\n"
+        "- verdict is \"correct\" if the expected idea is present, even if the student adds a personal reflection, a caveat, or a question that does not contradict the paragraph.\n"
+        "- verdict is \"partial\" only if the main idea is present but too imprecise or incomplete.\n"
+        "- verdict is \"incorrect\" only if the main idea is absent, contradicted, or off-topic."
+    )
+    return fr, en
+
+
 def _eval_objective_verdict_rule(verdict: str) -> tuple[str, str]:
     """Annonce le verdict déjà tranché côté serveur (cf. services.assistant)."""
     if verdict not in ("correct", "partial", "incorrect"):
@@ -1069,6 +1114,7 @@ def build_evaluation_prompt(
     question_type = (question or {}).get("question_type", "")
     _dim_hint_fr, _dim_hint_en = _eval_dimension_hint(question_type)
     _type_rule_fr, _type_rule_en = _eval_type_rule(question_type)
+    _verdict_rules_fr, _verdict_rules_en = _eval_verdict_rules(question_type)
     # Verdict déjà établi côté serveur (QCM, remise en ordre) : le LLM ne le
     # rejuge pas, il commente. Sans cette annonce, son feedback féliciterait
     # une réponse que le serveur vient de compter fausse.
@@ -1165,10 +1211,7 @@ Constraints:
 - Metacognitive signals are between -2.0 and 2.0.
 - highlights: 0 to 3 quotes copied WORD FOR WORD from the source paragraph (never rephrased), pointing at the passages that justify the verdict or correct the mistake. purpose is "key" (key passage), "explain" (passage your feedback explains) or "reference" (supporting passage). Use an empty list if nothing relevant.
 - verdict must be exactly "correct", "partial", or "incorrect".
-- meta_cognition stays at 0.0 here: it will only be evaluated in the end-of-session debrief.
-- verdict is "correct" if the expected idea is present, even if the student adds a personal reflection, a caveat, or a question that does not contradict the paragraph.
-- verdict is "partial" only if the main idea is present but too imprecise or incomplete.
-- verdict is "incorrect" only if the main idea is absent, contradicted, or off-topic.
+{_verdict_rules_en}
 - hint must only be set if verdict is "incorrect". Otherwise hint must be an empty string.
 - completion must only be set if verdict is "partial". Otherwise completion must be an empty string.
 - If verdict is "correct", feedback must be a short, specific sentence validating what the student understood — cite a precise element from their answer or the paragraph. Never write simply "Correct" or "Good answer": always add a nuance, a link, or a useful pedagogical remark.
@@ -1238,10 +1281,7 @@ Contraintes :
 - Les signaux métacognitifs sont entre -2.0 et 2.0.
 - highlights : 0 à 3 citations copiées MOT POUR MOT du paragraphe source (jamais reformulées), désignant les passages qui justifient le verdict ou corrigent l'erreur. purpose vaut "key" (passage clé), "explain" (passage que ton feedback explique) ou "reference" (passage cité en appui). Liste vide si rien de pertinent.
 - verdict doit être exactement "correct", "partial" ou "incorrect".
-- meta_cognition reste à 0.0 ici : elle sera évaluée uniquement dans le sas de fin de session.
-- verdict vaut "correct" si l'idée attendue est présente, même si l'étudiant ajoute une réflexion personnelle, une réserve ou une question qui ne contredit pas le paragraphe.
-- verdict vaut "partial" seulement si l'idée principale est présente mais trop imprécise ou incomplète.
-- verdict vaut "incorrect" seulement si l'idée principale est absente, contredite ou hors sujet.
+{_verdict_rules_fr}
 - hint doit être renseigné uniquement si verdict vaut "incorrect". Sinon hint doit être une chaîne vide.
 - completion doit être renseigné uniquement si verdict vaut "partial". Sinon completion doit être une chaîne vide.
 - Si verdict vaut "correct", feedback doit être une phrase courte et spécifique qui valide ce que l'étudiant a bien saisi — cite un élément précis de sa réponse ou du paragraphe. Ne jamais écrire simplement "Correct" ou "Bonne réponse" : ajoute toujours une nuance, un lien ou une remarque pédagogique utile.

@@ -11,6 +11,7 @@ from config.settings import (
     ATTENTION_PASSIVE_FLOOR,
     ATTENTION_PROGRESS_BONUS,
     ATTENTION_STALL_MAX_DROP,
+    GAUGE_REFLECTION_META_SCALE,
     GAUGE_VERDICT_TARGETS,
     GAUGE_VERDICT_WEIGHT,
 )
@@ -124,8 +125,19 @@ def update_gauges_from_evaluation(
     # Absent (ex. question libre) -> comportement uniforme historique.
     question_type = str(evaluation.get("question_type") or "")
     target_gauges = QUESTION_TYPE_TARGET_GAUGES.get(question_type, ())
+    # Question réflexive (métacognition, anticipation) : pas de mauvaise
+    # réponse, donc un verdict qui ne mesure rien. La métacognition suit
+    # l'analyse du LLM, dans un sens ou dans l'autre ; les autres jauges ne
+    # bougent que sur leurs signaux, sans bonus ni malus de verdict.
+    reflective = question_types.no_wrong_answer(question_type)
+    if reflective:
+        verdict = None
     values = {}
     for criterion, gauge in gauges.items():
+        if criterion == "meta_cognition" and reflective:
+            signal = max(-2.0, min(2.0, _signal_value(signals, criterion)))
+            values[criterion] = gauge.apply_delta(signal * GAUGE_REFLECTION_META_SCALE)
+            continue
         if criterion == "meta_cognition":
             # Dérive pendant la session. Renforcée pour les questions justement
             # ciblées sur la métacognition (sinon dérive légère, score fin de
@@ -411,11 +423,15 @@ def clamp_gauge(value: float) -> float:
     return _clamp(value)
 
 
-def _effective_signal(criterion: str, signals: dict, evaluation: dict) -> float:
+def _signal_value(signals: dict, criterion: str) -> float:
     try:
-        signal = float(signals.get(criterion, 0.0))
+        return float(signals.get(criterion, 0.0))
     except (TypeError, ValueError):
-        signal = 0.0
+        return 0.0
+
+
+def _effective_signal(criterion: str, signals: dict, evaluation: dict) -> float:
+    signal = _signal_value(signals, criterion)
 
     if criterion == "curiosity":
         curiosity_signals = evaluation.get("curiosity_signals") or {}

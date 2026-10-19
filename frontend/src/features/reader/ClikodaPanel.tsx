@@ -32,7 +32,7 @@ import type { WarmUpTiming } from "../session/WarmUp";
 import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
-import { VerdictBadge } from "../questions/VerdictBadge";
+import { ReflectionBadge, VerdictBadge } from "../questions/VerdictBadge";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
 import { renderMathToHtml } from "./renderMath";
 
@@ -40,6 +40,8 @@ interface QaFeedback {
   verdict: string;
   feedback: string;
   hint?: string;
+  /** Question réflexive : pas de bonne ni de mauvaise réponse, la réflexion est notée. */
+  noWrongAnswer?: boolean;
 }
 
 /**
@@ -478,9 +480,17 @@ export function ClikodaPanel({
         if (evt.type === "gated_question" || gatedRef.current) setGatedState(true, page);
       } else if (evt.type === "qa_feedback") {
         setBusy(false);
+        // Question réflexive : pas de mauvaise réponse — elle se clôt comme une
+        // bonne réponse, verrou levé, avec « réflexion notée » pour tout verdict.
+        const reflective = Boolean(evt.no_wrong_answer);
         if (liveQaIdRef.current !== null) {
           patchQa(liveQaIdRef.current, {
-            feedback: { verdict: evt.verdict || "", feedback: evt.feedback || "", hint: evt.hint || "" },
+            feedback: {
+              verdict: evt.verdict || "",
+              feedback: evt.feedback || "",
+              hint: evt.hint || "",
+              noWrongAnswer: reflective,
+            },
           });
         }
         // La réponse est donnée : on rend le passage masqué.
@@ -494,14 +504,14 @@ export function ClikodaPanel({
         if (gatedRef.current) {
           // Idée principale présente -> fin du verrouillage. Sinon, le lecteur
           // — libéré le temps de la correction — revient se caler sur la zone.
-          if (evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
+          if (reflective || evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
           else onGatedChangeRef.current?.(true, gatedPageRef.current);
         }
         // Réponse juste : rien à reprendre, la lecture enchaîne sans passer par
         // « Terminer ». L'encadré reste dans le fil avec sa correction, en
         // lecture seule, et la zone cadrée est rendue au lecteur. Une réponse
         // partielle ou fausse garde ses boutons : il y a encore une suite à choisir.
-        if (evt.verdict === "correct") closeQa();
+        if (reflective || evt.verdict === "correct") closeQa();
       }
     };
     // Présence : fenêtre masquée ou application passée au second plan. C'est le
@@ -1396,7 +1406,7 @@ function QaCard({
 
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <VerdictBadge verdict={feedback.verdict} />
+          {feedback.noWrongAnswer ? <ReflectionBadge /> : <VerdictBadge verdict={feedback.verdict} />}
           {/* La correction cite les formules du passage ($\alpha$…) comme
               l'énoncé : même rendu KaTeX, sinon le LaTeX s'affiche brut. */}
           {feedback.feedback && (

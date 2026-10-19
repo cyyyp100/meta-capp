@@ -35,3 +35,28 @@ export function VerdictBadge({ verdict }: { verdict: string }) {
     </span>
   );
 }
+
+/**
+ * La pastille d'une question réflexive (métacognition, anticipation) : il n'y
+ * a pas de mauvaise réponse, donc pas de couleur de statut — un succès vert
+ * ou un partiel orange y jugeraient une réflexion qui ne se juge pas.
+ */
+export function ReflectionBadge() {
+  const t = useT();
+  return (
+    <span
+      style={{
+        alignSelf: "flex-start",
+        fontSize: 11,
+        fontWeight: 700,
+        padding: "3px 10px",
+        borderRadius: 999,
+        color: "var(--accent-ink)",
+        background: "var(--accent-soft)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      {t("verdict.reflection")}
+    </span>
+  );
+}
