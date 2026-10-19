@@ -355,8 +355,11 @@ export function ClikodaPanel({
     else setGatedState(false);
   }
 
-  /** Le lecteur est rendu le temps que Clikoda réfléchit — on peut relire la
-   *  page, défiler, zoomer. Le verrou, lui, reste armé (`gated`) : cf. restoreGate. */
+  /** Le lecteur est rendu le temps que Clikoda corrige ou prépare la question
+   *  suivante — on peut relire la page, défiler, zoomer. Le verrou, lui, reste
+   *  armé (`gated`) : cf. restoreGate. Pas pendant une question libre posée
+   *  dans la barre du bas : celle-ci ne débloque rien (on peut de toute façon
+   *  remonter relire sous le verrou). */
   function releaseWhileThinking() {
     if (gatedRef.current) onGatedChangeRef.current?.(false);
   }
@@ -710,20 +713,14 @@ export function ClikodaPanel({
     // réfléchit… » tournait indéfiniment sur une connexion fermée.
     if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: snippets })) {
       setBusy(false);
-      return;
     }
-    releaseWhileThinking();
   }
 
   function action(type: "rephrase" | "recap" | "hook", label: string) {
     if (busy) return;
     setMessages((m) => [...m, { role: "user", text: label }]);
     beginRequest();
-    if (!sendRaw({ type, page: pageRef.current })) {
-      setBusy(false);
-      return;
-    }
-    releaseWhileThinking();
+    if (!sendRaw({ type, page: pageRef.current })) setBusy(false);
   }
 
   /** « Annuler » : la main est rendue tout de suite, et le serveur coupe la
@@ -752,9 +749,12 @@ export function ClikodaPanel({
       playDemo("question");
       return;
     }
-    // « Nouvelle question » / « Réessayer » : la précédente et sa correction
-    // restent dans le fil, en lecture seule ; la suivante viendra à la suite.
-    endQa();
+    // « Nouvelle question » / « Réessayer » : la carte reste en jeu (boutons
+    // désactivés par `busy`) jusqu'à l'arrivée de la suivante, qui la remplace
+    // et la laisse dans le fil en lecture seule (`openQa`). La clore ici
+    // désarmait le verrou côté client si la génération échouait ou était
+    // annulée (`restoreGate` ne trouvait plus de carte), alors que le serveur
+    // restait verrouillé : Clikoda se taisait pour toute la séance.
     beginRequest();
     if (!sendRaw({ type: "start_qa", page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
@@ -1427,7 +1427,7 @@ function QaCard({
                 {stayLocked ? t("clikoda.retry_question") : t("clikoda.new_question")}
               </button>
               {!stayLocked && (
-                <button onClick={onClose} style={chip}>
+                <button onClick={onClose} disabled={busy} style={chip}>
                   {t("clikoda.finish")}
                 </button>
               )}
