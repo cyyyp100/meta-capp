@@ -10,6 +10,7 @@ from services.flashcards import (
     find_flashcard,
     list_flashcards,
     review_flashcard,
+    schedule_language_rules,
     session_start_cards,
 )
 
@@ -71,6 +72,10 @@ def create(body: CreateBody) -> dict:
         difficulty=body.difficulty,
         source=body.source,
     )
+    # Carte écrite à la main : Clikoda y applique en fond les règles des cartes
+    # de langue (lemme, sens, prononciation). La liste suit au prochain refetch.
+    if body.source == "manual":
+        schedule_language_rules(card_id)
     return {"id": card_id, "created": True}
 
 

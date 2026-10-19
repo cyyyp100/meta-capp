@@ -94,6 +94,10 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # plafond de 220 et arrivaient coupées en plein JSON. Prompt ~1700 tokens.
     "assistant_intervention":   {"num_ctx": 3072, "num_predict": 320, "temperature": 0.1},
     "flashcard_standalone":     {"num_ctx": 3072, "num_predict": 260, "temperature": 0.1},
+    # Règles de langue d'une carte manuelle (services/flashcards) : six champs
+    # courts en JSON structuré, ~60 tokens — le double pour ne jamais couper.
+    # Prompt ~500 tokens au pire (deux faces de MANUAL_CARD_LANG_MAX_CHARS).
+    "flashcard_lang_rules":     {"num_ctx": 2048, "num_predict": 160, "temperature": 0.1},
     # Génération batch des distracteurs de QCM (~10 questions en un seul appel).
     "quiz_distractors":         {"num_ctx": 4096, "num_predict": 1200, "temperature": 0.3},
     "quiz_analysis":            {"num_ctx": 4096, "num_predict": 420, "temperature": 0.2},
@@ -401,7 +405,7 @@ LLM_SLOW_MACHINE_FACTOR = 1.5
 # à l'écran) et `lang_writing_feedback` (la correction de fin de séance) restent
 # servies, comme le calibrage du débit.
 OLLAMA_BACKGROUND_TASKS: frozenset[str] = frozenset({
-    "document_digest",
+    "document_digest", "flashcard_lang_rules",
     "lang_story_bible", "lang_story_arc",
     "lang_episode_text", "lang_episode_text_hanzi",
     "lang_episode_glossary", "lang_episode_glossary_pron", "lang_episode_notes_point",
@@ -1425,6 +1429,11 @@ FLASHCARD_RECENCY_FLOOR = 0.35
 # /review) : c'est le signal « vue à la session précédente », jusqu'ici ignoré.
 FLASHCARD_REVIEW_COOLDOWN_DAYS = 5.0
 FLASHCARD_REVIEW_FLOOR = 0.2
+# Carte écrite à la main : Clikoda y applique les règles des cartes de langue
+# (lemme au recto, sens au verso, prononciation, langue) — services/flashcards.
+# Au-delà de ce nombre de caractères sur une face, ce n'est plus un mot ni une
+# courte expression (définition, question de cours) : aucun appel.
+MANUAL_CARD_LANG_MAX_CHARS = 120
 
 # Brainstorming : plafond d'extraits par type de source (surlignage, flashcard, erreur,
 # Q&R, document, mot et épisode du module Langues) et amortissement d'une source

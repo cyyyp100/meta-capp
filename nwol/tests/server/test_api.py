@@ -42,6 +42,22 @@ def test_library_doc_404(client):
     assert client.get("/api/library/doc/999").status_code == 404
 
 
+def test_only_a_new_manual_card_schedules_the_language_rules(client, monkeypatch):
+    """Les règles de langue partent pour une carte écrite à la main ET neuve :
+    ni pour un doublon (rien n'a été écrit), ni pour une autre source."""
+    from server.routers import flashcards as router
+
+    scheduled: list[int] = []
+    monkeypatch.setattr(router, "schedule_language_rules", scheduled.append)
+
+    first = client.post("/api/flashcards", json={"front": "comemos", "back": "nous mangeons"}).json()
+    again = client.post("/api/flashcards", json={"front": "comemos", "back": "nous mangeons"}).json()
+    client.post("/api/flashcards", json={"front": "tener", "back": "avoir", "source": "auto"})
+
+    assert first["created"] is True and again["created"] is False
+    assert scheduled == [first["id"]]
+
+
 def test_flashcard_create_review_delete(client):
     # Création via l'API.
     resp = client.post("/api/flashcards", json={"front": "Q", "back": "R", "tags": ["t"], "difficulty": 2})

@@ -7,15 +7,22 @@
 from __future__ import annotations
 
 import logging
+import re
+import threading
+import unicodedata
+from typing import Callable
 
+from config.settings import LANGUAGE_SCRIPTS, MANUAL_CARD_LANG_MAX_CHARS, OLLAMA_BACKGROUND_QUEUE_WAIT_S
 from config.subjects import canonical_subject
 from db.documents import get_document_subject
 from db.flashcards import (
+    apply_language_rules,
     delete_flashcard as _delete_flashcard,
     fill_lang_flashcard_pronunciation,
     find_flashcard_id,
     flashcard_key,
     get_existing_tags,
+    get_flashcard,
     get_flashcards,
     get_session_start_pool,
     lang_flashcard_exists,
@@ -25,7 +32,7 @@ from db.flashcards import (
 from db.user import DEFAULT_USER_ID
 from services import selection
 from utils.tags import fallback_flashcard_tags
-from utils.text import document_reference
+from utils.text import document_reference, fold
 
 logger = logging.getLogger("services.flashcards")
 
@@ -37,6 +44,8 @@ __all__ = [
     "create_auto_flashcard",
     "find_flashcard",
     "create_lang_vocab_flashcards",
+    "schedule_language_rules",
+    "apply_card_language_rules",
     "review_flashcard",
     "delete_flashcards",
     "fallback_tags",
@@ -46,14 +55,29 @@ __all__ = [
 
 # Face d'une carte de langue écrite dans la langue apprise : c'est elle que la
 # prononciation accompagne. Vocabulaire hérité : recto « bientôt en anglais »,
-# verso « soon » ; feuilleton : recto = le mot, verso = sa traduction.
+# verso « soon » ; feuilleton : recto = le mot, verso = sa traduction. Une
+# carte écrite à la main à qui les règles de langue ont donné une langue a,
+# elle aussi, le mot au recto (`apply_card_language_rules`).
 _TARGET_SIDE = {"lang_vocab": "back", "lang_feuilleton": "front"}
+
+# Les règles de langue d'une carte manuelle partent en fond : la carte est déjà
+# créée et utilisable telle que saisie. Les tests les jouent sur place.
+RUN_IN_BACKGROUND = True
+_LANG_RULES_TASK = "flashcard_lang_rules"
+# Écritures où un mot et son lemme partagent leurs premières lettres (cf.
+# `_describes_the_card`) ; ailleurs, au moins un signe commun.
+_ALPHABETS = ("LATIN", "CYRILLIC", "GREEK")
 
 
 def with_pronunciation_side(card: dict) -> dict:
     """La carte, avec `pronunciation_side` : "front" ou "back", la face où
     afficher la prononciation ; None pour une carte qui n'en a pas."""
-    side = _TARGET_SIDE.get(card.get("source") or "", "back") if card.get("pronunciation") else None
+    if not card.get("pronunciation"):
+        side = None
+    elif card.get("source") == "manual" and card.get("language"):
+        side = "front"
+    else:
+        side = _TARGET_SIDE.get(card.get("source") or "", "back")
     return {**card, "pronunciation_side": side}
 
 
@@ -321,6 +345,148 @@ def create_lang_vocab_flashcards(
         except Exception:  # une carte ratée ne doit pas casser la génération d'exercice
             logger.warning("Flashcard de vocabulaire non créée (%s -> %s)", front, back, exc_info=True)
     return created
+
+
+def _wants_language_rules(card: dict | None) -> bool:
+    """Une carte manuelle sans langue, dont chaque face tient dans un mot ou une
+    courte expression. Au-delà de MANUAL_CARD_LANG_MAX_CHARS, c'est une
+    définition ou une question de cours : aucun appel."""
+    if not card or card.get("source") != "manual" or card.get("language"):
+        return False
+    front = (card.get("front") or "").strip()
+    back = (card.get("back") or "").strip()
+    return bool(front and back) and max(len(front), len(back)) <= MANUAL_CARD_LANG_MAX_CHARS
+
+
+def schedule_language_rules(card_id: int) -> bool:
+    """Lance en fond la passe des règles de langue sur une carte manuelle neuve.
+
+    Ne lève JAMAIS : la carte est créée, la passe n'est qu'un plus. Renvoie
+    True si une passe est partie ; False pour une carte qui n'en veut pas
+    (longue, déjà dotée d'une langue) ou en mode économe — rien n'est alors
+    tenté, la carte reste telle que saisie."""
+    from llm.ollama_client import background_suspended
+
+    try:
+        if background_suspended(_LANG_RULES_TASK) or not _wants_language_rules(get_flashcard(int(card_id))):
+            return False
+    except Exception:
+        logger.warning("Règles de langue non planifiées (carte %s)", card_id, exc_info=True)
+        return False
+    if RUN_IN_BACKGROUND:
+        threading.Thread(
+            target=apply_card_language_rules, args=(int(card_id),), daemon=True,
+            name=f"flashcard-lang-{card_id}",
+        ).start()
+    else:
+        apply_card_language_rules(int(card_id))
+    return True
+
+
+def apply_card_language_rules(card_id: int, *, generator: Callable | None = None) -> str:
+    """Applique à une carte écrite à la main les règles des cartes de langue.
+
+    Le LLM dit la langue de la carte (parmi les codes de LANGUAGE_SCRIPTS, ou
+    aucune), le lemme, son sens et sa prononciation ; tout le reste passe par
+    la chaîne des cartes du feuilleton — `lang_episodes.enrich_glossary`
+    calcule pinyin, translittération arabe et article allemand,
+    `lang_progress.card_face` donne le recto (lemme) et le verso (son sens).
+    Une carte qui n'est pas du vocabulaire reste telle quelle.
+
+    Ne lève JAMAIS (thread de fond). Renvoie ce qui s'est passé : « applied »
+    (texte réécrit), « language_only » (langue posée, texte gardé), « none »
+    (pas une carte de langue), « skipped », « suspended » ou « failed »."""
+    import i18n
+    from llm.ollama_client import background_suspended, generate_manual_card_lang_async
+    from services.llm_bridge import run_llm_sync
+
+    try:
+        card = get_flashcard(int(card_id))
+        if not _wants_language_rules(card):
+            return "skipped"
+        if background_suspended(_LANG_RULES_TASK):
+            return "suspended"
+        explain_lang = "en" if i18n.current_lang() == "en" else "fr"
+        params = {
+            "front": card["front"], "back": card["back"],
+            "languages": tuple(LANGUAGE_SCRIPTS), "explain_lang": explain_lang,
+        }
+        gen = generator or generate_manual_card_lang_async
+        result = run_llm_sync(
+            lambda ok, err: gen(params, ok, err), queue_wait_s=OLLAMA_BACKGROUND_QUEUE_WAIT_S,
+        )
+        return _apply_language_result(card, result if isinstance(result, dict) else {}, explain_lang)
+    except Exception:
+        logger.warning("Règles de langue non appliquées (carte %s)", card_id, exc_info=True)
+        return "failed"
+
+
+def _apply_language_result(card: dict, result: dict, explain_lang: str) -> str:
+    from services import lang_episodes, lang_progress
+
+    language = result.get("language")
+    if language not in LANGUAGE_SCRIPTS or not _describes_the_card(card, result):
+        return "none"
+    tags = list(dict.fromkeys([*(card.get("tags") or []), language]))
+    lemma, gender, pron = _without_de_article(
+        language, result.get("lemma") or "", result.get("gender"), result.get("pron"),
+    )
+    meaning = result.get("meaning") or ""
+    # Sans lemme ou sans sens — ou un « sens » qui recopie le lemme (le palier
+    # minuscule le fait) —, il n'y a pas de carte à réécrire : la langue seule.
+    if not lemma or not meaning or fold(lemma) == fold(meaning):
+        apply_language_rules(card["id"], None, None, None, language, tags)
+        return "language_only"
+    entry = {
+        "form": lemma, "lemma": lemma, "translation": meaning, "lemma_translation": meaning,
+        "pos": result.get("pos") or "", "gender": gender, "pron": pron,
+    }
+    entry = lang_episodes.enrich_glossary(language, [entry], {}, explain_lang)[0]
+    face = lang_progress.card_face(language, entry)
+    rewritten = apply_language_rules(card["id"], face["front"], face["back"], face["pron"], language, tags)
+    logger.info("Règles de langue (carte %s, %s) : %s -> %s", card["id"], language, card["front"], face["front"])
+    return "applied" if rewritten else "language_only"
+
+
+def _describes_the_card(card: dict, result: dict) -> bool:
+    """Le mot décrit est-il bien celui de la carte ? Contraint à la liste fermée,
+    le modèle TRADUIT parfois le mot dans une autre langue de la liste au lieu
+    de la reconnaître (une carte italienne rendue en espagnol, banc du
+    2026-10-19). Deux vérifications, calculées : le mot recopié (`form`) figure
+    sur la carte, et le lemme lui ressemble — mêmes deux premières lettres pour
+    un mot d'un alphabet, au moins un signe commun sinon. Une forme irrégulière
+    (un prétérit anglais) échoue aussi : la carte reste alors telle que saisie,
+    ce qui vaut mieux qu'une carte réécrite dans la mauvaise langue."""
+    form = fold(result.get("form") or "")
+    lemma = fold(result.get("lemma") or "")
+    if not form or form.strip("?!.¿¡ ") not in fold(f"{card.get('front') or ''} {card.get('back') or ''}"):
+        return False
+    if not lemma:
+        return True
+    letters = [c for c in form + lemma if c.isalpha()]
+    if all(unicodedata.name(c, "").startswith(_ALPHABETS) for c in letters):
+        return any(f[:2] == w[:2] for f in re.findall(r"\w+", form) for w in re.findall(r"\w+", lemma))
+    return bool((set(form) & set(lemma)) - {" "})
+
+
+def _without_de_article(
+    language: str, lemma: str, gender: str | None, pron: str | None,
+) -> tuple[str, str | None, str | None]:
+    """(lemme, genre, prononciation) sans l'article qu'un nom allemand aurait
+    gardé : l'article est CALCULÉ ensuite depuis le genre (`enrich_glossary`),
+    sa prononciation aussi — recopiés, ils se doubleraient. L'article retiré
+    donne le genre si le modèle l'a omis."""
+    from services.lang_latin import de_article
+
+    lemma = " ".join(lemma.split())
+    if language != "allemand":
+        return lemma, gender, pron
+    head, _, rest = lemma.partition(" ")
+    for g in ("m", "f", "n"):
+        if rest and head.lower() == de_article(g):
+            words = (pron or "").split()
+            return rest, gender or g, " ".join(words[1:]) if len(words) > 1 else pron
+    return lemma, gender, pron
 
 
 def review_flashcard(card_id: int, verdict: str) -> None:

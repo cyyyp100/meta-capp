@@ -166,6 +166,47 @@ def rewrite_lang_card_back(card_id: int, old_back: str, new_back: str) -> bool:
     return cur.rowcount > 0
 
 
+def apply_language_rules(
+    card_id: int,
+    front: str | None,
+    back: str | None,
+    pronunciation: str | None,
+    language: str,
+    tags: list[str] | None,
+) -> bool:
+    """Pose sur une carte écrite à la main ce que les règles des cartes de
+    langue en ont tiré (services.flashcards.apply_card_language_rules) : le
+    lemme au recto, son sens au verso, la prononciation, la langue, et la
+    langue parmi les tags. La clé de doublon suit le nouveau texte, comme dans
+    `update_flashcard`.
+
+    Si une AUTRE carte porte déjà ce recto/verso — ou s'il n'y a pas de texte
+    à écrire (`front`/`back` à None) — le texte reste tel que saisi : seules la
+    langue, la prononciation et les tags sont posés. Renvoie True si le texte
+    a été réécrit."""
+    pron = (pronunciation or "").strip() or None
+    tags_json = json.dumps(normalize_flashcard_tags(tags), ensure_ascii=False) if tags else None
+    conn = get_connection()
+    if front and back:
+        try:
+            with conn:
+                cur = conn.execute(
+                    """UPDATE flashcards SET front=?, back=?, dedup_key=?, pronunciation=?, language=?,
+                              tags=COALESCE(?, tags)
+                       WHERE id=?""",
+                    (front.strip(), back.strip(), flashcard_key(front, back), pron, language, tags_json, int(card_id)),
+                )
+            return cur.rowcount > 0
+        except sqlite3.IntegrityError:
+            logger.info("Règles de langue : la carte %s existe déjà sous ce texte, texte laissé tel quel", card_id)
+    with conn:
+        conn.execute(
+            "UPDATE flashcards SET pronunciation=?, language=?, tags=COALESCE(?, tags) WHERE id=?",
+            (pron, language, tags_json, int(card_id)),
+        )
+    return False
+
+
 def get_flashcard(card_id: int) -> dict | None:
     conn = get_connection()
     row = conn.execute("SELECT * FROM flashcards WHERE id=?", (card_id,)).fetchone()

@@ -1408,6 +1408,68 @@ Contraintes :
 - difficulty vaut 1, 2 ou 3. Garde les notations mathématiques en LaTeX valide entre $...$."""
 
 
+def build_manual_card_lang_prompt(p: dict) -> str:
+    """Règles de langue d'une carte écrite à la main (services/flashcards).
+
+    `p` : `front`, `back`, `languages` (codes de LANGUAGE_SCRIPTS, la liste
+    fermée que le schéma impose aussi), `explain_lang`. Le lemme, sa
+    prononciation et son sens se suivent, comme dans le glossaire du
+    feuilleton : placée plus loin, la prononciation était celle du mot écrit
+    et non du lemme. Aucun mot d'exemple : Gemma recopie les exemples. Ce qui
+    se calcule (pinyin, translittération arabe, article allemand) ne lui est
+    pas demandé — `lang_episodes.enrich_glossary` le pose ensuite."""
+    front = " ".join(str(p.get("front") or "").split())
+    back = " ".join(str(p.get("back") or "").split())
+    codes = ", ".join(p.get("languages") or ())
+    if p.get("explain_lang") == "en":
+        return f"""A flashcard has just been written by hand:
+front: {front}
+back: {back}
+
+Known languages: {codes}.
+
+It is a vocabulary card if one of its sides is a word or a short expression in one of these languages — even
+conjugated, inflected or plural — and the other side its translation.
+Otherwise (definition, course question, formula, or a language missing from the list), answer "none" in
+"language" and leave the other fields empty.
+
+Answer ONLY in valid JSON, without markdown:
+{{"form": "word of the card", "language": "language code", "lemma": "lemma", "pron": "pronunciation of the lemma", "meaning": "meaning of the lemma", "pos": "part of speech", "gender": "gender"}}
+
+"form": the word or expression of the card in a foreign language, copied exactly as it is on the card.
+"language": the code of the language of "form", copied exactly from the list, or "none".
+"lemma": the dictionary form of "form", in its own language, never translated — a verb in
+the infinitive, a noun in the singular, without an article; for an expression of several words, the whole expression.
+"pron": the pronunciation of this lemma in the International Phonetic Alphabet, without slashes or brackets;
+empty string for Mandarin and Arabic.
+"meaning": the meaning of this lemma in English, as in a dictionary; a verb is translated by an infinitive.
+"pos" among: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, interjection, expression.
+"gender": m, f or n for a noun, otherwise empty string."""
+    return f"""Une flashcard vient d'être écrite à la main :
+recto : {front}
+verso : {back}
+
+Langues connues : {codes}.
+
+C'est une carte de vocabulaire si l'une de ses faces est un mot ou une courte expression dans l'une de ces
+langues — même conjugué, accordé ou au pluriel — et l'autre sa traduction.
+Sinon (définition, question de cours, formule, ou langue absente de la liste), réponds "none" dans
+"language" et laisse les autres champs vides.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{{"form": "mot de la carte", "language": "code de la langue", "lemma": "lemme", "pron": "prononciation du lemme", "meaning": "sens du lemme", "pos": "nature", "gender": "genre"}}
+
+"form" : le mot ou l'expression de la carte en langue étrangère, recopié tel qu'il est sur la carte.
+"language" : le code de la langue de "form", recopié tel quel de la liste, ou "none".
+"lemma" : la forme du dictionnaire de "form", dans sa propre langue, jamais traduite — un verbe à
+l'infinitif, un nom au singulier, sans article ; une expression de plusieurs mots reste entière.
+"pron" : la prononciation de ce lemme en alphabet phonétique international, sans barres obliques ni crochets ;
+chaîne vide pour le mandarin et l'arabe.
+"meaning" : le sens de ce lemme en français, comme dans un dictionnaire ; un verbe se traduit par un infinitif.
+"pos" parmi : nom, verbe, adjectif, adverbe, pronom, préposition, conjonction, déterminant, interjection, expression.
+"gender" : m, f ou n pour un nom, sinon chaîne vide."""
+
+
 def build_session_summary_prompt(
     session_data: dict,
     metacog_profile: dict | None = None,

@@ -296,3 +296,199 @@ def test_a_card_keeps_its_subject_once_its_document_is_deleted(fresh_db):
     for _ in range(10):
         cards = session_start_cards(doc, limit=5)
         assert cards[0]["id"] == card and cards[0]["card_subject"] == "informatique"
+
+
+# ── Carte manuelle : les règles des cartes de langue, appliquées par le LLM ──
+
+def _lang_generator(result: dict | None, calls: list | None = None):
+    """Faux LLM des règles de langue : rend `result`, note les paramètres reçus."""
+    def generate(params, ok, err):
+        if calls is not None:
+            calls.append(params)
+        ok(result)
+    return generate
+
+
+def _card(card_id: int) -> dict:
+    from services.flashcards import list_flashcards
+
+    return next(c for c in list_flashcards() if c["id"] == card_id)
+
+
+def test_a_conjugated_spanish_verb_becomes_its_infinitive(fresh_db):
+    from config.settings import LANGUAGE_SCRIPTS
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="comemos", back="nous mangeons")
+    calls: list = []
+    outcome = apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "espagnol", "form": "comemos", "lemma": "comer", "pron": "koˈmeɾ", "meaning": "manger",
+        "pos": "verbe", "gender": None,
+    }, calls))
+
+    assert outcome == "applied"
+    card = _card(cid)
+    assert (card["front"], card["back"]) == ("comer", "manger")
+    assert card["pronunciation"] == "koˈmeɾ" and card["language"] == "espagnol"
+    assert "espagnol" in card["tags"]
+    # Le mot est au recto : la prononciation l'y accompagne.
+    assert card["pronunciation_side"] == "front"
+    # La langue se choisit dans la liste fermée, expliquée dans la langue de l'interface.
+    assert calls[0]["languages"] == tuple(LANGUAGE_SCRIPTS)
+    assert calls[0]["explain_lang"] == "fr"
+
+
+@pytest.mark.parametrize("lemma, gender", [("Hund", "m"), ("der Hund", None)])
+def test_a_german_noun_gets_its_article(fresh_db, lemma, gender):
+    """L'article est calculé depuis le genre ; recopié par le modèle, il est
+    retiré (et donne le genre s'il manquait) plutôt que doublé."""
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="Hund", back="chien")
+    apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "allemand", "form": "Hund", "lemma": lemma, "pron": "hʊnt", "meaning": "chien",
+        "pos": "nom", "gender": gender,
+    }))
+
+    card = _card(cid)
+    assert card["front"] == "der Hund"
+    assert card["pronunciation"] == "deːɐ̯ hʊnt"
+
+
+def test_a_card_that_is_not_vocabulary_stays_as_typed(fresh_db):
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="Capitale de la France ?", back="Paris")
+    outcome = apply_card_language_rules(cid, generator=_lang_generator({"language": None}))
+
+    assert outcome == "none"
+    card = _card(cid)
+    assert (card["front"], card["back"], card["language"], card["pronunciation"]) == (
+        "Capitale de la France ?", "Paris", None, None,
+    )
+
+
+def test_a_long_card_never_reaches_the_llm(fresh_db):
+    from config.settings import MANUAL_CARD_LANG_MAX_CHARS
+    from services.flashcards import apply_card_language_rules, create_flashcard, schedule_language_rules
+
+    cid = create_flashcard(front="Définis la dérivée.", back="x" * (MANUAL_CARD_LANG_MAX_CHARS + 1))
+    calls: list = []
+    assert schedule_language_rules(cid) is False
+    assert apply_card_language_rules(cid, generator=_lang_generator({"language": "espagnol"}, calls)) == "skipped"
+    assert calls == []
+
+
+def test_economy_mode_suspends_the_language_rules(fresh_db, monkeypatch):
+    from services import llm_models
+    from services.flashcards import apply_card_language_rules, create_flashcard, schedule_language_rules
+
+    monkeypatch.setattr(llm_models, "economy", lambda: True)
+    cid = create_flashcard(front="comemos", back="nous mangeons")
+    calls: list = []
+    assert schedule_language_rules(cid) is False
+    assert apply_card_language_rules(cid, generator=_lang_generator({"language": "espagnol"}, calls)) == "suspended"
+    assert calls == []
+    assert _card(cid)["front"] == "comemos"
+
+
+def test_a_lemma_card_already_known_keeps_the_typed_text(fresh_db):
+    """Une autre carte porte déjà « comer / manger » : l'index refuse le
+    doublon, la carte garde son texte et reçoit seulement langue et prononciation."""
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    create_flashcard(front="comer", back="manger")
+    cid = create_flashcard(front="comemos", back="nous mangeons")
+    outcome = apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "espagnol", "form": "comemos", "lemma": "comer", "pron": "koˈmeɾ", "meaning": "manger",
+        "pos": "verbe", "gender": None,
+    }))
+
+    assert outcome == "language_only"
+    card = _card(cid)
+    assert card["front"] == "comemos" and card["language"] == "espagnol" and card["pronunciation"] == "koˈmeɾ"
+
+
+def test_a_failed_generation_leaves_the_card_alone(fresh_db):
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="comemos", back="nous mangeons")
+
+    def broken(params, ok, err):
+        err("Ollama indisponible")
+
+    assert apply_card_language_rules(cid, generator=broken) == "failed"
+    assert _card(cid)["front"] == "comemos"
+
+
+def test_a_german_article_kept_in_the_pronunciation_is_not_doubled(fresh_db):
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="die Katze", back="le chat")
+    apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "allemand", "form": "die Katze", "lemma": "die Katze", "pron": "di ˈkat͡sə", "meaning": "chat",
+        "pos": "nom", "gender": "f",
+    }))
+    card = _card(cid)
+    assert card["front"] == "die Katze"
+    assert card["pronunciation"] == "diː ˈkat͡sə"
+
+
+def test_a_meaning_that_copies_the_lemma_only_sets_the_language(fresh_db):
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front="comemos", back="nous mangeons")
+    outcome = apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "espagnol", "form": "comemos", "lemma": "comemos", "pron": "koˈmemos", "meaning": "comemos",
+        "pos": "nom", "gender": "m",
+    }))
+    assert outcome == "language_only"
+    card = _card(cid)
+    assert (card["front"], card["back"], card["language"]) == ("comemos", "nous mangeons", "espagnol")
+
+
+def test_a_lemma_outside_the_script_of_its_language_is_not_vocabulary():
+    """Contraint à la liste fermée, le modèle y range parfois un mot d'une
+    langue absente : un lemme latin annoncé en hindi n'est pas retenu."""
+    from llm.schema_json import parse_manual_card_lang
+
+    def parse(language: str, lemma: str) -> dict:
+        return parse_manual_card_lang({"language": language, "lemma": lemma, "pron": "", "meaning": "x",
+                                       "pos": "", "gender": ""})
+
+    assert parse("hindi", "allé") == {"language": None}
+    assert parse("mandarin", "women") == {"language": None}
+    assert parse("mandarin", "我们")["language"] == "mandarin"
+    assert parse("espagnol", "comer")["language"] == "espagnol"
+    assert parse("none", "")["language"] is None
+
+
+@pytest.mark.parametrize("form, lemma", [
+    ("ragazze", "chica"),     # traduit dans une autre langue de la liste
+    ("allé", "जाना"),          # traduit, et dans une autre écriture
+    ("comiamo", "comer"),     # un mot qui n'est pas sur la carte
+])
+def test_a_word_translated_instead_of_recognized_leaves_the_card_alone(fresh_db, form, lemma):
+    """Contraint à la liste fermée, le modèle traduit parfois le mot au lieu de
+    reconnaître sa langue : le mot décrit doit être sur la carte, et le lemme
+    lui ressembler."""
+    from services.flashcards import apply_card_language_rules, create_flashcard
+
+    cid = create_flashcard(front=form if form != "comiamo" else "ragazze", back="filles")
+    outcome = apply_card_language_rules(cid, generator=_lang_generator({
+        "language": "espagnol", "form": form, "lemma": lemma, "pron": "x", "meaning": "fille",
+        "pos": "nom", "gender": "f",
+    }))
+    assert outcome == "none"
+    assert _card(cid)["language"] is None
+
+
+@pytest.mark.parametrize("front, form, lemma", [
+    ("ragazze", "ragazze", "ragazza"),
+    ("我们", "我们", "我们"),
+    ("Wie geht's?", "Wie geht's", "wie geht's"),
+])
+def test_a_recognized_word_is_rewritten(fresh_db, front, form, lemma):
+    from services.flashcards import _describes_the_card
+
+    assert _describes_the_card({"front": front, "back": "x"}, {"form": form, "lemma": lemma})
