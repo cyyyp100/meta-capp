@@ -72,6 +72,8 @@ interface Message {
   text: string;
   /** Renseigné pour `role === "qa"` : l'encadré de question. */
   qa?: QaRecord;
+  /** Question de l'élève : les extraits de la page joints à cette question-là. */
+  context?: { page: number; text: string }[];
 }
 
 interface Highlight {
@@ -147,6 +149,7 @@ export function ClikodaPanel({
   onHighlights,
   contextChips,
   onRemoveContextChip,
+  onContextConsumed,
   onGatedChange,
   onMask,
   onZone,
@@ -166,6 +169,8 @@ export function ClikodaPanel({
   onHighlights?: (items: Highlight[], page: number) => void;
   contextChips?: { id: number; page: number; text: string }[];
   onRemoveContextChip?: (id: number) => void;
+  /** Les extraits sont partis avec une question : le lecteur vide sa liste. */
+  onContextConsumed?: () => void;
   onGatedChange?: (active: boolean, page?: number) => void;
   /** Passage à cacher dans la page (rappel libre), null pour le redécouvrir. */
   onMask?: (mask: QaMask | null, page: number) => void;
@@ -705,15 +710,21 @@ export function ClikodaPanel({
   function ask() {
     const text = draft.trim();
     if (!text || busy) return;
-    setMessages((m) => [...m, { role: "user", text }]);
+    // Les extraits joints suivent LA question qu'ils accompagnent : ils
+    // s'affichent dans sa bulle, et la suivante part sans eux. Ils restaient
+    // sinon sous le champ et repartaient avec chaque question.
+    const context = (contextChipsRef.current ?? []).map(({ page, text: snippet }) => ({ page, text: snippet }));
+    setMessages((m) => [...m, { role: "user", text, ...(context.length ? { context } : {}) }]);
     setDraft("");
     beginRequest();
-    const snippets = (contextChipsRef.current ?? []).map((c) => c.text);
     // Message non parti : on rend la main. Sans ça, l'indicateur « Clikoda
-    // réfléchit… » tournait indéfiniment sur une connexion fermée.
-    if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: snippets })) {
+    // réfléchit… » tournait indéfiniment sur une connexion fermée. Les
+    // extraits, eux, restent sous le champ pour un nouvel essai.
+    if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: context.map((c) => c.text) })) {
       setBusy(false);
+      return;
     }
+    if (context.length) onContextConsumed?.();
   }
 
   function action(type: "rephrase" | "recap" | "hook", label: string) {
@@ -1000,6 +1011,22 @@ export function ClikodaPanel({
               </div>
             ) : (
               <div key={i} data-role={m.role} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+                {m.context?.length ? (
+                  <div
+                    role="group"
+                    aria-label={t("clikoda.context_attached")}
+                    data-testid="message-context"
+                    style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 4, marginBottom: 4 }}
+                  >
+                    {m.context.map((c, ci) => (
+                      <span key={ci} style={contextChipStyle} title={c.text}>
+                        <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t("clikoda.context_chip", { n: c.page })} · {c.text}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div
                   style={bubble(m.role === "user" ? "user" : "assistant")}
                   onClick={m.role === "assistant" ? handlePageRefClick : undefined}

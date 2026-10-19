@@ -10,6 +10,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -475,6 +476,51 @@ describe("ClikodaPanel", () => {
     expect(screen.getByTestId("qa-card")).toHaveAttribute("data-live", "true");
     expect(screen.getByRole("button", { name: /nouvelle question|réessayer|new question|try again/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /^(fermer|close)$/i })).toBeNull();
+  });
+
+  // Les extraits joints suivent LA question qu'ils accompagnent : dans sa bulle,
+  // puis plus rien sous le champ — la question suivante part sans eux. Ils
+  // repartaient avec chaque question tant qu'on ne les retirait pas à la main.
+  it("fait suivre le contexte dans la bulle de la question, puis le vide", async () => {
+    const consumed = vi.fn();
+    function WithChips() {
+      // Le lecteur tient la liste : il la vide quand le panneau l'a consommée.
+      const [chips, setChips] = useState([{ id: 1, page: 3, text: "La dérivée mesure la pente de la tangente." }]);
+      return (
+        <ClikodaPanel
+          docId={1}
+          currentPage={3}
+          sessionId={null}
+          contextChips={chips}
+          onContextConsumed={() => {
+            consumed();
+            setChips([]);
+          }}
+        />
+      );
+    }
+    render(wrap(<WithChips />));
+    await userEvent.click(await screen.findByRole("button", { name: /clikoda|ouvrir|open/i }));
+    const asks = () =>
+      (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m)).filter((m) => m.type === "ask");
+
+    await userEvent.type(chatBox(), "Pourquoi ?{Enter}");
+    expect(asks()[0].selected_snippets).toEqual(["La dérivée mesure la pente de la tangente."]);
+    expect(consumed).toHaveBeenCalledTimes(1);
+
+    // La puce est passée dans la bulle de l'élève, en lecture seule…
+    const bubble = screen.getByTestId("message-context");
+    expect(bubble).toHaveTextContent(/p\.3 · La dérivée mesure/);
+    expect(within(bubble).queryByRole("button")).toBeNull();
+    // …et plus sous le champ : plus de bouton pour la retirer.
+    expect(screen.queryByRole("button", { name: /retirer du contexte|remove from context/i })).toBeNull();
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Parce que…", highlights: [] });
+    });
+    await userEvent.type(chatBox(), "Et ensuite ?{Enter}");
+    expect(asks()[1].selected_snippets).toEqual([]);
+    expect(screen.getAllByTestId("message-context")).toHaveLength(1);
   });
 
   // « + Flashcard » cliqué deux fois sous la même réponse créait deux cartes :

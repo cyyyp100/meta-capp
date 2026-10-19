@@ -234,7 +234,9 @@ export function Reader() {
       y: number;
     } | null
   >(null);
-  // Extraits ajoutés au contexte du LLM (consommés par ClikodaPanel pour la prochaine question).
+  // Extraits ajoutés au contexte du LLM : ils partent avec la prochaine question
+  // posée à Clikoda, s'affichent dans sa bulle, puis la liste se vide
+  // (`onContextConsumed`) — la question suivante part sans eux.
   const [contextChips, setContextChips] = useState<{ id: number; page: number; text: string }[]>([]);
   // Question automatique bloquante : la lecture ne descend plus sous la page-contexte.
   const [locked, setLocked] = useState(false);
@@ -1538,6 +1540,7 @@ export function Reader() {
         onHighlights={handleHighlights}
         contextChips={contextChips}
         onRemoveContextChip={removeContextChip}
+        onContextConsumed={() => setContextChips([])}
         onGatedChange={handleGatedChange}
         onMask={handleMask}
         onZone={handleZone}

@@ -486,6 +486,7 @@ const FR: Record<string, string> = {
   "clikoda.answer_given": "Ta réponse",
   "clikoda.context_chip": "p.{n}",
   "clikoda.context_remove": "Retirer du contexte",
+  "clikoda.context_attached": "Extraits joints à la question",
   // Conseil de régulation de séance attaché à une question (session_hint).
   "clikoda.hint_label": "Conseil de séance",
   // Pause recommandée : Clikoda l'a proposée, l'étudiant décide.
@@ -1564,6 +1565,7 @@ const EN: Record<string, string> = {
   "clikoda.answer_given": "Your answer",
   "clikoda.context_chip": "p.{n}",
   "clikoda.context_remove": "Remove from context",
+  "clikoda.context_attached": "Excerpts attached to the question",
   "clikoda.hint_label": "Session tip",
   "clikoda.pause_title": "Break recommended",
   "clikoda.pause_start": "Take a {n} min break",
