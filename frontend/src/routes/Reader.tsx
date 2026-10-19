@@ -43,8 +43,35 @@ const ZONE_SIDE_INSET = 24;
 // hampes des lignes voisines laissent deviner le passage.
 const MASK_PAD_PTS = 2.5;
 const ZONE_PAD_PTS = 4;
+// Durée d'un défilement décidé par le lecteur (cadrage animé de la zone) : le
+// garde-fou du plancher le laisse finir au lieu de le ramener en arrière.
+const PROGRAMMATIC_SCROLL_MS = 800;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Distance qu'une touche ferait descendre le défilement natif (null : elle ne descend pas). */
+function scrollKeyStep(e: KeyboardEvent, el: HTMLElement): number | null {
+  const page = el.clientHeight * 0.85;
+  switch (e.key) {
+    case "ArrowDown":
+      return e.metaKey || e.ctrlKey ? Infinity : e.altKey ? page : 40;
+    case "PageDown":
+      return page;
+    case " ":
+      return e.shiftKey ? null : page;
+    case "End":
+      return Infinity;
+    default:
+      return null;
+  }
+}
+
+/** Delta vertical d'une molette, en pixels quel que soit son mode. */
+function wheelPixels(e: WheelEvent, el: HTMLElement): number {
+  if (e.deltaMode === 1) return e.deltaY * 16;
+  if (e.deltaMode === 2) return e.deltaY * el.clientHeight;
+  return e.deltaY;
+}
 
 // Fusionne des rects par mot en un bloc continu par ligne : on regroupe les rects
 // dont le centre vertical tombe dans la même bande (ligne), puis on soude les runs
@@ -158,8 +185,8 @@ export function Reader() {
 
   const [zoom, setZoom] = useState(1);
   // Décalage horizontal du PDF (px). Découplé du scroll natif (transform) -> reste
-  // utilisable même quand le scroll vertical est figé (question bloquante de Clikoda),
-  // et permet de pousser le PDF à gauche pour loger Clikoda à droite.
+  // utilisable quelle que soit la borne du scroll vertical (question bloquante de
+  // Clikoda), et permet de pousser le PDF à gauche pour loger Clikoda à droite.
   const [panX, setPanX] = useState(0);
   const [panning, setPanning] = useState(false);
   const panDragRef = useRef<{ startX: number; startPan: number } | null>(null);
@@ -188,7 +215,7 @@ export function Reader() {
   >(null);
   // Extraits ajoutés au contexte du LLM (consommés par ClikodaPanel pour la prochaine question).
   const [contextChips, setContextChips] = useState<{ id: number; page: number; text: string }[]>([]);
-  // Question automatique bloquante : scroll figé sur la page-contexte.
+  // Question automatique bloquante : la lecture ne descend plus sous la page-contexte.
   const [locked, setLocked] = useState(false);
   const [lockedPage, setLockedPage] = useState(1);
   // Zone précise visée par la question en cours (boîte en points PDF) : on la
@@ -196,6 +223,12 @@ export function Reader() {
   // carte se referme. Elle vient d'une citation retrouvée sur la page
   // (même chemin que le masque et les surlignages : api.searchPage).
   const [zone, setZone] = useState<{ page: number; rect: number[] } | null>(null);
+  // Plancher de la question bloquante : le scrollTop qui cadre sa zone (à
+  // défaut, le haut de la page bloquée). Au-dessus, on peut remonter relire ;
+  // en dessous, on ne descend pas. null hors verrou.
+  const lockFloorRef = useRef<number | null>(null);
+  // Fin du dernier défilement décidé par le lecteur (cf. PROGRAMMATIC_SCROLL_MS).
+  const programmaticUntilRef = useRef(0);
   // « ← Bibliothèque » cliqué avant que la session ne soit ouverte : on
   // l'abandonne dès qu'elle arrive, sinon elle resterait orpheline.
   const leftRef = useRef(false);
@@ -495,7 +528,7 @@ export function Reader() {
   // Ancrage du zoom : on mémorise le point visé (sous le pointeur, sinon centre du
   // viewport) AVANT le changement, puis on rétablit le scroll APRÈS la nouvelle mise
   // en page -> le PDF ne saute plus verticalement (y compris en question bloquante).
-  const zoomAnchorRef = useRef<{ frac: number; focal: number } | null>(null);
+  const zoomAnchorRef = useRef<{ frac: number; focal: number; aboveFloor: boolean } | null>(null);
   function captureZoomAnchor(focalClientY?: number) {
     const el = scrollRef.current;
     if (!el || el.scrollHeight <= 0) {
@@ -503,29 +536,82 @@ export function Reader() {
       return;
     }
     const focal = focalClientY != null ? focalClientY - el.getBoundingClientRect().top : el.clientHeight / 2;
-    zoomAnchorRef.current = { frac: (el.scrollTop + focal) / el.scrollHeight, focal };
+    const floor = lockFloorRef.current;
+    zoomAnchorRef.current = {
+      frac: (el.scrollTop + focal) / el.scrollHeight,
+      focal,
+      aboveFloor: floor !== null && el.scrollTop < floor - 2,
+    };
   }
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    const anchored = anchor ? clamp(anchor.frac * el.scrollHeight - anchor.focal, 0, el.scrollHeight - el.clientHeight) : null;
     if (locked) {
-      // Page bloquée : la zone reste cadrée à travers le zoom ; sans zone, on
-      // garde la page-contexte en haut, sans saut.
-      // `fit: false` : c'est l'utilisateur qui zoome, on ne lui reprend pas
-      // la main — on garde seulement la zone dans la vue.
-      if (!frameZone("auto", false)) {
-        el.querySelector(`[data-page="${lockedPage}"]`)?.scrollIntoView({ block: "start" });
+      // Page bloquée, remontée relire : le zoom garde le point visé, sous le
+      // plancher recalculé à la nouvelle échelle.
+      const frame = anchor?.aboveFloor ? lockFrame() : null;
+      if (frame && anchored !== null) {
+        lockFloorRef.current = frame.top;
+        el.scrollTop = Math.min(anchored, frame.top);
+        return;
       }
-      zoomAnchorRef.current = null;
+      // Sinon la zone (à défaut, la page-contexte) reste cadrée à travers le
+      // zoom, sans saut. `fit: false` : c'est l'utilisateur qui zoome, on ne
+      // lui reprend pas la main — on garde seulement la zone dans la vue.
+      frameZone("auto", false);
       return;
     }
-    const anchor = zoomAnchorRef.current;
-    if (anchor) {
-      el.scrollTop = clamp(anchor.frac * el.scrollHeight - anchor.focal, 0, el.scrollHeight - el.clientHeight);
-      zoomAnchorRef.current = null;
-    }
+    if (anchored !== null) el.scrollTop = anchored;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom]);
+
+  /** Défilement décidé par le lecteur, pas par l'élève : le garde-fou du plancher le laisse finir. */
+  function scrollViewTo(top: number, behavior: ScrollBehavior) {
+    programmaticUntilRef.current = performance.now() + PROGRAMMATIC_SCROLL_MS;
+    scrollRef.current?.scrollTo({ top, behavior });
+  }
+
+  /**
+   * Cadrage de la page bloquée, calculé sans rien bouger : le scrollTop qui
+   * amène la zone de la question ENTIÈRE au centre de la partie libre du
+   * cadre (sans zone sur cette page : le haut de la page), le décalage
+   * horizontal qui la ramène dans la vue, et — si elle ne tient pas au zoom
+   * courant — le zoom sous lequel elle tiendrait. null tant que la page
+   * bloquée n'est pas rendue.
+   */
+  function lockFrame(): { top: number; dx: number; fitZoom: number | null } | null {
+    const el = scrollRef.current;
+    const pageEl = el?.querySelector<HTMLElement>(`[data-page="${lockedPage}"]`);
+    if (!el || !pageEl) return null;
+    const elRect = el.getBoundingClientRect();
+    const pageRect = pageEl.getBoundingClientRect();
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const pageTop = pageRect.top - elRect.top + el.scrollTop;
+    if (!zone || zone.page !== lockedPage) return { top: clamp(pageTop, 0, maxTop), dx: 0, fitZoom: null };
+    const [w] = (data?.page_sizes_pts ?? [])[zone.page - 1] ?? [595, 842];
+    const scale = (BASE_WIDTH * zoom) / w;
+    const [x0, y0, x1, y1] = zone.rect;
+    const zoneW = (x1 - x0 + 2 * ZONE_PAD_PTS) * scale;
+    const zoneH = (y1 - y0 + 2 * ZONE_PAD_PTS) * scale;
+    const availW = el.clientWidth - 2 * ZONE_SIDE_INSET;
+    const availH = el.clientHeight - ZONE_TOP_INSET - ZONE_BOTTOM_INSET;
+    let fitZoom: number | null = null;
+    if ((zoneH > availH || zoneW > availW) && zoom > MIN_ZOOM) {
+      const z = clamp(Math.min(availH / zoneH, availW / zoneW) * zoom * 0.96, MIN_ZOOM, MAX_ZOOM);
+      if (z < zoom - 0.01) fitZoom = z;
+    }
+    const zoneTop = pageTop + (y0 - ZONE_PAD_PTS) * scale;
+    const top = zoneTop - ZONE_TOP_INSET - Math.max(0, (availH - zoneH) / 2);
+    const zoneLeft = pageRect.left - elRect.left + (x0 - ZONE_PAD_PTS) * scale;
+    const zoneRight = zoneLeft + zoneW;
+    let dx = 0;
+    if (zoneLeft < ZONE_SIDE_INSET) dx = ZONE_SIDE_INSET - zoneLeft;
+    else if (zoneRight > el.clientWidth - ZONE_SIDE_INSET) dx = el.clientWidth - ZONE_SIDE_INSET - zoneRight;
+    return { top: clamp(top, 0, maxTop), dx, fitZoom };
+  }
 
   /**
    * Amène la zone de la question ENTIÈRE à l'écran : centrée verticalement
@@ -534,43 +620,24 @@ export function Reader() {
    * si elle ne tient pas au zoom courant, le zoom baisse juste assez pour
    * qu'elle tienne. Jamais l'inverse, et jamais contre un zoom que
    * l'utilisateur vient de choisir : zoomer et dézoomer restent à lui pendant
-   * le blocage. Rend false s'il n'y a rien à cadrer (pas de zone, ou pas sur
-   * la page bloquée).
+   * le blocage. Sans zone sur la page bloquée, c'est le haut de cette page
+   * qui est cadré. Le cadrage devient le plancher du verrou. Rend false tant
+   * que la page bloquée n'est pas rendue.
    *
    * C'est ce qui remplace « page-contexte en haut » : entre la décision de
    * poser la question et son arrivée, on a pu défiler ou zoomer, et le passage
    * visé se retrouvait coupé au bord du cadre.
    */
   function frameZone(behavior: ScrollBehavior, fit = true): boolean {
-    const el = scrollRef.current;
-    if (!el || !zone || zone.page !== lockedPage) return false;
-    const pageEl = el.querySelector<HTMLElement>(`[data-page="${zone.page}"]`);
-    if (!pageEl) return false;
-    const [w] = (data?.page_sizes_pts ?? [])[zone.page - 1] ?? [595, 842];
-    const scale = (BASE_WIDTH * zoom) / w;
-    const [x0, y0, x1, y1] = zone.rect;
-    const zoneW = (x1 - x0 + 2 * ZONE_PAD_PTS) * scale;
-    const zoneH = (y1 - y0 + 2 * ZONE_PAD_PTS) * scale;
-    const availW = el.clientWidth - 2 * ZONE_SIDE_INSET;
-    const availH = el.clientHeight - ZONE_TOP_INSET - ZONE_BOTTOM_INSET;
-    if (fit && (zoneH > availH || zoneW > availW) && zoom > MIN_ZOOM) {
-      const fitZoom = clamp(Math.min(availH / zoneH, availW / zoneW) * zoom * 0.96, MIN_ZOOM, MAX_ZOOM);
-      if (fitZoom < zoom - 0.01) {
-        setZoom(fitZoom); // l'effet de zoom rappellera frameZone une fois la mise en page refaite
-        return true;
-      }
+    const frame = lockFrame();
+    if (!frame) return false;
+    if (fit && frame.fitZoom !== null) {
+      setZoom(frame.fitZoom); // l'effet de zoom recadrera une fois la mise en page refaite
+      return true;
     }
-    const elRect = el.getBoundingClientRect();
-    const pageRect = pageEl.getBoundingClientRect();
-    const zoneTop = pageRect.top - elRect.top + el.scrollTop + (y0 - ZONE_PAD_PTS) * scale;
-    const top = zoneTop - ZONE_TOP_INSET - Math.max(0, (availH - zoneH) / 2);
-    el.scrollTo({ top: clamp(top, 0, Math.max(0, el.scrollHeight - el.clientHeight)), behavior });
-    const zoneLeft = pageRect.left - elRect.left + (x0 - ZONE_PAD_PTS) * scale;
-    const zoneRight = zoneLeft + zoneW;
-    let dx = 0;
-    if (zoneLeft < ZONE_SIDE_INSET) dx = ZONE_SIDE_INSET - zoneLeft;
-    else if (zoneRight > el.clientWidth - ZONE_SIDE_INSET) dx = el.clientWidth - ZONE_SIDE_INSET - zoneRight;
-    if (dx) setPanX((p) => clampPanX(p + dx));
+    lockFloorRef.current = frame.top;
+    scrollViewTo(frame.top, behavior);
+    if (frame.dx) setPanX((p) => clampPanX(p + frame.dx));
     return true;
   }
 
@@ -586,6 +653,7 @@ export function Reader() {
   // Zoom fluide à la molette/pincement (Ctrl/Cmd) + déplacement horizontal (molette
   // horizontale du trackpad ou Maj+molette). preventDefault => pas de zoom/navigation
   // navigateur, et le déplacement reste actif même quand le scroll vertical est figé.
+  // Sous une question bloquante, la molette remonte librement mais s'arrête au plancher.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -601,10 +669,53 @@ export function Reader() {
         e.preventDefault();
         const delta = e.shiftKey ? e.deltaY : e.deltaX;
         setPanX((p) => clampPanX(p - delta));
+        return;
+      }
+      const floor = lockFloorRef.current;
+      if (floor !== null && e.deltaY > 0 && el.scrollTop + wheelPixels(e, el) > floor) {
+        e.preventDefault();
+        el.scrollTop = floor;
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Le plancher au clavier : les touches qui descendent s'y arrêtent. Pas dans
+  // un champ ni sur un bouton (Espace y écrit ou y clique), ni dans le panneau
+  // de Clikoda : seulement quand c'est le document qui défilerait.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = scrollRef.current;
+      const floor = lockFloorRef.current;
+      if (!el || floor === null || e.defaultPrevented) return;
+      const step = scrollKeyStep(e, el);
+      if (step === null) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target && target !== document.body && !el.contains(target)) return;
+      if (target?.closest("input, textarea, select, button, [contenteditable='true']")) return;
+      if (el.scrollTop + step <= floor) return;
+      e.preventDefault();
+      el.scrollTop = floor;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Garde-fou du plancher : ce que ni la molette ni le clavier n'ont arrêté
+  // (glissé de la barre de défilement, geste tactile) y est ramené. Sauf juste
+  // après un défilement décidé par le lecteur : le cadrage animé part parfois
+  // d'en dessous, et doit pouvoir finir son mouvement.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const floor = lockFloorRef.current;
+      if (floor === null || performance.now() < programmaticUntilRef.current) return;
+      if (el.scrollTop > floor + 1) el.scrollTop = floor;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
   // Déplacement horizontal à la souris : on n'amorce le glissé que sur le fond/les
@@ -838,24 +949,29 @@ export function Reader() {
   }, [isCode, quoteMarksByPage, savedHighlights]);
 
   // Verrouillage de la lecture pendant une question automatique : on amène la
-  // ZONE visée entière dans la vue (à défaut, la page-contexte) et on fige le
-  // scroll jusqu'à la bonne réponse. Relancé quand la zone arrive — sa
+  // ZONE visée entière dans la vue (à défaut, la page-contexte), et ce cadrage
+  // devient le plancher du défilement jusqu'à la bonne réponse — on peut
+  // remonter relire, pas descendre. Relancé quand la zone arrive — sa
   // localisation (api.searchPage) suit la question d'un aller-retour.
   useEffect(() => {
-    if (!locked) return;
+    if (!locked) {
+      lockFloorRef.current = null;
+      return;
+    }
     clearSelection();
-    if (frameZone("smooth")) return;
-    const pageEl = scrollRef.current?.querySelector(`[data-page="${lockedPage}"]`);
-    pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+    frameZone("smooth");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, lockedPage, zone]);
 
   /** Référence de page cliquée dans une réponse de Clikoda : on y amène le lecteur.
-      Pas pendant une question verrouillée — la page-contexte doit rester en vue. */
+      Pendant une question verrouillée, jamais plus bas que le plancher. */
   function goToPage(page: number) {
-    if (locked) return;
-    const pageEl = scrollRef.current?.querySelector(`[data-page="${page}"]`);
-    pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const el = scrollRef.current;
+    const pageEl = el?.querySelector<HTMLElement>(`[data-page="${page}"]`);
+    const floor = lockFloorRef.current;
+    if (!el || !pageEl || (locked && floor === null)) return;
+    const top = pageEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    scrollViewTo(floor === null ? top : Math.min(top, floor), "smooth");
   }
 
   function handleGatedChange(active: boolean, page?: number) {
@@ -968,10 +1084,12 @@ export function Reader() {
         onMouseDown={startPan}
         style={{
           height: "100%",
-          // Vertical : figé pendant une question bloquante. Horizontal : jamais de
-          // scroll natif, le déplacement passe par `panX` (transform) -> reste actif
+          // Vertical : figé en pause et pendant la visite. Sous une question
+          // bloquante, il reste natif mais borné par le plancher (lockFloorRef) :
+          // on remonte relire, on ne descend pas. Horizontal : jamais de scroll
+          // natif, le déplacement passe par `panX` (transform) -> reste actif
           // même verrouillé.
-          overflowY: locked || frozen ? "hidden" : "auto",
+          overflowY: frozen ? "hidden" : "auto",
           overflowX: "hidden",
           // En pause, le PDF n'est plus visible — masqué, pas démonté : la
           // position de lecture, le zoom et les pages chargées sont intacts.
@@ -1019,7 +1137,9 @@ export function Reader() {
               const scale = width / w;
               const words = wordsByPage[n];
               const pageSaved = savedHighlights.filter((hl) => hl.page === n);
-              const dimmed = locked && n !== lockedPage;
+              // Sous une question bloquante, seules les pages qu'on ne peut pas
+              // encore atteindre sont atténuées : celles du dessus se relisent.
+              const dimmed = locked && n > lockedPage;
               return (
                 <div
                   key={n}
