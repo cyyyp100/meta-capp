@@ -444,7 +444,7 @@ def _apply_language_result(card: dict, result: dict, explain_lang: str) -> str:
     entry = lang_episodes.enrich_glossary(language, [entry], {}, explain_lang)[0]
     face = lang_progress.card_face(language, entry)
     rewritten = apply_language_rules(card["id"], face["front"], face["back"], face["pron"], language, tags)
-    logger.info("Règles de langue (carte %s, %s) : %s -> %s", card["id"], language, card["front"], face["front"])
+    logger.info("Règles de langue appliquées (carte %s, %s)", card["id"], language)
     return "applied" if rewritten else "language_only"
 
 
