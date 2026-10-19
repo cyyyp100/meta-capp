@@ -1258,3 +1258,110 @@ def test_cancelling_reaches_the_generation_in_flight(client, monkeypatch):
     assert client.post("/api/reader/cancel").json() == {"cancelled": True}
     assert cancelled == [()]
     assert ollama_client.is_cancelled_error(ollama_client.CANCELLED_MESSAGE)
+
+
+# ── Plus de question automatique par-dessus une question en cours ────────────
+
+def _auto_question_setup(monkeypatch, decisions: list, generated: list | None = None):
+    """Ticker rapide, cadence relâchée ; les décisions d'intervention sont
+    capturées (`decisions`) au lieu d'être rendues tout de suite."""
+    from server.routers import reading
+    from services import assistant
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.02)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(assistant, "build_intervention_context", lambda *a, **k: {"trigger": "long_dwell", "page": 1})
+    monkeypatch.setattr(reading, "decide_intervention_async", lambda ctx, ok, err, **kw: decisions.append(ok))
+
+    def fake_question(d, p, ok, err, **kw):
+        if generated is not None:
+            generated.append(ok)
+        else:
+            ok({"question": "Idée clé ?", "choices": None, "question_type": "comprehension"})
+
+    monkeypatch.setattr(assistant, "generate_page_question", fake_question)
+
+
+def _next_event(ws, skip=("scanning",)) -> dict:
+    while True:
+        evt = ws.receive_json()
+        if evt["type"] not in skip:
+            return evt
+
+
+def test_no_decision_is_asked_while_a_quiz_question_awaits_its_answer(client, monkeypatch):
+    """« Quiz-moi » sans réponse : la politique se tait, sur plusieurs ticks."""
+    import time
+
+    decisions: list = []
+    _auto_question_setup(monkeypatch, decisions)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "qa_question"
+        ws.send_json({"type": "start_reading"})
+        time.sleep(0.3)  # une quinzaine de ticks
+    assert decisions == []
+
+
+def test_a_decision_returning_after_a_quiz_question_is_dropped(client, monkeypatch):
+    """La décision part quand Clikoda est libre ; l'élève lance « Quiz-moi » ;
+    elle revient ensuite : aucune question bloquante par-dessus."""
+    import time
+
+    decisions: list = []
+    _auto_question_setup(monkeypatch, decisions)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        for _ in range(100):
+            if decisions:
+                break
+            time.sleep(0.02)
+        assert decisions, "aucune décision demandée"
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "qa_question"
+
+        decisions[0]({"should_intervene": True, "kind": "ask_question"})
+        ws.send_json({"type": "mode", "mode": "coach"})
+        # Le message suivant est la réponse au changement de mode : rien d'autre avant.
+        assert _next_event(ws)["type"] == "system"
+
+
+def test_an_automatic_question_is_dropped_when_the_student_takes_over(client, monkeypatch):
+    """La question automatique est en génération quand l'élève pose sa propre
+    question : elle n'est ni émise, ni persistée."""
+    import time
+
+    from server.routers import reading
+    from services import assistant
+
+    decisions: list = []
+    generated: list = []
+    _auto_question_setup(monkeypatch, decisions, generated)
+    saved: list = []
+    monkeypatch.setattr(reading, "save_question", lambda *a, **k: saved.append(a) or 1)
+    monkeypatch.setattr(
+        assistant, "answer_question", lambda d, p, q, ok, err, **kw: ok({"answer": "Voici.", "highlights": []}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        for _ in range(100):
+            if decisions:
+                break
+            time.sleep(0.02)
+        decisions[0]({"should_intervene": True, "kind": "ask_question"})
+        for _ in range(100):
+            if generated:
+                break
+            time.sleep(0.02)
+        assert generated, "la question automatique n'est pas partie"
+
+        ws.send_json({"type": "ask", "question": "Et ça ?", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "answer"
+        generated[0]({"question": "Idée clé ?", "choices": None, "question_type": "comprehension"})
+
+        ws.send_json({"type": "mode", "mode": "coach"})
+        assert _next_event(ws)["type"] == "system"
+    assert saved == []

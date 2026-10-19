@@ -236,7 +236,17 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "recent_qtypes": [],  # types de questions Q&R récents (anti-répétition, 5 max)
         "gated": False,  # question automatique bloquante en cours (scroll verrouillé côté UI)
         "live_gauges": None,  # jauges métacognitives live (services.session.LiveGauges)
-        "generating": False,  # une génération LLM est en vol (Clikoda est occupée)
+        # Générations LLM en vol (Clikoda est occupée). Un COMPTEUR : une
+        # question de l'élève et une question automatique peuvent se chevaucher,
+        # et la fin de l'une ne doit pas déclarer Clikoda libre.
+        "generating": 0,
+        # Une question est posée et attend sa réponse (de son émission à
+        # l'évaluation de la réponse), bloquante ou non (« Quiz-moi »).
+        "qa_pending": False,
+        # Demandes de l'élève (ask, reformuler, résumer, curiosité, Quiz-moi,
+        # réponse) : une question automatique en génération le compare à sa
+        # valeur de départ, et s'efface si l'élève a pris la main entre-temps.
+        "user_turn": 0,
         "away": False,  # fenêtre masquée / application au second plan
         "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
@@ -281,18 +291,19 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     def refresh_busy() -> None:
         """La politique se tait tant que Clikoda travaille OU qu'une réponse est due.
 
-        Deux raisons distinctes, un seul drapeau : une génération en vol (réponse,
-        reformulation, question…) et une question bloquante en attente. Avant, seule
-        la seconde comptait — une décision d'intervention pouvait donc partir
-        pendant que l'étudiant attendait sa réponse."""
-        policy.set_busy(bool(state["generating"] or state["gated"]))
+        Trois raisons, un seul drapeau : une génération en vol (réponse,
+        reformulation, question…), une question bloquante, et une question —
+        bloquante ou non — qui attend sa réponse. Avant, seule la bloquante
+        comptait : une question automatique pouvait tomber par-dessus celle
+        d'un « Quiz-moi » encore sans réponse."""
+        policy.set_busy(bool(state["generating"] > 0 or state["gated"] or state["qa_pending"]))
 
     def start_generation() -> None:
-        state["generating"] = True
+        state["generating"] += 1
         refresh_busy()
 
     def end_generation() -> None:
-        state["generating"] = False
+        state["generating"] = max(0, state["generating"] - 1)
         refresh_busy()
 
     def make_callbacks():
@@ -373,7 +384,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         state["qa_sent_at"] = time.monotonic()
         state["recent_qtypes"].append(qtype)
         del state["recent_qtypes"][:-5]
-        state["generating"] = False
+        state["generating"] = max(0, state["generating"] - 1)
+        state["qa_pending"] = True
         session_hint = str(result.get("session_hint") or "").strip()
         if session_hint:
             # Conseil de régulation du LLM : une pause prise juste après le suit.
@@ -404,9 +416,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             "page": page,
         }
         if gated:
-            # La politique se tait tant que l'étudiant doit répondre.
+            # Question bloquante : le lecteur se verrouille jusqu'à la bonne réponse.
             state["gated"] = True
-        # Un seul point de bascule : la génération est finie, le verrou est posé.
+        # Un seul point de bascule : la génération est finie, la question attend
+        # sa réponse (la politique se tait jusque-là).
         refresh_busy()
         push_threadsafe(loop, out, event)
 
@@ -467,10 +480,22 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         # l'intervention, et l'UI verrouille le scroll.
         if payload.get("kind") == "ask_question":
             gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+            turn = state["user_turn"]
+
+            def on_auto_question(result: dict, p=page, s=state["session_id"]) -> None:
+                # L'élève a pris la main pendant la génération (question posée,
+                # « Quiz-moi », réponse), ou une question attend déjà sa réponse :
+                # celle-ci tomberait par-dessus. Ni persistée, ni émise.
+                if state["user_turn"] != turn or state["qa_pending"]:
+                    logger.info("Question automatique abandonnée : l'élève a pris la main entre-temps")
+                    end_generation()
+                    return
+                emit_question(result, p, s, gated=True)
+
             start_generation()
             assistant.generate_page_question(
                 doc_id, page,
-                lambda result, p=page, s=state["session_id"]: emit_question(result, p, s, gated=True),
+                on_auto_question,
                 lambda _m: end_generation(),
                 session_gauges=gauges,
                 recent_question_types=list(state["recent_qtypes"]),
@@ -726,6 +751,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # L'écran de pause couvre déjà le panneau : défense en profondeur,
                 # rien ne se génère ni ne s'évalue tant que l'élève n'est pas revenu.
                 continue
+            if kind in _PAUSED_ACTIONS:
+                # L'élève prend la main : une question automatique en génération
+                # n'a plus sa place (cf. on_intervention).
+                state["user_turn"] += 1
 
             if kind == "start_reading":
                 # Sas d'entrée franchi : le warm-up de la première question part
@@ -835,6 +864,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 await out.put(loading("evaluation"))
 
                 def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
+                    # La question a sa réponse : elle n'attend plus (la politique
+                    # peut reparler, sauf verrou maintenu par une réponse fausse).
+                    state["qa_pending"] = False
                     end_generation()
                     # Signaux dérivés de la FORME de la réponse (longueur, questions
                     # posées, connecteurs, analogies) : ils enrichissent curiosité et

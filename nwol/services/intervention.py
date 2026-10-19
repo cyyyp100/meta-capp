@@ -233,9 +233,13 @@ class AssistantInterventionPolicy:
         rearm: tuple[bool, dict | None, int],
     ) -> None:
         self._pending = False
-        if self._paused:
+        if self._paused or self._busy:
             # Décision partie avant la pause, revenue pendant : jetée, et le
             # signal pourra être redonné à la reprise s'il tient toujours.
+            # De même si Clikoda est occupée à son retour (l'élève a posé une
+            # question, lancé « Quiz-moi », ou une question attend sa réponse) :
+            # livrée, elle tomberait par-dessus. Pour la séance, elle n'a pas
+            # eu lieu — ni cooldown, ni plafond consommés.
             self._fired_reasons.discard((trigger_page, reason))
             self._flashcard_prompted, self._due_card, self._fatigue_at_answers = rearm
             return
