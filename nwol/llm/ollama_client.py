@@ -84,6 +84,9 @@ _TASK_PRIORITY: dict[str, int] = {
     "evaluation":               4,
     "rephrasing":               5,
     "flashcard_standalone":     5,
+    # Règles de langue d'une carte manuelle : travail de fond, la carte est déjà
+    # créée et utilisable telle que saisie. Cède le pas à tout ce qui est attendu.
+    "flashcard_lang_rules":     6,
     "quiz_distractors":         5,
     "quiz_analysis":            6,
     "assistant_intervention":   6,
@@ -746,6 +749,7 @@ def answer_user_question_async(
         user_highlights=context.get("user_highlights") or [],
         retrieved_passages=context.get("retrieved_passages") or [],
         whole_document_search=bool(context.get("whole_document_search")),
+        previous_turn=context.get("previous_turn"),
     )
     return _run_json_async(
         "assistant_answer",
@@ -887,6 +891,20 @@ def make_standalone_flashcard_async(
         paragraph=context.get("paragraph") or "",
     )
     return _run_json_async("flashcard_standalone", prompt, parse_flashcard, on_success, on_error, model)
+
+
+def generate_manual_card_lang_async(params: dict, on_success, on_error, model: str = "") -> None:
+    """Règles de langue d'une carte écrite à la main : langue, lemme, sens,
+    prononciation (services/flashcards.apply_card_language_rules). La langue
+    est contrainte au DÉCODAGE (schéma, liste fermée de codes)."""
+    from llm.prompts import build_manual_card_lang_prompt
+    from llm.schema_json import manual_card_lang_schema, parse_manual_card_lang
+    return _run_json_async(
+        "flashcard_lang_rules", build_manual_card_lang_prompt(params), parse_manual_card_lang,
+        on_success, on_error, model,
+        system_lang=params.get("explain_lang"),
+        json_schema=manual_card_lang_schema(params.get("languages") or ()),
+    )
 
 
 def generate_chapter_summary_async(

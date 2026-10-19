@@ -47,6 +47,33 @@ def test_update_from_evaluation_moves_targeted_gauge_more():
     assert curiosity_delta > retention_delta > 0
 
 
+def test_a_reflective_answer_moves_metacognition_by_the_llm_analysis_alone():
+    """Métacognition, anticipation : pas de mauvaise réponse, donc pas de
+    bonus de verdict. La jauge suit l'analyse du LLM, dans les deux sens et à
+    proportion ; la rétention, que le verdict poussait, ne bouge plus."""
+    from config.settings import GAUGE_REFLECTION_META_SCALE
+    from metacog.gauges import make_gauges, update_gauges_from_evaluation
+
+    def deltas(signal: float, question_type: str = "metacognition") -> dict[str, float]:
+        gauges = make_gauges({c: 50.0 for c in CRITERIA})
+        before = {k: g.value for k, g in gauges.items()}
+        update_gauges_from_evaluation(gauges, {
+            "verdict": "correct",
+            "question_type": question_type,
+            "metacog_signals": {"meta_cognition": signal},
+        })
+        return {k: gauges[k].value - before[k] for k in before}
+
+    assert deltas(-1.0)["meta_cognition"] == pytest.approx(-GAUGE_REFLECTION_META_SCALE)
+    assert deltas(1.0)["meta_cognition"] == pytest.approx(GAUGE_REFLECTION_META_SCALE)
+    assert deltas(2.0)["meta_cognition"] == pytest.approx(2 * GAUGE_REFLECTION_META_SCALE)
+    assert deltas(1.0, "anticipation")["meta_cognition"] == pytest.approx(GAUGE_REFLECTION_META_SCALE)
+    assert deltas(1.0)["retention"] == 0.0
+    assert deltas(1.0)["attention"] == 0.0
+    # Une question qui a une bonne réponse garde son bonus de verdict.
+    assert deltas(0.0, "comprehension")["retention"] > 0
+
+
 def test_update_from_evaluation_tolerates_garbage_signals():
     from metacog.gauges import make_gauges, update_gauges_from_evaluation
 

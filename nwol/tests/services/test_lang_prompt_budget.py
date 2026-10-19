@@ -277,3 +277,18 @@ def test_lesson_and_feedback_prompts_carry_no_target_word():
         for build in (prompts.build_lang_point_lesson_prompt, prompts.build_lang_writing_feedback_prompt):
             text = build({**common, "explain_lang": lang})
             assert not any(word in text.split() for word in ("estar", "ser", "soy", "estoy", "hola"))
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
+def test_manual_card_lang_prompt_fits(family, lang, machine):
+    """Règles de langue d'une carte manuelle : deux faces au plafond de
+    MANUAL_CARD_LANG_MAX_CHARS (au-delà, aucun appel), dans l'écriture la plus
+    coûteuse, et la liste fermée de toutes les langues."""
+    from config.settings import LANGUAGE_SCRIPTS, MANUAL_CARD_LANG_MAX_CHARS
+
+    side = {"latin": LONG_FR, "hanzi": "我" * 500, "arabe": "كِتَابُهُ " * 100}[family][:MANUAL_CARD_LANG_MAX_CHARS]
+    prompt = prompts.build_manual_card_lang_prompt({
+        "front": side, "back": side, "languages": tuple(LANGUAGE_SCRIPTS), "explain_lang": lang,
+    })
+    _check("flashcard_lang_rules", prompt, lang, machine)

@@ -10,7 +10,7 @@ import unicodedata
 from typing import Any
 
 from config import question_types
-from config.settings import DOCUMENT_SUMMARY_MAX_CHARS
+from config.settings import DOCUMENT_SUMMARY_MAX_CHARS, LANGUAGE_SCRIPTS
 from config.subjects import (
     FALLBACK_SUBJECT,
     canonical_subject,
@@ -2037,6 +2037,62 @@ def parse_lang_episode_glossary(raw: str | dict, pron: bool = False) -> dict | N
     for e in expressions:
         e["pos"] = "expression"
     return {"entries": entries, "expressions": expressions} if entries or expressions else None
+
+
+# Carte manuelle : les champs dans l'ordre où le modèle les écrit — le mot tel
+# qu'écrit sur la carte d'abord, SA langue ensuite (décidée avant le mot, elle
+# se trompait plus souvent au banc du 2026-10-19), puis la prononciation collée
+# au lemme, comme dans le glossaire du feuilleton.
+MANUAL_CARD_LANG_FIELDS = ("form", "language", "lemma", "pron", "meaning", "pos", "gender")
+MANUAL_CARD_NO_LANGUAGE = "none"
+# Lettres attendues dans le lemme, par écriture de LANGUAGE_SCRIPTS (début du
+# nom Unicode). Contraint à la liste fermée, le modèle y range parfois un mot
+# d'une langue absente de la liste — un mot français classé en hindi.
+_SCRIPT_LETTERS: dict[str, tuple[str, ...]] = {
+    "latin": ("LATIN",), "cyrillic": ("CYRILLIC",), "greek": ("GREEK",), "hangul": ("HANGUL",),
+    "hanzi": ("CJK",), "japanese": ("HIRAGANA", "KATAKANA", "CJK"), "arabic": ("ARABIC",),
+    "hebrew": ("HEBREW",), "devanagari": ("DEVANAGARI",), "thai": ("THAI",),
+}
+
+
+def _written_in(text: str, script: str) -> bool:
+    prefixes = _SCRIPT_LETTERS.get(script)
+    if not prefixes:
+        return True
+    return any(unicodedata.name(c, "").startswith(prefixes) for c in text if c.isalpha())
+
+
+def manual_card_lang_schema(languages) -> dict:
+    """Sortie structurée des règles de langue d'une carte manuelle : la langue
+    est imposée au décodage parmi les codes connus, ou « none »."""
+    properties: dict = {key: {"type": "string"} for key in MANUAL_CARD_LANG_FIELDS}
+    properties["language"] = {"type": "string", "enum": [*languages, MANUAL_CARD_NO_LANGUAGE]}
+    return {"type": "object", "properties": properties, "required": list(MANUAL_CARD_LANG_FIELDS)}
+
+
+def parse_manual_card_lang(raw: str | dict) -> dict | None:
+    """{language, form, lemma, pron, meaning, pos, gender} ; `language` vaut None quand
+    la carte n'est pas du vocabulaire (ou que la langue n'est pas un code connu),
+    et rien d'autre n'est alors rendu. None si la sortie n'est pas un objet."""
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    language = _str(data.get("language")).lower()
+    lemma = _str(data.get("lemma"))
+    if language not in LANGUAGE_SCRIPTS or (lemma and not _written_in(lemma, LANGUAGE_SCRIPTS[language])):
+        return {"language": None}
+    pos = _lang_enum(_str(data.get("pos")).lower())
+    gender = _str(data.get("gender")).lower()[:1]
+    return {
+        "language": language,
+        "form": _str(data.get("form")),
+        "lemma": lemma,
+        # Barres et crochets de l'API retirés : l'affichage pose les siens.
+        "pron": _str(data.get("pron")).strip("/[]").strip() or None,
+        "meaning": _str(data.get("meaning")),
+        "pos": pos if pos in _LANG_POS else None,
+        "gender": gender if gender in ("m", "f", "n") else None,
+    }
 
 
 def parse_lang_episode_notes_point(raw: str | dict) -> dict | None:

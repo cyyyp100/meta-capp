@@ -108,6 +108,11 @@ def test_answer_prompt_fits(machine, lang, page_kind):
         session_gauges=GAUGES, recent_exchanges=[{"question": LONG[:160], "answer": LONG[:200]}] * 6,
         related_flashcards=[{"front": LONG[:100]}] * 3, selected_snippets=QUOTES, user_highlights=QUOTES,
         retrieved_passages=_passages(page_kind), whole_document_search=True,
+        # Le dernier échange le plus long : question de Clikoda, réponse de
+        # l'étudiant et correction, dans l'écriture la plus coûteuse.
+        previous_turn={"kind": "answer", "lines": [
+            ("clikoda", PAGES[page_kind][:600]), ("student", PAGES[page_kind][:4000]), ("clikoda", PAGES[page_kind][:900]),
+        ]},
     )
     _check("assistant_answer", prompt, lang, machine)
 
@@ -124,9 +129,12 @@ def test_question_prompt_fits(machine, lang, page_kind):
 
 
 @pytest.mark.parametrize("page_kind", list(PAGES))
-def test_evaluation_prompt_fits(machine, lang, page_kind):
+# Une question réflexive remplace les consignes de verdict par les siennes :
+# elle a son propre cas maximal.
+@pytest.mark.parametrize("question_type", ["open", "metacognition"])
+def test_evaluation_prompt_fits(machine, lang, page_kind, question_type):
     prompt = prompts.build_evaluation_prompt(
-        question={"question": LONG[:300], "question_type": "open", "expected_answer": LONG[:400],
+        question={"question": LONG[:300], "question_type": question_type, "expected_answer": LONG[:400],
                   "choices": ["choix " + LONG[:60]] * 4},
         user_answer=PAGES[page_kind][:3000], paragraph=PAGES[page_kind], metacog_profile=PROFILE,
         history=HISTORY, past_struggles=STRUGGLES,
@@ -213,3 +221,39 @@ def test_a_token_cut_falls_between_two_words(machine):
     cut = prompts._fit_tokens(LONG, 100)
     assert estimate_prompt_tokens(cut, machine.tokenizer) <= 100
     assert LONG.startswith(cut) and LONG[len(cut)] == " "
+
+
+def test_the_answer_prompt_carries_the_last_exchange(lang):
+    """Une question de suivi renvoie au dernier échange : le prompt le donne,
+    avec la consigne de s'y appuyer seulement si la question y renvoie. Venu
+    d'une question posée dans la barre, il n'est pas répété dans les échanges
+    récents."""
+    turn = {"kind": "ask", "lines": [("student", "Qu'est-ce que le taux d'apprentissage ?"),
+                                     ("clikoda", "C'est la taille du pas de la descente.")]}
+    prompt = prompts.build_assistant_answer_prompt(
+        page_text="La page.", user_question="Développe ta réponse.",
+        recent_exchanges=[{"question": "Une question plus ancienne ?", "answer": "Une réponse."},
+                          {"question": "Qu'est-ce que le taux d'apprentissage ?", "answer": "C'est la taille du pas de la descente."}],
+        previous_turn=turn,
+    )
+    header = "Dernier échange (juste avant cette question)" if lang == "fr" else "Last exchange (just before this question)"
+    rule = "renvoie au dernier échange" if lang == "fr" else "refers to the last exchange"
+    assert header in prompt and rule in prompt
+    assert "C'est la taille du pas de la descente." in prompt
+    assert prompt.count("Qu'est-ce que le taux d'apprentissage ?") == 1
+    assert "Une question plus ancienne ?" in prompt
+
+    # Sans dernier échange : ni bloc, ni consigne.
+    bare = prompts.build_assistant_answer_prompt(page_text="La page.", user_question="Pourquoi ?")
+    assert header not in bare and rule not in bare
+
+
+def test_the_tiny_model_never_gets_the_last_exchange(machine, lang):
+    """Le palier minuscule ne reçoit pas le dernier échange — et ses passages
+    trouvés ailleurs gardent tout leur budget. Gemma en mode économe le reçoit."""
+    turn = {"kind": "question", "lines": [("clikoda", "Quel est le rôle du pas ?")]}
+    prompt = prompts.build_assistant_answer_prompt(
+        page_text="La page.", user_question="Je ne comprends pas ta question.", previous_turn=turn,
+    )
+    shown = "Quel est le rôle du pas ?" in prompt
+    assert shown is (machine.profile.tier != "tiny"), machine.profile.name

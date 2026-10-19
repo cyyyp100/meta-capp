@@ -10,6 +10,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -402,9 +403,10 @@ describe("ClikodaPanel", () => {
     expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
   });
 
-  // Une question posée à Clikoda pendant une question bloquante : le lecteur est
-  // rendu le temps de la réponse, et revient se caler sur la zone ensuite.
-  it("libère le lecteur pendant que Clikoda répond, même sous une question bloquante", async () => {
+  // Une question posée à Clikoda dans la barre du bas, sous une question
+  // bloquante : elle ne débloque rien. Le lecteur reste verrouillé pendant la
+  // réponse — on peut de toute façon y remonter relire.
+  it("garde le lecteur verrouillé pendant que Clikoda répond sous une question bloquante", async () => {
     const onGatedChange = vi.fn();
     await renderOpenPanel({ onGatedChange });
     await act(async () => {
@@ -418,14 +420,107 @@ describe("ClikodaPanel", () => {
       });
     });
     expect(onGatedChange).toHaveBeenLastCalledWith(true, 5);
+    const before = onGatedChange.mock.calls.length;
+    const released = () => onGatedChange.mock.calls.slice(before).some(([active]) => active === false);
 
     await userEvent.type(chatBox(), "Explique-moi ce terme.{Enter}");
-    expect(onGatedChange).toHaveBeenLastCalledWith(false);
-
+    expect(released()).toBe(false);
     await act(async () => {
       FakeWebSocket.last?.emit({ type: "answer", answer: "Voici.", highlights: [] });
     });
-    expect(onGatedChange).toHaveBeenLastCalledWith(true, 5);
+    expect(released()).toBe(false);
+
+    // Reformuler, résumer, curiosité : pareil.
+    await userEvent.click(screen.getByRole("button", { name: /reformul|rephrase/i }));
+    expect(released()).toBe(false);
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Autrement dit…", highlights: [] });
+    });
+    expect(released()).toBe(false);
+    // Le verrou tient : le panneau ne se ferme toujours pas.
+    expect(screen.queryByRole("button", { name: /^(fermer|close)$/i })).toBeNull();
+  });
+
+  // « Réessayer » qui échoue (génération en panne ou annulée) : la carte reste
+  // en jeu et le verrou armé. Avant, la carte était close dès l'envoi, et
+  // l'échec désarmait le verrou côté client alors que le serveur le gardait :
+  // Clikoda se taisait pour toute la séance.
+  it("garde le verrou armé quand « Réessayer » échoue", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Quelle est l'idée principale ?",
+        question_type: "open",
+        choices: null,
+        mask: null,
+        page: 3,
+      });
+    });
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "Faux.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "incorrect", feedback: "Non.", hint: "Relis." });
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /nouvelle question|réessayer|new question|try again/i }));
+    // Pendant la génération, la carte reste en jeu, ses boutons désactivés.
+    expect(screen.getByTestId("qa-card")).toHaveAttribute("data-live", "true");
+    expect(screen.getByRole("button", { name: /nouvelle question|réessayer|new question|try again/i })).toBeDisabled();
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "error", message: "Génération impossible." });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 3);
+    expect(screen.getByTestId("qa-card")).toHaveAttribute("data-live", "true");
+    expect(screen.getByRole("button", { name: /nouvelle question|réessayer|new question|try again/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^(fermer|close)$/i })).toBeNull();
+  });
+
+  // Les extraits joints suivent LA question qu'ils accompagnent : dans sa bulle,
+  // puis plus rien sous le champ — la question suivante part sans eux. Ils
+  // repartaient avec chaque question tant qu'on ne les retirait pas à la main.
+  it("fait suivre le contexte dans la bulle de la question, puis le vide", async () => {
+    const consumed = vi.fn();
+    function WithChips() {
+      // Le lecteur tient la liste : il la vide quand le panneau l'a consommée.
+      const [chips, setChips] = useState([{ id: 1, page: 3, text: "La dérivée mesure la pente de la tangente." }]);
+      return (
+        <ClikodaPanel
+          docId={1}
+          currentPage={3}
+          sessionId={null}
+          contextChips={chips}
+          onContextConsumed={() => {
+            consumed();
+            setChips([]);
+          }}
+        />
+      );
+    }
+    render(wrap(<WithChips />));
+    await userEvent.click(await screen.findByRole("button", { name: /clikoda|ouvrir|open/i }));
+    const asks = () =>
+      (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m)).filter((m) => m.type === "ask");
+
+    await userEvent.type(chatBox(), "Pourquoi ?{Enter}");
+    expect(asks()[0].selected_snippets).toEqual(["La dérivée mesure la pente de la tangente."]);
+    expect(consumed).toHaveBeenCalledTimes(1);
+
+    // La puce est passée dans la bulle de l'élève, en lecture seule…
+    const bubble = screen.getByTestId("message-context");
+    expect(bubble).toHaveTextContent(/p\.3 · La dérivée mesure/);
+    expect(within(bubble).queryByRole("button")).toBeNull();
+    // …et plus sous le champ : plus de bouton pour la retirer.
+    expect(screen.queryByRole("button", { name: /retirer du contexte|remove from context/i })).toBeNull();
+
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Parce que…", highlights: [] });
+    });
+    await userEvent.type(chatBox(), "Et ensuite ?{Enter}");
+    expect(asks()[1].selected_snippets).toEqual([]);
+    expect(screen.getAllByTestId("message-context")).toHaveLength(1);
   });
 
   // « + Flashcard » cliqué deux fois sous la même réponse créait deux cartes :
@@ -475,6 +570,36 @@ describe("ClikodaPanel", () => {
       FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "correct", feedback: "Oui.", hint: "" });
     });
     expect(onGatedChange.mock.calls.at(-1)?.[0]).toBe(false);
+  });
+
+  // Métacognition, anticipation : pas de mauvaise réponse. La carte se clôt
+  // comme sur une bonne réponse, le verrou tombe, et aucun verdict coloré ne
+  // juge une réflexion — même un « partiel ».
+  it("referme une question réflexive et lève le verrou, sans verdict", async () => {
+    const onGatedChange = vi.fn();
+    await renderOpenPanel({ onGatedChange });
+    await act(async () => {
+      FakeWebSocket.last?.emit({
+        type: "gated_question",
+        question: "Comment as-tu trouvé ta réponse ?",
+        question_type: "metacognition",
+        choices: null,
+        mask: null,
+        page: 2,
+      });
+    });
+    expect(onGatedChange).toHaveBeenLastCalledWith(true, 2);
+    await userEvent.type(await screen.findByRole("textbox", { name: /ta réponse|your answer/i }), "J'ai relu.");
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "qa_feedback", verdict: "partial", feedback: "Noté.", hint: "", no_wrong_answer: true });
+    });
+
+    expect(onGatedChange.mock.calls.at(-1)?.[0]).toBe(false);
+    const card = screen.getByTestId("qa-card");
+    expect(card).not.toHaveAttribute("data-live");
+    expect(card).toHaveTextContent(/réflexion notée|reflection noted/i);
+    expect(card).not.toHaveTextContent(/partiel|partial/i);
   });
 
   // La zone visée par la question remonte au lecteur avec sa page, et se

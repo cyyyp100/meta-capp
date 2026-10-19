@@ -45,6 +45,39 @@ def test_specs_are_complete_and_coherent():
     assert not set(qt.alias_map()) & set(qt.KEYS)
 
 
+def test_only_reflective_types_have_no_wrong_answer():
+    assert {key for key in qt.KEYS if qt.no_wrong_answer(key)} == {"metacognition", "anticipation"}
+    assert qt.no_wrong_answer("") is False and qt.no_wrong_answer("inconnu") is False
+
+
+def test_a_reflective_evaluation_prompt_grades_the_reflection_not_an_answer():
+    """Métacognition et anticipation : jamais « incorrect », et `meta_cognition`
+    porte l'analyse du LLM au lieu de rester à 0.0 jusqu'au sas de sortie."""
+    import i18n
+    from llm.prompts import build_evaluation_prompt
+
+    def prompt(question_type: str) -> str:
+        return build_evaluation_prompt(
+            {"question": "La question ?", "question_type": question_type}, "Ma réponse.", "Le paragraphe.",
+        )
+
+    for lang, zero_line, reflective in (
+        ("fr", "meta_cognition reste à 0.0", "il n'y a pas de mauvaise réponse"),
+        ("en", "meta_cognition stays at 0.0", "there is no wrong answer"),
+    ):
+        i18n.set_lang(lang)
+        try:
+            for key in ("metacognition", "anticipation"):
+                text = prompt(key)
+                assert reflective in text, (lang, key)
+                assert "metacog_signals.meta_cognition" in text, (lang, key)
+                assert zero_line not in text, (lang, key)
+            text = prompt("comprehension")
+            assert zero_line in text and reflective not in text, lang
+        finally:
+            i18n.set_lang("fr")
+
+
 def test_prompt_lists_every_type_in_both_languages():
     import i18n
     from llm.prompts import build_question_prompt

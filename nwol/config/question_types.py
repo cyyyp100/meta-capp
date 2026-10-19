@@ -38,6 +38,10 @@ class QuestionTypeSpec:
     base_weight: float
     widget: str
     eval_dimension_hint: bool = True  # False -> signal piloté par le verdict
+    # Question réflexive : pas de mauvaise réponse. Le verdict ne descend pas
+    # sous « partial », et c'est l'analyse du LLM (metacog_signals.meta_cognition)
+    # qui fait bouger la jauge (services/assistant.py, metacog/gauges.py).
+    no_wrong_answer: bool = False
     flashcard_eligible: bool = True
     quiz_eligible: bool = True
     aliases: tuple[str, ...] = ()
@@ -210,6 +214,7 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         base_weight=1.0,
         widget=WIDGET_TEXT,
         eval_dimension_hint=False,
+        no_wrong_answer=True,
         flashcard_eligible=False,
         quiz_eligible=False,
         aliases=(
@@ -239,6 +244,7 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
         base_weight=1.0,
         widget=WIDGET_TEXT,
         eval_dimension_hint=False,
+        no_wrong_answer=True,
         flashcard_eligible=False,
         quiz_eligible=False,
         aliases=(
@@ -535,6 +541,12 @@ def requires_choices(key: str) -> bool:
 def flashcard_eligible(key: str) -> bool:
     found = _BY_KEY.get(key)
     return found.flashcard_eligible if found else True
+
+
+def no_wrong_answer(key: str) -> bool:
+    """Question réflexive : on s'y engage plus ou moins, on n'y répond jamais faux."""
+    found = _BY_KEY.get(key or "")
+    return found.no_wrong_answer if found else False
 
 
 def quiz_excluded_keys() -> tuple[str, ...]:

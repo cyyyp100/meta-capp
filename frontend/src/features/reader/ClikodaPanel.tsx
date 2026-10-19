@@ -32,7 +32,7 @@ import type { WarmUpTiming } from "../session/WarmUp";
 import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
-import { VerdictBadge } from "../questions/VerdictBadge";
+import { ReflectionBadge, VerdictBadge } from "../questions/VerdictBadge";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
 import { renderMathToHtml } from "./renderMath";
 
@@ -40,6 +40,8 @@ interface QaFeedback {
   verdict: string;
   feedback: string;
   hint?: string;
+  /** Question réflexive : pas de bonne ni de mauvaise réponse, la réflexion est notée. */
+  noWrongAnswer?: boolean;
 }
 
 /**
@@ -70,6 +72,8 @@ interface Message {
   text: string;
   /** Renseigné pour `role === "qa"` : l'encadré de question. */
   qa?: QaRecord;
+  /** Question de l'élève : les extraits de la page joints à cette question-là. */
+  context?: { page: number; text: string }[];
 }
 
 interface Highlight {
@@ -145,6 +149,7 @@ export function ClikodaPanel({
   onHighlights,
   contextChips,
   onRemoveContextChip,
+  onContextConsumed,
   onGatedChange,
   onMask,
   onZone,
@@ -164,6 +169,8 @@ export function ClikodaPanel({
   onHighlights?: (items: Highlight[], page: number) => void;
   contextChips?: { id: number; page: number; text: string }[];
   onRemoveContextChip?: (id: number) => void;
+  /** Les extraits sont partis avec une question : le lecteur vide sa liste. */
+  onContextConsumed?: () => void;
   onGatedChange?: (active: boolean, page?: number) => void;
   /** Passage à cacher dans la page (rappel libre), null pour le redécouvrir. */
   onMask?: (mask: QaMask | null, page: number) => void;
@@ -353,8 +360,11 @@ export function ClikodaPanel({
     else setGatedState(false);
   }
 
-  /** Le lecteur est rendu le temps que Clikoda réfléchit — on peut relire la
-   *  page, défiler, zoomer. Le verrou, lui, reste armé (`gated`) : cf. restoreGate. */
+  /** Le lecteur est rendu le temps que Clikoda corrige ou prépare la question
+   *  suivante — on peut relire la page, défiler, zoomer. Le verrou, lui, reste
+   *  armé (`gated`) : cf. restoreGate. Pas pendant une question libre posée
+   *  dans la barre du bas : celle-ci ne débloque rien (on peut de toute façon
+   *  remonter relire sous le verrou). */
   function releaseWhileThinking() {
     if (gatedRef.current) onGatedChangeRef.current?.(false);
   }
@@ -478,9 +488,17 @@ export function ClikodaPanel({
         if (evt.type === "gated_question" || gatedRef.current) setGatedState(true, page);
       } else if (evt.type === "qa_feedback") {
         setBusy(false);
+        // Question réflexive : pas de mauvaise réponse — elle se clôt comme une
+        // bonne réponse, verrou levé, avec « réflexion notée » pour tout verdict.
+        const reflective = Boolean(evt.no_wrong_answer);
         if (liveQaIdRef.current !== null) {
           patchQa(liveQaIdRef.current, {
-            feedback: { verdict: evt.verdict || "", feedback: evt.feedback || "", hint: evt.hint || "" },
+            feedback: {
+              verdict: evt.verdict || "",
+              feedback: evt.feedback || "",
+              hint: evt.hint || "",
+              noWrongAnswer: reflective,
+            },
           });
         }
         // La réponse est donnée : on rend le passage masqué.
@@ -494,14 +512,14 @@ export function ClikodaPanel({
         if (gatedRef.current) {
           // Idée principale présente -> fin du verrouillage. Sinon, le lecteur
           // — libéré le temps de la correction — revient se caler sur la zone.
-          if (evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
+          if (reflective || evt.verdict === "correct" || evt.verdict === "partial") setGatedState(false);
           else onGatedChangeRef.current?.(true, gatedPageRef.current);
         }
         // Réponse juste : rien à reprendre, la lecture enchaîne sans passer par
         // « Terminer ». L'encadré reste dans le fil avec sa correction, en
         // lecture seule, et la zone cadrée est rendue au lecteur. Une réponse
         // partielle ou fausse garde ses boutons : il y a encore une suite à choisir.
-        if (evt.verdict === "correct") closeQa();
+        if (reflective || evt.verdict === "correct") closeQa();
       }
     };
     // Présence : fenêtre masquée ou application passée au second plan. C'est le
@@ -692,28 +710,28 @@ export function ClikodaPanel({
   function ask() {
     const text = draft.trim();
     if (!text || busy) return;
-    setMessages((m) => [...m, { role: "user", text }]);
+    // Les extraits joints suivent LA question qu'ils accompagnent : ils
+    // s'affichent dans sa bulle, et la suivante part sans eux. Ils restaient
+    // sinon sous le champ et repartaient avec chaque question.
+    const context = (contextChipsRef.current ?? []).map(({ page, text: snippet }) => ({ page, text: snippet }));
+    setMessages((m) => [...m, { role: "user", text, ...(context.length ? { context } : {}) }]);
     setDraft("");
     beginRequest();
-    const snippets = (contextChipsRef.current ?? []).map((c) => c.text);
     // Message non parti : on rend la main. Sans ça, l'indicateur « Clikoda
-    // réfléchit… » tournait indéfiniment sur une connexion fermée.
-    if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: snippets })) {
+    // réfléchit… » tournait indéfiniment sur une connexion fermée. Les
+    // extraits, eux, restent sous le champ pour un nouvel essai.
+    if (!sendRaw({ type: "ask", question: text, page: pageRef.current, selected_snippets: context.map((c) => c.text) })) {
       setBusy(false);
       return;
     }
-    releaseWhileThinking();
+    if (context.length) onContextConsumed?.();
   }
 
   function action(type: "rephrase" | "recap" | "hook", label: string) {
     if (busy) return;
     setMessages((m) => [...m, { role: "user", text: label }]);
     beginRequest();
-    if (!sendRaw({ type, page: pageRef.current })) {
-      setBusy(false);
-      return;
-    }
-    releaseWhileThinking();
+    if (!sendRaw({ type, page: pageRef.current })) setBusy(false);
   }
 
   /** « Annuler » : la main est rendue tout de suite, et le serveur coupe la
@@ -742,9 +760,12 @@ export function ClikodaPanel({
       playDemo("question");
       return;
     }
-    // « Nouvelle question » / « Réessayer » : la précédente et sa correction
-    // restent dans le fil, en lecture seule ; la suivante viendra à la suite.
-    endQa();
+    // « Nouvelle question » / « Réessayer » : la carte reste en jeu (boutons
+    // désactivés par `busy`) jusqu'à l'arrivée de la suivante, qui la remplace
+    // et la laisse dans le fil en lecture seule (`openQa`). La clore ici
+    // désarmait le verrou côté client si la génération échouait ou était
+    // annulée (`restoreGate` ne trouvait plus de carte), alors que le serveur
+    // restait verrouillé : Clikoda se taisait pour toute la séance.
     beginRequest();
     if (!sendRaw({ type: "start_qa", page: pageRef.current, session_id: sessionId ?? null })) {
       setBusy(false);
@@ -990,6 +1011,22 @@ export function ClikodaPanel({
               </div>
             ) : (
               <div key={i} data-role={m.role} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+                {m.context?.length ? (
+                  <div
+                    role="group"
+                    aria-label={t("clikoda.context_attached")}
+                    data-testid="message-context"
+                    style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 4, marginBottom: 4 }}
+                  >
+                    {m.context.map((c, ci) => (
+                      <span key={ci} style={contextChipStyle} title={c.text}>
+                        <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t("clikoda.context_chip", { n: c.page })} · {c.text}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div
                   style={bubble(m.role === "user" ? "user" : "assistant")}
                   onClick={m.role === "assistant" ? handlePageRefClick : undefined}
@@ -1396,7 +1433,7 @@ function QaCard({
 
       {feedback && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <VerdictBadge verdict={feedback.verdict} />
+          {feedback.noWrongAnswer ? <ReflectionBadge /> : <VerdictBadge verdict={feedback.verdict} />}
           {/* La correction cite les formules du passage ($\alpha$…) comme
               l'énoncé : même rendu KaTeX, sinon le LaTeX s'affiche brut. */}
           {feedback.feedback && (
@@ -1417,7 +1454,7 @@ function QaCard({
                 {stayLocked ? t("clikoda.retry_question") : t("clikoda.new_question")}
               </button>
               {!stayLocked && (
-                <button onClick={onClose} style={chip}>
+                <button onClick={onClose} disabled={busy} style={chip}>
                   {t("clikoda.finish")}
                 </button>
               )}

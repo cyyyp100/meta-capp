@@ -236,7 +236,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "recent_qtypes": [],  # types de questions Q&R récents (anti-répétition, 5 max)
         "gated": False,  # question automatique bloquante en cours (scroll verrouillé côté UI)
         "live_gauges": None,  # jauges métacognitives live (services.session.LiveGauges)
-        "generating": False,  # une génération LLM est en vol (Clikoda est occupée)
+        # Générations LLM en vol (Clikoda est occupée). Un COMPTEUR : une
+        # question de l'élève et une question automatique peuvent se chevaucher,
+        # et la fin de l'une ne doit pas déclarer Clikoda libre.
+        "generating": 0,
+        # Une question est posée et attend sa réponse (de son émission à
+        # l'évaluation de la réponse), bloquante ou non (« Quiz-moi »).
+        "qa_pending": False,
+        # Demandes de l'élève (ask, reformuler, résumer, curiosité, Quiz-moi,
+        # réponse) : une question automatique en génération le compare à sa
+        # valeur de départ, et s'efface si l'élève a pris la main entre-temps.
+        "user_turn": 0,
+        # Dernier échange de CETTE séance — {"kind", "lines": [(qui, texte)]} —,
+        # relayé à la réponse libre : une question de suivi (« développe »)
+        # renvoie souvent à la question de Clikoda ou à sa correction, que les
+        # `exchanges` (questions posées dans la barre) ne contiennent pas.
+        # Jamais réhydraté depuis la base : un suivi parle de ce qui vient
+        # d'être dit.
+        "last_turn": None,
         "away": False,  # fenêtre masquée / application au second plan
         "qa_sent_at": 0.0,  # émission de la question courante -> temps de réponse
         "consecutive_incorrect": 0,  # série d'erreurs en cours (modèle d'attention)
@@ -281,19 +298,27 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
     def refresh_busy() -> None:
         """La politique se tait tant que Clikoda travaille OU qu'une réponse est due.
 
-        Deux raisons distinctes, un seul drapeau : une génération en vol (réponse,
-        reformulation, question…) et une question bloquante en attente. Avant, seule
-        la seconde comptait — une décision d'intervention pouvait donc partir
-        pendant que l'étudiant attendait sa réponse."""
-        policy.set_busy(bool(state["generating"] or state["gated"]))
+        Trois raisons, un seul drapeau : une génération en vol (réponse,
+        reformulation, question…), une question bloquante, et une question —
+        bloquante ou non — qui attend sa réponse. Avant, seule la bloquante
+        comptait : une question automatique pouvait tomber par-dessus celle
+        d'un « Quiz-moi » encore sans réponse."""
+        policy.set_busy(bool(state["generating"] > 0 or state["gated"] or state["qa_pending"]))
 
     def start_generation() -> None:
-        state["generating"] = True
+        state["generating"] += 1
         refresh_busy()
 
     def end_generation() -> None:
-        state["generating"] = False
+        state["generating"] = max(0, state["generating"] - 1)
         refresh_busy()
+
+    def remember_turn(kind: str, *lines: tuple[str, str]) -> None:
+        """Retient le dernier échange de la séance (cf. state["last_turn"]) ;
+        `lines` : (« student » | « clikoda », texte), les vides écartés."""
+        kept = [(who, str(text or "").strip()) for who, text in lines if str(text or "").strip()]
+        if kept:
+            state["last_turn"] = {"kind": kind, "lines": kept}
 
     def make_callbacks():
         def on_success(result: dict) -> None:
@@ -373,7 +398,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         state["qa_sent_at"] = time.monotonic()
         state["recent_qtypes"].append(qtype)
         del state["recent_qtypes"][:-5]
-        state["generating"] = False
+        state["generating"] = max(0, state["generating"] - 1)
+        state["qa_pending"] = True
+        remember_turn("question", ("clikoda", result.get("question", "")))
         session_hint = str(result.get("session_hint") or "").strip()
         if session_hint:
             # Conseil de régulation du LLM : une pause prise juste après le suit.
@@ -404,9 +431,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             "page": page,
         }
         if gated:
-            # La politique se tait tant que l'étudiant doit répondre.
+            # Question bloquante : le lecteur se verrouille jusqu'à la bonne réponse.
             state["gated"] = True
-        # Un seul point de bascule : la génération est finie, le verrou est posé.
+        # Un seul point de bascule : la génération est finie, la question attend
+        # sa réponse (la politique se tait jusque-là).
         refresh_busy()
         push_threadsafe(loop, out, event)
 
@@ -467,10 +495,22 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         # l'intervention, et l'UI verrouille le scroll.
         if payload.get("kind") == "ask_question":
             gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+            turn = state["user_turn"]
+
+            def on_auto_question(result: dict, p=page, s=state["session_id"]) -> None:
+                # L'élève a pris la main pendant la génération (question posée,
+                # « Quiz-moi », réponse), ou une question attend déjà sa réponse :
+                # celle-ci tomberait par-dessus. Ni persistée, ni émise.
+                if state["user_turn"] != turn or state["qa_pending"]:
+                    logger.info("Question automatique abandonnée : l'élève a pris la main entre-temps")
+                    end_generation()
+                    return
+                emit_question(result, p, s, gated=True)
+
             start_generation()
             assistant.generate_page_question(
                 doc_id, page,
-                lambda result, p=page, s=state["session_id"]: emit_question(result, p, s, gated=True),
+                on_auto_question,
                 lambda _m: end_generation(),
                 session_gauges=gauges,
                 recent_question_types=list(state["recent_qtypes"]),
@@ -478,6 +518,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             )
             return
         kind = str(payload.get("kind") or "offer_help")
+        remember_turn("intervention", ("clikoda", "\n".join(
+            text for text in (str(payload.get("message") or ""), str(payload.get("question") or "")) if text.strip()
+        )))
         push_threadsafe(loop, out, {
             "type": "intervention",
             "message": payload.get("message", ""),
@@ -726,6 +769,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # L'écran de pause couvre déjà le panneau : défense en profondeur,
                 # rien ne se génère ni ne s'évalue tant que l'élève n'est pas revenu.
                 continue
+            if kind in _PAUSED_ACTIONS:
+                # L'élève prend la main : une question automatique en génération
+                # n'a plus sa place (cf. on_intervention).
+                state["user_turn"] += 1
 
             if kind == "start_reading":
                 # Sas d'entrée franchi : le warm-up de la première question part
@@ -779,6 +826,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     if state["live_gauges"] is not None:
                         state["live_gauges"].apply(result)
                     answer = result.get("answer", "")
+                    remember_turn("ask", ("student", _q), ("clikoda", answer))
                     state["exchanges"].append({"question": _q, "answer": answer})
                     del state["exchanges"][:-6]  # ne garder que les 6 derniers échanges
                     if answer:
@@ -795,22 +843,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         recent_exchanges=recent_exchanges,
                         session_gauges=session_gauges,
                         selected_snippets=selected_snippets,
+                        previous_turn=state["last_turn"],
                     )
-            elif kind == "rephrase":
-                await out.put(loading("rephrasing"))
+            elif kind in ("rephrase", "recap", "hook"):
+                # Reformuler, résumer, curiosité : ce que Clikoda en dit devient
+                # le dernier échange (« redis-le plus simplement » y renvoie).
+                def on_command_success(result: dict, _ok=on_success) -> None:
+                    remember_turn("command", ("clikoda", result.get("answer", "")))
+                    _ok(result)
+
+                task, run = {
+                    "rephrase": ("rephrasing", assistant.rephrase_page),
+                    "recap": ("chapter_summary", assistant.chapter_recap),
+                    "hook": ("curiosity_hook", assistant.curiosity_hook),
+                }[kind]
+                await out.put(loading(task))
                 start_generation()
-                with announced("rephrasing"):
-                    assistant.rephrase_page(doc_id, page, on_success, on_error)
-            elif kind == "recap":
-                await out.put(loading("chapter_summary"))
-                start_generation()
-                with announced("chapter_summary"):
-                    assistant.chapter_recap(doc_id, page, on_success, on_error)
-            elif kind == "hook":
-                await out.put(loading("curiosity_hook"))
-                start_generation()
-                with announced("curiosity_hook"):
-                    assistant.curiosity_hook(doc_id, page, on_success, on_error)
+                with announced(task):
+                    run(doc_id, page, on_command_success, on_error)
             elif kind == "start_qa":
                 sid = msg.session_id
                 await out.put(loading("question"))
@@ -835,6 +885,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 await out.put(loading("evaluation"))
 
                 def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
+                    # La question a sa réponse : elle n'attend plus (la politique
+                    # peut reparler, sauf verrou maintenu par une réponse fausse).
+                    state["qa_pending"] = False
                     end_generation()
                     # Signaux dérivés de la FORME de la réponse (longueur, questions
                     # posées, connecteurs, analogies) : ils enrichissent curiosité et
@@ -875,6 +928,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         "verdict": verdict or "",
                     })
                     del state["qa_history"][:-_MAX_HISTORY]
+                    remember_turn(
+                        "answer",
+                        ("clikoda", _q or state.get("qa_text") or ""),
+                        ("student", _answer),
+                        ("clikoda", ev.get("feedback", "")),
+                    )
                     try:
                         save_answer(
                             question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,
@@ -911,6 +970,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                         # l'erreur : surlignés comme pour une réponse libre.
                         "highlights": ev.get("highlights", []),
                         "flashcard_created": flashcard_created,
+                        # Question réflexive : pas de bonne ni de mauvaise réponse,
+                        # l'UI referme la carte et dit « réflexion notée ».
+                        "no_wrong_answer": bool(ev.get("no_wrong_answer")),
                     })
 
                 start_generation()

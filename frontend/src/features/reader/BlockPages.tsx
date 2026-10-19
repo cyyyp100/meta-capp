@@ -93,7 +93,8 @@ export function BlockPages({
       {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => {
         const blocks = blocksByPage[n];
         const [w, h] = sizes[n - 1] ?? [595, 842];
-        const dimmed = locked && n !== lockedPage;
+        // Même règle que les pages PDF : les pages au-dessus de la page bloquée se relisent.
+        const dimmed = locked && n > lockedPage;
         const visible = (blocks ?? []).filter((b) => !b.metadata?.reader_hidden);
         return (
           <div

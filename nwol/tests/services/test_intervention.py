@@ -366,6 +366,32 @@ def test_a_decision_returning_during_a_pause_never_happened(monkeypatch):
     assert len(fired) == 1
 
 
+def test_a_decision_returning_while_clikoda_is_busy_never_happened(monkeypatch):
+    """Décision partie quand Clikoda était libre, revenue pendant qu'elle
+    travaille (l'élève a lancé « Quiz-moi », une question attend sa réponse) :
+    livrée, elle tomberait par-dessus. Jetée comme pendant une pause — ni
+    plafond, ni cooldown, ni anti-répétition consommés."""
+    policy, _memory, fired, _ctx, _page = make_policy(monkeypatch, cooldown=3600.0)
+    in_flight: list = []
+    policy._request_decision = lambda ctx, done: in_flight.append(done)
+
+    policy.tick()
+    assert len(in_flight) == 1
+    policy.set_busy(True)
+    in_flight.pop()({"should_intervene": True, "kind": "ask_question"})
+    assert fired == []
+    assert policy._interventions_count == 0
+
+    policy.tick()  # toujours occupée : aucune nouvelle demande
+    assert in_flight == []
+
+    policy.set_busy(False)
+    policy.tick()
+    assert len(in_flight) == 1
+    in_flight.pop()({"should_intervene": True, "kind": "offer_help"})
+    assert len(fired) == 1
+
+
 def test_a_dropped_fatigue_signal_is_rearmed(monkeypatch):
     """Le signal de fatigue se consomme à la détection : jeté pendant une pause,
     il doit revenir à la reprise, pas attendre une fenêtre entière de réponses."""

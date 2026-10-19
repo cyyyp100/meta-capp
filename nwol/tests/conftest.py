@@ -81,6 +81,17 @@ def reference_model(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def manual_card_rules_in_place(monkeypatch):
+    """Une carte manuelle créée par l'API lance en thread les règles de langue
+    (services/flashcards.schedule_language_rules). Ce thread survivrait au test
+    qui l'a lancé et lirait la base du suivant : la passe se joue sur place
+    (Ollama coupé : elle échoue aussitôt, la carte reste telle que saisie)."""
+    from services import flashcards
+
+    monkeypatch.setattr(flashcards, "RUN_IN_BACKGROUND", False)
+
+
+@pytest.fixture(autouse=True)
 def no_startup_backfill(monkeypatch):
     """Le démarrage du serveur (lifespan) lance le calcul des empreintes dans un
     thread (services/relink). Ce thread survivrait au test qui l'a lancé : il

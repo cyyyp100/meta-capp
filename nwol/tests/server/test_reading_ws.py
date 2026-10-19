@@ -1001,6 +1001,60 @@ def test_open_types_keep_the_llm_verdict(client, monkeypatch):
     assert out["verdict"] == "partial" and out["completion"] == "précise"
 
 
+@pytest.mark.parametrize("question_type", ["metacognition", "anticipation"])
+def test_a_reflective_question_has_no_wrong_answer(client, monkeypatch, question_type):
+    """Une réflexion n'est jamais fausse : un « incorrect » du LLM devient
+    « partial », sans indice ni complément — il relançait le verrou du lecteur."""
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, question_type, "")
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "Je ne sais pas trop.", lambda r: out.update(r), lambda m: None,
+        question_type=question_type, question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "incorrect", "feedback": "…", "hint": "Relis.", "completion": "x"}),
+    )
+    assert out["verdict"] == "partial"
+    assert out["hint"] == "" and out["completion"] == ""
+    assert out["no_wrong_answer"] is True
+
+
+def test_a_comprehension_question_can_still_be_wrong(client, monkeypatch):
+    from services import assistant
+
+    qid = _seed_question(monkeypatch, "comprehension", "La définition donnée.")
+    out: dict = {}
+    assistant.evaluate_page_answer(
+        1, 1, "La question ?", "Autre chose.", lambda r: out.update(r), lambda m: None,
+        question_type="comprehension", question_id=qid,
+        evaluator=lambda ctx, ok, err: ok({"verdict": "incorrect", "feedback": "…", "hint": "Relis."}),
+    )
+    assert out["verdict"] == "incorrect" and out["hint"] == "Relis."
+    assert "no_wrong_answer" not in out
+
+
+def test_reader_ws_feedback_says_when_there_was_no_wrong_answer(client, monkeypatch):
+    from services import assistant
+
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Comment as-tu procédé ?", "choices": None,
+                                        "question_type": "metacognition"}),
+    )
+    monkeypatch.setattr(
+        assistant, "evaluate_page_answer",
+        lambda d, p, q, a, ok, err, **kw: ok({"verdict": "partial", "feedback": "Noté.", "no_wrong_answer": True}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        ws.send_json({"type": "qa_answer", "question": q["question"], "answer": "J'ai relu.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        fb = ws.receive_json()
+        assert fb["type"] == "qa_feedback" and fb["no_wrong_answer"] is True
+
+
 def test_assistant_exchanges_are_rehydrated_from_the_db(client, monkeypatch):
     """Rouvrir un document retrouve la conversation précédente.
 
@@ -1204,3 +1258,181 @@ def test_cancelling_reaches_the_generation_in_flight(client, monkeypatch):
     assert client.post("/api/reader/cancel").json() == {"cancelled": True}
     assert cancelled == [()]
     assert ollama_client.is_cancelled_error(ollama_client.CANCELLED_MESSAGE)
+
+
+# ── Plus de question automatique par-dessus une question en cours ────────────
+
+def _auto_question_setup(monkeypatch, decisions: list, generated: list | None = None):
+    """Ticker rapide, cadence relâchée ; les décisions d'intervention sont
+    capturées (`decisions`) au lieu d'être rendues tout de suite."""
+    from server.routers import reading
+    from services import assistant
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.02)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(assistant, "build_intervention_context", lambda *a, **k: {"trigger": "long_dwell", "page": 1})
+    monkeypatch.setattr(reading, "decide_intervention_async", lambda ctx, ok, err, **kw: decisions.append(ok))
+
+    def fake_question(d, p, ok, err, **kw):
+        if generated is not None:
+            generated.append(ok)
+        else:
+            ok({"question": "Idée clé ?", "choices": None, "question_type": "comprehension"})
+
+    monkeypatch.setattr(assistant, "generate_page_question", fake_question)
+
+
+def _next_event(ws, skip=("scanning",)) -> dict:
+    while True:
+        evt = ws.receive_json()
+        if evt["type"] not in skip:
+            return evt
+
+
+def test_no_decision_is_asked_while_a_quiz_question_awaits_its_answer(client, monkeypatch):
+    """« Quiz-moi » sans réponse : la politique se tait, sur plusieurs ticks."""
+    import time
+
+    decisions: list = []
+    _auto_question_setup(monkeypatch, decisions)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "qa_question"
+        ws.send_json({"type": "start_reading"})
+        time.sleep(0.3)  # une quinzaine de ticks
+    assert decisions == []
+
+
+def test_a_decision_returning_after_a_quiz_question_is_dropped(client, monkeypatch):
+    """La décision part quand Clikoda est libre ; l'élève lance « Quiz-moi » ;
+    elle revient ensuite : aucune question bloquante par-dessus."""
+    import time
+
+    decisions: list = []
+    _auto_question_setup(monkeypatch, decisions)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        for _ in range(100):
+            if decisions:
+                break
+            time.sleep(0.02)
+        assert decisions, "aucune décision demandée"
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "qa_question"
+
+        decisions[0]({"should_intervene": True, "kind": "ask_question"})
+        ws.send_json({"type": "mode", "mode": "coach"})
+        # Le message suivant est la réponse au changement de mode : rien d'autre avant.
+        assert _next_event(ws)["type"] == "system"
+
+
+def test_an_automatic_question_is_dropped_when_the_student_takes_over(client, monkeypatch):
+    """La question automatique est en génération quand l'élève pose sa propre
+    question : elle n'est ni émise, ni persistée."""
+    import time
+
+    from server.routers import reading
+    from services import assistant
+
+    decisions: list = []
+    generated: list = []
+    _auto_question_setup(monkeypatch, decisions, generated)
+    saved: list = []
+    monkeypatch.setattr(reading, "save_question", lambda *a, **k: saved.append(a) or 1)
+    monkeypatch.setattr(
+        assistant, "answer_question", lambda d, p, q, ok, err, **kw: ok({"answer": "Voici.", "highlights": []}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        for _ in range(100):
+            if decisions:
+                break
+            time.sleep(0.02)
+        decisions[0]({"should_intervene": True, "kind": "ask_question"})
+        for _ in range(100):
+            if generated:
+                break
+            time.sleep(0.02)
+        assert generated, "la question automatique n'est pas partie"
+
+        ws.send_json({"type": "ask", "question": "Et ça ?", "page": 1})
+        assert _next_event(ws)["type"] == "loading"
+        assert _next_event(ws)["type"] == "answer"
+        generated[0]({"question": "Idée clé ?", "choices": None, "question_type": "comprehension"})
+
+        ws.send_json({"type": "mode", "mode": "coach"})
+        assert _next_event(ws)["type"] == "system"
+    assert saved == []
+
+
+# ── Mémoire de l'échange précédent pour les questions de suivi ──────────────
+
+def test_a_follow_up_question_receives_the_previous_exchange(client, monkeypatch):
+    """Le second « ask » reçoit le premier échange ; un « ask » qui suit une
+    question de Clikoda reçoit cette question."""
+    from services import assistant
+
+    received: list = []
+
+    def fake_answer(d, p, q, ok, err, **kw):
+        received.append(kw.get("previous_turn"))
+        ok({"answer": f"Réponse à {q}", "highlights": []})
+
+    monkeypatch.setattr(assistant, "answer_question", fake_answer)
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Quel est le rôle du pas ?", "choices": None, "question_type": "open"}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "C'est quoi le pas ?", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+        ws.send_json({"type": "ask", "question": "Développe ta réponse.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "qa_question"
+        ws.send_json({"type": "ask", "question": "Je ne comprends pas ta question.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+    assert received[0] is None  # rien avant la première question de la séance
+    assert received[1] == {"kind": "ask", "lines": [("student", "C'est quoi le pas ?"),
+                                                    ("clikoda", "Réponse à C'est quoi le pas ?")]}
+    assert received[2] == {"kind": "question", "lines": [("clikoda", "Quel est le rôle du pas ?")]}
+
+
+def test_an_evaluated_answer_becomes_the_last_exchange(client, monkeypatch):
+    from services import assistant
+
+    received: list = []
+    monkeypatch.setattr(
+        assistant, "answer_question",
+        lambda d, p, q, ok, err, **kw: (received.append(kw.get("previous_turn")), ok({"answer": "…", "highlights": []})),
+    )
+    monkeypatch.setattr(
+        assistant, "generate_page_question",
+        lambda d, p, ok, err, **kw: ok({"question": "Quel est le rôle du pas ?", "choices": None, "question_type": "open"}),
+    )
+    monkeypatch.setattr(
+        assistant, "evaluate_page_answer",
+        lambda d, p, q, a, ok, err, **kw: ok({"verdict": "partial", "feedback": "Il manque la direction."}),
+    )
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        q = ws.receive_json()
+        ws.send_json({"type": "qa_answer", "question": q["question"], "answer": "Il règle la vitesse.", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "qa_feedback"
+        ws.send_json({"type": "ask", "question": "Quelle direction ?", "page": 1})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+
+    assert received[0] == {"kind": "answer", "lines": [
+        ("clikoda", "Quel est le rôle du pas ?"), ("student", "Il règle la vitesse."), ("clikoda", "Il manque la direction."),
+    ]}
