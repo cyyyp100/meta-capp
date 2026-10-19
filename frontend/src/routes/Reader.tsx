@@ -6,13 +6,13 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { useConfirm } from "@/components/ui/confirm";
 
-import { api, pageImageUrl } from "../api/client";
+import { api } from "../api/client";
 import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
 import { ClikodaPanel, type QaMask } from "../features/reader/ClikodaPanel";
 import { DEMO_METRICS, DEMO_REFLECTION_KEYS, type DemoBeat } from "../features/reader/demoScript";
 import { BlockPages } from "../features/reader/BlockPages";
-import { PageTextLayer } from "../features/reader/PageTextLayer";
+import { PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
 import { placedBoxes } from "../features/reader/textLayer";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
@@ -31,6 +31,11 @@ const HL_COLORS: Record<string, string> = {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
 const BASE_WIDTH = 820;
+const INITIAL_ZOOM = 1;
+// Zoom par geste (molette + Ctrl/Cmd, pincement) : la colonne est mise à
+// l'échelle en CSS pendant le geste, et la vraie largeur n'est écrite qu'après
+// ce temps sans nouvel événement — une seule re-mise en page par geste.
+const GESTURE_IDLE_MS = 150;
 
 // Cadrage de la zone d'une question : ce qu'il faut laisser libre autour pour
 // qu'elle soit VISIBLE et non simplement dans le viewport — la barre d'outils
@@ -38,16 +43,24 @@ const BASE_WIDTH = 820;
 const ZONE_TOP_INSET = 112;
 const ZONE_BOTTOM_INSET = 24;
 const ZONE_SIDE_INSET = 24;
-/** Marge (en points PDF) autour du passage cité, pour le liseré. */
-// Marge du cache de rappel libre : couvre jambages et interlignes, sinon les
-// hampes des lignes voisines laissent deviner le passage.
-const MASK_PAD_PTS = 2.5;
-const ZONE_PAD_PTS = 4;
 // Durée d'un défilement décidé par le lecteur (cadrage animé de la zone) : le
 // garde-fou du plancher le laisse finir au lieu de le ramener en arrière.
 const PROGRAMMATIC_SCROLL_MS = 800;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Palier de résolution des images de page pour un zoom (texte net au repos). */
+const renderZoomFor = (zoom: number) => clamp(Math.ceil(zoom * 2), 2, 5);
+
+/** Une page sans surlignage mémorisé : la même liste à chaque rendu (PdfPage est mémoïsée). */
+const NO_SAVED: SavedPageHighlight[] = [];
+
+/** Pincement du trackpad sous WebKit (WKWebView de pywebview, Safari) : pas de molette Ctrl. */
+interface WebKitGestureEvent extends UIEvent {
+  scale: number;
+  clientX: number;
+  clientY: number;
+}
 
 /** Distance qu'une touche ferait descendre le défilement natif (null : elle ne descend pas). */
 function scrollKeyStep(e: KeyboardEvent, el: HTMLElement): number | null {
@@ -116,27 +129,6 @@ function boundsOf(rects: number[][]): number[] {
   ];
 }
 
-/**
- * Boîte englobante des surlignages d'une page, en pixels d'écran.
- *
- * Sert d'ancre à l'étape de la visite qui explique « elle surligne le passage
- * dont elle parle » : le voile éclaire ce rectangle en même temps que la
- * réponse de Clikoda. Sans lui, l'étape désignait le panneau et laissait le
- * passage cité dans le noir — exactement ce qu'elle demande de regarder.
- */
-function highlightBounds(groups: { rect: number[] }[], scale: number) {
-  const left = Math.min(...groups.map((g) => g.rect[0]));
-  const top = Math.min(...groups.map((g) => g.rect[1]));
-  const right = Math.max(...groups.map((g) => g.rect[2]));
-  const bottom = Math.max(...groups.map((g) => g.rect[3]));
-  return {
-    left: left * scale,
-    top: top * scale,
-    width: (right - left) * scale,
-    height: (bottom - top) * scale,
-  };
-}
-
 const selBtn: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -183,15 +175,44 @@ export function Reader() {
   const [pause, setPause] = useState<ReadingPause | null>(null);
   const pausedMsRef = useRef(0);
 
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(INITIAL_ZOOM);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   // Décalage horizontal du PDF (px). Découplé du scroll natif (transform) -> reste
   // utilisable quelle que soit la borne du scroll vertical (question bloquante de
   // Clikoda), et permet de pousser le PDF à gauche pour loger Clikoda à droite.
   const [panX, setPanX] = useState(0);
+  const panXRef = useRef(panX);
+  panXRef.current = panX;
   const [panning, setPanning] = useState(false);
   const panDragRef = useRef<{ startX: number; startPan: number } | null>(null);
+  // Décalage en attente de la prochaine frame : glissé et molette horizontale
+  // émettent bien plus d'événements que l'écran n'affiche d'images — un rendu
+  // par frame, pas un par événement.
+  const panFrameRef = useRef<{ raf: number; value: number } | null>(null);
+  // La colonne des pages : c'est elle que le zoom par geste met à l'échelle.
+  const columnRef = useRef<HTMLDivElement>(null);
+  // Geste de zoom en cours (molette + Ctrl/Cmd, pincement). `base` : le zoom
+  // réel au départ ; `target` : celui que vise le geste ; `origin` : le point
+  // visé dans la colonne, qui reste immobile ; `fx`/`fxr` : ce point à l'écran
+  // et sa part de la largeur de la colonne, pour le garder en place au
+  // moment où la vraie largeur est écrite.
+  const gestureRef = useRef<{
+    base: number;
+    target: number;
+    originX: number;
+    originY: number;
+    fx: number;
+    fxr: number;
+    raf: number;
+    idle: number;
+  } | null>(null);
+  // Fin de geste à appliquer par l'effet de zoom (horizontal : cf. gestureRef).
+  const gestureEndRef = useRef<{ fx: number; fxr: number } | null>(null);
   const widthRef = useRef(BASE_WIDTH);
-  const [renderZoom, setRenderZoom] = useState(2.5);
+  // Initialisé depuis le zoom de départ : partir de 2.5 puis passer au palier
+  // du zoom faisait charger chaque page deux fois à l'ouverture.
+  const [renderZoom, setRenderZoom] = useState(() => renderZoomFor(INITIAL_ZOOM));
   const [currentPage, setCurrentPage] = useState(1);
   // Marque-page : page quittée à la session précédente (figée à l'ouverture, > 1 seulement).
   const [bookmarkPage, setBookmarkPage] = useState<number | null>(null);
@@ -379,6 +400,24 @@ export function Reader() {
     });
     if (ok) removeSavedHighlight(hid);
   }
+  // La même fonction d'un rendu à l'autre : les pages sont mémoïsées.
+  const askRemoveRef = useRef(askRemoveHighlight);
+  askRemoveRef.current = askRemoveHighlight;
+  const deleteHighlight = useCallback((hid: number) => void askRemoveRef.current(hid), []);
+
+  // Surlignages mémorisés groupés par page, rects fusionnés par ligne une fois
+  // pour toutes — et non à chaque rendu de chaque page.
+  const savedByPage = useMemo(() => {
+    const out: Record<number, SavedPageHighlight[]> = {};
+    for (const hl of savedHighlights) {
+      (out[hl.page] ??= []).push({
+        id: hl.id,
+        fill: HL_COLORS[hl.color] ?? "var(--hl-key)",
+        rects: mergeLineRects(hl.rects),
+      });
+    }
+    return out;
+  }, [savedHighlights]);
 
   // Action « ➕ Contexte » : mémorise l'extrait pour la prochaine question.
   function addSelectionToContext() {
@@ -521,34 +560,88 @@ export function Reader() {
 
   // Re-rendu HD à palier quand le zoom se stabilise (texte net au repos).
   useEffect(() => {
-    const t = setTimeout(() => setRenderZoom(clamp(Math.ceil(zoom * 2), 2, 5)), 250);
+    const t = setTimeout(() => setRenderZoom(renderZoomFor(zoom)), 250);
     return () => clearTimeout(t);
   }, [zoom]);
 
   // Ancrage du zoom : on mémorise le point visé (sous le pointeur, sinon centre du
   // viewport) AVANT le changement, puis on rétablit le scroll APRÈS la nouvelle mise
   // en page -> le PDF ne saute plus verticalement (y compris en question bloquante).
-  const zoomAnchorRef = useRef<{ frac: number; focal: number; aboveFloor: boolean } | null>(null);
+  // Le point visé est repéré dans la PAGE qu'il touche (`page`, `pageFrac`) :
+  // les marges et les intervalles entre pages ne grandissent pas avec le zoom,
+  // si bien qu'une simple fraction de la hauteur totale (`frac`, le repli)
+  // faisait glisser le point visé de plusieurs dizaines de pixels.
+  const zoomAnchorRef = useRef<{
+    frac: number;
+    focal: number;
+    aboveFloor: boolean;
+    page: number | null;
+    pageFrac: number;
+  } | null>(null);
   function captureZoomAnchor(focalClientY?: number) {
     const el = scrollRef.current;
     if (!el || el.scrollHeight <= 0) {
       zoomAnchorRef.current = null;
       return;
     }
-    const focal = focalClientY != null ? focalClientY - el.getBoundingClientRect().top : el.clientHeight / 2;
+    const elTop = el.getBoundingClientRect().top;
+    const focal = focalClientY != null ? focalClientY - elTop : el.clientHeight / 2;
     const floor = lockFloorRef.current;
+    let page: number | null = null;
+    let pageFrac = 0;
+    for (const pageEl of el.querySelectorAll<HTMLElement>("[data-page]")) {
+      const r = pageEl.getBoundingClientRect();
+      if (r.bottom < elTop + focal) continue;
+      if (r.top <= elTop + focal && r.height > 0) {
+        page = Number(pageEl.dataset.page);
+        pageFrac = (elTop + focal - r.top) / r.height;
+      }
+      break;
+    }
     zoomAnchorRef.current = {
       frac: (el.scrollTop + focal) / el.scrollHeight,
       focal,
       aboveFloor: floor !== null && el.scrollTop < floor - 2,
+      page,
+      pageFrac,
     };
+  }
+
+  /** scrollTop qui remet le point visé (cf. captureZoomAnchor) à sa place après une mise en page. */
+  function anchoredScrollTop(el: HTMLElement, anchor: NonNullable<typeof zoomAnchorRef.current>): number {
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const pageEl = anchor.page !== null ? el.querySelector<HTMLElement>(`[data-page="${anchor.page}"]`) : null;
+    if (pageEl) {
+      const r = pageEl.getBoundingClientRect();
+      const point = r.top - el.getBoundingClientRect().top + anchor.pageFrac * r.height;
+      return clamp(el.scrollTop + point - anchor.focal, 0, max);
+    }
+    return clamp(anchor.frac * el.scrollHeight - anchor.focal, 0, max);
   }
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Fin d'un geste : la vraie largeur vient d'être écrite, l'échelle CSS qui
+    // la simulait tombe dans la même frame — aucune image intermédiaire.
+    const col = columnRef.current;
+    const gestureEnd = gestureEndRef.current;
+    gestureEndRef.current = null;
+    if (col) {
+      col.style.transform = `translateX(${panXRef.current}px)`;
+      col.style.transformOrigin = "";
+      if (gestureEnd) {
+        // Le point visé reste sous le pointeur horizontalement aussi : sans ce
+        // décalage, la colonne retomberait sur son centrage.
+        const rect = col.getBoundingClientRect();
+        const next = clampPanX(gestureEnd.fx - gestureEnd.fxr * rect.width - (rect.left - panXRef.current));
+        col.style.transform = `translateX(${next}px)`;
+        panXRef.current = next;
+        setPanX(next);
+      }
+    }
     const anchor = zoomAnchorRef.current;
     zoomAnchorRef.current = null;
-    const anchored = anchor ? clamp(anchor.frac * el.scrollHeight - anchor.focal, 0, el.scrollHeight - el.clientHeight) : null;
+    const anchored = anchor ? anchoredScrollTop(el, anchor) : null;
     if (locked) {
       // Page bloquée, remontée relire : le zoom garde le point visé, sous le
       // plancher recalculé à la nouvelle échelle.
@@ -650,25 +743,102 @@ export function Reader() {
     return clamp(px, -max, max);
   }
 
+  /** Décale la colonne à la prochaine frame (cf. panFrameRef). */
+  function schedulePan(next: (current: number) => number) {
+    const pending = panFrameRef.current;
+    const value = clampPanX(next(pending ? pending.value : panXRef.current));
+    if (pending) {
+      pending.value = value;
+      return;
+    }
+    const frame = { value, raf: 0 };
+    frame.raf = requestAnimationFrame(() => {
+      panFrameRef.current = null;
+      setPanX(frame.value);
+    });
+    panFrameRef.current = frame;
+  }
+
   // Zoom fluide à la molette/pincement (Ctrl/Cmd) + déplacement horizontal (molette
   // horizontale du trackpad ou Maj+molette). preventDefault => pas de zoom/navigation
   // navigateur, et le déplacement reste actif même quand le scroll vertical est figé.
   // Sous une question bloquante, la molette remonte librement mais s'arrête au plancher.
+  //
+  // Un geste de zoom ne re-met plus la page en forme à chaque événement : la
+  // colonne est mise à l'échelle en CSS autour du point visé, une fois par
+  // frame, et la vraie largeur n'est écrite qu'une fois le geste fini
+  // (GESTURE_IDLE_MS sans événement). L'ancrage du zoom garde alors le point
+  // visé en place. Les boutons et Ctrl +/-/0 restent des pas discrets.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Pincement WebKit en cours : ses éventuelles molettes Ctrl sont le même geste.
+    let webkitPinch = false;
+
+    /** Le geste en cours, ou un nouveau qui part du point visé. */
+    const gestureAt = (clientX: number, clientY: number) => {
+      if (gestureRef.current) return gestureRef.current;
+      const rect = columnRef.current?.getBoundingClientRect();
+      captureZoomAnchor(clientY);
+      const gesture = {
+        base: zoomRef.current,
+        target: zoomRef.current,
+        originX: rect ? clientX - rect.left : 0,
+        originY: rect ? clientY - rect.top : 0,
+        fx: clientX,
+        fxr: rect && rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5,
+        raf: 0,
+        idle: 0,
+      };
+      gestureRef.current = gesture;
+      return gesture;
+    };
+    const paintGesture = () => {
+      const gesture = gestureRef.current;
+      const col = columnRef.current;
+      if (!gesture || !col) return;
+      gesture.raf = 0;
+      col.style.transformOrigin = `${gesture.originX}px ${gesture.originY}px`;
+      col.style.transform = `translateX(${panXRef.current}px) scale(${gesture.target / gesture.base})`;
+    };
+    const endGesture = () => {
+      const gesture = gestureRef.current;
+      if (!gesture) return;
+      gestureRef.current = null;
+      cancelAnimationFrame(gesture.raf);
+      clearTimeout(gesture.idle);
+      if (Math.abs(gesture.target - gesture.base) < 0.001) {
+        // Rien à écrire (zoom déjà en butée) : l'échelle tombe, c'est tout.
+        const col = columnRef.current;
+        if (col) {
+          col.style.transform = `translateX(${panXRef.current}px)`;
+          col.style.transformOrigin = "";
+        }
+        zoomAnchorRef.current = null;
+        return;
+      }
+      gestureEndRef.current = { fx: gesture.fx, fxr: gesture.fxr };
+      setZoom(gesture.target); // l'effet de zoom retire l'échelle et ancre la vue
+    };
+    const zoomBy = (clientX: number, clientY: number, next: (base: number, target: number) => number) => {
+      const gesture = gestureAt(clientX, clientY);
+      gesture.target = clamp(next(gesture.base, gesture.target), MIN_ZOOM, MAX_ZOOM);
+      if (!gesture.raf) gesture.raf = requestAnimationFrame(paintGesture);
+      clearTimeout(gesture.idle);
+      gesture.idle = window.setTimeout(endGesture, GESTURE_IDLE_MS);
+    };
+
     const onWheel = (e: WheelEvent) => {
       if (frozenRef.current) return;
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        captureZoomAnchor(e.clientY);
-        setZoom((z) => clamp(z - e.deltaY * 0.0025, MIN_ZOOM, MAX_ZOOM));
+        if (!webkitPinch) zoomBy(e.clientX, e.clientY, (_base, target) => target - e.deltaY * 0.0025);
         return;
       }
       if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         e.preventDefault();
         const delta = e.shiftKey ? e.deltaY : e.deltaX;
-        setPanX((p) => clampPanX(p - delta));
+        schedulePan((p) => p - delta);
         return;
       }
       const floor = lockFloorRef.current;
@@ -677,8 +847,45 @@ export function Reader() {
         el.scrollTop = floor;
       }
     };
+    // Sous WebKit, le pincement du trackpad arrive en événements de geste, avec
+    // une échelle relative à son début — pas en molette Ctrl.
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      if (frozenRef.current) return;
+      const pinch = e as WebKitGestureEvent;
+      webkitPinch = true;
+      gestureAt(pinch.clientX, pinch.clientY);
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      if (frozenRef.current || !webkitPinch) return;
+      const pinch = e as WebKitGestureEvent;
+      zoomBy(pinch.clientX, pinch.clientY, (base) => base * pinch.scale);
+    };
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      if (!webkitPinch) return;
+      webkitPinch = false;
+      endGesture();
+    };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("gesturestart", onGestureStart);
+    el.addEventListener("gesturechange", onGestureChange);
+    el.addEventListener("gestureend", onGestureEnd);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("gestureend", onGestureEnd);
+      const gesture = gestureRef.current;
+      if (gesture) {
+        cancelAnimationFrame(gesture.raf);
+        clearTimeout(gesture.idle);
+        gestureRef.current = null;
+      }
+    };
+    // Branchés une fois : `schedulePan` et le zoom par geste ne lisent que des refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Le plancher au clavier : les touches qui descendent s'y arrêtent. Pas dans
@@ -724,13 +931,13 @@ export function Reader() {
   function startPan(e: React.MouseEvent) {
     if (e.button !== 0 || frozenRef.current) return;
     if ((e.target as HTMLElement).closest("[data-page]")) return;
-    panDragRef.current = { startX: e.clientX, startPan: panX };
+    panDragRef.current = { startX: e.clientX, startPan: panFrameRef.current?.value ?? panX };
     setPanning(true);
   }
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const d = panDragRef.current;
-      if (d) setPanX(clampPanX(d.startPan + (e.clientX - d.startX)));
+      if (d) schedulePan(() => d.startPan + (e.clientX - d.startX));
     };
     const onUp = () => {
       if (panDragRef.current) {
@@ -743,7 +950,9 @@ export function Reader() {
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current.raf);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Curseur « main fermée » pendant le glissé, où qu'aille le pointeur.
@@ -1107,6 +1316,7 @@ export function Reader() {
           // pousser le PDF sur le côté (Clikoda à droite) même quand il rentre.
           <div style={{ display: "flex", justifyContent: "center", minWidth: "min-content", cursor: "grab" }}>
           <div
+            ref={columnRef}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -1114,6 +1324,8 @@ export function Reader() {
               gap: 18,
               padding: "70px 0 40px",
               cursor: "grab",
+              // Pendant un geste de zoom, l'échelle s'ajoute ici, posée
+              // directement sur l'élément (cf. gestureRef) : sans rendu React.
               transform: `translateX(${panX}px)`,
             }}
           >
@@ -1129,185 +1341,33 @@ export function Reader() {
                 locked={locked}
                 lockedPage={lockedPage}
                 marksByPage={marksByPage}
-                onDeleteHighlight={(hid) => void askRemoveHighlight(hid)}
+                onDeleteHighlight={deleteHighlight}
               />
             ) : (
             Array.from({ length: data.page_count }, (_, i) => i + 1).map((n) => {
               const [w, h] = sizes[n - 1] ?? [595, 842];
-              const scale = width / w;
-              const words = wordsByPage[n];
-              const pageSaved = savedHighlights.filter((hl) => hl.page === n);
-              // Sous une question bloquante, seules les pages qu'on ne peut pas
-              // encore atteindre sont atténuées : celles du dessus se relisent.
-              const dimmed = locked && n > lockedPage;
               return (
-                <div
+                <PdfPage
                   key={n}
-                  data-page={n}
-                  // Ancre de la visite guidée, sur la PREMIÈRE page seulement :
-                  // `querySelector` prend le premier élément trouvé, donc la
-                  // poser sur toutes reviendrait au même — mais dire « la page
-                  // 1 » ici évite qu'on croie l'attribut générique et qu'on
-                  // s'appuie dessus ailleurs.
-                  {...(n === 1 ? { "data-tour": "page" } : {})}
-                  style={{
-                    position: "relative",
-                    width,
-                    aspectRatio: `${w} / ${h}`,
-                    background: "var(--surface)",
-                    boxShadow: "var(--shadow-md)",
-                    borderRadius: 4,
-                    overflow: "hidden",
-                    cursor: "default",
-                    opacity: dimmed ? 0.3 : 1,
-                    transition: "opacity 0.2s",
-                  }}
-                >
-                  <img
-                    src={pageImageUrl(id, n, renderZoom, data.content_hash)}
-                    alt={`Page ${n}`}
-                    loading="lazy"
-                    draggable={false}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      display: "block",
-                      // L'image ne doit jamais capter le drag de sélection (WebKit/pywebview).
-                      pointerEvents: "none",
-                      userSelect: "none",
-                      WebkitUserSelect: "none",
-                    }}
-                  />
-                  {/* Marque-page : ruban sur le bord droit de la page quittée la dernière fois. */}
-                  {n === bookmarkPage ? (
-                    <div
-                      title={t("reader.last_position")}
-                      style={{
-                        position: "absolute",
-                        top: 24,
-                        right: 0,
-                        width: 10,
-                        height: 46,
-                        background: "var(--accent)",
-                        borderRadius: "3px 0 0 3px",
-                        boxShadow: "var(--shadow-sm)",
-                        zIndex: 5,
-                      }}
-                    />
-                  ) : null}
-                  {highlightsByPage[n]?.length ? (
-                    <svg
-                      viewBox={`0 0 ${w} ${h}`}
-                      preserveAspectRatio="none"
-                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-                    >
-                      {highlightsByPage[n].map((g, gi) => (
-                        <rect
-                          key={gi}
-                          x={g.rect[0]}
-                          y={g.rect[1]}
-                          width={g.rect[2] - g.rect[0]}
-                          height={g.rect[3] - g.rect[1]}
-                          fill={g.color}
-                          opacity={0.35}
-                          rx={1}
-                        />
-                      ))}
-                    </svg>
-                  ) : null}
-                  {/* Zone visée par la question en cours : un liseré à l'accent,
-                      pour qu'on voie de quoi Clikoda parle — surtout quand la
-                      lecture est bloquée dessus. */}
-                  {zone && zone.page === n ? (
-                    <svg
-                      viewBox={`0 0 ${w} ${h}`}
-                      preserveAspectRatio="none"
-                      aria-hidden
-                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 4 }}
-                    >
-                      <rect
-                        data-testid="question-zone"
-                        x={zone.rect[0] - ZONE_PAD_PTS}
-                        y={zone.rect[1] - ZONE_PAD_PTS}
-                        width={zone.rect[2] - zone.rect[0] + 2 * ZONE_PAD_PTS}
-                        height={zone.rect[3] - zone.rect[1] + 2 * ZONE_PAD_PTS}
-                        fill="var(--accent)"
-                        fillOpacity={0.07}
-                        stroke="var(--accent)"
-                        strokeWidth={1.5}
-                        vectorEffect="non-scaling-stroke"
-                        rx={3}
-                      />
-                    </svg>
-                  ) : null}
-                  {/* Ancre de la visite guidée sur le passage cité (cf.
-                      `highlightBounds`). Invisible et inerte : elle ne sert
-                      qu'à donner un rectangle à éclairer au voile. */}
-                  {demo && highlightsByPage[n]?.length ? (
-                    <div
-                      aria-hidden
-                      data-tour="quote"
-                      style={{ position: "absolute", ...highlightBounds(highlightsByPage[n], scale), pointerEvents: "none" }}
-                    />
-                  ) : null}
-                  {/* Rappel libre : cache opaque sur le passage à restituer. Il
-                      recouvre le calque de texte, donc on ne peut ni le lire ni
-                      le sélectionner tant que la réponse n'est pas donnée. */}
-                  {maskByPage[n]?.length ? (
-                    <svg
-                      viewBox={`0 0 ${w} ${h}`}
-                      preserveAspectRatio="none"
-                      aria-label={t("qa.recall.masked")}
-                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 6 }}
-                    >
-                      {maskByPage[n].map((rect, ri) => (
-                        <rect
-                          key={ri}
-                          x={rect[0] - MASK_PAD_PTS}
-                          y={rect[1] - MASK_PAD_PTS}
-                          width={rect[2] - rect[0] + 2 * MASK_PAD_PTS}
-                          height={rect[3] - rect[1] + 2 * MASK_PAD_PTS}
-                          // Opaque, explicitement : la variable de thème est
-                          // pleine, mais rien ne doit pouvoir la rendre
-                          // translucide (transition d'opacité, thème tiers).
-                          fill="var(--surface-soft)"
-                          fillOpacity={1}
-                          stroke="var(--border-strong)"
-                          strokeDasharray="4 3"
-                          vectorEffect="non-scaling-stroke"
-                          rx={3}
-                        />
-                      ))}
-                    </svg>
-                  ) : null}
-                  {/* Calque de texte transparent : sélection native par-dessus l'image. */}
-                  {words ? <PageTextLayer words={words} scale={scale} /> : null}
-                  {/* Surlignages mémorisés (cliquables pour suppression). */}
-                  {pageSaved.length ? (
-                    <svg
-                      viewBox={`0 0 ${w} ${h}`}
-                      preserveAspectRatio="none"
-                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-                    >
-                      {pageSaved.map((hl) =>
-                        mergeLineRects(hl.rects).map((r, ri) => (
-                          <rect
-                            key={`${hl.id}-${ri}`}
-                            x={r[0]}
-                            y={r[1]}
-                            width={r[2] - r[0]}
-                            height={r[3] - r[1]}
-                            fill={HL_COLORS[hl.color] ?? "var(--hl-key)"}
-                            opacity={0.32}
-                            rx={1}
-                            style={{ pointerEvents: "all", cursor: "pointer" }}
-                            onClick={() => void askRemoveHighlight(hl.id)}
-                          />
-                        )),
-                      )}
-                    </svg>
-                  ) : null}
-                </div>
+                  docId={id}
+                  page={n}
+                  width={width}
+                  widthPts={w}
+                  heightPts={h}
+                  renderZoom={renderZoom}
+                  contentHash={data.content_hash}
+                  // Sous une question bloquante, seules les pages qu'on ne peut pas
+                  // encore atteindre sont atténuées : celles du dessus se relisent.
+                  dimmed={locked && n > lockedPage}
+                  bookmarked={n === bookmarkPage}
+                  highlights={highlightsByPage[n]}
+                  zoneRect={zone && zone.page === n ? zone.rect : null}
+                  mask={maskByPage[n]}
+                  words={wordsByPage[n]}
+                  saved={savedByPage[n] ?? NO_SAVED}
+                  demo={demo}
+                  onDeleteHighlight={deleteHighlight}
+                />
               );
             })
             )}
