@@ -17,6 +17,7 @@ from i18n import t
 from server import security
 from server.config import APP_VERSION, DEV_ORIGINS, FRONTEND_DIST
 from server.routers import (
+    annotations,
     brainstorming,
     data,
     flashcards,
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(flashcards.router, prefix="/api")
     app.include_router(library.router, prefix="/api")
     app.include_router(highlights.router, prefix="/api")
+    app.include_router(annotations.router, prefix="/api")
     app.include_router(reading.router, prefix="/api")
     app.include_router(quiz.router, prefix="/api")
     app.include_router(session.router, prefix="/api")

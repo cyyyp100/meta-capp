@@ -4,6 +4,10 @@
 # schéma v20) : il réapparaît à la réouverture du PDF et sert à enrichir le
 # contexte transmis au LLM (passages qui « tiennent à cœur » à l'étudiant).
 # Module distinct du module Tk reader/highlights.py (localisation éphémère).
+#
+# v45 : chaque surlignage a une étiquette (`label_id`, cf. db/annotation_labels),
+# un style (surligné, souligné, barré, encadré) et une note. La validation est
+# celle de services/annotations.py ; `color` reste, historique.
 from __future__ import annotations
 
 import json
@@ -25,6 +29,10 @@ def add_highlight(
     color: str = "key",
     user_id: int = DEFAULT_USER_ID,
     anchor: dict | None = None,
+    *,
+    label_id: int | None = None,
+    style: str | None = None,
+    note: str | None = None,
 ) -> int:
     """Mémorise un surlignage ; renvoie son id.
 
@@ -34,7 +42,9 @@ def add_highlight(
     PAS DE DOUBLON : le même passage (même page, même texte) surligné une
     seconde fois met à jour le surlignage existant — couleur et rectangles —
     et renvoie SON id. Sinon chaque re-sélection empilait une couche de plus,
-    et le contexte LLM citait le passage autant de fois."""
+    et le contexte LLM citait le passage autant de fois. L'étiquette et le
+    style ne changent que s'ils sont fournis, et une note existante n'est
+    jamais effacée par un nouveau surlignage du même passage (v45)."""
     ensure_default_user()
     clean_color = color if color in _VALID_COLORS else "key"
     clean_quote = (quote or "").strip()
@@ -47,11 +57,18 @@ def add_highlight(
     if existing is not None:
         with conn:
             conn.execute(
-                "UPDATE reader_highlights SET rects_json=?, color=?, anchor_json=? WHERE id=?",
+                """UPDATE reader_highlights
+                   SET rects_json=?, color=?, anchor_json=?,
+                       label_id=COALESCE(?, label_id), style=COALESCE(?, style),
+                       note=COALESCE(?, note), updated_at=datetime('now')
+                   WHERE id=?""",
                 (
                     json.dumps(rects or [], ensure_ascii=False),
                     clean_color,
                     json.dumps(anchor, ensure_ascii=False) if anchor else None,
+                    label_id,
+                    style,
+                    note or None,
                     existing["id"],
                 ),
             )
@@ -60,8 +77,9 @@ def add_highlight(
     with conn:
         cur = conn.execute(
             """INSERT INTO reader_highlights
-               (user_id, document_id, page, quote, rects_json, color, anchor_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, document_id, page, quote, rects_json, color, anchor_json,
+                label_id, style, note, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
             (
                 user_id or DEFAULT_USER_ID,
                 int(document_id),
@@ -70,6 +88,9 @@ def add_highlight(
                 json.dumps(rects or [], ensure_ascii=False),
                 clean_color,
                 json.dumps(anchor, ensure_ascii=False) if anchor else None,
+                label_id,
+                style or "highlight",
+                note or None,
             ),
         )
     logger.info("Surlignage créé id=%s doc=%s page=%s", cur.lastrowid, document_id, page)
@@ -88,14 +109,69 @@ def list_highlights(document_id: int, user_id: int = DEFAULT_USER_ID) -> list[di
     return [_decode(row) for row in rows]
 
 
-def delete_highlight(highlight_id: int, user_id: int = DEFAULT_USER_ID) -> int:
-    """Supprime un surlignage (filtré par utilisateur). Renvoie le nb supprimé."""
+def find_highlight(
+    document_id: int, page: int, quote: str, user_id: int = DEFAULT_USER_ID
+) -> dict | None:
+    """Le surlignage de ce passage (même page, même texte), s'il existe déjà."""
+    row = get_connection().execute(
+        """SELECT * FROM reader_highlights
+           WHERE user_id=? AND document_id=? AND page=? AND quote=? LIMIT 1""",
+        (user_id, int(document_id), int(page), (quote or "").strip()),
+    ).fetchone()
+    return _decode(row) if row else None
+
+
+def get_highlight(highlight_id: int, document_id: int, user_id: int = DEFAULT_USER_ID) -> dict | None:
+    """Un surlignage DE CE DOCUMENT : l'id d'un autre document est introuvable."""
+    row = get_connection().execute(
+        "SELECT * FROM reader_highlights WHERE id=? AND document_id=? AND user_id=?",
+        (int(highlight_id), int(document_id), user_id),
+    ).fetchone()
+    return _decode(row) if row else None
+
+
+# Colonnes qu'une édition peut changer ; la valeur None est écrite telle quelle
+# (étiquette retirée, note effacée) — c'est au service de dire quoi changer.
+_EDITABLE = ("label_id", "style", "note")
+
+
+def update_highlight(
+    highlight_id: int, document_id: int, fields: dict, user_id: int = DEFAULT_USER_ID
+) -> bool:
+    """Applique `fields` (sous-ensemble de label_id, style, note) au surlignage
+    du document. False s'il n'existe pas dans ce document."""
+    changes = {k: v for k, v in fields.items() if k in _EDITABLE}
+    if not changes:
+        return get_highlight(highlight_id, document_id, user_id) is not None
+    assignments = ", ".join(f"{column}=?" for column in changes)
     conn = get_connection()
     with conn:
         cur = conn.execute(
-            "DELETE FROM reader_highlights WHERE id=? AND user_id=?",
-            (int(highlight_id), user_id),
+            f"""UPDATE reader_highlights SET {assignments}, updated_at=datetime('now')
+                WHERE id=? AND document_id=? AND user_id=?""",
+            (*changes.values(), int(highlight_id), int(document_id), user_id),
         )
+    return bool(cur.rowcount)
+
+
+def delete_highlight(
+    highlight_id: int, user_id: int = DEFAULT_USER_ID, *, document_id: int | None = None
+) -> int:
+    """Supprime un surlignage (filtré par utilisateur et, si donné, par
+    document : un id d'un autre document ne supprime rien). Renvoie le nb
+    supprimé."""
+    conn = get_connection()
+    with conn:
+        if document_id is None:
+            cur = conn.execute(
+                "DELETE FROM reader_highlights WHERE id=? AND user_id=?",
+                (int(highlight_id), user_id),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM reader_highlights WHERE id=? AND user_id=? AND document_id=?",
+                (int(highlight_id), user_id, int(document_id)),
+            )
     return int(cur.rowcount or 0)
 
 

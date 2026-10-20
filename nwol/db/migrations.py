@@ -230,6 +230,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 44)
         current = 44
 
+    if current < 45 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v45(conn)
+        _set_version(conn, 45)
+        current = 45
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1926,6 +1931,112 @@ def _migrate_to_v44(conn) -> None:
     with conn:
         _ensure_column(conn, "documents", "bookmark_page", "INTEGER")
     logger.info("Migration SQLite v44 terminée")
+
+
+def _migrate_to_v45(conn) -> None:
+    """La prise de notes du lecteur : étiquettes, styles, notes, post-it, signets.
+
+    Le lecteur ne savait faire qu'un surlignage jaune : `reader_highlights.color`
+    valait toujours « key », et cliquer sur un surlignage le supprimait. Il n'y
+    avait ni note, ni étiquette, ni carnet. Cette étape ajoute :
+
+    - `annotation_labels` : les étiquettes de l'élève (« Important »,
+      « Définition »… puis les siennes), chacune avec une couleur de la palette
+      fermée (`settings.ANNOTATION_COLORS`). `preset` nomme une étiquette semée
+      (NULL = créée par l'élève) ; `name` NULL = le nom traduit du preset, qui
+      suit la langue de l'interface ;
+    - sur `reader_highlights` : `label_id` (SET NULL quand l'étiquette est
+      supprimée — le passage reste, en couleur neutre), `style` (surligné,
+      souligné, barré, encadré), `note` (le commentaire de l'élève) et
+      `updated_at` ;
+    - `reader_notes` : les post-it (posés sur la page, en points PDF origine
+      haut-gauche ; sans géométrie pour un fichier de code) et les signets (un
+      par page au plus, index unique partiel).
+
+    Données : les étiquettes prédéfinies sont semées pour chaque utilisateur
+    existant (une base neuve n'en a pas encore : services/annotations les sème
+    à la demande), et chaque surlignage reçoit l'étiquette qui correspond à son
+    ancienne couleur (`settings.ANNOTATION_LEGACY_COLOR_PRESETS`). La colonne
+    `color` reste, historique : elle est encore validée et renvoyée.
+
+    Rejouable : `CREATE … IF NOT EXISTS`, colonnes ajoutées une fois, semis en
+    `INSERT OR IGNORE` (unique par utilisateur et preset), et le report ne
+    touche que les surlignages encore sans étiquette ni `updated_at`."""
+    from config.settings import ANNOTATION_LEGACY_COLOR_PRESETS, ANNOTATION_PRESETS
+
+    logger.info("Migration SQLite v45 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS annotation_labels (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+                   preset     TEXT,
+                   name       TEXT,
+                   color      TEXT NOT NULL,
+                   position   INTEGER NOT NULL DEFAULT 0,
+                   created_at DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(user_id, preset)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_annotation_labels_user ON annotation_labels(user_id, position)"
+        )
+        _ensure_column(
+            conn, "reader_highlights", "label_id",
+            "INTEGER REFERENCES annotation_labels(id) ON DELETE SET NULL",
+        )
+        _ensure_column(conn, "reader_highlights", "style", "TEXT NOT NULL DEFAULT 'highlight'")
+        _ensure_column(conn, "reader_highlights", "note", "TEXT")
+        _ensure_column(conn, "reader_highlights", "updated_at", "DATETIME")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS reader_notes (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+                   document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                   page        INTEGER NOT NULL,
+                   kind        TEXT NOT NULL CHECK (kind IN ('sticky', 'signet')),
+                   x           REAL,
+                   y           REAL,
+                   body        TEXT NOT NULL DEFAULT '',
+                   label_id    INTEGER REFERENCES annotation_labels(id) ON DELETE SET NULL,
+                   created_at  DATETIME DEFAULT (datetime('now')),
+                   updated_at  DATETIME DEFAULT (datetime('now'))
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reader_notes_user_doc ON reader_notes(user_id, document_id, page)"
+        )
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_reader_notes_signet
+               ON reader_notes(user_id, document_id, page) WHERE kind = 'signet'"""
+        )
+
+        users = [int(row["id"]) for row in conn.execute("SELECT id FROM user").fetchall()]
+        for user_id in users:
+            conn.executemany(
+                """INSERT OR IGNORE INTO annotation_labels (user_id, preset, color, position)
+                   VALUES (?, ?, ?, ?)""",
+                [(user_id, preset, color, position) for position, (preset, color) in enumerate(ANNOTATION_PRESETS)],
+            )
+        # Une couleur inconnue ou NULL valait « key » (db/reader_highlights).
+        mapping = ANNOTATION_LEGACY_COLOR_PRESETS
+        preset_of = "CASE reader_highlights.color " + " ".join("WHEN ? THEN ?" for _ in mapping) + " ELSE ? END"
+        relabelled = conn.execute(
+            f"""UPDATE reader_highlights
+                SET label_id = (SELECT l.id FROM annotation_labels l
+                                WHERE l.user_id = reader_highlights.user_id AND l.preset = {preset_of})
+                WHERE label_id IS NULL AND updated_at IS NULL""",
+            (*(value for pair in mapping.items() for value in pair), mapping["key"]),
+        ).rowcount
+        dated = conn.execute(
+            "UPDATE reader_highlights SET updated_at = created_at WHERE updated_at IS NULL"
+        ).rowcount
+        logger.info(
+            "Migration v45 : étiquettes prédéfinies semées pour %d utilisateur(s), "
+            "%d surlignage(s) rattaché(s) à l'étiquette de leur couleur, %d daté(s)",
+            len(users), int(relabelled or 0), int(dated or 0),
+        )
+    logger.info("Migration SQLite v45 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:
