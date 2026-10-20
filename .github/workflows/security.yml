@@ -1,6 +1,10 @@
 # Scans sécurité (S5 du plan) : dépendances Python/npm + secrets.
-# Politique : ces scans BLOQUENT la release (release.yml les rejoue) ; sur PR
-# ils remontent l'info sans exiger un correctif immédiat (voir plan §3.2).
+# Politique : ces scans BLOQUENT la release (release.yml les rejoue, événement
+# `push` d'un tag), les pushs sur main/block et le cron. Sur PR, les deux audits
+# de dépendances remontent l'info sans exiger un correctif immédiat (voir plan
+# §3.2) : un avis publié entre deux commits n'est pas le fait de la PR — l'étape
+# échoue, le job reste vert et une annotation ::warning:: le signale. gitleaks
+# bloque partout : un secret, lui, est introduit par la PR.
 name: Security
 
 on:
@@ -28,7 +32,12 @@ jobs:
           python-version: "3.11.9"
       - run: pip install pip-audit
       - name: Audit des dépendances Python
+        id: audit
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: pip-audit -r requirements.txt -r requirements-build.txt
+      - name: Signaler l'audit en échec (PR, non bloquant)
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning title=pip-audit::Vulnérabilité connue dans les dépendances Python — non bloquant sur PR, bloquant sur main et à la release. Détail dans l'étape « Audit des dépendances Python »."
 
   npm-audit:
     runs-on: ubuntu-latest
@@ -38,8 +47,13 @@ jobs:
         with:
           node-version: "22"
       - name: Audit des dépendances npm (prod = bloquant dès « high »)
+        id: audit
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: npm audit --audit-level=high
         working-directory: frontend
+      - name: Signaler l'audit en échec (PR, non bloquant)
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning title=npm-audit::Vulnérabilité « high » ou plus dans les dépendances npm — non bloquant sur PR, bloquant sur main et à la release. Détail dans l'étape « Audit des dépendances npm »."
 
   gitleaks:
     runs-on: ubuntu-latest
