@@ -22,6 +22,7 @@ from config.settings import (
     ASSISTANT_FATIGUE_SHRINK_RATIO,
     ASSISTANT_FATIGUE_WINDOW,
     ASSISTANT_GLOBAL_COOLDOWN,
+    ASSISTANT_INTERVENTION_WINDOW_S,
     ASSISTANT_LOW_ATTENTION,
     ASSISTANT_MATH_AHEAD_DWELL_S,
     ASSISTANT_MAX_INTERVENTIONS,
@@ -82,7 +83,9 @@ class AssistantInterventionPolicy:
         self._last_global = _NEVER
         self._last_by_page: dict[int, float] = {}
         self._fired_reasons: set[tuple[int, str]] = set()
-        self._interventions_count = 0
+        # Instants des interventions retenues, en temps de LECTURE (cf. `skip`) :
+        # le plafond porte sur une fenêtre glissante, jamais sur la séance entière.
+        self._recent: list[float] = []
         self._due_card: dict | None = None
         self._flashcard_prompted = False
         # Départ du warm-up : posé par `start_reading()`, quand le lecteur franchit
@@ -129,6 +132,7 @@ class AssistantInterventionPolicy:
         self._last_global += seconds  # -inf (aucune intervention) le reste
         for page in self._last_by_page:
             self._last_by_page[page] += seconds
+        self._recent = [at + seconds for at in self._recent]
 
     def reset(self) -> None:
         self._busy = False
@@ -137,7 +141,7 @@ class AssistantInterventionPolicy:
         self._last_global = _NEVER
         self._last_by_page.clear()
         self._fired_reasons.clear()
-        self._interventions_count = 0
+        self._recent.clear()
         self._due_card = None
         self._flashcard_prompted = False
         self._opened_at = None
@@ -160,10 +164,10 @@ class AssistantInterventionPolicy:
             # attendrait derrière. Le mode du lecteur, lui, ne change pas : il
             # reprend ses droits dès que le mode économe s'arrête.
             return
-        if self._interventions_count >= ASSISTANT_MAX_INTERVENTIONS:
-            return
 
         now = time.monotonic()
+        if self._window_full(now):
+            return
         # Warm-up de début de lecture : silence le temps que le lecteur entre dans le
         # document — et, avant lui, tant qu'il est encore dans le sas d'entrée. Une
         # fois écoulé, le verrou est posé pour la session et seuls les cooldowns par
@@ -257,7 +261,7 @@ class AssistantInterventionPolicy:
 
         self._last_global = now
         self._last_by_page[trigger_page] = now
-        self._interventions_count += 1
+        self._recent.append(now)
         self._on_intervention({
             "kind": kind,
             "message": str(decision.get("message") or "").strip(),
@@ -266,6 +270,13 @@ class AssistantInterventionPolicy:
             "highlights": list(decision.get("highlights") or []),
             "flashcard": self._due_card if kind == "review_flashcard" else None,
         })
+
+    def _window_full(self, now: float) -> bool:
+        """Le plafond est-il atteint sur la fenêtre glissante ? Les interventions
+        sorties de la fenêtre sont oubliées au passage."""
+        horizon = now - ASSISTANT_INTERVENTION_WINDOW_S
+        self._recent = [at for at in self._recent if at > horizon]
+        return len(self._recent) >= ASSISTANT_MAX_INTERVENTIONS
 
     # ------------------------------------------------------------------
     # Déclencheurs

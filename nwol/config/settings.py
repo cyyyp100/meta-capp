@@ -1216,7 +1216,13 @@ ASSISTANT_WARMUP_S = {"normal": 240.0, "coach": 150.0}
 ASSISTANT_REVISIT_TRIGGER = 3       # retours sur une même page
 ASSISTANT_LOW_ATTENTION = 40.0      # seuil de jauge attention
 ASSISTANT_QUESTIONS_TRIGGER = 2     # questions utilisateur sur la même page
-ASSISTANT_MAX_INTERVENTIONS = 6     # par session
+# Plafond sur une fenêtre GLISSANTE de lecture : au plus ASSISTANT_MAX_INTERVENTIONS
+# dans toute période de ASSISTANT_INTERVENTION_WINDOW_S, pauses exclues (comme les
+# cooldowns). C'était un plafond par SÉANCE : les six tombaient dans la première
+# heure, puis Clikoda se taisait jusqu'à la fin — 2 h 47 sans une question sur
+# une séance de 3 h (journal du 2026-10-20).
+ASSISTANT_MAX_INTERVENTIONS = 6
+ASSISTANT_INTERVENTION_WINDOW_S = 3600.0
 
 # Fatigue de production : les réponses de l'étudiant rétrécissent d'une question
 # à l'autre. C'est le signal « il n'apprend plus », qui appelle une pause et non

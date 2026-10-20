@@ -1,8 +1,8 @@
 # Politique d'intervention — moteur unique partagé par le lecteur web.
 #
 # Ces tests couvrent les garde-fous que le chemin web n'avait pas avant
-# l'unification (plafond par session, cooldown par page, déclencheur `hard_page`)
-# et vérifient qu'aucun seuil n'est réintroduit en dur.
+# l'unification (plafond d'interventions, cooldown par page, déclencheur
+# `hard_page`) et vérifient qu'aucun seuil n'est réintroduit en dur.
 import time
 
 import pytest
@@ -46,7 +46,7 @@ def make_policy(monkeypatch, **overrides):
     return policy, memory, fired, contexts, page
 
 
-def test_max_interventions_per_session_is_enforced(monkeypatch):
+def test_max_interventions_per_window_is_enforced(monkeypatch):
     # Garde-fou absent du chemin web avant l'unification.
     from services import intervention
 
@@ -59,6 +59,63 @@ def test_max_interventions_per_session_is_enforced(monkeypatch):
         memory.on_page_view(n)
 
     assert len(fired) == 3
+
+
+def test_a_long_session_is_never_silenced_for_good(monkeypatch):
+    """Régression (journal du 2026-10-20) : le plafond était par SÉANCE. Sur une
+    lecture de 3 h, les six interventions sont tombées dans la première heure,
+    puis Clikoda s'est tue jusqu'à la fin — 2 h 47 sans une question. Le plafond
+    porte maintenant sur une fenêtre glissante : la plus ancienne en sort, une
+    place se libère."""
+    from services import intervention
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(intervention, "ASSISTANT_MAX_INTERVENTIONS", 3)
+    monkeypatch.setattr(intervention, "ASSISTANT_INTERVENTION_WINDOW_S", 3600.0)
+    policy, memory, fired, _ctx, page = make_policy(monkeypatch)
+
+    def tick_then_turn_page(step_s: float) -> None:
+        policy.tick()
+        page["n"] += 1
+        memory.on_page_view(page["n"])
+        clock["t"] += step_s
+
+    for _ in range(3):  # trois interventions, une toutes les dix minutes
+        tick_then_turn_page(600.0)
+    assert len(fired) == 3
+    while clock["t"] < 1000.0 + 3600.0:  # plafond atteint pour le reste de l'heure
+        tick_then_turn_page(300.0)
+    assert len(fired) == 3
+
+    clock["t"] = 1000.0 + 3600.0 + 1.0  # la première sort de la fenêtre
+    policy.tick()
+    assert len(fired) == 4
+
+
+def test_a_pause_does_not_age_the_window(monkeypatch):
+    """La fenêtre se compte en temps de LECTURE, comme les cooldowns : une
+    longue pause ne fait pas sortir une intervention de la fenêtre."""
+    from services import intervention
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(intervention, "ASSISTANT_MAX_INTERVENTIONS", 1)
+    monkeypatch.setattr(intervention, "ASSISTANT_INTERVENTION_WINDOW_S", 3600.0)
+    policy, memory, fired, _ctx, page = make_policy(monkeypatch)
+
+    policy.tick()
+    assert len(fired) == 1
+    page["n"] = 2
+    memory.on_page_view(2)
+    clock["t"] += 1800.0 + 3000.0  # 30 min de lecture, 50 min de pause
+    policy.skip(3000.0)
+    policy.tick()
+    assert len(fired) == 1  # 30 min de lecture seulement depuis l'intervention
+
+    clock["t"] += 1801.0
+    policy.tick()
+    assert len(fired) == 2
 
 
 def test_page_cooldown_blocks_second_intervention_on_same_page(monkeypatch):
@@ -170,7 +227,7 @@ def test_thresholds_come_from_settings_not_literals():
     source = inspect.getsource(intervention.AssistantInterventionPolicy)
     for name in (
         "ASSISTANT_DWELL_TRIGGER_S", "ASSISTANT_GLOBAL_COOLDOWN", "ASSISTANT_PAGE_COOLDOWN",
-        "ASSISTANT_WARMUP_S", "ASSISTANT_MAX_INTERVENTIONS",
+        "ASSISTANT_WARMUP_S", "ASSISTANT_MAX_INTERVENTIONS", "ASSISTANT_INTERVENTION_WINDOW_S",
     ):
         assert name in source, f"{name} n'est plus lu par la politique"
 
@@ -354,7 +411,7 @@ def test_a_decision_returning_during_a_pause_never_happened(monkeypatch):
     policy.set_paused(True)
     in_flight.pop()({"should_intervene": True, "kind": "offer_help"})
     assert fired == []
-    assert policy._interventions_count == 0
+    assert policy._recent == []
 
     policy.tick()  # toujours en pause : aucune nouvelle demande
     assert in_flight == []
@@ -380,7 +437,7 @@ def test_a_decision_returning_while_clikoda_is_busy_never_happened(monkeypatch):
     policy.set_busy(True)
     in_flight.pop()({"should_intervene": True, "kind": "ask_question"})
     assert fired == []
-    assert policy._interventions_count == 0
+    assert policy._recent == []
 
     policy.tick()  # toujours occupée : aucune nouvelle demande
     assert in_flight == []
