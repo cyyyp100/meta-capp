@@ -1009,9 +1009,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             logger.debug("Clôture de la pause ignorée", exc_info=True)
         # Flush du dwell de la page courante + persistance fine par page, et le
         # compte EXACT des pages lues (le dernier tick peut avoir 5 s de retard).
+        # Quitté depuis le sas, rien n'a été lu : sans cette garde, la mise en
+        # condition s'écrivait comme une lecture de la page 1 (et faussait
+        # l'allure de services/reading_pace), et le marque-page revenait à 1.
+        # La séance elle-même est effacée par `abandonSession`.
         try:
             memory.flush()
-            if state["session_id"] and memory.dwell_by_page:
+            if state["session_id"] and memory.reading_started and memory.dwell_by_page:
                 save_page_dwell(
                     int(state["session_id"]),
                     {int(k): round(v, 1) for k, v in memory.dwell_by_page.items()},
@@ -1024,7 +1028,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             session_memory.untrack(int(state["session_id"]), memory)
         # Marque-page : mémorise la dernière page vue pour la signaler à la réouverture.
         try:
-            update_last_page(doc_id, int(state["page"]))
+            if memory.reading_started:
+                update_last_page(doc_id, int(state["page"]))
         except Exception:  # persistance best-effort
             logger.debug("Persistance du marque-page ignorée", exc_info=True)
         # Stockage borné : ne garder que la vignette, jeter les pages de la session.

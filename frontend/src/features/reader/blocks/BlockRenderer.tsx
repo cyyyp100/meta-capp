@@ -17,13 +17,20 @@ import { CodeBlock } from "./CodeBlock";
 const headingSizes: Record<number, string> = { 1: "1.5em", 2: "1.25em", 3: "1.1em" };
 
 const NO_MARKS: TextMark[] = [];
+const NO_RANGES: [number, number][] = [];
 
 export function BlockRenderer({
   block,
   marks = NO_MARKS,
+  findRanges = NO_RANGES,
+  findCurrent = -1,
 }: {
   block: ReaderBlock;
   marks?: TextMark[];
+  /** Occurrences de la recherche dans le texte d'un bloc de code (offsets UTF-16). */
+  findRanges?: [number, number][];
+  /** Rang de l'occurrence courante parmi `findRanges`, -1 si elle est ailleurs. */
+  findCurrent?: number;
 }) {
   if (block.metadata?.reader_hidden) return null;
 
@@ -67,6 +74,8 @@ export function BlockRenderer({
           lang={typeof block.metadata?.lang === "string" ? block.metadata.lang : "text"}
           startLine={typeof block.metadata?.start_line === "number" ? block.metadata.start_line : 1}
           marks={marks}
+          findRanges={findRanges}
+          findCurrent={findCurrent}
         />
       );
 

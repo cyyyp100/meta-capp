@@ -170,3 +170,137 @@ def test_economy_is_forced_both_ways_through_the_one_write_path(client, ollama, 
     body = client.get("/api/llm/status").json()
     assert body["model"] == "qwen3:1.7b" and body["economy"] is False and body["economy_reason"] is None
     assert client.post("/api/preferences", json={"llm_economy": "maybe"}).status_code == 400
+
+
+def test_the_status_exposes_the_fluency_verdicts(client, ollama):
+    body = client.get("/api/llm/status").json()
+    assert body["auto_set_aside"] == []
+    assert body["auto_min_output_tokens_per_s"] == 15.0
+    assert all(entry["too_slow"] is False for entry in body["installed"] + body["catalog"])
+
+
+# ── « Automatique » = le plus capable qui reste fluide (judge_fluency) ───────
+#
+# La RAM ne départage pas e4b et 12b (12 Go chacun) : sur le M4 de 16 Go, le
+# 12b écrit à 11,9 tokens/s et e4b à 29,7 (2026-10-15). Le calibrage tranche.
+
+
+def _measured(model: str, output_tps: float, prompt_tps: float = 89.0) -> None:
+    """Un calibrage simulé : Ollama a rendu ces durées pour `model`."""
+    from llm import throughput
+
+    throughput.record_call({
+        "eval_count": 64, "eval_duration": int(64 / output_tps * 1e9),
+        "prompt_eval_count": 300, "prompt_eval_duration": int(300 / prompt_tps * 1e9),
+    }, model)
+
+
+@pytest.fixture
+def fluency(client, ollama, monkeypatch, reference_model):
+    """Les VRAIS verdicts, sur la base isolée de `client` ; le calibrage et le
+    déchargement sont des espions (aucun Ollama)."""
+    import threading
+    from types import SimpleNamespace
+
+    from llm import ollama_client
+    from services import llm_models
+
+    # Le démarrage du serveur lance `refresh_active` dans un thread (server/app) :
+    # fini avant les espions, il ne s'y mêle pas.
+    for thread in threading.enumerate():
+        if thread.name == "llm-calibration":
+            thread.join(timeout=5)
+    monkeypatch.setattr(llm_models, "set_aside", reference_model.set_aside)
+    monkeypatch.setattr(llm_models, "judge_fluency", reference_model.judge_fluency)
+    monkeypatch.setattr(llm_models, "_calibrated", set())
+    spies = SimpleNamespace(calibrated=[], unloaded=[])
+    monkeypatch.setattr(ollama_client, "calibrate_throughput", lambda: spies.calibrated.append(llm_models.active()))
+    monkeypatch.setattr(ollama_client, "unload_model", spies.unloaded.append)
+    ollama["models"] = [
+        {"name": "qwen3:1.7b", "size": 1_400_000_000},
+        {"name": "gemma4:e4b", "size": 9_600_000_000},
+        {"name": "gemma4:12b", "size": 8_000_000_000},
+    ]
+    llm_models.invalidate()
+    return spies
+
+
+def _verdicts() -> dict:
+    import json
+
+    from db.app_settings import get_setting
+
+    return json.loads(get_setting("llm_auto_set_aside") or "{}")
+
+
+def test_a_model_too_slow_here_is_set_aside_and_replaced(client, ollama, fluency):
+    from services import llm_models
+
+    assert llm_models.active() == "gemma4:12b"
+    _measured("gemma4:12b", 11.9)
+    llm_models.judge_fluency("gemma4:12b")
+
+    assert llm_models.active() == "gemma4:e4b"
+    assert fluency.calibrated == ["gemma4:e4b"]  # le suivant est calibré à son tour
+    assert fluency.unloaded == ["gemma4:12b"]  # 12b et e4b ne tiennent pas ensemble
+    verdict = _verdicts()["gemma4:12b"]
+    assert verdict["output_tokens_per_s"] == pytest.approx(11.9, abs=0.1)
+    assert verdict["ram_gb"] == 16.0
+
+    body = client.get("/api/llm/status").json()
+    assert body["model"] == "gemma4:e4b"
+    assert [entry["model"] for entry in body["auto_set_aside"]] == ["gemma4:12b"]
+    assert body["auto_set_aside"][0]["prompt_tokens_per_s"] == pytest.approx(89.0, abs=1)
+    assert body["auto_set_aside"][0]["measured_at"]
+    catalog = {entry["name"]: entry for entry in body["catalog"]}
+    assert catalog["gemma4:12b"]["too_slow"] is True and catalog["gemma4:e4b"]["too_slow"] is False
+    # Au relancement, plus de calibrage du 12b : le verdict est en base.
+    assert fluency.calibrated == ["gemma4:e4b"]
+
+
+def test_a_model_measured_above_the_floor_is_rehabilitated(client, ollama, fluency):
+    from services import llm_models
+
+    _measured("gemma4:12b", 11.9)
+    llm_models.judge_fluency("gemma4:12b")
+    assert llm_models.active() == "gemma4:e4b"
+
+    from llm import throughput
+
+    throughput.reset("gemma4:12b")
+    _measured("gemma4:12b", 21.0)  # mesuré branché, hors économie d'énergie
+    llm_models.judge_fluency("gemma4:12b")
+    assert _verdicts() == {}
+    assert llm_models.active() == "gemma4:12b"
+
+
+def test_an_explicit_choice_is_noted_but_not_switched(client, ollama, fluency):
+    from services import llm_models
+
+    ollama["pref"] = "gemma4:12b"
+    _measured("gemma4:12b", 11.9)
+    llm_models.judge_fluency("gemma4:12b")
+    assert "gemma4:12b" in _verdicts()  # le fait est noté…
+    assert llm_models.active() == "gemma4:12b"  # …le choix respecté
+    assert fluency.calibrated == [] and fluency.unloaded == []
+
+    ollama["pref"] = "auto"  # retour à « Automatique » : e4b
+    llm_models.invalidate()
+    assert llm_models.active() == "gemma4:e4b"
+
+
+def test_an_unreadable_database_neither_raises_nor_sets_anything_aside(client, ollama, fluency, monkeypatch):
+    from db import app_settings
+    from services import llm_models
+
+    def _locked(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(app_settings, "get_setting", _locked)
+    monkeypatch.setattr(app_settings, "set_setting", _locked)
+    llm_models.invalidate()
+    _measured("gemma4:12b", 11.9)
+    llm_models.judge_fluency("gemma4:12b")  # ne lève pas
+    assert llm_models.set_aside(16.0) == {}
+    assert llm_models.active() == "gemma4:12b"
+    assert client.get("/api/llm/status").status_code == 200

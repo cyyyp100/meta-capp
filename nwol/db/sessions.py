@@ -114,6 +114,21 @@ def list_sessions(user_id: int = DEFAULT_USER_ID, limit: int = 20) -> list[dict]
     return [_decode_session(row) for row in rows]
 
 
+def latest_read_document_id(user_id: int = DEFAULT_USER_ID) -> int | None:
+    """Document de la séance la plus récente qui a LU quelque chose.
+
+    Une séance ouverte puis quittée depuis le sas, ou un import jamais lu, ne
+    désigne pas ce qu'on est en train de lire : seul `pages_read > 0` le dit."""
+    row = get_connection().execute(
+        """SELECT document_id FROM reading_sessions
+           WHERE user_id=? AND pages_read > 0 AND document_id IS NOT NULL
+           ORDER BY started_at DESC, id DESC
+           LIMIT 1""",
+        (user_id,),
+    ).fetchone()
+    return int(row["document_id"]) if row else None
+
+
 def count_sessions(user_id: int = DEFAULT_USER_ID) -> int:
     row = get_connection().execute(
         "SELECT COUNT(*) AS n FROM reading_sessions WHERE user_id=?", (user_id,),

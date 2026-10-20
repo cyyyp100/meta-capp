@@ -12,9 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clikoda's model is a setting** (`Settings ▸ Clikoda`). The gemma4 family is declared
   in one table (`nwol/config/settings.py:LLM_MODELS`) with what each model downloads, the
   RAM it needs and the speed it writes at. "Automatic" (the default) picks the most capable
-  model installed that this machine can actually load; an explicit choice is always
-  honoured — even one that is missing or too heavy, because nothing is disabled and the
-  reason is stated instead.
+  model installed that this machine can actually load **and that stays fluent on it**:
+  the startup calibration measures each model it runs, and one that writes below
+  15 tokens/s is set aside for the next best one — on a 16 GB Apple M4, `gemma4:12b`
+  (11.9 tokens/s) gives way to `gemma4:e4b` (29.7), which RAM alone could not tell apart.
+  The verdict holds 14 days for this machine's RAM, a later measure above the threshold
+  lifts it, the tiny model is never picked for speed alone, and Settings names the model
+  set aside with its measured speed. An explicit choice is always honoured — even one that
+  is missing, too heavy or too slow, because nothing is disabled and the reason is stated
+  instead.
 - **`GET /api/llm/status`**: whether Ollama answers, which model runs, whether it fits in
   this machine, the measured speed, and the `ollama pull` command to copy when something is
   missing. The reader's status light now tells "connected" apart from "Clikoda can answer"
@@ -32,9 +38,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   queue) and a **Cancel** button.
 - A dismissible note on the language home page for the tiny model, separate from the
   general one; the home page says when economy mode keeps episodes from being written.
+- **Search the document** (⌘F on macOS, Ctrl+F elsewhere, or the toolbar's magnifier):
+  accents and capitals are ignored, a word hyphenated at the end of a line is found
+  whole, and "3 / 17" walks through every occurrence of the document (Enter /
+  Shift+Enter, ⌘/Ctrl+G, F3; Esc closes). Code files are searched too. A scanned PDF
+  says it has no text to search; an occurrence below a blocking question is counted but
+  not reached, and one inside a free-recall passage stays hidden. The document is
+  indexed once, in batches that leave the PDF engine free for the pages being read
+  (`GET /api/library/doc/{id}/find`, `…/page/{n}/find`).
 
 ### Changed
 
+- **The "Resume" card shows the time left in the document** ("≈ 2 h 10 to finish"), at
+  the reader's measured pace: the median time per page read in this document, else in
+  documents of the same kind (a code file does not borrow the pace of PDFs), else 2 min a
+  page, labelled as an estimate. It used to show the median of the last 40 sessions,
+  quizzes and language sessions included (7 min for someone reading in 22-minute
+  stretches), whatever the document. The card now resumes the document of the last
+  session that actually read something, so a PDF imported but never opened no longer
+  takes its place (`GET /api/library/resume`).
 - Prompt sizes are estimated **per tokenizer** (five character classes, calibrated on 60
   measured prompts): vocalized Arabic costs 0.6 token per character with Gemma and 0.8
   with qwen3, not 0.5, and digits cost one each. The budget benches now run for every
@@ -48,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one is attached.
 - The out-of-memory message names the active model and the RAM it needs (it said
   "about 16 GB" for every model).
+- `gemma4:12b`'s reference speeds are the ones measured on the 16 GB Apple M4 (11 tokens/s
+  written, 85 read, pessimistic like the other rows): its time budgets are longer, and
+  choosing it explicitly no longer announces a "slow machine" — the model is slow, not
+  the machine.
 - Time budgets follow the chosen model. The cost of a heavier model and the measured
   slowness of the machine are two separate factors, so `OLLAMA_MAX_SLOWDOWN` again bounds
   only the machine; measured throughput is kept per model. Each task's `num_ctx` is capped
@@ -57,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A word hyphenated at the end of a line ("differen- / tials") was one word for the
+  reader's text layer, with a box covering both lines: selecting it lit up a rectangle
+  as tall as the paragraph. It is now two words, each on its line.
+- Leaving the reader from the entry airlock no longer records the warm-up as time spent
+  reading page 1, nor moves the last page seen back to 1. That session is erased anyway;
+  its time skewed the measured reading pace.
 - The curiosity hook could read "Entre dans **non renseigné** en cherchant…". An empty
   field wrote a placeholder into the prompt, and the offline fallback re-read its own
   prompt and found it. Empty context lines are now omitted, the fallback receives the

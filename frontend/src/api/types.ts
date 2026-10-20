@@ -78,6 +78,46 @@ export interface DocumentSummary {
   last_known_folder: string | null;
 }
 
+/** Ce qu'il reste à lire d'un document, à l'allure mesurée de l'élève
+ *  (nwol/services/reading_pace.remaining). `scope` dit d'où vient l'allure :
+ *  ce document, les documents de même nature, ou un défaut (`measured` faux). */
+export interface ReadingRemaining {
+  pages: number;
+  seconds_per_page: number;
+  minutes: number;
+  measured: boolean;
+  samples: number;
+  scope: "document" | "kind" | "default";
+}
+
+/** Ctrl/Cmd+F du lecteur, sur tout le document (nwol/services/reader_find) :
+ *  combien d'occurrences, sur quelles pages. `query` est la requête PLIÉE.
+ *  `searchable` faux : le document n'a pas de texte (PDF scanné). */
+export interface FindSummary {
+  query: string;
+  total: number;
+  pages: { page: number; count: number }[];
+  searchable: boolean;
+  too_short: boolean;
+}
+
+/** Les occurrences d'une page : pour un PDF, une liste de rects (points PDF,
+ *  origine haut-gauche, un par ligne) PAR occurrence ; pour un fichier de code,
+ *  des plages [début, fin) en unités UTF-16 du texte du bloc. */
+export interface FindOnPage {
+  page: number;
+  rects?: number[][][];
+  ranges?: [number, number][];
+  truncated: boolean;
+}
+
+/** La carte « Reprendre » (GET /api/library/resume) : le document de la
+ *  dernière séance qui a lu quelque chose, sinon le plus récent. */
+export interface ResumePayload {
+  document: DocumentSummary | null;
+  remaining: ReadingRemaining | null;
+}
+
 /** Réponse de « Localiser le fichier » : le document relié, et les AUTRES
  *  documents introuvables retrouvés au même endroit. */
 export interface RelinkResult {

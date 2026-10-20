@@ -20,6 +20,84 @@ def fold(text: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
+# ── Recherche dans le texte d'une page (Ctrl/Cmd+F du lecteur) ───────────────
+#
+# Un mot coupé en fin de ligne n'est pas deux mots. PDFium remplace le tiret et
+# le saut de ligne par un marqueur, qui n'est pas le même selon la lecture :
+# U+FFFE dans le texte indexé (`PdfDocument._indexed_text`, celui dont les
+# indices sont ceux de PDFium), U+0002 dans `get_text_bounded`. Le trait d'union
+# conditionnel (U+00AD) d'un fichier de code joue le même rôle. Les trois
+# disparaissent du texte plié : « différen-/tielles » s'y lit « differentielles ».
+HYPHENATION_MARKERS = frozenset({"\ufffe", "\x02", "\u00ad"})
+
+
+def fold_with_map(text: str) -> tuple[str, list[int]]:
+    """Le même repli que `fold` (NFKD, accents retirés, minuscules), avec la
+    position d'origine de chaque caractère plié : `map[k]` est l'index, dans
+    `text`, du caractère qui a produit `folded[k]`.
+
+    Différences voulues avec `fold` : pas de `strip` (les positions doivent
+    rester celles du texte entier), toute suite de blancs devient UNE espace
+    (« tielles   ordinaires » et un saut de ligne se cherchent comme une
+    espace), et les marqueurs de césure disparaissent. C'est ce qui permet de
+    remonter d'une occurrence trouvée dans le texte plié aux boîtes PDFium (ou
+    aux offsets d'un fichier de code) du texte d'origine."""
+    folded: list[str] = []
+    mapping: list[int] = []
+    last_space = False
+    for index, char in enumerate(text or ""):
+        if char in HYPHENATION_MARKERS:
+            continue
+        if char.isspace():
+            produced = " "
+        else:
+            produced = "".join(
+                c for c in unicodedata.normalize("NFKD", char.lower()) if not unicodedata.combining(c)
+            )
+        for c in produced:
+            if c.isspace():
+                if last_space:
+                    continue
+                c, last_space = " ", True
+            else:
+                last_space = False
+            folded.append(c)
+            mapping.append(index)
+    return "".join(folded), mapping
+
+
+def fold_query(query: str) -> str:
+    """Une requête de recherche pliée comme le texte où on la cherche
+    (`fold_with_map`), blancs de tête et de queue retirés."""
+    return fold_with_map(query)[0].strip()
+
+
+def find_all(haystack: str, needle: str, limit: int | None = None) -> list[int]:
+    """Débuts des occurrences de `needle`, SANS chevauchement — le même compte
+    que `str.count`, si bien qu'un total annoncé et les occurrences surlignées
+    ne divergent jamais. Au plus `limit` occurrences."""
+    starts: list[int] = []
+    if not needle:
+        return starts
+    at = haystack.find(needle)
+    while at >= 0 and (limit is None or len(starts) < limit):
+        starts.append(at)
+        at = haystack.find(needle, at + len(needle))
+    return starts
+
+
+def utf16_offsets(text: str) -> list[int]:
+    """`offsets[i]` = nombre d'unités UTF-16 avant le caractère `i` de `text`
+    (longueur `len(text) + 1`). Une chaîne JavaScript compte en UTF-16 : un
+    emoji y vaut deux, contre un caractère Python. Les plages envoyées au
+    navigateur sont converties ici, côté serveur, parce que Python (NFKD) et
+    JavaScript (NFD) ne replient pas les accents de la même façon."""
+    offsets = [0]
+    for char in text:
+        offsets.append(offsets[-1] + (2 if ord(char) > 0xFFFF else 1))
+    return offsets
+
+
 def fingerprint(*parts: str) -> str:
     """Empreinte stable de textes comparés « au sens », pas à l'octet.
 

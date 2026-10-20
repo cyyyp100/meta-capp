@@ -2,7 +2,15 @@
 # le document sous les yeux (« according to the text », « Table 3.5 »).
 import pytest
 
-from utils.text import document_reference
+from utils.text import (
+    HYPHENATION_MARKERS,
+    document_reference,
+    find_all,
+    fold,
+    fold_query,
+    fold_with_map,
+    utf16_offsets,
+)
 
 # Cartes automatiques réelles, créées pendant des lectures puis servies seules
 # dans le sas d'entrée — c'est ce qu'elles font que le détecteur doit attraper.
@@ -123,3 +131,38 @@ def test_quiz_drops_a_question_that_needs_its_missing_context():
     assert _is_unusable_for_quiz(question, source_context=None)
     assert not _is_unusable_for_quiz(question, source_context="Transfer learning fails when…")
     assert not _is_unusable_for_quiz("What is transfer learning?", source_context=None)
+
+
+# ── Repli avec positions (recherche du lecteur, services/reader_find) ────────
+
+
+def test_fold_with_map_folds_like_fold_and_keeps_positions():
+    text = "Les Équations"
+    folded, mapping = fold_with_map(text)
+    assert folded == fold(text) == "les equations"
+    assert len(mapping) == len(folded)
+    assert text[mapping[folded.index("equations")]] == "É"
+
+
+def test_fold_with_map_collapses_blanks_and_drops_hyphenation_markers():
+    for marker in HYPHENATION_MARKERS:
+        folded, mapping = fold_with_map(f"  différen{marker}tielles  \r\n\tordinaires ")
+        # Pas de strip : les positions restent celles du texte entier.
+        assert folded == " differentielles ordinaires "
+        assert mapping[1] == 2 and mapping[-1] == len(f"  différen{marker}tielles  \r\n\tordinaires ") - 1
+
+
+def test_fold_query_strips_and_folds_the_query():
+    assert fold_query("  Équation   DIFFÉRENTIELLE ") == "equation differentielle"
+    assert fold_query("   ") == ""
+
+
+def test_find_all_does_not_overlap_like_str_count():
+    assert find_all("aaaa", "aa") == [0, 2] and "aaaa".count("aa") == 2
+    assert find_all("le le le", "le", limit=2) == [0, 3]
+    assert find_all("abc", "") == []
+
+
+def test_utf16_offsets_count_an_emoji_twice():
+    text = "a😀b"
+    assert utf16_offsets(text) == [0, 1, 3, 4]

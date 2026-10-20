@@ -54,14 +54,17 @@ export function ClikodaSection({ payload }: { payload: PreferencesPayload }) {
     if (!entry) return { value, label: value };
     const tier = t(`settings.clikoda.tier_${entry.tier ?? "standard"}`);
     const detail = t("settings.clikoda.option", { tier, gb: entry.download_gb ?? "?" });
-    // « Trop lourd » passe devant « pas installé » : conseiller un
-    // téléchargement de 20 Go à une machine qui ne pourra pas le charger est
-    // le pire des deux avertissements possibles.
+    // « Trop lourd » passe devant le reste : conseiller un téléchargement de
+    // 20 Go à une machine qui ne pourra pas le charger est le pire des
+    // avertissements possibles. Puis « trop lent ici » (mesuré, et c'est la
+    // raison pour laquelle « Automatique » ne le prend pas), puis « pas installé ».
     const warning = !entry.fits
       ? ` — ${t("settings.clikoda.too_big")}`
-      : !entry.installed
-        ? ` — ${t("settings.clikoda.not_installed")}`
-        : "";
+      : entry.too_slow
+        ? ` — ${t("settings.clikoda.too_slow")}`
+        : !entry.installed
+          ? ` — ${t("settings.clikoda.not_installed")}`
+          : "";
     return { value, label: `${value} · ${detail}${warning}` };
   });
 
@@ -147,6 +150,20 @@ function ClikodaState({
       </p>
 
       {reason && <p className="mt-3 mb-0 text-sm text-warning">{reason}</p>}
+
+      {/* En « Automatique », pourquoi tel modèle plus capable ne tourne pas : sa
+          vitesse mesurée ici. Le choisir reste possible — c'est un arbitrage
+          qualité contre vitesse, pas une interdiction. */}
+      {status.preference === "auto" &&
+        status.auto_set_aside.map((entry) => (
+          <p key={entry.model} className="mt-3 mb-0 text-[13px] text-muted-foreground">
+            {t("settings.clikoda.auto_set_aside", {
+              model: entry.model,
+              tps: entry.output_tokens_per_s,
+              floor: status.auto_min_output_tokens_per_s,
+            })}
+          </p>
+        ))}
 
       {needsPull && (
         <div className="mt-3">

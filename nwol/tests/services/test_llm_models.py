@@ -86,6 +86,72 @@ def test_latest_is_not_a_tag():
     assert llm_models.resolve("auto", ["gemma4:e4b:latest"], 16.0)["model"] == "gemma4:e4b"
 
 
+# ── La fluidité : « Automatique » = le plus capable qui reste fluide ─────────
+#
+# e4b et 12b exigent les mêmes 12 Go : la RAM ne les départage pas. Mesuré le
+# 2026-10-15 sur un M4 de 16 Go, 12b écrit à 11,9 tokens/s et e4b à 29,7.
+
+_ALL_GEMMA = ["qwen3:1.7b", "gemma4:e2b", "gemma4:e4b", "gemma4:12b"]
+
+
+def test_a_model_set_aside_for_slowness_gives_way_to_the_next_best():
+    assert llm_models.auto_pick(_ALL_GEMMA, 16.0, {"gemma4:12b": 11.9}) == "gemma4:e4b"
+    assert llm_models.resolve("auto", _ALL_GEMMA, 16.0, {"gemma4:12b": 11.9})["model"] == "gemma4:e4b"
+
+
+def test_a_slow_model_stays_chosen_rather_than_falling_to_the_tiny_tier():
+    """Seuls 12b et qwen3 installés : passer au palier minuscule couperait l'aide
+    autonome et le travail de fond (mode économe). Un 12b lent vaut mieux."""
+    assert llm_models.auto_pick(["gemma4:12b", "qwen3:1.7b"], 16.0, {"gemma4:12b": 11.9}) == "gemma4:12b"
+
+
+def test_all_capable_models_set_aside_gives_the_fastest_measured():
+    too_slow = {"gemma4:12b": 11.9, "gemma4:e4b": 14.2, "gemma4:e2b": 13.0}
+    assert llm_models.auto_pick(_ALL_GEMMA, 16.0, too_slow) == "gemma4:e4b"
+
+
+def test_a_tiny_model_set_aside_is_still_taken_when_it_is_all_that_fits():
+    assert llm_models.auto_pick(["qwen3:1.7b", "gemma4:e2b"], 4.0, {"qwen3:1.7b": 3.0}) == "qwen3:1.7b"
+
+
+def test_an_explicit_choice_ignores_the_verdicts():
+    resolution = llm_models.resolve("gemma4:12b", _ALL_GEMMA, 16.0, {"gemma4:12b": 11.9})
+    assert resolution["model"] == "gemma4:12b"
+    assert resolution["reason"] is None
+
+
+def test_the_missing_model_fallback_honours_the_verdicts():
+    resolution = llm_models.resolve("gemma4:31b", ["gemma4:e4b", "gemma4:12b"], 16.0, {"gemma4:12b": 11.9})
+    assert resolution["model"] == "gemma4:e4b"
+    assert resolution["reason"] == "model_missing"
+
+
+def test_an_expired_verdict_or_one_taken_with_another_ram_is_ignored():
+    from datetime import datetime, timedelta, timezone
+
+    from config.settings import LLM_AUTO_VERDICT_TTL_DAYS
+
+    now = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+
+    def verdict(days_ago: float, ram_gb: float | None) -> dict:
+        at = (now - timedelta(days=days_ago)).isoformat()
+        return {"output_tokens_per_s": 11.9, "prompt_tokens_per_s": 89.0, "ram_gb": ram_gb, "at": at}
+
+    verdicts = {
+        "gemma4:12b": verdict(1, 16.0),
+        "gemma4:e4b": verdict(LLM_AUTO_VERDICT_TTL_DAYS + 1, 16.0),  # expiré
+        "gemma4:e2b": verdict(1, 32.0),  # une autre machine (base restaurée)
+        "gemma4:26b": verdict(1, 16.3),  # même machine, mesure de RAM arrondie
+        "gemma4:31b": {"output_tokens_per_s": "?", "at": "hier"},  # illisible
+    }
+    assert set(llm_models.valid_verdicts(verdicts, 16.0, now)) == {"gemma4:12b", "gemma4:26b"}
+    # RAM inconnue : seul un verdict pris RAM inconnue vaut.
+    assert llm_models.valid_verdicts({"gemma4:12b": verdict(1, None)}, None, now) == {
+        "gemma4:12b": verdict(1, None),
+    }
+    assert llm_models.valid_verdicts(verdicts, None, now) == {}
+
+
 def test_an_unknown_model_keeps_the_reference_profile():
     """Jamais None : les budgets temps d'un modèle inconnu doivent rester définis."""
     assert llm_models.profile("llama3:8b") is LLM_REFERENCE_PROFILE

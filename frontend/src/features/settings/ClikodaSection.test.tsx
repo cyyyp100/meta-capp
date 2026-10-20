@@ -44,6 +44,7 @@ function status(extra: Partial<LlmStatus> = {}): LlmStatus {
     pull_command: "ollama pull gemma4:e4b",
     throughput: { model: "gemma4:e4b", measured: true, output_tokens_per_s: 27.4, prompt_tokens_per_s: 240, slowdown: 1 },
     economy: false, economy_preference: "auto", economy_reason: null,
+    auto_set_aside: [], auto_min_output_tokens_per_s: 15,
     ...extra,
   };
 }
@@ -137,6 +138,38 @@ describe("ClikodaSection", () => {
     const state = await screen.findByText(/clikoda tourne avec|clikoda is running/i);
     expect(state).toHaveTextContent(/mode économe actif|economy mode on/i);
     expect(state).toHaveTextContent(/plus petit modèle|smallest model/i);
+  });
+
+  it("dit pourquoi « Automatique » écarte un modèle plus capable, sans l'interdire", async () => {
+    // Le M4 de 16 Go : 12b tient en mémoire mais n'écrit que 11,9 tokens/s.
+    const heavy = { name: "gemma4:12b", tier: "standard", download_gb: 8, min_ram_gb: 12, installed: true, fits: true };
+    const state = status({
+      installed: [
+        { name: "gemma4:e4b", size_gb: 8.9, known: true, fits: true },
+        { name: "gemma4:12b", size_gb: 7.5, known: true, fits: true, too_slow: true },
+      ],
+      catalog: [...status().catalog, { ...heavy, too_slow: true }],
+      auto_set_aside: [
+        { model: "gemma4:12b", output_tokens_per_s: 11.9, prompt_tokens_per_s: 89, measured_at: "2026-10-15T09:12:00+00:00" },
+      ],
+    });
+    const payload = preferences();
+    payload.choices.llm_model = [...payload.choices.llm_model, "gemma4:12b"];
+    await renderSection(payload, state);
+
+    expect(await screen.findByText(/gemma4:12b (est écarté|is left out).*11[.,]9.*\(15\)/)).toBeInTheDocument();
+    const option = screen.getByRole("button", { name: /gemma4:12b/i });
+    expect(option).toHaveAccessibleName(/trop lent ici|too slow here/i);
+    expect(option).not.toBeDisabled();
+  });
+
+  it("ne détaille pas les modèles écartés quand le choix est explicite", async () => {
+    await renderSection(preferences("gemma4:e4b"), status({
+      preference: "gemma4:e4b",
+      auto_set_aside: [{ model: "gemma4:12b", output_tokens_per_s: 11.9, prompt_tokens_per_s: 89, measured_at: null }],
+    }));
+    await screen.findByText(/clikoda tourne avec|clikoda is running/i);
+    expect(screen.queryByText(/est écarté|is left out/)).toBeNull();
   });
 
   it("dit qu'Ollama est éteint sans le confondre avec un modèle absent", async () => {

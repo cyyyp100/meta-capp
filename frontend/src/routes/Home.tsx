@@ -273,7 +273,6 @@ export function Home() {
       {documents && documents.length > 0 && !searching && selection.kind !== "folder" && (
         <div className="mt-5.5">
           <ResumeCard
-            documents={allDocuments}
             onRelink={(doc) => void relink(doc)}
             relinkingId={relinkingId}
           />

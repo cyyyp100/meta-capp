@@ -419,6 +419,7 @@ def test_a_session_closed_during_a_pause_still_records_it(client, tmp_path, make
     doc_id, sid = _reading_session(client, tmp_path, make_pdf)
     with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
         ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "start_reading", "session_id": sid})
         ws.send_json({"type": "pause", "source": "manual"})
         _sync(ws)
 
@@ -587,6 +588,27 @@ def test_the_entry_sas_is_not_reading(client, tmp_path, make_pdf, quick_reading)
     assert get_session(sid)["pages_read"] == 0
     dwell = {row["page"]: row["dwell_s"] for row in get_page_dwell(sid)}
     assert dwell[1] < quick_reading
+
+
+def test_closing_during_the_entry_sas_keeps_last_page_and_writes_no_dwell(client, tmp_path, make_pdf,
+                                                                          quick_reading):
+    """Quitter depuis le sas : la séance n'a pas eu lieu (le client l'efface,
+    `abandonSession`). Sa fermeture écrivait pourtant la mise en condition comme
+    une lecture de la page 1 — l'allure de services/reading_pace en était
+    faussée — et ramenait la dernière page vue à 1."""
+    import time
+
+    from db.documents import get_document, update_last_page
+    from db.page_dwell import get_page_dwell
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    update_last_page(doc_id, 12)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading * 2)
+    assert get_page_dwell(sid) == []
+    assert get_document(doc_id)["last_page"] == 12
 
 
 def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_path, make_pdf, quick_reading):

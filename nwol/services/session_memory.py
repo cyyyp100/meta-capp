@@ -121,6 +121,12 @@ class SessionMemory:
     # ------------------------------------------------------------------
     # Lectures (politique d'intervention / synthèse)
     # ------------------------------------------------------------------
+    @property
+    def reading_started(self) -> bool:
+        """Le sas d'entrée est-il franchi ? Avant, rien de ce que la mémoire a
+        vu n'est une lecture : ni temps par page, ni position à retenir."""
+        return self._reading_started
+
     def current_dwell(self, now: float | None = None) -> float:
         """Secondes passées sur la page dominante actuelle (pause en cours exclue)."""
         if self._current_page is None:

@@ -61,7 +61,13 @@ def reference_model(monkeypatch):
 
     Le mode économe dépend, lui, de la RAM de la machine et d'un second réglage :
     un runner CI de 7 Go (macOS) l'activerait en « auto » et changerait tous les
-    budgets. RAM figée à « inconnue » (qui n'active rien) et réglage « auto »."""
+    budgets. RAM figée à « inconnue » (qui n'active rien) et réglage « auto ».
+
+    Les verdicts de lenteur du choix automatique (`set_aside`, `judge_fluency`)
+    sont lus et écrits en base : sans la fixture `client`, ce serait la VRAIE
+    `data/nwol.db`, et un calibrage simulé lent (6 tokens/s) écarterait un
+    modèle pour la suite. Aucun verdict, aucun jugement ; le test qui les veut
+    reçoit les vraies fonctions (`.set_aside`, `.judge_fluency`)."""
     from types import SimpleNamespace
 
     from llm import ollama_client
@@ -70,11 +76,14 @@ def reference_model(monkeypatch):
     real = SimpleNamespace(
         list_models=ollama_client.list_models, preference=llm_models.preference,
         host_ram_gb=llm_models.host_ram_gb, economy_preference=llm_models.economy_preference,
+        set_aside=llm_models.set_aside, judge_fluency=llm_models.judge_fluency,
     )
     monkeypatch.setattr(ollama_client, "list_models", lambda: None)
     monkeypatch.setattr(llm_models, "preference", lambda: llm_models.LLM_MODEL_AUTO)
     monkeypatch.setattr(llm_models, "host_ram_gb", lambda: None)
     monkeypatch.setattr(llm_models, "economy_preference", lambda: llm_models.LLM_ECONOMY_AUTO)
+    monkeypatch.setattr(llm_models, "set_aside", lambda _ram_gb: {})
+    monkeypatch.setattr(llm_models, "judge_fluency", lambda _model: None)
     llm_models.invalidate()
     yield real
     llm_models.invalidate()
