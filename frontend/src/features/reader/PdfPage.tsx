@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { MathText } from "../../components/MathText";
 import { pageImageUrl } from "../../api/client";
@@ -29,6 +29,9 @@ export interface SavedPageHighlight {
 /** Aucune note sur la page : la même liste à chaque rendu (la page est mémoïsée). */
 export const NO_NOTES: ReaderNote[] = [];
 const NO_LABELS = new Map<number, AnnotationLabel>();
+// Ce qui, sur la page, a son propre clic : un clic dessus n'édite pas le
+// surlignage qu'il recouvre.
+const OWN_CLICK = "button, a, input, textarea, select, [data-note]";
 
 /**
  * Boîte englobante des surlignages d'une page, en pixels d'écran.
@@ -138,6 +141,30 @@ export const PdfPage = memo(function PdfPage({
   // Note d'un surlignage dont on survole la pastille : une petite carte la montre.
   const [peek, setPeek] = useState<number | null>(null);
   const peeked = peek !== null ? saved.find((hl) => hl.id === peek && hl.note) : undefined;
+  // Les surlignages enregistrés ne captent plus le pointeur : leurs rects
+  // couvraient le texte, et on ne pouvait ni commencer ni prolonger une
+  // sélection par-dessus — elle sautait au bout de la page. La page reconnaît
+  // elle-même, par la géométrie, le surlignage sous un clic ou un survol.
+  const [hovered, setHovered] = useState<number | null>(null);
+  const hoveredHl = hovered !== null ? saved.find((hl) => hl.id === hovered) : undefined;
+  function highlightAt(e: React.MouseEvent<HTMLDivElement>): SavedPageHighlight | undefined {
+    if (!saved.length) return undefined;
+    const box = e.currentTarget.getBoundingClientRect();
+    const k = box.width / w; // l'échelle affichée, geste de zoom en cours compris
+    const x = (e.clientX - box.left) / k;
+    const y = (e.clientY - box.top) / k;
+    // Le dernier dessiné est au-dessus.
+    for (let i = saved.length - 1; i >= 0; i--) {
+      if (saved[i].rects.some((r) => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3])) return saved[i];
+    }
+    return undefined;
+  }
+  // Le cache d'un rappel libre retire ses mots du calque de texte : le passage
+  // ne se sélectionne ni ne se copie dessous. Le reste de la page, si.
+  const hidden = useMemo(
+    () => mask?.map((r) => [r[0] - MASK_PAD_PTS, r[1] - MASK_PAD_PTS, r[2] + MASK_PAD_PTS, r[3] + MASK_PAD_PTS]),
+    [mask],
+  );
   const src = pageImageUrl(docId, page, renderZoom, contentHash);
   // L'image affichée reste celle qu'on a tant que la nouvelle résolution n'est
   // pas chargée ET décodée : changer `src` directement vidait la page le temps
@@ -179,6 +206,27 @@ export const PdfPage = memo(function PdfPage({
       // 1 » ici évite qu'on croie l'attribut générique et qu'on
       // s'appuie dessus ailleurs.
       {...(page === 1 ? { "data-tour": "page" } : {})}
+      {...(hoveredHl ? { "data-hl-hover": "" } : {})}
+      title={hoveredHl ? (hoveredHl.note ? `${hoveredHl.labelName} — ${hoveredHl.note}` : hoveredHl.labelName) : undefined}
+      onClick={(e) => {
+        // Un clic posé sur un surlignage l'édite ; la fin d'un glissé de
+        // sélection, non (la sélection n'est alors pas vide).
+        if (!saved.length || (e.target as Element).closest(OWN_CLICK)) return;
+        if (!document.getSelection()?.isCollapsed) return;
+        const hl = highlightAt(e);
+        if (hl) onEditHighlight(hl.id);
+      }}
+      onMouseMove={
+        saved.length
+          ? (e) => {
+              // Pendant un glissé, le curseur reste celui de la sélection.
+              if (e.buttons) return;
+              const id = highlightAt(e)?.id ?? null;
+              if (id !== hovered) setHovered(id);
+            }
+          : undefined
+      }
+      onMouseLeave={() => setHovered(null)}
       style={{
         position: "relative",
         width,
@@ -317,15 +365,16 @@ export const PdfPage = memo(function PdfPage({
           style={{ position: "absolute", ...highlightBounds(highlights, scale), pointerEvents: "none" }}
         />
       ) : null}
-      {/* Rappel libre : cache opaque sur le passage à restituer. Il
-          recouvre le calque de texte, donc on ne peut ni le lire ni
-          le sélectionner tant que la réponse n'est pas donnée. */}
+      {/* Rappel libre : cache opaque sur le passage à restituer. On ne
+          peut ni le lire ni le sélectionner tant que la réponse n'est pas
+          donnée — ses mots sont retirés du calque de texte (`hidden`) ; le
+          cache, lui, laisse passer le pointeur vers le reste de la page. */}
       {mask?.length ? (
         <svg
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
           aria-label={t("qa.recall.masked")}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 6 }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 6, pointerEvents: "none" }}
         >
           {mask.map((rect, ri) => (
             <rect
@@ -348,10 +397,11 @@ export const PdfPage = memo(function PdfPage({
         </svg>
       ) : null}
       {/* Calque de texte transparent : sélection native par-dessus l'image. */}
-      {words ? <PageTextLayer words={words} scale={scale} /> : null}
+      {words ? <PageTextLayer words={words} scale={scale} hidden={hidden} /> : null}
       {/* Surlignages mémorisés : tracés selon leur style (surligné, souligné,
-          barré, encadré), à la couleur de leur étiquette. Toute la ligne est
-          cliquable — l'édition s'ouvre (`data-hl` : l'ancre de la popover). */}
+          barré, encadré), à la couleur de leur étiquette. Un clic sur la ligne
+          l'édite (cf. `highlightAt`) ; ses rects pleins (`data-hl`) servent
+          d'ancre à la popover et au clignotement, sans capter le pointeur. */}
       {saved.length ? (
         <svg
           viewBox={`0 0 ${w} ${h}`}
@@ -387,11 +437,7 @@ export const PdfPage = memo(function PdfPage({
                   width={r[2] - r[0]}
                   height={r[3] - r[1]}
                   fill="transparent"
-                  style={{ pointerEvents: "all", cursor: "pointer" }}
-                  onClick={() => onEditHighlight(hl.id)}
-                >
-                  <title>{hl.note ? `${hl.labelName} — ${hl.note}` : hl.labelName}</title>
-                </rect>
+                />
               ))}
             </g>
           ))}

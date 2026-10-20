@@ -9,6 +9,16 @@ from pdf_viewer.engine import PDFIUM_LOCK
 
 logger = logging.getLogger("pdf_viewer.document")
 
+# Boîte « loose » d'un caractère (cf. `PdfDocument._char_box`) : elle doit
+# contenir le glyphe à cette tolérance près, et ne pas dépasser ce multiple de
+# sa plus grande dimension — au-delà, les métriques de la police sont
+# fantaisistes et la boîte du glyphe fait foi. Le corps d'une lettre courante
+# fait au plus ~2,2 fois sa hauteur d'x ; un point ou un tiret, beaucoup plus,
+# et retombent donc sur leur glyphe (la bande de la ligne les reprend côté
+# lecteur).
+_LOOSE_TOLERANCE_PT = 1.0
+_LOOSE_MAX_RATIO = 3.0
+
 
 class PdfDocument:
     """Enveloppe fine autour de pypdfium2 (moteur PDFium).
@@ -254,7 +264,9 @@ class PdfDocument:
 
         PDFium n'expose que des caractères : on regroupe les suites non-blanches
         et on unit leurs boîtes. L'ordre reste celui du flux de contenu, comme
-        le faisait ``get_text("words")``.
+        le faisait ``get_text("words")``. Les boîtes couvrent le CORPS de la
+        police (cf. `_char_box`) : tous les mots d'une ligne partagent la même
+        bande, jambages compris.
         """
         try:
             with self._page(page_number) as page:
@@ -322,6 +334,45 @@ class PdfDocument:
         return rects
 
     @staticmethod
+    def _char_box(textpage, index: int) -> tuple[float, float, float, float] | None:
+        """Boîte d'un caractère pour le calque de sélection, en origine PDFium.
+
+        La boîte serrée (`get_charbox`) est celle du glyphe : « ce » n'a que la
+        hauteur d'x, « expliciter » va de l'ascendante à la descendante — sur
+        une même ligne, des boîtes de 4,5 à 8,8 pt pour un corps de 10 pt.
+        Le calque en tirait une bande médiane qui coupait les jambages, et la
+        sélection comme les surlignages tombaient à côté du texte. La boîte
+        « loose » couvre le corps entier de la police (ascendante → descendante,
+        origine → avance) : la même pour tous les caractères d'une ligne.
+
+        Elle n'est retenue que si elle est plausible : non dégénérée (PDFium la
+        calcule à plat — un texte pivoté la donne vide), contenant le glyphe,
+        et pas démesurée (métriques de police fantaisistes). Sinon, la boîte
+        serrée. None : caractère sans boîte (ignoré, comme avant)."""
+        try:
+            left, bottom, right, top = (float(v) for v in textpage.get_charbox(index))
+        except Exception:  # pragma: no cover - défensif (caractère sans glyphe)
+            return None
+        if not (right > left and top > bottom):
+            return None
+        try:
+            l_left, l_bottom, l_right, l_top = (float(v) for v in textpage.get_charbox(index, loose=True))
+        except Exception:  # pragma: no cover - défensif
+            return left, bottom, right, top
+        plausible = (
+            l_right > l_left
+            and l_top > l_bottom
+            and l_left <= left + _LOOSE_TOLERANCE_PT
+            and l_right >= right - _LOOSE_TOLERANCE_PT
+            and l_bottom <= bottom + _LOOSE_TOLERANCE_PT
+            and l_top >= top - _LOOSE_TOLERANCE_PT
+            and l_top - l_bottom <= _LOOSE_MAX_RATIO * max(top - bottom, right - left)
+        )
+        if plausible:
+            return l_left, l_bottom, l_right, l_top
+        return left, bottom, right, top
+
+    @staticmethod
     def _group_words(
         textpage, text: str, height: float
     ) -> list[tuple[float, float, float, float, str]]:
@@ -350,18 +401,16 @@ class PdfDocument:
             # premier morceau ; le second commence la ligne suivante.
             hyphen = char in HYPHENATION_MARKERS
             buffer.append("-" if hyphen else char)
-            try:
-                left, bottom, right, top = textpage.get_charbox(index)
-            except Exception:  # pragma: no cover - défensif (caractère sans glyphe)
-                left = right = bottom = top = 0.0
-            if right > left and top > bottom:  # boîte dégénérée : ignorée
+            char_box = PdfDocument._char_box(textpage, index)
+            if char_box is not None:  # caractère sans boîte : ignoré
+                left, bottom, right, top = char_box
                 if box is None:
-                    box = [float(left), float(bottom), float(right), float(top)]
+                    box = [left, bottom, right, top]
                 else:
-                    box[0] = min(box[0], float(left))
-                    box[1] = min(box[1], float(bottom))
-                    box[2] = max(box[2], float(right))
-                    box[3] = max(box[3], float(top))
+                    box[0] = min(box[0], left)
+                    box[1] = min(box[1], bottom)
+                    box[2] = max(box[2], right)
+                    box[3] = max(box[3], top)
             if hyphen:
                 flush()
         flush()

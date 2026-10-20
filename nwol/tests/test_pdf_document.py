@@ -88,8 +88,29 @@ def test_words_and_search_agree_on_the_same_word(tmp_path, make_pdf):
     with PdfDocument(path) as pdf:
         word = next(w for w in pdf.words(1) if w[4] == "Meta")
         rect = pdf.search_text(1, "Meta")[0]
-    for from_words, from_search in zip(word[:4], rect):
-        assert abs(from_words - from_search) < 2.0
+    # À l'horizontale, les deux chemins coïncident. À la verticale, la boîte du
+    # calque couvre le corps de la police (`_char_box`) : elle contient le
+    # glyphe que trouve la recherche, sans déborder d'une ligne de 12 pt.
+    assert abs(word[0] - rect[0]) < 1.5 and abs(word[2] - rect[2]) < 1.5
+    assert word[1] <= rect[1] + 0.01 and word[3] >= rect[3] - 0.01
+    assert word[3] - word[1] < 12 * 1.3
+
+
+def test_the_words_of_a_line_share_one_band(tmp_path, make_pdf):
+    """La boîte serrée d'un glyphe varie d'un mot à l'autre (« ce » : hauteur
+    d'x ; « expliciter » : de l'ascendante à la descendante) : le calque en
+    tirait une bande médiane qui coupait les jambages, et la sélection tombait
+    à côté du texte. Les boîtes de mots couvrent maintenant le corps de la
+    police — la même bande pour toute la ligne, qui contient chaque glyphe."""
+    path = make_pdf(tmp_path / "band.pdf", ["ce que nous allons expliciter"])
+    with PdfDocument(path) as pdf:
+        words = pdf.words(1)
+        glyphs = {w[4]: pdf.search_text(1, w[4])[0] for w in words}
+    assert {round(w[1], 2) for w in words} == {round(words[0][1], 2)}
+    assert {round(w[3], 2) for w in words} == {round(words[0][3], 2)}
+    for x0, y0, x1, y1, text in words:
+        gx0, gy0, gx1, gy1 = glyphs[text]
+        assert y0 <= gy0 + 0.01 and y1 >= gy1 - 0.01, text
 
 
 def test_line_sizes_expose_a_bigger_heading(tmp_path, make_pdf):

@@ -165,6 +165,151 @@ export function placedBoxes(words: PageWord[]): Map<number, [number, number, num
 }
 
 /**
+ * Élément du calque, dans l'ordre de LECTURE de la page (celui du flux du PDF).
+ *
+ * Les spans suivaient l'ordre des bandes : sur deux colonnes, la ligne 3 de
+ * gauche et la ligne 3 de droite se suivaient dans le DOM, et sélectionner
+ * trois lignes à gauche en colorait autant à droite. Et rien ne séparait deux
+ * mots : la sélection avançait par à-coups, de mot en mot, et sautait au bout
+ * de la page dès que le pointeur passait dans un vide.
+ *
+ * Désormais, comme dans le calque de PDF.js, une ligne est une suite de mots
+ * séparés par de VRAIS espaces (un span par écart, qui le couvre), et deux
+ * lignes par un saut (`<br>`) : la sélection est continue, la copie garde ses
+ * espaces et ses retours. Chaque mot couvre exactement sa boîte (`width`,
+ * `height`) ; autour, une zone de saisie (`pad*`) : la moitié de l'interligne
+ * au-dessus et au-dessous, et un peu de marge avant le premier mot et après le
+ * dernier — on attrape une ligne sans viser au pixel près, sans jamais
+ * empiéter sur la voisine.
+ */
+export type LayerItem =
+  | {
+      kind: "word";
+      wi: number;
+      text: string;
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+      rotated: boolean;
+      padTop: number;
+      padBottom: number;
+      padLeft: number;
+      padRight: number;
+    }
+  | { kind: "space"; left: number; top: number; width: number; height: number; padTop: number; padBottom: number }
+  | { kind: "break" };
+
+// Deux mots d'une même bande ont le même `top` (placeWords) : la tolérance
+// n'absorbe que l'arrondi.
+export const SAME_BAND_PT = 0.5;
+// Au-delà de cet écart (en hauteurs de ligne), deux mots consécutifs ne sont
+// plus séparés par une espace : colonne voisine, cellule de tableau.
+const WORD_GAP_MAX = 3;
+// Zone de saisie, en hauteurs de ligne : au plus la moitié au-dessus et
+// au-dessous (sinon la moitié de l'écart avec la ligne voisine), au plus 1,5
+// avant le premier mot et après le dernier (sinon la moitié de l'écart avec le
+// mot voisin de la même bande, dans l'autre colonne).
+const LINE_REACH = 0.5;
+const EDGE_REACH = 1.5;
+
+interface Run {
+  words: PlacedWord[];
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+function continuesRun(prev: PlacedWord, next: PlacedWord): boolean {
+  if (prev.rotated || next.rotated) return false;
+  if (Math.abs(prev.top - next.top) > SAME_BAND_PT || Math.abs(prev.height - next.height) > SAME_BAND_PT) return false;
+  const gap = next.left - (prev.left + prev.width);
+  return gap >= -prev.height * 0.5 && gap <= prev.height * WORD_GAP_MAX;
+}
+
+function intersects(p: PlacedWord, r: number[]): boolean {
+  return p.left < r[2] && p.left + p.width > r[0] && p.top < r[3] && p.top + p.height > r[1];
+}
+
+/**
+ * Le calque d'une page : ses mots, les espaces entre eux et les sauts de
+ * ligne, dans l'ordre de lecture. `hidden` : boîtes (points PDF) dont les mots
+ * sont retirés du calque — le passage caché d'un rappel libre ne doit pas se
+ * sélectionner (ni se copier) sous son cache.
+ */
+export function layoutTextLayer(words: PageWord[], hidden: number[][] = []): LayerItem[] {
+  const byWi = new Map(placeWords(words).map((p) => [p.wi, p]));
+  const runs: Run[] = [];
+  let current: PlacedWord[] = [];
+  const close = () => {
+    if (!current.length) return;
+    const first = current[0];
+    const last = current[current.length - 1];
+    runs.push({ words: current, left: first.left, right: last.left + last.width, top: first.top, bottom: first.top + first.height });
+    current = [];
+  };
+  for (let wi = 0; wi < words.length; wi++) {
+    const p = byWi.get(wi);
+    if (!p || hidden.some((r) => intersects(p, r))) {
+      close();
+      continue;
+    }
+    const prev = current[current.length - 1];
+    if (!prev || !continuesRun(prev, p)) close();
+    current.push(p);
+  }
+  close();
+
+  const items: LayerItem[] = [];
+  runs.forEach((run, ri) => {
+    if (ri > 0) items.push({ kind: "break" });
+    const [first] = run.words;
+    if (first.rotated) {
+      items.push({ kind: "word", ...first, padTop: 0, padBottom: 0, padLeft: 0, padRight: 0 });
+      return;
+    }
+    const height = run.bottom - run.top;
+    let above = -Infinity;
+    let below = Infinity;
+    let leftNeighbour = -Infinity;
+    let rightNeighbour = Infinity;
+    for (const other of runs) {
+      if (other === run || other.words[0].rotated) continue;
+      const overlapsX = other.left < run.right && other.right > run.left;
+      if (overlapsX && other.bottom <= run.top + SAME_BAND_PT) above = Math.max(above, other.bottom);
+      else if (overlapsX && other.top >= run.bottom - SAME_BAND_PT) below = Math.min(below, other.top);
+      else if (Math.abs(other.top - run.top) <= SAME_BAND_PT && Math.abs(other.bottom - run.bottom) <= SAME_BAND_PT) {
+        if (other.right <= run.left + SAME_BAND_PT) leftNeighbour = Math.max(leftNeighbour, other.right);
+        else if (other.left >= run.right - SAME_BAND_PT) rightNeighbour = Math.min(rightNeighbour, other.left);
+      }
+    }
+    const reach = (gap: number, cap: number) => Math.min(Math.max(gap / 2, 0), cap);
+    const padTop = reach(run.top - above, height * LINE_REACH);
+    const padBottom = reach(below - run.bottom, height * LINE_REACH);
+    const padLeft = Math.min(reach(run.left - leftNeighbour, height * EDGE_REACH), Math.max(0, run.left));
+    const padRight = reach(rightNeighbour - run.right, height * EDGE_REACH);
+    run.words.forEach((p, k) => {
+      const last = k === run.words.length - 1;
+      items.push({
+        kind: "word",
+        ...p,
+        top: run.top,
+        height,
+        padTop,
+        padBottom,
+        padLeft: k === 0 ? padLeft : 0,
+        padRight: last ? padRight : 0,
+      });
+      if (last) return;
+      const end = p.left + p.width;
+      items.push({ kind: "space", left: end, top: run.top, width: run.words[k + 1].left - end, height, padTop, padBottom });
+    });
+  });
+  return items;
+}
+
+/**
  * Facteur de compression horizontale d'un span pour qu'il couvre exactement sa
  * boîte (méthode du calque de texte de PDF.js). Le rapport est invariant à
  * l'échelle : on mesure une fois en points, il reste valable à tous les zooms.

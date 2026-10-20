@@ -24,6 +24,7 @@ import { NO_HITS, NO_NOTES, PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } fro
 import { ReaderToolbar, ToolbarIconButton } from "../features/reader/ReaderToolbar";
 import { buildQuote } from "../features/reader/selectionQuote";
 import { placedBoxes } from "../features/reader/textLayer";
+import { selectedWordIndices } from "../features/reader/textSelection";
 import { useStableCallback } from "../features/reader/useStableCallback";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
@@ -1147,18 +1148,15 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, data?.page_count, isCode]);
 
-  // Sélection sur une page PDF : les mots touchés du calque (`data-wi`). Leurs
-  // boîtes PLACÉES (bandes de ligne), pas les boîtes brutes de PDFium, forment
-  // les rects — le surlignage enregistré couvre exactement ce que l'utilisateur
-  // a vu se colorer —, et leur texte la citation, avec ses espaces
-  // (`buildQuote` : le calque n'en a pas, `sel.toString()` collait les mots).
+  // Sélection sur une page PDF : les mots du calque (`data-wi`) dont au moins
+  // un caractère est sélectionné. Leurs boîtes PLACÉES (bandes de ligne), pas
+  // les boîtes brutes de PDFium, forment les rects — le surlignage enregistré
+  // couvre exactement ce que l'utilisateur a vu se colorer —, et leur texte la
+  // citation (`buildQuote` : césures recollées, marqueurs retirés).
   function pdfSelection(pageEl: HTMLElement, page: number, sel: Selection): { rects: number[][]; quote: string } {
     const words = wordsByPage[page] || [];
     const boxes = placedBoxes(words);
-    const selected: number[] = [];
-    pageEl.querySelectorAll<HTMLElement>("[data-wi]").forEach((span) => {
-      if (sel.containsNode(span, true)) selected.push(Number(span.dataset.wi));
-    });
+    const selected = selectedWordIndices(sel.getRangeAt(0), pageEl);
     const rects: number[][] = [];
     for (const wi of selected) {
       const box = boxes.get(wi);
@@ -1231,6 +1229,19 @@ export function Reader() {
     return () => document.removeEventListener("mouseup", onUp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wordsByPage, isCode]);
+
+  // Un nouveau geste efface la barre de la sélection précédente. Restée
+  // affichée pendant le glissé suivant, elle était sur son chemin — juste
+  // au-dessus de la ligne choisie — et la sélection sautait dedans, jusqu'au
+  // bout du document. Elle revient au relâcher s'il y a encore une sélection.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (e.target instanceof Node && toolbarRef.current?.contains(e.target)) return;
+      setSelection(null);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, []);
 
   // Marques des pages reconstruites : citations de Clikoda + surlignages mémorisés.
   const flashKey = flash?.key ?? null;

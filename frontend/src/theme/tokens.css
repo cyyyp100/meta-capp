@@ -537,6 +537,57 @@ body {
   cursor: crosshair !important;
 }
 
+/* Calque de texte transparent d'une page PDF (features/reader/PageTextLayer).
+   Spans en absolu, comprimés à la largeur de leur mot ; derrière eux, le bloc
+   de fin de contenu (features/reader/textSelection) couvre les vides. */
+[data-textlayer] {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  /* La transparence est celle du CALQUE, la sélection y est opaque : chaque
+     span peint la sienne (plus un bout de « fin de ligne » qui mord sur le mot
+     suivant), et deux sélections translucides superposées foncent — une bande
+     sombre au début de chaque mot. Aplaties d'abord, elles se confondent. Le
+     texte, transparent, n'en est pas affecté. */
+  opacity: 0.28;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+}
+[data-textlayer] > span,
+[data-textlayer] > br {
+  position: absolute;
+  z-index: 1;
+  color: transparent;
+  font-family: sans-serif; /* = TEXT_LAYER_FONT, la police de la mesure */
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+[data-textlayer] ::selection {
+  background: rgb(0 96 255);
+  background: AccentColor;
+}
+[data-textlayer] br::selection {
+  background: transparent;
+}
+[data-textlayer] > [data-textlayer-end] {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Survol d'un surlignage enregistré : un clic l'édite (PdfPage). */
+[data-hl-hover] [data-textlayer] > span {
+  cursor: pointer;
+}
+
 /* ---------------------------------------------------------------------------
    COMPAT PREFLIGHT — À SUPPRIMER en fin de migration Tailwind.
 

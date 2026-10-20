@@ -1,15 +1,16 @@
 import type { PageWord } from "../../api/types";
-import { placedBoxes } from "./textLayer";
+import { placedBoxes, SAME_BAND_PT } from "./textLayer";
 
 /**
  * Texte d'une sélection sur une page PDF, reconstruit depuis les mots du calque.
  *
- * Le calque de texte est fait de <span> posés mot à mot, sans espace entre
- * eux : `Selection.toString()` y lit « inatypicaltrainingscript… ». C'était le
- * texte des surlignages enregistrés et des extraits « + Contexte » envoyés à
- * Clikoda. On repart donc des mots sélectionnés (`data-wi`), dans l'ordre de la
- * page, joints par une espace — les mêmes mots que ceux dont les rects forment
- * le surlignage, si bien que la citation dit exactement ce qui s'est coloré.
+ * Le calque de texte a longtemps été fait de <span> posés mot à mot, sans
+ * espace entre eux : `Selection.toString()` y lisait « inatypicaltraining… ».
+ * Il a maintenant ses espaces et ses sauts de ligne (`layoutTextLayer`), mais la
+ * citation repart toujours des mots sélectionnés (`data-wi`), dans l'ordre de
+ * la page, joints par une espace — les mêmes mots que ceux dont les rects
+ * forment le surlignage, si bien que la citation dit exactement ce qui s'est
+ * coloré, sans les retours à la ligne du PDF.
  *
  * Césure : le moteur PDF termine le premier morceau d'un mot coupé en fin de
  * ligne par « - » (`_group_words`). Quand le mot suivant ouvre une autre bande
@@ -24,9 +25,6 @@ const HYPHENATION_MARKERS = new Set(["￾", "\u0002", "­"]);
 const withoutMarkers = (s: string) => [...s].filter((c) => !HYPHENATION_MARKERS.has(c)).join("");
 const ENDS_WITH_BROKEN_WORD = /\p{L}-$/u;
 const STARTS_WITH_LETTER = /^\p{L}/u;
-// Deux mots d'une même bande ont le même `top` (placeWords) : la tolérance
-// n'absorbe que l'arrondi.
-const SAME_BAND_PT = 0.5;
 
 export function buildQuote(
   words: PageWord[],
