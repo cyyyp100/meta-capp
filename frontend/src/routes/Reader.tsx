@@ -26,6 +26,7 @@ import { useReaderFind } from "../features/reader/find/useReaderFind";
 import { boundsOf, frameRect, type PageGeometry } from "../features/reader/frame";
 import { NO_HITS, PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
 import { ReaderToolbar, ToolbarIconButton } from "../features/reader/ReaderToolbar";
+import { buildQuote } from "../features/reader/selectionQuote";
 import { placedBoxes } from "../features/reader/textLayer";
 import { useStableCallback } from "../features/reader/useStableCallback";
 import { EntrySas } from "../features/session/EntrySas";
@@ -1156,19 +1157,24 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, data?.page_count, isCode]);
 
-  // Rects d'une sélection : on relit les boîtes PLACÉES du calque (bandes de
-  // ligne), pas les boîtes brutes de PDFium — le surlignage enregistré doit
-  // couvrir exactement ce que l'utilisateur a vu se colorer en sélectionnant.
-  function computeSelectionRects(pageEl: HTMLElement, page: number, sel: Selection): number[][] {
-    const boxes = placedBoxes(wordsByPage[page] || []);
-    const spans = pageEl.querySelectorAll<HTMLElement>("[data-wi]");
-    const rects: number[][] = [];
-    spans.forEach((span) => {
-      if (!sel.containsNode(span, true)) return;
-      const box = boxes.get(Number(span.dataset.wi));
-      if (box) rects.push([...box]);
+  // Sélection sur une page PDF : les mots touchés du calque (`data-wi`). Leurs
+  // boîtes PLACÉES (bandes de ligne), pas les boîtes brutes de PDFium, forment
+  // les rects — le surlignage enregistré couvre exactement ce que l'utilisateur
+  // a vu se colorer —, et leur texte la citation, avec ses espaces
+  // (`buildQuote` : le calque n'en a pas, `sel.toString()` collait les mots).
+  function pdfSelection(pageEl: HTMLElement, page: number, sel: Selection): { rects: number[][]; quote: string } {
+    const words = wordsByPage[page] || [];
+    const boxes = placedBoxes(words);
+    const selected: number[] = [];
+    pageEl.querySelectorAll<HTMLElement>("[data-wi]").forEach((span) => {
+      if (sel.containsNode(span, true)) selected.push(Number(span.dataset.wi));
     });
-    return mergeLineRects(rects);
+    const rects: number[][] = [];
+    for (const wi of selected) {
+      const box = boxes.get(wi);
+      if (box) rects.push([...box]);
+    }
+    return { rects: mergeLineRects(rects), quote: buildQuote(words, selected, boxes) };
   }
 
   // Ancrage texte d'une sélection sur page reconstruite : offsets dans le
@@ -1216,12 +1222,14 @@ export function Reader() {
         return;
       }
       const page = Number(pageEl.dataset.page);
-      const rects = isCode ? [] : computeSelectionRects(pageEl, page, sel);
+      // Fichier de code : du vrai texte, espaces compris — `sel.toString()` suffit.
+      const pdf = isCode ? null : pdfSelection(pageEl, page, sel);
+      const rects = pdf ? pdf.rects : [];
       const anchor = isCode ? computeSelectionAnchor(sel) : null;
       const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
       const rootRect = rootEl.getBoundingClientRect();
       setSelection({
-        text,
+        text: pdf?.quote || text,
         page,
         rects,
         anchor,

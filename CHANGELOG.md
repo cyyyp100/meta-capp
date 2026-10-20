@@ -89,6 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A passage highlighted or added to Clikoda's context from a PDF was saved without
+  spaces ("inatypicaltrainingscript…"): the reader's text layer is one element per
+  word, and the browser read them glued together. The quote is now rebuilt from
+  the selected words, with spaces, and a word hyphenated at the end of a line is
+  joined back. Quotes saved before keep their old text.
 - The guided tour promised that a document reopens where you stopped; the reader
   always opened on page 1. The tour now describes the bookmark, which does.
 - A word hyphenated at the end of a line ("differen- / tials") was one word for the
