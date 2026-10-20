@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Highlighter, Pause as PauseIcon, Plus } from "lucide-react";
+import { Highlighter, Plus, Search } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -12,8 +12,14 @@ import type { TextMark } from "../features/reader/anchorText";
 import { ClikodaPanel, type QaMask } from "../features/reader/ClikodaPanel";
 import { DEMO_METRICS, DEMO_REFLECTION_KEYS, type DemoBeat } from "../features/reader/demoScript";
 import { BlockPages } from "../features/reader/BlockPages";
-import { PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
+import { FindBar } from "../features/reader/find/FindBar";
+import { isMacPlatform } from "../features/reader/find/findNav";
+import { useReaderFind } from "../features/reader/find/useReaderFind";
+import { boundsOf, frameRect, type PageGeometry } from "../features/reader/frame";
+import { NO_HITS, PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
+import { ReaderToolbar, ToolbarIconButton } from "../features/reader/ReaderToolbar";
 import { placedBoxes } from "../features/reader/textLayer";
+import { useStableCallback } from "../features/reader/useStableCallback";
 import { EntrySas } from "../features/session/EntrySas";
 import { ExitSas } from "../features/session/ExitSas";
 import type { WarmUpTiming } from "../features/session/WarmUp";
@@ -117,16 +123,6 @@ function mergeLineRects(rects: number[][]): number[][] {
     merged.push(cur);
   }
   return merged;
-}
-
-/** Boîte englobante [x0, y0, x1, y1] d'une liste de rects (points PDF). */
-function boundsOf(rects: number[][]): number[] {
-  return [
-    Math.min(...rects.map((r) => r[0])),
-    Math.min(...rects.map((r) => r[1])),
-    Math.max(...rects.map((r) => r[2])),
-    Math.max(...rects.map((r) => r[3])),
-  ];
 }
 
 const selBtn: React.CSSProperties = {
@@ -403,9 +399,7 @@ export function Reader() {
     if (ok) removeSavedHighlight(hid);
   }
   // La même fonction d'un rendu à l'autre : les pages sont mémoïsées.
-  const askRemoveRef = useRef(askRemoveHighlight);
-  askRemoveRef.current = askRemoveHighlight;
-  const deleteHighlight = useCallback((hid: number) => void askRemoveRef.current(hid), []);
+  const deleteHighlight = useStableCallback((hid: number) => void askRemoveHighlight(hid));
 
   // Surlignages mémorisés groupés par page, rects fusionnés par ligne une fois
   // pour toutes — et non à chaque rendu de chaque page.
@@ -678,34 +672,41 @@ export function Reader() {
    * bloquée n'est pas rendue.
    */
   function lockFrame(): { top: number; dx: number; fitZoom: number | null } | null {
+    const geo = pageGeometry(lockedPage);
+    if (!geo) return null;
+    return frameRect(geo, zone && zone.page === lockedPage ? zone.rect : null, frameOptions());
+  }
+
+  /** La page `page` et la vue, mesurées pour `frameRect` ; null tant que la
+   *  page n'est pas rendue. L'échelle est celle du zoom ÉCRIT (pas l'échelle
+   *  CSS d'un geste en cours). */
+  function pageGeometry(page: number): PageGeometry | null {
     const el = scrollRef.current;
-    const pageEl = el?.querySelector<HTMLElement>(`[data-page="${lockedPage}"]`);
+    const pageEl = el?.querySelector<HTMLElement>(`[data-page="${page}"]`);
     if (!el || !pageEl) return null;
     const elRect = el.getBoundingClientRect();
     const pageRect = pageEl.getBoundingClientRect();
-    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const pageTop = pageRect.top - elRect.top + el.scrollTop;
-    if (!zone || zone.page !== lockedPage) return { top: clamp(pageTop, 0, maxTop), dx: 0, fitZoom: null };
-    const [w] = (data?.page_sizes_pts ?? [])[zone.page - 1] ?? [595, 842];
-    const scale = (BASE_WIDTH * zoom) / w;
-    const [x0, y0, x1, y1] = zone.rect;
-    const zoneW = (x1 - x0 + 2 * ZONE_PAD_PTS) * scale;
-    const zoneH = (y1 - y0 + 2 * ZONE_PAD_PTS) * scale;
-    const availW = el.clientWidth - 2 * ZONE_SIDE_INSET;
-    const availH = el.clientHeight - ZONE_TOP_INSET - ZONE_BOTTOM_INSET;
-    let fitZoom: number | null = null;
-    if ((zoneH > availH || zoneW > availW) && zoom > MIN_ZOOM) {
-      const z = clamp(Math.min(availH / zoneH, availW / zoneW) * zoom * 0.96, MIN_ZOOM, MAX_ZOOM);
-      if (z < zoom - 0.01) fitZoom = z;
-    }
-    const zoneTop = pageTop + (y0 - ZONE_PAD_PTS) * scale;
-    const top = zoneTop - ZONE_TOP_INSET - Math.max(0, (availH - zoneH) / 2);
-    const zoneLeft = pageRect.left - elRect.left + (x0 - ZONE_PAD_PTS) * scale;
-    const zoneRight = zoneLeft + zoneW;
-    let dx = 0;
-    if (zoneLeft < ZONE_SIDE_INSET) dx = ZONE_SIDE_INSET - zoneLeft;
-    else if (zoneRight > el.clientWidth - ZONE_SIDE_INSET) dx = el.clientWidth - ZONE_SIDE_INSET - zoneRight;
-    return { top: clamp(top, 0, maxTop), dx, fitZoom };
+    const [w] = (data?.page_sizes_pts ?? [])[page - 1] ?? [595, 842];
+    return {
+      pageTop: pageRect.top - elRect.top + el.scrollTop,
+      pageLeft: pageRect.left - elRect.left,
+      maxTop: Math.max(0, el.scrollHeight - el.clientHeight),
+      viewWidth: el.clientWidth,
+      viewHeight: el.clientHeight,
+      scale: (BASE_WIDTH * zoom) / w,
+    };
+  }
+
+  function frameOptions() {
+    return {
+      pad: ZONE_PAD_PTS,
+      topInset: ZONE_TOP_INSET,
+      bottomInset: ZONE_BOTTOM_INSET,
+      sideInset: ZONE_SIDE_INSET,
+      zoom,
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+    };
   }
 
   /**
@@ -1176,13 +1177,129 @@ export function Reader() {
 
   /** Référence de page cliquée dans une réponse de Clikoda : on y amène le lecteur.
       Pendant une question verrouillée, jamais plus bas que le plancher. */
-  function goToPage(page: number) {
+  function goToPage(page: number, behavior: ScrollBehavior = "smooth") {
     const el = scrollRef.current;
     const pageEl = el?.querySelector<HTMLElement>(`[data-page="${page}"]`);
     const floor = lockFloorRef.current;
     if (!el || !pageEl || (locked && floor === null)) return;
     const top = pageEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
-    scrollViewTo(floor === null ? top : Math.min(top, floor), "smooth");
+    scrollViewTo(floor === null ? top : Math.min(top, floor), behavior);
+  }
+
+  // ── Recherche dans le document (Ctrl/Cmd+F) ──────────────────────────────
+  //
+  // Elle ne s'ouvre qu'en lecture : ni dans le sas d'entrée, ni dans celui de
+  // sortie, ni en pause ou pendant la visite (vue figée). Le raccourci est
+  // ⌘F sur macOS, Ctrl+F ailleurs — jamais Ctrl+F sur macOS, qui déplace le
+  // curseur d'un champ de texte, ni ⌘+Ctrl+F, le plein écran. Il est capté
+  // partout dans le lecteur : en mode navigateur, la recherche du navigateur
+  // ne voit que les pages rendues en images, et ne trouverait rien.
+  const find = useReaderFind(id, currentPage);
+  const canFind = Boolean(data) && entered && exit === null && !showPostExitRest && !frozen;
+  const findVisible = find.open && canFind;
+  // L'occurrence courante est sous le plancher d'une question bloquante :
+  // comptée, mais le lecteur ne descend pas jusqu'à elle.
+  const [findLocked, setFindLocked] = useState(false);
+  const onFindKey = useStableCallback((e: KeyboardEvent) => {
+    if (e.isComposing || e.altKey) return;
+    const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && key === "f") {
+      e.preventDefault();
+      if (canFind) find.openBar();
+      return;
+    }
+    if (!findVisible || !((mod && key === "g") || e.key === "F3")) return;
+    e.preventDefault();
+    if (e.shiftKey) find.prev();
+    else find.next();
+  });
+  useEffect(() => {
+    window.addEventListener("keydown", onFindKey);
+    return () => window.removeEventListener("keydown", onFindKey);
+  }, [onFindKey]);
+
+  // Occurrences à dessiner, par page : les listes viennent telles quelles des
+  // réponses du serveur, donc stables d'un rendu à l'autre (pages mémoïsées).
+  const findHitsByPage = useMemo(() => {
+    const out: Record<number, number[][][]> = {};
+    for (const [page, hits] of Object.entries(find.pageHits)) if (hits.rects?.length) out[Number(page)] = hits.rects;
+    return out;
+  }, [find.pageHits]);
+  const findRangesByPage = useMemo(() => {
+    const out: Record<number, [number, number][]> = {};
+    for (const [page, hits] of Object.entries(find.pageHits)) if (hits.ranges?.length) out[Number(page)] = hits.ranges;
+    return out;
+  }, [find.pageHits]);
+
+  // Aller à l'occurrence courante, UNE fois par occurrence (« 3 / 17 » → « 4 /
+  // 17 »), dès que ses boîtes sont arrivées. Le défilement est instantané : on
+  // enchaîne les Entrée. Dans une image (requestAnimationFrame) : la page vient
+  // peut-être d'être re-rendue avec ses occurrences.
+  const findNavRef = useRef<string | null>(null);
+  const findQuery = find.summary?.query ?? null;
+  const findPage = find.hit?.page ?? null;
+  const findIndex = find.hit?.index ?? -1;
+  const findPageLoaded = findPage !== null && find.pageHits[findPage] !== undefined;
+  const findHitRects = findPage !== null && !isCode ? find.pageHits[findPage]?.rects?.[findIndex] ?? null : null;
+  useEffect(() => {
+    if (!findVisible || findPage === null || findQuery === null) return;
+    const key = `${findQuery}:${find.ordinal}`;
+    if (findNavRef.current === key) return;
+    if (!isCode && !findHitRects) {
+      // Page arrivée sans les boîtes de cette occurrence (au-delà du plafond
+      // par page, READER_FIND_MAX_PAGE_HITS) : son haut, à défaut. Sinon on
+      // attend les boîtes.
+      if (findPageLoaded) {
+        findNavRef.current = key;
+        goToPage(findPage, "auto");
+      }
+      return;
+    }
+    let raf = 0;
+    const land = (top: number) => {
+      findNavRef.current = key;
+      const floor = lockFloorRef.current;
+      setFindLocked(floor !== null && top > floor + 1);
+      if (locked && floor === null) return;
+      scrollViewTo(floor === null ? top : Math.min(top, floor), "auto");
+    };
+    if (!isCode) {
+      raf = requestAnimationFrame(() => {
+        const geo = pageGeometry(findPage);
+        if (!geo || !findHitRects?.length) return;
+        const frame = frameRect(geo, boundsOf(findHitRects), frameOptions());
+        land(frame.top);
+        if (frame.dx) setPanX((p) => clampPanX(p + frame.dx));
+      });
+    } else {
+      // Fichier de code : pas de géométrie. La page d'abord, puis la marque
+      // `data-find-current`, une fois ses blocs chargés et rendus (au plus 1 s).
+      findNavRef.current = key;
+      goToPage(findPage, "auto");
+      const deadline = performance.now() + 1000;
+      const seek = () => {
+        const el = scrollRef.current;
+        const mark = el?.querySelector<HTMLElement>(`[data-page="${findPage}"] mark[data-find-current]`);
+        if (el && mark) {
+          const r = mark.getBoundingClientRect();
+          const top = r.top - el.getBoundingClientRect().top + el.scrollTop;
+          const avail = el.clientHeight - ZONE_TOP_INSET - ZONE_BOTTOM_INSET;
+          land(clamp(top - ZONE_TOP_INSET - Math.max(0, (avail - r.height) / 2), 0, el.scrollHeight));
+          return;
+        }
+        if (performance.now() < deadline) raf = requestAnimationFrame(seek);
+      };
+      raf = requestAnimationFrame(seek);
+    }
+    return () => cancelAnimationFrame(raf);
+    // `pageGeometry`, `frameOptions`, `goToPage` lisent l'état du rendu courant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findVisible, findQuery, find.ordinal, findPage, findIndex, findHitRects, findPageLoaded, isCode]);
+
+  function closeFind() {
+    setFindLocked(false);
+    find.close();
   }
 
   function handleGatedChange(active: boolean, page?: number) {
@@ -1344,6 +1461,8 @@ export function Reader() {
                 lockedPage={lockedPage}
                 marksByPage={marksByPage}
                 onDeleteHighlight={deleteHighlight}
+                findRangesByPage={findVisible ? findRangesByPage : undefined}
+                findCurrent={findVisible ? find.hit : null}
               />
             ) : (
             Array.from({ length: data.page_count }, (_, i) => i + 1).map((n) => {
@@ -1367,6 +1486,8 @@ export function Reader() {
                   mask={maskByPage[n]}
                   words={wordsByPage[n]}
                   saved={savedByPage[n] ?? NO_SAVED}
+                  findHits={findVisible ? findHitsByPage[n] ?? NO_HITS : NO_HITS}
+                  findCurrent={findVisible && findPage === n ? findIndex : -1}
                   demo={demo}
                   onDeleteHighlight={deleteHighlight}
                 />
@@ -1379,69 +1500,37 @@ export function Reader() {
       </div>
 
       {/* Barre supérieure flottante */}
-      <div
-        data-tour="toolbar"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "12px 18px",
-          background: "color-mix(in srgb, var(--surface) 88%, transparent)",
-          backdropFilter: "blur(8px)",
-          borderBottom: "1px solid var(--border)",
-        }}
+      <ReaderToolbar
+        title={data?.title ?? ""}
+        onEnd={handleEnd}
+        onPause={() => startPause("manual")}
+        pauseDisabled={!entered || exit !== null}
+        page={data ? { current: currentPage, total: data.page_count } : null}
       >
-        <button
-          onClick={handleEnd}
-          style={{
-            cursor: "pointer",
-            color: "var(--text-soft)",
-            fontWeight: 600,
-            fontSize: 13,
-            padding: "6px 12px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border)",
-            background: "var(--surface)",
-          }}
-        >
-          {t("reader.end")}
-        </button>
-        <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {data?.title ?? ""}
-        </span>
-        <button
-          onClick={() => startPause("manual")}
-          disabled={!entered || exit !== null}
-          title={t("reader.pause_hint")}
-          aria-label={t("reader.pause_hint")}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: !entered || exit !== null ? "default" : "pointer",
-            color: "var(--text-soft)",
-            fontWeight: 600,
-            fontSize: 13,
-            padding: "6px 12px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border)",
-            background: "var(--surface)",
-            opacity: !entered || exit !== null ? 0.5 : 1,
-          }}
-        >
-          <PauseIcon className="size-3.5" aria-hidden />
-          {t("reader.pause")}
-        </button>
-        {data && (
-          <span style={{ color: "var(--muted)", fontSize: 13, whiteSpace: "nowrap" }}>
-            {t("reader.page", { cur: currentPage, total: data.page_count })}
-          </span>
+        {findVisible ? (
+          <FindBar
+            query={find.query}
+            onQuery={find.setQuery}
+            summary={find.summary}
+            searching={find.searching}
+            ordinal={find.ordinal}
+            locked={findLocked}
+            onNext={find.next}
+            onPrev={find.prev}
+            onClose={closeFind}
+            focusToken={find.focusToken}
+          />
+        ) : (
+          <ToolbarIconButton
+            label={t("reader.find_open")}
+            hint={t("reader.find_hint", { keys: isMacPlatform() ? "⌘F" : "Ctrl+F" })}
+            disabled={!canFind}
+            onClick={find.openBar}
+          >
+            <Search className="size-3.5" aria-hidden />
+          </ToolbarIconButton>
         )}
-      </div>
+      </ReaderToolbar>
 
       {/* Contrôles de zoom */}
       <ZoomControls

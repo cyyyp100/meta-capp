@@ -49,6 +49,7 @@ __all__ = [
     "list_recent_documents",
     "list_all_documents",
     "search_documents",
+    "resume",
     "get_document",
     "render_page",
     "page_text",
@@ -155,6 +156,30 @@ def search_documents(query: str, limit: int = LIBRARY_SEARCH_LIMIT) -> list[dict
 
     scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [_summary(doc) for (_d, _s, _o, doc) in scored[:limit]]
+
+
+def resume() -> dict:
+    """La carte « Reprendre » : le document qu'on lit, et ce qu'il en reste.
+
+    C'est le document de la dernière séance qui a LU quelque chose — un PDF
+    importé hier mais jamais ouvert ne passe pas devant le manuel en cours.
+    Rien n'a encore été lu (premier lancement) : le plus récemment ouvert ou
+    importé. Bibliothèque vide : `document` nul."""
+    from db.sessions import latest_read_document_id
+    from services import reading_pace
+
+    doc = None
+    try:
+        doc_id = latest_read_document_id()
+        doc = _get_document(doc_id) if doc_id is not None else None
+    except Exception:  # pragma: no cover - la carte se rabat sur le plus récent
+        logger.debug("Dernière lecture illisible", exc_info=True)
+    if doc is None:
+        recent = _list_all(1)
+        doc = recent[0] if recent else None
+    if doc is None:
+        return {"document": None, "remaining": None}
+    return {"document": _summary(doc), "remaining": reading_pace.remaining(doc)}
 
 
 def get_document(doc_id: int) -> dict | None:
@@ -308,9 +333,13 @@ def page_words(doc_id: int, page: int) -> list[list]:
 
 
 def clear_reader_cache(doc_id: int) -> None:
-    """Purge les pages rendues du doc (sauf la vignette) — fin de session lecture."""
+    """Purge les pages rendues du doc (sauf la vignette) — fin de session lecture —,
+    et son index de recherche (Ctrl/Cmd+F), qui ne sert qu'au lecteur ouvert."""
+    from services import reader_find
+
     for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
         _PAGE_TEXT_CACHE.pop(key, None)
+    reader_find.forget(doc_id)
     doc = _get_document(doc_id)
     if doc and doc.get("path"):
         _clear_reader_cache(doc["path"])
@@ -320,9 +349,13 @@ def forget_path_caches(doc_id: int, path: str | None, engine: str | None) -> Non
     """Oublie tout ce qui a été dérivé du fichier à `path` pour ce document :
     texte de page en mémoire, PNG rendus (vignette comprise) et leur dossier,
     une fois vide — le cache disque est indexé par le CHEMIN, il ne servirait
-    plus à personne. Partagé par la suppression et la re-liaison (services/relink)."""
+    plus à personne —, et l'index de recherche du lecteur. Partagé par la
+    suppression et la re-liaison (services/relink)."""
+    from services import reader_find
+
     for key in [k for k in _PAGE_TEXT_CACHE if k[0] == int(doc_id)]:
         _PAGE_TEXT_CACHE.pop(key, None)
+    reader_find.forget(doc_id)
     if not path or engine == "code":
         return
     try:

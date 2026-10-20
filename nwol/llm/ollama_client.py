@@ -632,8 +632,34 @@ def calibrate_throughput() -> None:
             logger.info("Calibrage du débit de Clikoda impossible : %s", exc)
             return
         logger.info("Débit de Clikoda sur cette machine : %s", throughput.snapshot(model))
+        # Reste-t-il assez fluide pour le choix automatique ? Import tardif : la
+        # politique vit dans services/llm_models (cf. les cycles en tête du module).
+        from services.llm_models import judge_fluency
+
+        judge_fluency(model)
 
     _LLM_QUEUE.put((_TASK_PRIORITY["calibration"], next(_QUEUE_COUNTER), _run))
+
+
+def unload_model(model: str) -> None:
+    """Décharge `model` de la mémoire d'Ollama (`keep_alive: 0`), sans attendre
+    son délai d'inactivité.
+
+    Appelé quand le choix automatique quitte un modèle trop lent pour un autre :
+    sur 16 Go, gemma4:12b et gemma4:e4b ne tiennent pas ensemble, et le second se
+    chargerait en faisant swapper le premier. Best-effort, local (127.0.0.1, sans
+    proxy) et court : un échec laisse Ollama décharger le modèle à l'expiration
+    de son `keep_alive`."""
+    payload = json.dumps({"model": model, "keep_alive": 0}).encode()
+    req = urllib.request.Request(
+        OLLAMA_URL, data=payload, method="POST", headers={"Content-Type": "application/json"},
+    )
+    try:
+        with _LOCAL_HTTP.open(req, timeout=5) as resp:
+            resp.read()
+        logger.info("Modèle %s déchargé de la mémoire d'Ollama", model)
+    except Exception as exc:
+        logger.info("Déchargement de %s ignoré : %s", model, exc)
 
 
 def embed_texts(texts: list[str], model: str = OLLAMA_EMBED_MODEL) -> list[list[float]]:

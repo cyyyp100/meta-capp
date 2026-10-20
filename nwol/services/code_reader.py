@@ -20,6 +20,7 @@ __all__ = [
     "page_count",
     "page_block",
     "page_text",
+    "page_texts",
     "supported_extensions",
 ]
 
@@ -156,6 +157,17 @@ def page_block(path: str, page: int) -> dict:
         "text": "\n".join(lines),
         "metadata": {"lang": detect_language(path), "start_line": start + 1},
     }
+
+
+def page_texts(path: str) -> list[str]:
+    """Le texte de CHAQUE page, tel que `page_block` le rend (code brut, sans
+    numéros), en une seule lecture du fichier — l'index de la recherche du
+    lecteur (services/reader_find) y compte les occurrences, et les plages qu'il
+    renvoie s'appliquent au texte du bloc affiché : les deux doivent être le
+    même texte."""
+    lines = _lines(path)
+    pages = max(1, math.ceil(len(lines) / LINES_PER_PAGE))
+    return ["\n".join(_slice(lines, page)[0]) for page in range(1, pages + 1)]
 
 
 def page_text(path: str, page: int) -> str:

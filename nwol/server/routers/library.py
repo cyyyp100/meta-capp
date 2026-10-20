@@ -10,7 +10,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from config.settings import LIBRARY_MAX_DOCUMENTS, LIBRARY_SEARCH_LIMIT, UPLOAD_MAX_BYTES
+from config.settings import (
+    LIBRARY_MAX_DOCUMENTS,
+    LIBRARY_SEARCH_LIMIT,
+    READER_FIND_MAX_QUERY_CHARS,
+    UPLOAD_MAX_BYTES,
+)
 from server.security import import_path_allowed
 from services.library import (
     delete_document as delete_document_service,
@@ -20,6 +25,7 @@ from services.library import (
     page_words,
     rename_document as rename_document_service,
     render_page,
+    resume as resume_service,
     search_documents,
     search_page,
 )
@@ -81,6 +87,12 @@ def documents(limit: int = Query(LIBRARY_MAX_DOCUMENTS, ge=1, le=5000)) -> list[
 def search_library(q: str, limit: int = Query(LIBRARY_SEARCH_LIMIT, ge=1, le=200)) -> list[dict]:
     """Recherche globale : nom de fichier + résumé généré + mots-clés + matière."""
     return search_documents(q, limit)
+
+
+@router.get("/resume")
+def resume() -> dict:
+    """La carte « Reprendre » : `{document, remaining}` (services/library.resume)."""
+    return resume_service()
 
 
 # ── Dossiers de la bibliothèque ─────────────────────────────────────────────
@@ -330,6 +342,33 @@ def move_document(doc_id: int, body: DocumentFolderBody) -> dict:
 def search(doc_id: int, page: int, q: str) -> dict:
     """Rects (x0,y0,x1,y1) en points PDF où `q` apparaît sur la page."""
     return {"rects_pts": search_page(doc_id, page, q)}
+
+
+# ── Ctrl/Cmd+F du lecteur ───────────────────────────────────────────────────
+# Toute la politique (repli, index, plafonds) est dans services/reader_find ;
+# ici, la borne de la requête (422) et le document inconnu (404).
+
+
+@router.get("/doc/{doc_id}/find")
+def find_in_document(doc_id: int, q: str = Query("", max_length=READER_FIND_MAX_QUERY_CHARS)) -> dict:
+    """Combien d'occurrences, sur quelles pages : `{query, total, pages, searchable, too_short}`."""
+    from services import reader_find
+
+    result = reader_find.find_in_document(doc_id, q)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+    return result
+
+
+@router.get("/doc/{doc_id}/page/{page}/find")
+def find_on_page(doc_id: int, page: int, q: str = Query("", max_length=READER_FIND_MAX_QUERY_CHARS)) -> dict:
+    """Les occurrences d'une page : rects par occurrence (PDF) ou plages UTF-16 (code)."""
+    from services import reader_find
+
+    result = reader_find.find_on_page(doc_id, page, q)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+    return result
 
 
 @router.get("/doc/{doc_id}/page/{page}/words")

@@ -61,9 +61,17 @@ interface Props {
   /** Mots du calque de texte (chargés autour de la page dominante). */
   words?: PageWord[];
   saved: SavedPageHighlight[];
+  /** Occurrences de la recherche (Ctrl/Cmd+F) sur cette page : une liste de
+   *  rects par occurrence. `NO_HITS` hors recherche — une liste stable. */
+  findHits?: number[][][];
+  /** Rang, sur cette page, de l'occurrence courante ; -1 si elle est ailleurs. */
+  findCurrent?: number;
   demo: boolean;
   onDeleteHighlight: (id: number) => void;
 }
+
+/** Aucune occurrence : la même liste à chaque rendu (la page est mémoïsée). */
+export const NO_HITS: number[][][] = [];
 
 /**
  * Une page PDF du lecteur : image, surlignages, zone, cache, calque de texte,
@@ -89,6 +97,8 @@ export const PdfPage = memo(function PdfPage({
   mask,
   words,
   saved,
+  findHits = NO_HITS,
+  findCurrent = -1,
   demo,
   onDeleteHighlight,
 }: Props) {
@@ -227,6 +237,40 @@ export const PdfPage = memo(function PdfPage({
             vectorEffect="non-scaling-stroke"
             rx={3}
           />
+        </svg>
+      ) : null}
+      {/* Occurrences de la recherche. En z 5, SOUS le cache du rappel libre
+          (z 6) : une occurrence dans le passage à restituer reste cachée. La
+          courante, plus soutenue et cernée, est celle que « 3 / 17 » désigne. */}
+      {findHits.length ? (
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="none"
+          aria-hidden
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 5 }}
+        >
+          {findHits.map((rects, hi) =>
+            rects.map((r, ri) => {
+              const current = hi === findCurrent;
+              return (
+                <rect
+                  key={`${hi}-${ri}`}
+                  data-find=""
+                  {...(current ? { "data-find-current": "" } : {})}
+                  x={r[0] - 1}
+                  y={r[1] - 1}
+                  width={r[2] - r[0] + 2}
+                  height={r[3] - r[1] + 2}
+                  fill={current ? "var(--find-current)" : "var(--find-hit)"}
+                  fillOpacity={current ? 0.42 : 0.32}
+                  stroke={current ? "var(--find-current)" : "none"}
+                  strokeWidth={1.5}
+                  vectorEffect="non-scaling-stroke"
+                  rx={1.5}
+                />
+              );
+            }),
+          )}
         </svg>
       ) : null}
       {/* Ancre de la visite guidée sur le passage cité (cf.

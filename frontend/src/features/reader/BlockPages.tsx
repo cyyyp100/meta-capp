@@ -33,6 +33,11 @@ interface Props {
   marksByPage?: Record<number, TextMark[]>;
   /** Clic sur un <mark data-hl> de surlignage mémorisé. */
   onDeleteHighlight?: (id: number) => void;
+  /** Occurrences de la recherche par page : plages UTF-16 dans le texte du
+   *  bloc de code de la page (un seul bloc par page de code). */
+  findRangesByPage?: Record<number, [number, number][]>;
+  /** L'occurrence courante : sa page et son rang sur la page. */
+  findCurrent?: { page: number; index: number } | null;
 }
 
 // undefined = pas encore demandé ; null = le serveur n'a pas de blocs pour
@@ -53,6 +58,8 @@ export function BlockPages({
   lockedPage,
   marksByPage,
   onDeleteHighlight,
+  findRangesByPage,
+  findCurrent = null,
 }: Props) {
   const t = useT();
   const [blocksByPage, setBlocksByPage] = useState<BlocksState>({});
@@ -130,7 +137,12 @@ export function BlockPages({
               >
                 {visible.map((block) => (
                   <div key={block.id} data-block-id={block.id}>
-                    <BlockRenderer block={block} marks={marksByPage?.[n]} />
+                    <BlockRenderer
+                      block={block}
+                      marks={marksByPage?.[n]}
+                      findRanges={block.type === "code" ? findRangesByPage?.[n] : undefined}
+                      findCurrent={findCurrent?.page === n ? findCurrent.index : -1}
+                    />
                   </div>
                 ))}
                 <div style={{ textAlign: "right", color: "var(--muted)", fontSize: "0.75em", marginTop: "1.2em" }}>

@@ -24,7 +24,7 @@ import { create } from "zustand";
 
 import { api } from "@/api/client";
 import { queryClient } from "@/api/queryClient";
-import type { DocumentSummary } from "@/api/types";
+import type { DocumentSummary, ResumePayload } from "@/api/types";
 
 import { DEMO_ROUTE, TOUR_STEPS, type TourStepDef } from "./steps";
 
@@ -106,6 +106,11 @@ function returnDemoDocument(docId: number | null): void {
   if (docId !== null) {
     queryClient.setQueryData<DocumentSummary[]>(["library", "documents"], (docs) =>
       docs?.filter((d) => d.id !== docId),
+    );
+    // La carte « Reprendre » a sa propre requête : sur une bibliothèque neuve,
+    // c'est le document de démonstration, le plus récent, qu'elle propose.
+    queryClient.setQueryData<ResumePayload>(["library", "resume"], (resume) =>
+      resume?.document?.id === docId ? { document: null, remaining: null } : resume,
     );
   }
   void api

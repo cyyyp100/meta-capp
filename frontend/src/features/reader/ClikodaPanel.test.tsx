@@ -137,6 +137,7 @@ describe("ClikodaPanel", () => {
       pull_command: "ollama pull gemma4:e4b",
       throughput: { model: "gemma4:e4b", measured: false, output_tokens_per_s: null, prompt_tokens_per_s: null, slowdown: 1 },
       economy: false, economy_preference: "auto", economy_reason: null,
+      auto_set_aside: [], auto_min_output_tokens_per_s: 15,
     });
     await renderOpenPanel();
 

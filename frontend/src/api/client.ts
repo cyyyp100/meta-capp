@@ -23,6 +23,8 @@ import type { PickedDocument } from "./platform";
 import type {
   DocumentDetail,
   DocumentSummary,
+  FindOnPage,
+  FindSummary,
   Flashcard,
   FolderNode,
   Health,
@@ -39,6 +41,7 @@ import type {
   QuizSubject,
   ReaderBlock,
   RelinkResult,
+  ResumePayload,
   SavedHighlight,
   SessionAnalysis,
   SessionMetrics,
@@ -117,6 +120,8 @@ export const api = {
   // Le catalogue est servi d'un bloc et le rail filtre côté client : un
   // glisser-déposer doit être instantané, sans aller-retour réseau.
   libraryDocuments: () => getJSON<DocumentSummary[]>("/api/library/documents"),
+  // La carte « Reprendre » : le document qu'on lit et le temps qu'il en reste.
+  libraryResume: () => getJSON<ResumePayload>("/api/library/resume"),
   searchDocuments: (q: string) => {
     const p = new URLSearchParams({ q });
     return getJSON<DocumentSummary[]>(`/api/library/search?${p.toString()}`);
@@ -248,6 +253,11 @@ export const api = {
     }),
   searchPage: (docId: number, page: number, q: string) =>
     getJSON<{ rects_pts: number[][] }>(`/api/library/doc/${docId}/page/${page}/search?q=${encodeURIComponent(q)}`),
+  // Ctrl/Cmd+F : le résumé du document, puis les occurrences page par page.
+  findInDocument: (docId: number, q: string) =>
+    getJSON<FindSummary>(`/api/library/doc/${docId}/find?q=${encodeURIComponent(q)}`),
+  findOnPage: (docId: number, page: number, q: string) =>
+    getJSON<FindOnPage>(`/api/library/doc/${docId}/page/${page}/find?q=${encodeURIComponent(q)}`),
   pageBlocks: (docId: number, page: number) =>
     getJSON<{ blocks: ReaderBlock[] | null }>(`/api/library/doc/${docId}/page/${page}/blocks`),
   pageWords: (docId: number, page: number) =>
@@ -525,6 +535,18 @@ export interface LlmModelEntry {
   tier?: string;
   download_gb?: number;
   min_ram_gb?: number;
+  /** Écarté du choix automatique : son écriture, mesurée ICI, est sous le seuil
+   *  de fluidité (nwol/services/llm_models.judge_fluency). Toujours choisissable. */
+  too_slow?: boolean;
+}
+
+/** Un modèle écarté du choix automatique sur cette machine, et la mesure qui
+ *  l'a écarté. */
+export interface LlmSetAside {
+  model: string;
+  output_tokens_per_s: number;
+  prompt_tokens_per_s: number | null;
+  measured_at: string | null;
 }
 
 export interface LlmStatus {
@@ -553,6 +575,10 @@ export interface LlmStatus {
   economy: boolean;
   economy_preference: string;
   economy_reason: "preference" | "tiny_model" | "low_ram" | null;
+  /** « Automatique » prend le plus capable qui reste FLUIDE : les modèles
+   *  installés trop lents ici, et le seuil (tokens écrits par seconde). */
+  auto_set_aside: LlmSetAside[];
+  auto_min_output_tokens_per_s: number;
 }
 
 /** `checked: false` = la vérification n'a rien donné (hors ligne, panne, option

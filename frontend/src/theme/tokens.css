@@ -123,6 +123,14 @@
   --hl-explain: #4d9de0;
   --hl-reference: #5fbf77;
 
+  /* Recherche dans le document (Ctrl/Cmd+F) : les occurrences, et la courante,
+     plus soutenue et cernée d'un liseré. Une seule valeur pour les deux thèmes,
+     comme les surlignages : les pages d'un PDF restent claires. Posées en
+     translucide par le calque (fillOpacity, color-mix), jamais en aplat — le
+     texte de la page doit rester lisible dessous. */
+  --find-hit: #f5a524;
+  --find-current: #e8590c;
+
   /* Module langues (feuilleton) : tons du mandarin et genre des noms allemands.
      Toujours DOUBLÉS d'un indicateur non coloré (chiffre du ton, article) :
      la couleur aide, elle ne porte jamais seule l'information (F17). Les cinq

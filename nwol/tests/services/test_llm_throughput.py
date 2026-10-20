@@ -270,6 +270,20 @@ def test_ollama_is_reached_without_the_system_proxy(fake_ollama, monkeypatch, re
     assert ollama_client._model_installed("gemma4:e4b")
 
 
+def test_unloading_a_model_asks_ollama_to_free_it_now(fake_ollama, monkeypatch):
+    """Le choix automatique quitte un modèle trop lent : il est déchargé tout de
+    suite (12b et e4b ne tiennent pas ensemble dans 16 Go), en local, sans proxy."""
+    for name in ("http_proxy", "HTTP_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")  # proxy injoignable
+    ollama_client.unload_model("gemma4:12b")
+    assert fake_ollama["last"] == {"model": "gemma4:12b", "keep_alive": 0}
+
+
+def test_unloading_never_raises(monkeypatch):
+    monkeypatch.setattr(ollama_client, "OLLAMA_URL", "http://127.0.0.1:9/api/generate")  # rien n'écoute
+    ollama_client.unload_model("gemma4:12b")
+
+
 @pytest.fixture
 def real_provider(monkeypatch):
     """`no_real_generation` coupe le fournisseur : on le rebranche sur le faux serveur."""
@@ -354,6 +368,29 @@ def test_calibration_runs_first_and_measures(monkeypatch):
     # Le modèle ACTIF, et non un nom figé à l'import.
     assert calls == [("calibration", "gemma4:e4b")]
     assert throughput.slowdown("gemma4:e4b")[0] > 1.0
+
+
+def test_calibration_hands_the_measure_to_the_fluency_judge(monkeypatch):
+    """Le choix automatique écarte un modèle trop lent ici (services/llm_models) :
+    c'est le calibrage qui lui en donne la mesure, une fois le débit noté."""
+    from services import llm_models
+
+    queued: list = []
+    judged: list[tuple[str, float | None]] = []
+    monkeypatch.setattr(ollama_client._LLM_QUEUE, "put", queued.append)
+    monkeypatch.setattr(ollama_client, "list_models", lambda: [{"name": "gemma4:e4b"}])
+    monkeypatch.setattr(
+        ollama_client, "_call_ollama",
+        lambda _prompt, model, images=None, options=None, format_json=True, task="":
+            throughput.record_call(_ollama_reply(output_tps=6.0, prompt_tps=50.0), model) or "ok",
+    )
+    monkeypatch.setattr(
+        llm_models, "judge_fluency",
+        lambda model: judged.append((model, throughput.snapshot(model)["output_tokens_per_s"])),
+    )
+    ollama_client.calibrate_throughput()
+    queued[0][2]()
+    assert judged == [("gemma4:e4b", 6.0)]
 
 
 def test_each_calibration_starts_differently(monkeypatch):

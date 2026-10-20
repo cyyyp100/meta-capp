@@ -289,8 +289,12 @@ archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <
 Clikoda runs on the **gemma4** family — plus one tiny model for 4 GB machines — and which
 one is a setting, not a hard-coded name.
 « Automatic » (the default) picks the most capable model you have installed that your
-machine's memory can actually load; **Settings ▸ Clikoda** shows what it chose, why, and
-the `ollama pull` command for anything you are missing. The table lives in
+machine's memory can actually load **and that stays fluent on it**: a model whose writing
+speed, measured at startup, falls below 15 tokens/s is set aside for the next best one
+(for 14 days, on this machine; any later measure above the threshold brings it back).
+**Settings ▸ Clikoda** shows what it chose, why — including which model was set aside
+and at what speed — and the `ollama pull` command for anything you are missing. An
+explicit choice is always honoured. The table lives in
 `nwol/config/settings.py:LLM_MODELS`.
 
 | model | download | RAM needed | for |
@@ -298,7 +302,7 @@ the `ollama pull` command for anything you are missing. The table lives in
 | `qwen3:1.7b` | 1.4 GB | 4 GB | a 4 GB laptop: slower, more mistakes, text only (no page image), economy mode on |
 | `gemma4:e2b` | 7.2 GB | 8 GB | a light machine |
 | `gemma4:e4b` | 9.6 GB | 12 GB | the standard choice |
-| `gemma4:12b` | 8.0 GB | 12 GB | better answers, a bit slower |
+| `gemma4:12b` | 8.0 GB | 12 GB | better answers, much slower (~12 tokens/s against ~30 for e4b on a 16 GB Apple M4) |
 | `gemma4:26b` / `gemma4:31b` | 18–20 GB | 32 GB | a workstation |
 
 ```bash

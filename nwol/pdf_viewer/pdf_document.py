@@ -189,6 +189,63 @@ class PdfDocument:
             return []
         return rects
 
+    def folded_text(self, page_number: int) -> str:
+        """Texte plié d'une page (`utils.text.fold_with_map`) : sans accents,
+        en minuscules, blancs réduits, mots coupés en fin de ligne recollés.
+
+        C'est le texte où la recherche du lecteur (Ctrl/Cmd+F) COMPTE les
+        occurrences, et `find_folded` les localise dans le même : le total
+        annoncé et les occurrences surlignées viennent d'une seule lecture."""
+        from utils.text import fold_with_map
+
+        try:
+            with self._page(page_number) as page:
+                if page is None:
+                    return ""
+                textpage = page.get_textpage()
+                try:
+                    return fold_with_map(self._indexed_text(textpage))[0]
+                finally:
+                    textpage.close()
+        except Exception as exc:  # pragma: no cover - défensif
+            logger.debug("folded_text page %s: %s", page_number, exc)
+            return ""
+
+    def find_folded(
+        self, page_number: int, needle: str, limit: int | None = None
+    ) -> list[list[tuple[float, float, float, float]]]:
+        """Occurrences de `needle` (DÉJÀ plié, cf. `utils.text.fold_query`) dans
+        `folded_text(page)` → UNE LISTE DE RECTS PAR OCCURRENCE, un rect par
+        ligne, en points PDF origine haut-gauche.
+
+        Contrairement à `search_text` (la recherche de PDFium), « equation »
+        trouve « Équation » et un mot coupé en fin de ligne se trouve entier.
+        Invariant : `folded_text(p).count(n) == len(find_folded(p, n))` — une
+        occurrence sans boîte (caractères sans glyphe) garde sa place, vide."""
+        from utils.text import find_all, fold_with_map
+
+        if not needle:
+            return []
+        try:
+            with self._page(page_number) as page:
+                if page is None:
+                    return []
+                height = float(page.get_size()[1])
+                textpage = page.get_textpage()
+                try:
+                    folded, mapping = fold_with_map(self._indexed_text(textpage))
+                    hits: list[list[tuple[float, float, float, float]]] = []
+                    for start in find_all(folded, needle, limit):
+                        first = mapping[start]
+                        last = mapping[start + len(needle) - 1]
+                        hits.append(self._range_rects(textpage, first, last - first + 1, height))
+                    return hits
+                finally:
+                    textpage.close()
+        except Exception as exc:  # pragma: no cover - défensif
+            logger.debug("find_folded page %s: %s", page_number, exc)
+            return []
+
     def words(self, page_number: int) -> list[tuple[float, float, float, float, str]]:
         """Boîtes de mots d'une page → (x0, y0, x1, y1, mot) en points PDF.
 
@@ -268,6 +325,8 @@ class PdfDocument:
     def _group_words(
         textpage, text: str, height: float
     ) -> list[tuple[float, float, float, float, str]]:
+        from utils.text import HYPHENATION_MARKERS
+
         words: list[tuple[float, float, float, float, str]] = []
         buffer: list[str] = []
         box: list[float] | None = None
@@ -284,20 +343,27 @@ class PdfDocument:
             if char.isspace():
                 flush()
                 continue
-            buffer.append(char)
+            # Césure : PDFium remplace le tiret ET le saut de ligne par ce
+            # marqueur. Sans coupure ici, « différen- / tielles » formait UN mot
+            # dont la boîte couvrait deux lignes — un rectangle de sélection
+            # grand comme le paragraphe. Le tiret, avec sa propre boîte, clôt le
+            # premier morceau ; le second commence la ligne suivante.
+            hyphen = char in HYPHENATION_MARKERS
+            buffer.append("-" if hyphen else char)
             try:
                 left, bottom, right, top = textpage.get_charbox(index)
             except Exception:  # pragma: no cover - défensif (caractère sans glyphe)
-                continue
-            if right <= left or top <= bottom:  # boîte dégénérée : ignorée
-                continue
-            if box is None:
-                box = [float(left), float(bottom), float(right), float(top)]
-            else:
-                box[0] = min(box[0], float(left))
-                box[1] = min(box[1], float(bottom))
-                box[2] = max(box[2], float(right))
-                box[3] = max(box[3], float(top))
+                left = right = bottom = top = 0.0
+            if right > left and top > bottom:  # boîte dégénérée : ignorée
+                if box is None:
+                    box = [float(left), float(bottom), float(right), float(top)]
+                else:
+                    box[0] = min(box[0], float(left))
+                    box[1] = min(box[1], float(bottom))
+                    box[2] = max(box[2], float(right))
+                    box[3] = max(box[3], float(top))
+            if hyphen:
+                flush()
         flush()
         return words
 

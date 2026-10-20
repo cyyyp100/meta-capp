@@ -11,6 +11,7 @@ qu'aucun autre test ne s'en aperçoive.
 import threading
 
 from pdf_viewer.pdf_document import PdfDocument
+from utils.text import fold_query
 
 # `make_pdf` écrit la première ligne à 72 pt du bord HAUT d'une page A4 (842 pt).
 _A4_HEIGHT = 842.0
@@ -153,3 +154,72 @@ def test_empty_page_degrades_silently(tmp_path, make_pdf):
         assert pdf.line_sizes(1) == []
         assert pdf.search_text(1, "quoi que ce soit") == []
         assert pdf.toc() == []
+
+
+# ── Recherche pliée (Ctrl/Cmd+F du lecteur) ──────────────────────────────────
+#
+# `search_text` (la recherche de PDFium) ne trouvait ni « equation » dans
+# « Équation », ni un mot coupé en fin de ligne. `find_folded` cherche dans le
+# texte PLIÉ (`folded_text`) et rend une liste de rects par occurrence.
+
+
+def test_find_folded_ignores_accents_and_case(tmp_path, make_pdf):
+    path = make_pdf(tmp_path / "accents.pdf", ["Une Équation différentielle, puis une equation."])
+    with PdfDocument(path) as pdf:
+        hits = pdf.find_folded(1, fold_query("ÉQUATION"))
+    assert len(hits) == 2
+    for rects in hits:
+        assert len(rects) == 1  # une ligne, un rect
+        x0, y0, x1, y1 = rects[0]
+        assert x1 > x0 and y1 > y0
+        assert abs(y0 - _TEXT_TOP_MARGIN) < 25  # origine haut-gauche, comme search_text
+    assert hits[0][0][0] < hits[1][0][0]  # dans l'ordre du texte
+
+
+def test_find_folded_crosses_an_end_of_line_hyphenation(tmp_path, make_pdf):
+    """reportlab écrit « différen- » en fin de ligne : PDFium le lit U+FFFE,
+    sans saut de ligne. Le mot se trouve entier, un rect par ligne."""
+    path = make_pdf(tmp_path / "hyphen.pdf", ["Les équations différen-\ntielles ordinaires."])
+    with PdfDocument(path) as pdf:
+        assert "differentielles ordinaires" in pdf.folded_text(1)
+        hits = pdf.find_folded(1, fold_query("différentielles"))
+    assert len(hits) == 1
+    first_line, second_line = hits[0]
+    assert second_line[1] > first_line[3] - 1  # la seconde ligne est en dessous
+
+
+def test_find_folded_collapses_whitespace_and_line_breaks(tmp_path, make_pdf):
+    path = make_pdf(tmp_path / "spaces.pdf", ["La photosynthese convertit\nla   lumiere en energie."])
+    with PdfDocument(path) as pdf:
+        hits = pdf.find_folded(1, fold_query("convertit la lumiere"))
+    assert len(hits) == 1 and len(hits[0]) == 2  # à cheval sur deux lignes
+
+
+def test_find_folded_counts_what_folded_text_counts(tmp_path, make_pdf):
+    """L'invariant du « 3 / 17 » : le total vient de `folded_text`, les
+    occurrences surlignées de `find_folded` — ils ne peuvent pas diverger."""
+    path = make_pdf(tmp_path / "count.pdf", [
+        "Le lait, le lion et le leopard.\nLe le le : lele.\nDifféren-\ntielle et différentielle.", "",
+    ])
+    with PdfDocument(path) as pdf:
+        for needle in ("le", "le le", "lele", "differentielle", "e", "absent"):
+            assert pdf.folded_text(1).count(needle) == len(pdf.find_folded(1, needle)), needle
+        assert pdf.folded_text(2) == "" and pdf.find_folded(2, "le") == []
+        assert pdf.find_folded(99, "le") == [] and pdf.find_folded(1, "") == []
+        assert len(pdf.find_folded(1, "le", limit=2)) == 2
+
+
+def test_a_hyphenated_word_gives_two_words_one_per_line(tmp_path, make_pdf):
+    """C1 : « différen-tielles » formait UN mot dont la boîte couvrait deux
+    lignes — un rectangle de sélection haut comme le paragraphe."""
+    path = make_pdf(tmp_path / "split.pdf", ["Les équations différen-\ntielles ordinaires."])
+    with PdfDocument(path) as pdf:
+        words = pdf.words(1)
+    texts = [w[4] for w in words]
+    assert "différen-" in texts and "tielles" in texts
+    assert not any(chr(0xFFFE) in text for text in texts)
+    first = words[texts.index("différen-")]
+    second = words[texts.index("tielles")]
+    for x0, y0, x1, y1, _text in (first, second):
+        assert y1 - y0 < 12 * 1.5  # une ligne de 12 pt, pas deux
+    assert second[1] > first[3] - 1

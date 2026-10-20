@@ -5,29 +5,29 @@
 // fallait se souvenir de ce qu'on lisait, le retrouver, viser la bonne page.
 // Ici : un document, une page, un clic.
 //
-// La durée annoncée n'est pas un chiffre rond inventé : c'est la MÉDIANE des
-// sessions déjà terminées par cette personne. Promettre « 20 min » à quelqu'un
-// qui lit par tranches de 8 est la meilleure façon de ne pas être cru.
+// Le document et la durée viennent du serveur (services/library.resume) : la
+// dernière séance qui a LU quelque chose, et le temps qu'il reste au document à
+// l'allure mesurée de cette personne. Une durée de séance générique (la médiane
+// de toutes les séances, quiz compris) promettait la même chose pour un
+// chapitre et pour un manuel ; une allure qui n'est pas encore mesurée est
+// annoncée comme une estimation.
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, FileQuestionMark, Flame } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api/client";
-import type { DocumentSummary } from "@/api/types";
+import type { DocumentSummary, ReadingRemaining } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { useT } from "../../i18n";
-
-/** Repli quand personne n'a encore terminé de session : une durée de séance
- *  plausible, annoncée comme une estimation et non comme une mesure. */
-const DEFAULT_MINUTES = 20;
+import { remainingParts } from "./remaining";
 
 export function ResumeCard({
-  documents,
   onRelink,
   relinkingId = null,
 }: {
-  documents: DocumentSummary[];
   /** Le document à reprendre est introuvable : son bouton devient « Localiser
    *  le fichier… » (le dialogue est celui de `useRelinkDocument`, dans Home). */
   onRelink: (doc: DocumentSummary) => void;
@@ -37,19 +37,12 @@ export function ResumeCard({
   const t = useT();
   const navigate = useNavigate();
 
-  // `last_opened` trie déjà le catalogue côté serveur : le premier document
-  // ouvert au moins une fois EST celui qu'on était en train de lire.
-  const doc = documents.find((d) => (d.last_page ?? 0) > 0) ?? documents[0];
-
+  // Sous `["library", …]` : `refreshLibrary()` (Home) l'invalide avec le reste.
+  const { data: resume } = useQuery({ queryKey: ["library", "resume"], queryFn: api.libraryResume });
   const { data: streak } = useQuery({ queryKey: ["streak"], queryFn: api.streak });
-  const { data: history } = useQuery({
-    queryKey: ["progress", "sessions"],
-    queryFn: () => api.progressSessions(),
-  });
 
+  const doc = resume?.document;
   if (!doc) return null;
-
-  const minutes = medianMinutes(history?.sessions ?? []);
 
   return (
     <section
@@ -64,8 +57,12 @@ export function ResumeCard({
         <h2 className="mt-1.5 mb-0 truncate font-serif text-h3 font-bold">{doc.title}</h2>
         <p className="mt-1 mb-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
           <span>{t("resume.page", { page: Math.max(1, doc.last_page || 1) })}</span>
-          <span aria-hidden>·</span>
-          <span>{t("resume.estimate", { n: minutes })}</span>
+          {resume.remaining && (
+            <>
+              <span aria-hidden>·</span>
+              <Remaining remaining={resume.remaining} />
+            </>
+          )}
         </p>
         {doc.file_missing && (
           <p className="mt-1.5 mb-0 flex items-center gap-1.5 text-[13px] text-warning">
@@ -105,14 +102,32 @@ export function ResumeCard({
   );
 }
 
-/** Médiane (et non moyenne) des durées : une session oubliée ouverte trois
- *  heures fausserait une moyenne, pas une médiane. */
-function medianMinutes(sessions: { completed: boolean; duration_s: number }[]): number {
-  const durations = sessions
-    .filter((s) => s.completed && s.duration_s > 60)
-    .map((s) => s.duration_s)
-    .sort((a, b) => a - b);
-  if (durations.length === 0) return DEFAULT_MINUTES;
-  const middle = durations[Math.floor(durations.length / 2)];
-  return Math.max(1, Math.round(middle / 60));
+/** « ≈ 2 h 10 pour finir », l'allure en infobulle, et « estimation » quand
+ *  rien n'est encore mesuré. */
+function Remaining({ remaining }: { remaining: ReadingRemaining }) {
+  const t = useT();
+  const parts = remainingParts(remaining.minutes);
+  const label =
+    parts.kind === "min"
+      ? t("resume.remaining_min", { n: parts.min })
+      : parts.kind === "h"
+        ? t("resume.remaining_h", { h: parts.h })
+        : t("resume.remaining_h_min", { h: parts.h, min: parts.min });
+  const pace = Math.round(remaining.seconds_per_page);
+  const hint = remaining.measured
+    ? t("resume.remaining_measured_hint", { s: pace, n: remaining.samples })
+    : t("resume.remaining_default_hint", { s: pace });
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="cursor-help rounded-sm underline decoration-dotted underline-offset-2">
+            {label}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{hint}</TooltipContent>
+      </Tooltip>
+      {!remaining.measured && <Badge variant="outline">{t("resume.remaining_estimate")}</Badge>}
+    </span>
+  );
 }

@@ -263,7 +263,12 @@ LLM_MODELS: dict[str, ModelProfile] = {
         "qwen3:1.7b": (1, "tiny",      1.4,  4.0, 42.0, 540.0, 10.0, 4096, False, "qwen"),
         "gemma4:e2b": (2, "small",     7.2,  8.0, 22.0, 240.0, 20.0, 8192, True,  "gemma"),
         "gemma4:e4b": (3, "standard",  9.6, 12.0, 18.0, 200.0, 25.0, 8192, True,  "gemma"),
-        "gemma4:12b": (4, "standard",  8.0, 12.0, 14.0, 170.0, 25.0, 8192, True,  "gemma"),
+        # Débits MESURÉS le 2026-10-15 sur l'Apple M4 de 16 Go (journal du
+        # calibrage) : 11,9 tokens/s écrits et 89 lus, contre 29,7 et 255 pour
+        # e4b. L'ancienne ligne (14 / 170) le croyait plus rapide qu'il n'est :
+        # choisi explicitement, il déclenchait l'annonce « machine lente », alors
+        # que c'est le modèle qui est lent. Pessimiste comme les autres lignes.
+        "gemma4:12b": (4, "standard",  8.0, 12.0, 11.0,  85.0, 30.0, 8192, True,  "gemma"),
         "gemma4:26b": (5, "large",    18.0, 32.0,  7.0, 110.0, 45.0, 8192, True,  "gemma"),
         "gemma4:31b": (6, "large",    20.0, 32.0,  6.0, 100.0, 50.0, 8192, True,  "gemma"),
     }.items()
@@ -280,6 +285,19 @@ LLM_REFERENCE_PROFILE = LLM_MODELS[OLLAMA_MODEL]
 # résolu à CHAQUE génération et à chaque calcul de budget : un aller-retour HTTP
 # par appel serait payé par l'étudiant qui attend.
 LLM_TAGS_CACHE_TTL_S = 30.0
+# « Automatique » prend le plus capable qui reste FLUIDE ici. La RAM ne suffit
+# pas à le dire : e4b et 12b exigent les mêmes 12 Go, et sur l'Apple M4 de 16 Go
+# le 12b écrit à 11,9 tokens/s (89 lus) contre 29,7 (255) pour e4b — mesuré le
+# 2026-10-15. Une réponse de lecteur y prend deux fois et demie plus longtemps,
+# et une lecture de prompt de 15 à 30 s. Un modèle dont l'écriture mesurée au
+# calibrage passe sous ce plancher est écarté du choix automatique
+# (services/llm_models.judge_fluency) ; un choix explicite, lui, est respecté.
+# Le plancher porte sur l'écriture seule : c'est elle que l'étudiant attend.
+LLM_AUTO_MIN_OUTPUT_TOKENS_PER_S = 15.0
+# Un verdict de lenteur vaut pour la machine qui l'a mesuré (même RAM) et pour
+# ce délai : une mesure prise en mode économie d'énergie ne doit pas écarter un
+# modèle pour toujours. Il tombe aussi dès qu'une mesure repasse le plancher.
+LLM_AUTO_VERDICT_TTL_DAYS = 14
 # Coût en tokens d'un caractère, par tokenizer et par classe de caractères
 # (`llm.prompts.estimate_prompt_tokens`). Ollama ne signale pas un prompt
 # tronqué : les budgets se vérifient AVANT, sur les cas maximaux, avec une
@@ -1263,6 +1281,31 @@ ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives e
 # Lu par services/session_memory.pages_read, seul auteur du compte
 # (`reading_sessions.pages_read`) et du bonus de progression ci-dessus.
 PAGE_READ_MIN_DWELL_S = 5.0
+
+# ── Temps restant d'un document (carte « Reprendre ») ────────────────────────
+# Le « ≈ N min » de la carte était la médiane des 40 dernières séances, quiz et
+# langues compris : 7 min annoncées pour un rythme de lecture de 22, la même
+# durée pour un chapitre et pour un manuel. C'est désormais le temps qu'il
+# reste au document : ses pages restantes à l'allure MESURÉE de l'élève —
+# médiane du temps par page lue (au moins PAGE_READ_MIN_DWELL_S) dans ce
+# document, sinon dans les documents de même nature (un fichier de code ne se
+# lit pas au rythme d'un PDF), sinon ce défaut, annoncé comme une estimation.
+# La médiane relevée sur la base de dev est d'environ 116 s par page lue.
+# Lus uniquement par services/reading_pace.py.
+READING_ESTIMATE_DEFAULT_PAGE_S = 120.0
+READING_ESTIMATE_MIN_PAGES = 5       # échantillons pour se fier à une médiane
+READING_ESTIMATE_WINDOW = 200        # échantillons récents gardés (l'allure change)
+
+# ── Recherche dans le document (Ctrl/Cmd+F du lecteur) ───────────────────────
+# Insensible aux accents et à la casse, à travers les mots coupés en fin de
+# ligne (services/reader_find.py). Une lettre seule trouverait toutes les
+# pages : la requête en demande au moins deux, pliées. Au-delà de 200, ce n'est
+# plus une recherche mais un collage. Une page surligne au plus 500 occurrences
+# (« de » sur une page dense de tableaux en approche) : au-delà, elles restent
+# comptées, et la réponse dit que la liste de la page est tronquée.
+READER_FIND_MIN_CHARS = 2
+READER_FIND_MAX_QUERY_CHARS = 200
+READER_FIND_MAX_PAGE_HITS = 500
 
 # ── Révision éclair : le RYTHME des cartes du sas d'entrée ──────────────────
 # Les cartes du warm-up ne sont pas notées (un clic retourne, un clic avance) :

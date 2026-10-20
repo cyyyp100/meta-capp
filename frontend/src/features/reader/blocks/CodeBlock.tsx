@@ -8,7 +8,8 @@ import { escapeAttr, findFolded, type TextMark } from "../anchorText";
  * citations de Clikoda).
  *
  * Sécurité : tout le code passe par `escape()` avant injection ; les seules
- * balises émises sont des <span class="tok-*"> et des <mark> inertes.
+ * balises émises sont des <span class="tok-*"> et des <mark> inertes, dont les
+ * attributs sont des constantes ou passent par `escapeAttr`.
  */
 
 const NO_MARKS: TextMark[] = [];
@@ -135,14 +136,51 @@ function highlight(code: string, lang: string): string {
   return out;
 }
 
+const NO_RANGES: [number, number][] = [];
+
+// Occurrences de la recherche (Ctrl/Cmd+F) : jetons de thème, translucides,
+// la courante cernée — comme le calque SVG d'une page PDF.
+const FIND_STYLE = "background:color-mix(in srgb, var(--find-hit) 40%, transparent);border-radius:2px;color:inherit";
+const FIND_CURRENT_STYLE =
+  "background:color-mix(in srgb, var(--find-current) 45%, transparent);" +
+  "outline:2px solid var(--find-current);outline-offset:0;border-radius:2px;color:inherit";
+
 /** Code coloré + surlignages : les segments marqués sont posés par-dessus la
- * coloration (recherche « pliée », comme le reste du lecteur reconstruit). */
-function renderCode(code: string, lang: string, marks: TextMark[]): string {
-  const spans: { start: number; end: number; mark: TextMark }[] = [];
+ * coloration (recherche « pliée », comme le reste du lecteur reconstruit).
+ *
+ * Les occurrences de la recherche (`findRanges`, offsets UTF-16 calculés par
+ * le serveur dans ce même texte) passent EN PRIORITÉ : une marque qui en
+ * chevauche une s'efface le temps de la recherche, l'occurrence ne disparaît
+ * jamais sous un surlignage. */
+export function renderCode(
+  code: string,
+  lang: string,
+  marks: TextMark[],
+  findRanges: [number, number][] = NO_RANGES,
+  findCurrent = -1,
+): string {
+  const spans: { start: number; end: number; open: string }[] = [];
+  findRanges.forEach(([start, end], i) => {
+    if (end <= start || start < 0 || end > code.length) return;
+    const current = i === findCurrent;
+    spans.push({
+      start,
+      end,
+      open: `<mark data-find${current ? " data-find-current" : ""} style="${current ? FIND_CURRENT_STYLE : FIND_STYLE}">`,
+    });
+  });
+  const found = spans.slice();
   for (const mark of marks) {
     if (!mark.text.trim()) continue;
     const hit = findFolded(code, mark.text);
-    if (hit) spans.push({ start: hit[0], end: hit[1], mark });
+    if (!hit || found.some((f) => hit[0] < f.end && hit[1] > f.start)) continue;
+    const idAttr = mark.id != null ? ` data-hl="${Number(mark.id)}"` : "";
+    const cur = mark.id != null ? "cursor:pointer;" : "";
+    spans.push({
+      start: hit[0],
+      end: hit[1],
+      open: `<mark${idAttr} style="background:${escapeAttr(mark.color)};${cur}border-radius:2px;color:inherit">`,
+    });
   }
   if (!spans.length) return highlight(code, lang);
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -151,12 +189,7 @@ function renderCode(code: string, lang: string, marks: TextMark[]): string {
   for (const s of spans) {
     if (s.start < cursor) continue; // chevauchement : premier arrivé gagne
     html += highlight(code.slice(cursor, s.start), lang);
-    const idAttr = s.mark.id != null ? ` data-hl="${Number(s.mark.id)}"` : "";
-    const cur = s.mark.id != null ? "cursor:pointer;" : "";
-    html +=
-      `<mark${idAttr} style="background:${escapeAttr(s.mark.color)};${cur}border-radius:2px;color:inherit">` +
-      escape(code.slice(s.start, s.end)) +
-      "</mark>";
+    html += s.open + escape(code.slice(s.start, s.end)) + "</mark>";
     cursor = s.end;
   }
   html += highlight(code.slice(cursor), lang);
@@ -168,11 +201,17 @@ export function CodeBlock({
   lang = "text",
   startLine = 1,
   marks = NO_MARKS,
+  findRanges = NO_RANGES,
+  findCurrent = -1,
 }: {
   code: string;
   lang?: string;
   startLine?: number;
   marks?: TextMark[];
+  /** Occurrences de la recherche dans `code`, en offsets UTF-16 [début, fin). */
+  findRanges?: [number, number][];
+  /** Rang de l'occurrence courante parmi `findRanges`, -1 si elle est ailleurs. */
+  findCurrent?: number;
 }) {
   const lineCount = code.length ? code.split("\n").length : 1;
   const gutter = Array.from({ length: lineCount }, (_, i) => startLine + i).join("\n");
@@ -223,7 +262,7 @@ export function CodeBlock({
           userSelect: "text",
           WebkitUserSelect: "text",
         }}
-        dangerouslySetInnerHTML={{ __html: renderCode(code, lang, marks) }}
+        dangerouslySetInnerHTML={{ __html: renderCode(code, lang, marks, findRanges, findCurrent) }}
       />
     </div>
   );
