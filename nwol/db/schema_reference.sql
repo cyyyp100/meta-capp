@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 43).
+-- (config.settings.DB_SCHEMA_VERSION = 44).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -104,7 +104,7 @@ CREATE TABLE documents (
     extraction_engine TEXT,
     has_toc          BOOLEAN DEFAULT 0,
     created_at       DATETIME DEFAULT (datetime('now'))
-, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL, auto_summary TEXT, keywords TEXT DEFAULT '[]', digest_status TEXT DEFAULT 'none');
+, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL, auto_summary TEXT, keywords TEXT DEFAULT '[]', digest_status TEXT DEFAULT 'none', bookmark_page INTEGER);
 CREATE INDEX idx_documents_folder ON documents(folder_id);
 CREATE TABLE flashcards (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not reached, and one inside a free-recall passage stays hidden. The document is
   indexed once, in batches that leave the PDF engine free for the pages being read
   (`GET /api/library/doc/{id}/find`, `…/page/{n}/find`).
+- **A bookmark to resume reading**, at the top right of every page: one per
+  document, set, moved or removed in a click. The reader opens on the bookmarked
+  page, the entry airlock's curiosity hook is about that page, the "Resume" card
+  names it and the time left counts from it. Without a bookmark the reader opens
+  on page 1, as before. Schema v44 (`documents.bookmark_page`); no existing
+  position is turned into a bookmark (`POST /api/library/doc/{id}/bookmark`).
 
 ### Changed
 
@@ -83,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The guided tour promised that a document reopens where you stopped; the reader
+  always opened on page 1. The tour now describes the bookmark, which does.
 - A word hyphenated at the end of a line ("differen- / tials") was one word for the
   reader's text layer, with a box covering both lines: selecting it lit up a rectangle
   as tall as the paragraph. It is now two words, each on its line.

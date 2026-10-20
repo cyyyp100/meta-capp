@@ -27,6 +27,7 @@ from config.settings import (
     READING_ESTIMATE_WINDOW,
 )
 from db.page_dwell import reading_dwell_samples
+from services.library import bookmark_page
 
 logger = logging.getLogger("services.reading_pace")
 
@@ -70,14 +71,14 @@ def remaining(doc: dict | None) -> dict | None:
     """Ce qu'il reste à lire de `doc`, à l'allure mesurée :
     `{pages, seconds_per_page, minutes, measured, samples, scope}`.
 
-    Le départ est la dernière page vue, comptée comme restant à lire : on
-    reprend là où l'on s'est arrêté, pas après. None pour un document sans
-    page (ou illisible)."""
+    Le départ est le marque-page posé par l'élève, sinon la dernière page
+    vue ; il compte comme restant à lire : on reprend là où l'on s'est
+    arrêté, pas après. None pour un document sans page (ou illisible)."""
     try:
         page_count = int((doc or {}).get("page_count") or 0)
         if page_count <= 0:
             return None
-        start = min(max(1, int(doc.get("last_page") or 1)), page_count)
+        start = bookmark_page(doc) or min(max(1, int(doc.get("last_page") or 1)), page_count)
         pages = page_count - start + 1
         pace = seconds_per_page(doc)
         return {

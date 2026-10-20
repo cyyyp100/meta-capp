@@ -32,6 +32,23 @@ def test_hook_endpoint_returns_empty_when_llm_down(client, monkeypatch):
     assert res.json() == {"hook": ""}
 
 
+def test_hook_endpoint_passes_the_page_on(client, monkeypatch):
+    """Le sas d'un lecteur ouvert sur le marque-page demande l'accroche de
+    CETTE page, pas de la page 1."""
+    from services import assistant
+
+    seen: list[tuple[int, int]] = []
+
+    def hook(doc_id, page, on_success, on_error, **_kw):
+        seen.append((doc_id, page))
+        on_success({"answer": "Une accroche."})
+
+    monkeypatch.setattr(assistant, "curiosity_hook", hook)
+    assert client.get("/api/library/doc/3/hook", params={"page": 12}).json() == {"hook": "Une accroche."}
+    assert client.get("/api/library/doc/3/hook").json() == {"hook": "Une accroche."}
+    assert seen == [(3, 12), (3, 1)]
+
+
 def test_health_reports_llm_offline_without_failing(client):
     # Sans Ollama, /api/health doit répondre 200 (état LLM = dégradé, pas erreur).
     res = client.get("/api/health")

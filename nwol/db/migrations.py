@@ -225,6 +225,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 43)
         current = 43
 
+    if current < 44 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v44(conn)
+        _set_version(conn, 44)
+        current = 44
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -1899,6 +1904,28 @@ def _migrate_to_v43(conn) -> None:
     with conn:
         _ensure_column(conn, "lang_lexicon", "lemma_translation", "TEXT")
     logger.info("Migration SQLite v43 terminée")
+
+
+def _migrate_to_v44(conn) -> None:
+    """Le marque-page de reprise (`documents.bookmark_page`).
+
+    Le lecteur s'ouvrait toujours en page 1, et l'accroche du sas parlait de la
+    page 1, alors que la visite guidée promet « tu rouvriras là où tu t'es
+    arrêté ». `last_page` ne peut pas tenir ce rôle : c'est une position
+    PASSIVE, réécrite à chaque fermeture par la page dominante du moment — une
+    séance passée à feuilleter l'annexe la déplacerait. Le marque-page, lui,
+    est posé par l'élève, un seul par document, et il se déplace : le lecteur
+    s'y ouvre, l'accroche porte sur sa page, et le temps restant
+    (`services/reading_pace.remaining`) en part. NULL = aucun marque-page, et
+    le lecteur s'ouvre en page 1 comme avant. Aucune position existante n'est
+    convertie : ce serait poser à la place de l'élève un repère qu'il n'a pas
+    choisi.
+
+    Rejouable : la colonne n'est ajoutée qu'une fois."""
+    logger.info("Migration SQLite v44 démarrée")
+    with conn:
+        _ensure_column(conn, "documents", "bookmark_page", "INTEGER")
+    logger.info("Migration SQLite v44 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

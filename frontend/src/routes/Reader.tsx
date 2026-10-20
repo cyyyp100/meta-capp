@@ -3,11 +3,19 @@ import { Highlighter, Plus, Search } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 
 import { useConfirm } from "@/components/ui/confirm";
 
 import { api } from "../api/client";
-import type { Highlight, HighlightAnchor, PageWord, SavedHighlight, SessionMetrics } from "../api/types";
+import type {
+  DocumentDetail,
+  Highlight,
+  HighlightAnchor,
+  PageWord,
+  SavedHighlight,
+  SessionMetrics,
+} from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
 import { ClikodaPanel, type QaMask } from "../features/reader/ClikodaPanel";
 import { DEMO_METRICS, DEMO_REFLECTION_KEYS, type DemoBeat } from "../features/reader/demoScript";
@@ -52,6 +60,12 @@ const ZONE_SIDE_INSET = 24;
 // Durée d'un défilement décidé par le lecteur (cadrage animé de la zone) : le
 // garde-fou du plancher le laisse finir au lieu de le ramener en arrière.
 const PROGRAMMATIC_SCROLL_MS = 800;
+// Marge au-dessus de la première page : la barre d'outils flotte là. Une page
+// amenée en haut de la vue (ouverture sur le marque-page) garde cette marge.
+const COLUMN_PAD_TOP = 70;
+// Ouverture sur le marque-page : la position est tenue au plus ce temps, ou
+// jusqu'au premier geste (cf. l'effet d'ouverture).
+const OPEN_HOLD_MS = 2000;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -210,8 +224,17 @@ export function Reader() {
   // du zoom faisait charger chaque page deux fois à l'ouverture.
   const [renderZoom, setRenderZoom] = useState(() => renderZoomFor(INITIAL_ZOOM));
   const [currentPage, setCurrentPage] = useState(1);
-  // Marque-page : page quittée à la session précédente (figée à l'ouverture, > 1 seulement).
-  const [bookmarkPage, setBookmarkPage] = useState<number | null>(null);
+  // Dernière position : page quittée à la session précédente (figée à
+  // l'ouverture, > 1 seulement). Un ruban la signale, sans marque-page posé.
+  const [lastPositionPage, setLastPositionPage] = useState<number | null>(null);
+  // Marque-page de l'élève (v44), un seul par document, qui se déplace. Lu une
+  // fois à l'ouverture, puis tenu ici et recopié dans le cache du document.
+  const [bookmark, setBookmark] = useState<number | null>(null);
+  // La page où le lecteur s'ouvre : le marque-page à l'ouverture, sinon 1.
+  // Figée — le sas en tire son accroche, et la déplacer ensuite ne rouvre rien.
+  // null tant que le document n'est pas chargé.
+  const [openPage, setOpenPage] = useState<number | null>(null);
+  const bookmarkSeqRef = useRef(0);
   const ratios = useRef<Map<number, number>>(new Map());
   const [highlightsByPage, setHighlightsByPage] = useState<Record<number, { rect: number[]; color: string }[]>>({});
 
@@ -545,14 +568,81 @@ export function Reader() {
     return () => setTourControls(null);
   }, [demo, setTourControls]);
 
-  // Marque-page : on fige la page de reprise au tout premier chargement (valeur de la
-  // session précédente, écrite en fin de session côté backend). On ignore la page 1
-  // (document jamais lu) où le repère n'aurait pas de sens. Le PDF ouvre toujours page 1.
+  // Dernière position : on fige la page quittée au tout premier chargement (valeur de
+  // la session précédente, écrite en fin de session côté backend). On ignore la page 1
+  // (document jamais lu) où le repère n'aurait pas de sens.
   useEffect(() => {
-    if (data && bookmarkPage === null && (data.last_page ?? 1) > 1) {
-      setBookmarkPage(data.last_page);
+    if (data && lastPositionPage === null && (data.last_page ?? 1) > 1) {
+      setLastPositionPage(data.last_page);
     }
-  }, [data, bookmarkPage]);
+  }, [data, lastPositionPage]);
+
+  // Marque-page et page d'ouverture, lus au premier chargement du document.
+  // Pendant la visite, ni l'un ni l'autre : elle s'ouvre en page 1, toujours.
+  if (data && openPage === null) {
+    const marked = demo ? null : (data.bookmark_page ?? null);
+    setBookmark(marked);
+    setOpenPage(marked ?? 1);
+  }
+
+  // Ouverture sur le marque-page : on amène sa page en haut de la vue, sans
+  // animation, pendant le sas — l'accroche porte sur elle et la lecture y
+  // commence. Puis on TIENT la position jusqu'au premier geste (molette,
+  // toucher, clic, touche), OPEN_HOLD_MS au plus : WKWebView n'ancre pas le
+  // défilement, et une page de code change de hauteur en chargeant ses blocs —
+  // la page marquée glissait hors de la vue. Ne dépend que de `openPage`, posé
+  // une fois : les autres rendus ne la relancent pas.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const col = columnRef.current;
+    if (openPage === null || openPage <= 1 || !el || !col) return;
+    const jump = () => {
+      const pageEl = el.querySelector<HTMLElement>(`[data-page="${openPage}"]`);
+      if (!pageEl) return;
+      const top = pageEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+      scrollViewTo(Math.max(0, top - COLUMN_PAD_TOP), "auto");
+    };
+    jump();
+    const held = new ResizeObserver(jump);
+    held.observe(col);
+    const gestures = ["wheel", "touchstart", "pointerdown"] as const;
+    const release = () => {
+      held.disconnect();
+      window.clearTimeout(timer);
+      for (const ev of gestures) el.removeEventListener(ev, release);
+      window.removeEventListener("keydown", release);
+    };
+    const timer = window.setTimeout(release, OPEN_HOLD_MS);
+    for (const ev of gestures) el.addEventListener(ev, release, { passive: true });
+    window.addEventListener("keydown", release);
+    return release;
+  }, [openPage]);
+
+  /** Pose le marque-page sur `page`, ou l'y retire s'il y est. Optimiste : le
+   *  bouton répond tout de suite, l'échec le remet où il était. Le cache du
+   *  document suit — sans lui, rouvrir le lecteur le relirait et s'ouvrirait sur
+   *  l'ancien marque-page —, et la bibliothèque (carte « Reprendre ») aussi. */
+  const toggleBookmark = useStableCallback((page: number) => {
+    const before = bookmark;
+    const next = before === page ? null : page;
+    const seq = ++bookmarkSeqRef.current;
+    const write = (value: number | null) => {
+      setBookmark(value);
+      queryClient.setQueryData<DocumentDetail>(["document", id], (d) => (d ? { ...d, bookmark_page: value } : d));
+    };
+    write(next);
+    api.setBookmark(id, next).then(
+      () => queryClient.invalidateQueries({ queryKey: ["library"] }),
+      () => {
+        // Un geste plus récent a déjà décidé : ne pas l'écraser.
+        if (seq !== bookmarkSeqRef.current) return;
+        write(before);
+        toast.error(t("reader.bookmark_error"));
+      },
+    );
+  });
+  // Visite guidée : pas de bouton (le document de démonstration est éphémère).
+  const onToggleBookmark = demo ? undefined : toggleBookmark;
 
   // Re-rendu HD à palier quand le zoom se stabilise (texte net au repos).
   useEffect(() => {
@@ -1441,7 +1531,7 @@ export function Reader() {
               flexDirection: "column",
               alignItems: "center",
               gap: 18,
-              padding: "70px 0 40px",
+              padding: `${COLUMN_PAD_TOP}px 0 40px`,
               cursor: "grab",
               // Pendant un geste de zoom, l'échelle s'ajoute ici, posée
               // directement sur l'élément (cf. gestureRef) : sans rendu React.
@@ -1456,7 +1546,9 @@ export function Reader() {
                 zoom={zoom}
                 currentPage={currentPage}
                 sizes={sizes}
-                bookmarkPage={bookmarkPage}
+                lastPositionPage={bookmark === null ? lastPositionPage : null}
+                bookmarkPage={bookmark}
+                onToggleBookmark={onToggleBookmark}
                 locked={locked}
                 lockedPage={lockedPage}
                 marksByPage={marksByPage}
@@ -1480,7 +1572,8 @@ export function Reader() {
                   // Sous une question bloquante, seules les pages qu'on ne peut pas
                   // encore atteindre sont atténuées : celles du dessus se relisent.
                   dimmed={locked && n > lockedPage}
-                  bookmarked={n === bookmarkPage}
+                  lastPosition={bookmark === null && n === lastPositionPage}
+                  bookmarked={n === bookmark}
                   highlights={highlightsByPage[n]}
                   zoneRect={zone && zone.page === n ? zone.rect : null}
                   mask={maskByPage[n]}
@@ -1490,6 +1583,7 @@ export function Reader() {
                   findCurrent={findVisible && findPage === n ? findIndex : -1}
                   demo={demo}
                   onDeleteHighlight={deleteHighlight}
+                  onToggleBookmark={onToggleBookmark}
                 />
               );
             })
@@ -1649,7 +1743,13 @@ export function Reader() {
       />
 
       {data && !entered && (
-        <EntrySas source={{ kind: "document", docId: id }} title={data.title} onStart={startReading} onLeave={handleLeave} demo={demo} />
+        <EntrySas
+          source={{ kind: "document", docId: id, page: openPage ?? 1 }}
+          title={data.title}
+          onStart={startReading}
+          onLeave={handleLeave}
+          demo={demo}
+        />
       )}
 
       {pause && !exit && <PauseSas pause={pause} onResume={resumeReading} onEnd={handleEnd} />}

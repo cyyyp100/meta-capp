@@ -53,7 +53,11 @@ export interface DocumentSummary {
   title: string;
   filename: string;
   page_count: number;
+  // Page dominante à la dernière fermeture du lecteur : elle bouge seule.
   last_page: number;
+  // Marque-page posé par l'élève (schéma v44), un seul par document : le
+  // lecteur s'y ouvre. Nul sans marque-page — le lecteur s'ouvre en page 1.
+  bookmark_page: number | null;
   subject: string | null;
   last_opened: string;
   // `documents.created_at` : date du PREMIER import, inchangée à la ré-ouverture.

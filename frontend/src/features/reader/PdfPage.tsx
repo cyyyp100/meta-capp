@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { pageImageUrl } from "../../api/client";
 import type { PageWord } from "../../api/types";
 import { useT } from "../../i18n";
+import { PageBookmarkButton } from "./PageBookmarkButton";
 import { PageTextLayer } from "./PageTextLayer";
 
 /** Marge (en points PDF) autour du passage cité, pour le liseré de la zone. */
@@ -51,6 +52,9 @@ interface Props {
   renderZoom: number;
   contentHash: string | null;
   dimmed: boolean;
+  /** Page quittée à la dernière séance : ruban sur le bord droit (sans marque-page seulement). */
+  lastPosition: boolean;
+  /** Le marque-page de l'élève est sur cette page. */
   bookmarked: boolean;
   /** Passages cités par Clikoda sur cette page. */
   highlights?: { rect: number[]; color: string }[];
@@ -68,6 +72,8 @@ interface Props {
   findCurrent?: number;
   demo: boolean;
   onDeleteHighlight: (id: number) => void;
+  /** Pose ou retire le marque-page ; absent, pas de bouton (visite guidée). */
+  onToggleBookmark?: (page: number) => void;
 }
 
 /** Aucune occurrence : la même liste à chaque rendu (la page est mémoïsée). */
@@ -75,7 +81,7 @@ export const NO_HITS: number[][][] = [];
 
 /**
  * Une page PDF du lecteur : image, surlignages, zone, cache, calque de texte,
- * ruban du marque-page.
+ * ruban de la dernière position, bouton du marque-page.
  *
  * Mémoïsée, et ses props sont stables d'un rendu à l'autre : le lecteur se
  * re-rend à chaque page dominante qui change en cours de défilement, à chaque
@@ -91,6 +97,7 @@ export const PdfPage = memo(function PdfPage({
   renderZoom,
   contentHash,
   dimmed,
+  lastPosition,
   bookmarked,
   highlights,
   zoneRect,
@@ -101,6 +108,7 @@ export const PdfPage = memo(function PdfPage({
   findCurrent = -1,
   demo,
   onDeleteHighlight,
+  onToggleBookmark,
 }: Props) {
   const t = useT();
   const scale = width / w;
@@ -177,8 +185,8 @@ export const PdfPage = memo(function PdfPage({
           WebkitUserSelect: "none",
         }}
       />
-      {/* Marque-page : ruban sur le bord droit de la page quittée la dernière fois. */}
-      {bookmarked ? (
+      {/* Dernière position : ruban sur le bord droit de la page quittée la dernière fois. */}
+      {lastPosition ? (
         <div
           title={t("reader.last_position")}
           style={{
@@ -340,6 +348,7 @@ export const PdfPage = memo(function PdfPage({
           )}
         </svg>
       ) : null}
+      {onToggleBookmark ? <PageBookmarkButton page={page} active={bookmarked} onToggle={onToggleBookmark} /> : null}
     </div>
   );
 });

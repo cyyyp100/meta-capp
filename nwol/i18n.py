@@ -100,6 +100,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.episode": "épisode {n} « {title} »",
         "brainstorm.episode.line": "{speaker} : « {text} » ({translation})",
         "library.title_empty": "Le titre ne peut pas être vide.",
+        "library.bookmark_page_invalid": "Cette page n'existe pas dans le document.",
         # « Localiser le fichier » (services/relink) : refus traduits, renvoyés
         # tels quels par le serveur et affichés par l'interface.
         "library.file_missing": "Fichier introuvable : il a été déplacé, renommé ou supprimé depuis l'import.",
@@ -271,6 +272,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "brainstorm.episode": "episode {n} \"{title}\"",
         "brainstorm.episode.line": "{speaker}: \"{text}\" ({translation})",
         "library.title_empty": "The title cannot be empty.",
+        "library.bookmark_page_invalid": "This page does not exist in the document.",
         "library.file_missing": "File not found: it was moved, renamed or deleted since the import.",
         "library.relink_different_file": (
             "This file does not match the imported document: its content has changed since the import."

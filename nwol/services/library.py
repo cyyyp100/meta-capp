@@ -30,6 +30,7 @@ from db.documents import list_all_documents as _list_all
 from db.documents import list_documents_for_search as _list_for_search
 from db.documents import list_recent_documents as _list_recent
 from db.documents import rename_document as _rename_document
+from db.documents import set_bookmark_page as _set_bookmark_page
 from db.documents import update_content_hash as _update_content_hash
 from db.documents import update_page_count as _update_page_count
 from i18n import t
@@ -60,6 +61,8 @@ __all__ = [
     "forget_path_caches",
     "delete_document",
     "rename_document",
+    "set_bookmark",
+    "bookmark_page",
 ]
 
 
@@ -242,10 +245,12 @@ def _resync_rewritten_pdf(doc: dict, page_count: int) -> dict:
         _clear_page_cache(doc["path"])
     except OSError:  # pragma: no cover - le cache disque est jetable
         pass
+    bookmark = doc.get("bookmark_page")
     return {
         **doc,
         "page_count": page_count,
         "last_page": min(int(doc.get("last_page") or 1), page_count),
+        "bookmark_page": None if bookmark is None else min(int(bookmark), page_count),
         "content_hash": content_hash,
     }
 
@@ -409,6 +414,42 @@ def rename_document(doc_id: int, title: str) -> dict:
     return get_document(doc_id) or {"id": int(doc_id)}
 
 
+def bookmark_page(doc: dict) -> int | None:
+    """Le marque-page de `doc`, s'il désigne une page du document ; sinon None.
+
+    Une seule lecture pour tout ce qui en part — la page d'ouverture du
+    lecteur, la carte « Reprendre », le temps restant. `update_page_count`
+    borne déjà la colonne, mais un `page_count` inconnu (0) ou une ligne
+    écrite à la main ne doivent pas faire ouvrir le lecteur hors du document."""
+    raw = doc.get("bookmark_page")
+    if raw is None:
+        return None
+    try:
+        page = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return page if 1 <= page <= int(doc.get("page_count") or 0) else None
+
+
+def set_bookmark(doc_id: int, page: int | None) -> dict:
+    """Pose, déplace ou retire (`page` None) le marque-page du document.
+
+    Un seul par document : le poser ailleurs le déplace. C'est un geste de
+    l'élève, distinct de `last_page` (la page dominante à la fermeture, qui
+    bouge seule). La page est contrôlée contre `page_count` en base, sans
+    ouvrir le fichier — un document dont le fichier a disparu garde son
+    marque-page. Renvoie le détail à jour. ValueError si le document n'existe
+    pas ou si la page n'en fait pas partie."""
+    doc = _get_document(doc_id)
+    if doc is None:
+        raise ValueError(t("folders.document_missing"))
+    if page is not None and not 1 <= int(page) <= int(doc.get("page_count") or 0):
+        raise ValueError(t("library.bookmark_page_invalid"))
+    _set_bookmark_page(doc_id, None if page is None else int(page))
+    logger.info("Marque-page doc=%s : %s", doc_id, page if page is not None else "retiré")
+    return get_document(doc_id) or {"id": int(doc_id)}
+
+
 def search_page(doc_id: int, page: int, needle: str) -> list[list[float]]:
     """Rects (x0, y0, x1, y1) en points PDF où `needle` apparaît sur la page."""
     doc = _get_document(doc_id)
@@ -462,6 +503,8 @@ def _summary(doc: dict) -> dict:
         "filename": doc.get("filename") or "",
         "page_count": doc.get("page_count") or 0,
         "last_page": doc.get("last_page") or 1,
+        # Posé par l'élève (v44) ; null sans marque-page ou hors du document.
+        "bookmark_page": bookmark_page(doc),
         "subject": doc.get("subject"),
         "last_opened": doc.get("last_opened") or "",
         # `created_at` est absent du ON CONFLICT DO UPDATE de `upsert_document` :

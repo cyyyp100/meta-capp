@@ -41,7 +41,8 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
  * Ce qu'on s'apprête à ouvrir.
- *   * un document : accroche de curiosité (LLM) et cartes de sa matière
+ *   * un document : accroche de curiosité (LLM) sur la page où il s'ouvre
+ *     (`page`, celle du marque-page ; la 1 sinon) et cartes de sa matière
  *     d'abord (dues, puis tirage récence × déjà vue), complétées par les
  *     autres disciplines — jamais par une autre langue ;
  *   * une séance du feuilleton (`episode`) : cartes de la langue (dues, puis
@@ -51,7 +52,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *     accroche le thème de la leçon quand il est connu — pas d'appel LLM.
  */
 export type EntrySource =
-  | { kind: "document"; docId: number }
+  | { kind: "document"; docId: number; page?: number }
   | { kind: "episode"; language: string }
   | { kind: "language"; language: string; theme?: string };
 
@@ -113,15 +114,18 @@ export function EntrySas({
   // L'accroche de Clikoda : celle du document, ou celle de l'épisode à venir.
   // La langue de l'interface fait partie de la clé : une accroche mise en cache
   // en anglais ne doit pas resservir après un passage au français (le lecteur
-  // purge celle d'un document par `["hook", docId]`). Celle d'un épisode
-  // s'écrit à CHAQUE sas (`gcTime: 0`) : sa clé ne dit pas de quel épisode il
-  // s'agit — le serveur seul le sait —, et le sas suivant en ouvrira un autre.
+  // purge celle d'un document par le préfixe `["hook", docId]`). La page aussi :
+  // le marque-page déplacé, l'accroche de l'ancienne page ne resert pas. Celle
+  // d'un épisode s'écrit à CHAQUE sas (`gcTime: 0`) : sa clé ne dit pas de quel
+  // épisode il s'agit — le serveur seul le sait —, et le sas suivant en ouvrira
+  // un autre.
   const lang = useLangStore((s) => s.lang);
   const docId = source.kind === "document" ? source.docId : null;
+  const hookPage = source.kind === "document" ? (source.page ?? 1) : 1;
   const episodeOf = source.kind === "episode" ? source.language : null;
   const { data: hook } = useQuery({
-    queryKey: docId !== null ? ["hook", docId, lang] : ["episode-hook", episodeOf, lang],
-    queryFn: () => (docId !== null ? api.docHook(docId, 1) : api.feuilletonHook(episodeOf as string)),
+    queryKey: docId !== null ? ["hook", docId, hookPage, lang] : ["episode-hook", episodeOf, lang],
+    queryFn: () => (docId !== null ? api.docHook(docId, hookPage) : api.feuilletonHook(episodeOf as string)),
     staleTime: Infinity,
     gcTime: episodeOf !== null ? 0 : undefined,
     enabled: !demo && (docId !== null || episodeOf !== null),

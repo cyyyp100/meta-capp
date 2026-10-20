@@ -649,8 +649,22 @@ describe("ClikodaPanel", () => {
     await renderOpenPanel({ sessionId: 12, reading: true, warmup });
     await waitFor(() => {
       const start = (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m)).find((m) => m.type === "start_reading");
-      expect(start).toEqual({ type: "start_reading", session_id: 12, warmup });
+      expect(start).toEqual({ type: "start_reading", session_id: 12, page: 1, warmup });
     });
+  });
+
+  // Ouvert sur le marque-page, le lecteur n'est pas en page 1 quand le socket
+  // s'ouvre : la page part dès l'ouverture, puis avec l'entrée en lecture — le
+  // serveur y compte la lecture dès le départ.
+  it("signale la page d'ouverture dès que le socket est ouvert, et à l'entrée en lecture", async () => {
+    const sent = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m));
+    const view = await renderOpenPanel({ currentPage: 12, sessionId: 7, reading: false });
+    await waitFor(() => expect(sent()).toContainEqual({ type: "viewport", page: 12, session_id: 7 }));
+
+    view.rerender(wrap(<ClikodaPanel docId={1} currentPage={12} sessionId={7} reading />));
+    await waitFor(() =>
+      expect(sent().find((m) => m.type === "start_reading")).toMatchObject({ page: 12, session_id: 7 }),
+    );
   });
   // Sur la machine de 4 Go, une réponse se chiffre en minutes : sans un mot, un
   // panneau qui « réfléchit » trois minutes ressemble à un panneau figé.

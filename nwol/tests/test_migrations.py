@@ -428,3 +428,34 @@ def test_v43_gives_the_lexicon_the_meaning_of_its_lemmas(fresh_db, monkeypatch):
     store.insert_lexeme(profile_id, {**entry, "lemma_translation": "posséder"}, 3)
     row = store.get_lexeme(profile_id, "tener")
     assert (row["form"], row["translation"], row["lemma_translation"]) == ("Tenemos", "Nous avons", "avoir")
+
+
+def test_v44_adds_the_bookmark_without_converting_positions(fresh_db, monkeypatch):
+    """Une base v43 avec un document lu jusqu'à la page 12 : la migration ajoute
+    `documents.bookmark_page` à NULL. La dernière page vue reste une position
+    passive — la convertir en marque-page poserait à la place de l'élève un
+    repère qu'il n'a pas choisi. Rejouable."""
+    from db import get_connection, migrations
+    from db.documents import get_document, set_bookmark_page, update_last_page, upsert_document
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 43)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    doc_id = upsert_document("/tmp/cours.pdf", "cours.pdf", 40, "pdfium_scroll", False)
+    update_last_page(doc_id, 12)
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 44)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 44
+    doc = get_document(doc_id)
+    assert (doc["last_page"], doc["bookmark_page"]) == (12, None)
+
+    assert set_bookmark_page(doc_id, 30) is True
+    assert get_document(doc_id)["bookmark_page"] == 30
+    assert set_bookmark_page(999, 3) is False

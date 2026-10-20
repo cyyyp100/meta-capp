@@ -5,13 +5,15 @@ import type { ReaderBlock } from "../../api/types";
 import { useT } from "../../i18n";
 import type { TextMark } from "./anchorText";
 import { BlockRenderer } from "./blocks/BlockRenderer";
+import { PageBookmarkButton } from "./PageBookmarkButton";
 
 /**
  * Boucle de pages du lecteur en BLOCS DE TEXTE — les fichiers de code, seuls
  * documents paginés en blocs dans cette édition (les PDF sont rendus en images
  * par le lecteur raster). Un div[data-page=n] par page : les contrats du shell
  * Reader restent intacts (IntersectionObserver de page dominante, page
- * verrouillée, ruban marque-page, sélection native via closest("[data-page]")).
+ * verrouillée, ruban de la dernière position, marque-page, sélection native
+ * via closest("[data-page]")).
  *
  * Les blocs ne sont chargés qu'autour de la page courante (PREFETCH_RADIUS) :
  * une page pas encore chargée affiche un cadre vide au bon ratio, ce qui garde
@@ -26,7 +28,12 @@ interface Props {
   zoom: number;
   currentPage: number;
   sizes: [number, number][];
+  /** Page quittée à la dernière séance (ruban), nulle quand un marque-page existe. */
+  lastPositionPage: number | null;
+  /** Page du marque-page de l'élève. */
   bookmarkPage: number | null;
+  /** Pose ou retire le marque-page ; absent, pas de bouton (visite guidée). */
+  onToggleBookmark?: (page: number) => void;
   locked: boolean;
   lockedPage: number;
   /** Marques par page : citations de Clikoda + surlignages mémorisés. */
@@ -53,7 +60,9 @@ export function BlockPages({
   zoom,
   currentPage,
   sizes,
+  lastPositionPage,
   bookmarkPage,
+  onToggleBookmark,
   locked,
   lockedPage,
   marksByPage,
@@ -157,7 +166,7 @@ export function BlockPages({
               // préchargement déclencherait une requête en échec.
               <div style={{ width: "100%", height: "100%" }} />
             )}
-            {n === bookmarkPage ? (
+            {n === lastPositionPage ? (
               <div
                 title={t("reader.last_position")}
                 style={{
@@ -172,6 +181,9 @@ export function BlockPages({
                   zIndex: 5,
                 }}
               />
+            ) : null}
+            {onToggleBookmark ? (
+              <PageBookmarkButton page={n} active={n === bookmarkPage} onToggle={onToggleBookmark} />
             ) : null}
           </div>
         );

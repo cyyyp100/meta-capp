@@ -149,6 +149,12 @@ export const api = {
       `/api/library/doc/${docId}/rename`,
       { title },
     ),
+  // Pose, déplace ou retire (`null`) le marque-page : un seul par document.
+  setBookmark: (docId: number, page: number | null) =>
+    postJSON<{ ok: boolean; document: DocumentDetail }>(
+      `/api/library/doc/${docId}/bookmark`,
+      { page },
+    ),
   // Retire le document de la bibliothèque — jamais le fichier de l'utilisateur.
   deleteDocument: (docId: number) =>
     fetch(`/api/library/doc/${docId}`, { method: "DELETE" }).then(async (r) => {

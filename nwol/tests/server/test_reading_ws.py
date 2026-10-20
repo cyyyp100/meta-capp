@@ -611,6 +611,47 @@ def test_closing_during_the_entry_sas_keeps_last_page_and_writes_no_dwell(client
     assert get_document(doc_id)["last_page"] == 12
 
 
+def test_a_reader_opened_on_the_bookmark_counts_reading_there_from_the_start(client, tmp_path, make_pdf,
+                                                                           quick_reading):
+    """Ouvert sur le marque-page, le lecteur signale sa page pendant le sas
+    (`viewport`) : à l'entrée en lecture, le temps court sur cette page-là, pas
+    sur la page 1 où le socket s'est ouvert."""
+    import time
+
+    from db.page_dwell import get_page_dwell
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 12, "session_id": sid})
+        _sync(ws)
+        time.sleep(quick_reading)  # le sas : pas une lecture
+        ws.send_json({"type": "start_reading", "session_id": sid, "page": 12})
+        _sync(ws)
+        time.sleep(quick_reading * 2)
+    dwell = {row["page"]: row["dwell_s"] for row in get_page_dwell(sid)}
+    assert set(dwell) == {12}
+    assert dwell[12] >= quick_reading * 2
+
+
+def test_start_reading_carries_the_page_on_screen(client, tmp_path, make_pdf, quick_reading):
+    """Le `viewport` de l'ouverture peut se perdre (socket pas encore ouvert) :
+    `start_reading` porte la page à l'écran, et la lecture y est comptée — ni
+    sur la page 1, ni sur la page à laquelle le socket croyait être."""
+    import time
+
+    from db.documents import get_document
+    from db.page_dwell import get_page_dwell
+
+    doc_id, sid = _long_session(client, tmp_path, make_pdf)
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "start_reading", "session_id": sid, "page": 9})
+        _sync(ws)
+        time.sleep(quick_reading * 2)
+    dwell = {row["page"]: row["dwell_s"] for row in get_page_dwell(sid)}
+    assert set(dwell) == {9}
+    assert get_document(doc_id)["last_page"] == 9
+
+
 def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_path, make_pdf, quick_reading):
     """« Terminer », puis le sas de repos : un lecteur rouvert sur la séance
     close ne s'y rattache pas. Il écrasait à sa fermeture le temps par page

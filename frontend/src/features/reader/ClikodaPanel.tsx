@@ -562,11 +562,14 @@ export function ClikodaPanel({
     };
   }, [docId, demo, ended]);
 
+  // La page à l'écran, dès que le socket est ouvert (`connected`) : ouvert sur
+  // le marque-page, le lecteur n'est pas en page 1 quand le socket s'ouvre, et
+  // le serveur doit le savoir avant l'entrée en lecture.
   useEffect(() => {
     const ws = wsRef.current;
     if (pausedRef.current) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "viewport", page: currentPage, session_id: sessionId ?? null }));
-  }, [currentPage, sessionId]);
+  }, [currentPage, sessionId, connected]);
 
   // Pause de la lecture : un message à l'arrêt, un à la reprise. Le serveur
   // mesure la durée et ce qui l'a précédée (services/pause.py) ; ici on ne fait
@@ -590,10 +593,18 @@ export function ClikodaPanel({
   // question, et juge le rythme de la révision éclair. `connected` couvre le
   // socket pas encore ouvert à la sortie du sas ; un envoi répété est sans
   // effet côté serveur (la révision n'est enregistrée qu'une fois par séance).
+  // La page à l'écran part avec : la lecture y est comptée dès le départ.
   useEffect(() => {
     const ws = wsRef.current;
     if (reading && connected && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "start_reading", session_id: sessionIdRef.current ?? null, warmup: warmupRef.current }));
+      ws.send(
+        JSON.stringify({
+          type: "start_reading",
+          session_id: sessionIdRef.current ?? null,
+          page: pageRef.current,
+          warmup: warmupRef.current,
+        }),
+      );
     }
   }, [reading, connected]);
 

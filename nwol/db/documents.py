@@ -106,15 +106,30 @@ def update_last_page(doc_id: int, page: int) -> None:
         )
 
 
-def update_page_count(doc_id: int, page_count: int) -> None:
-    """Réaligne `page_count` sur le fichier quand il a été réécrit depuis l'import
-    (ou remplacé par une autre version, services/relink). Le marque-page suit :
-    une page au-delà de la dernière n'existe plus."""
+def set_bookmark_page(doc_id: int, page: int | None) -> bool:
+    """Pose, déplace (`page`) ou retire (None) le marque-page ; False si le
+    document n'existe pas. Les bornes sont celles du service (services/library)."""
     conn = get_connection()
     with conn:
+        cur = conn.execute("UPDATE documents SET bookmark_page=? WHERE id=?", (page, doc_id))
+    return cur.rowcount > 0
+
+
+def update_page_count(doc_id: int, page_count: int) -> None:
+    """Réaligne `page_count` sur le fichier quand il a été réécrit depuis l'import
+    (ou remplacé par une autre version, services/relink). La dernière page vue
+    et le marque-page suivent : une page au-delà de la dernière n'existe plus.
+    Sans marque-page, il n'y en a toujours pas."""
+    conn = get_connection()
+    last = max(1, int(page_count))
+    with conn:
         conn.execute(
-            "UPDATE documents SET page_count=?, last_page=MIN(COALESCE(last_page, 1), ?) WHERE id=?",
-            (page_count, max(1, int(page_count)), doc_id),
+            """UPDATE documents SET page_count=?,
+                   last_page=MIN(COALESCE(last_page, 1), ?),
+                   bookmark_page=CASE WHEN bookmark_page IS NULL THEN NULL
+                                      ELSE MIN(bookmark_page, ?) END
+               WHERE id=?""",
+            (page_count, last, last, doc_id),
         )
 
 

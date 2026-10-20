@@ -100,6 +100,29 @@ describe("EntrySas", () => {
     expect(screen.getByRole("button", { name: /continuer|continue/i })).toBeEnabled();
   });
 
+  it("tire l'accroche d'un document de la page où il s'ouvre", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Ouvert sur le marque-page : l'accroche porte sur sa page.
+    const first = renderSas(vi.fn(), { kind: "document", docId: 3, page: 12 }, client);
+    await wait(1);
+    expect(screen.getByText("Une accroche.")).toBeInTheDocument();
+    expect(api.docHook).toHaveBeenCalledWith(3, 12);
+    first.unmount();
+
+    // Marque-page déplacé : l'accroche de l'ancienne page ne resert pas.
+    renderSas(vi.fn(), { kind: "document", docId: 3, page: 30 }, client);
+    await wait(1);
+    expect(api.docHook).toHaveBeenLastCalledWith(3, 30);
+  });
+
+  it("tire l'accroche de la page 1 sans marque-page", async () => {
+    vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
+    renderSas();
+    await wait(1);
+    expect(api.docHook).toHaveBeenCalledWith(3, 1);
+  });
+
   it("annonce l'épisode à venir par une accroche de Clikoda, comme avant un PDF", async () => {
     vi.spyOn(api, "preferences").mockResolvedValue(preferences("60"));
     renderSas(vi.fn(), { kind: "episode", language: "espagnol" });
