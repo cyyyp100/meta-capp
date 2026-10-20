@@ -63,7 +63,7 @@ httpx==0.28.1
 # Mozilla CA bundle for the opt-in update check (services/updates.py). Frozen
 # builds cannot rely on OpenSSL's compiled-in store: it points at the build
 # machine. Already pulled in by httpx; pinned here because the app imports it.
-certifi==2026.1.4
+certifi==2026.10.19
 
 # Testing (reportlab builds the PDF fixtures — test-only, never shipped)
 pytest==9.0.3
