@@ -86,12 +86,15 @@ export function ToolbarIconButton({
   label,
   hint,
   disabled,
+  pressed,
   onClick,
   children,
 }: {
   label: string;
   hint?: string;
   disabled?: boolean;
+  /** Bouton à bascule (carnet ouvert, pose d'un post-it en cours). */
+  pressed?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -101,10 +104,12 @@ export function ToolbarIconButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
+      aria-pressed={pressed}
       title={hint ?? label}
       style={{
         ...toolButton,
         padding: "6px 9px",
+        ...(pressed ? { background: "var(--accent-soft)", borderColor: "var(--accent)", color: "var(--text)" } : {}),
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.5 : 1,
       }}

@@ -1,8 +1,11 @@
 import { memo, useEffect, useRef, useState } from "react";
 
+import { MathText } from "../../components/MathText";
 import { pageImageUrl } from "../../api/client";
-import type { PageWord } from "../../api/types";
+import type { AnnotationLabel, AnnotationStyle, PageWord, ReaderNote } from "../../api/types";
 import { useT } from "../../i18n";
+import { PageNotesLayer } from "./annotations/PageNotesLayer";
+import { svgStyle } from "./annotations/palette";
 import { PageBookmarkButton } from "./PageBookmarkButton";
 import { PageTextLayer } from "./PageTextLayer";
 
@@ -12,12 +15,20 @@ export const ZONE_PAD_PTS = 4;
 // hampes des lignes voisines laissent deviner le passage.
 const MASK_PAD_PTS = 2.5;
 
-/** Surlignage mémorisé d'une page, prêt à dessiner (rects fusionnés par ligne, couleur résolue). */
+/** Surlignage mémorisé d'une page, prêt à dessiner (rects fusionnés par ligne,
+ *  couleur et nom de l'étiquette résolus). */
 export interface SavedPageHighlight {
   id: number;
   fill: string;
+  style: AnnotationStyle;
   rects: number[][];
+  note: string | null;
+  labelName: string;
 }
+
+/** Aucune note sur la page : la même liste à chaque rendu (la page est mémoïsée). */
+export const NO_NOTES: ReaderNote[] = [];
+const NO_LABELS = new Map<number, AnnotationLabel>();
 
 /**
  * Boîte englobante des surlignages d'une page, en pixels d'écran.
@@ -71,7 +82,15 @@ interface Props {
   /** Rang, sur cette page, de l'occurrence courante ; -1 si elle est ailleurs. */
   findCurrent?: number;
   demo: boolean;
-  onDeleteHighlight: (id: number) => void;
+  /** Clic sur un surlignage mémorisé : son édition (étiquette, style, note). */
+  onEditHighlight: (id: number) => void;
+  /** Post-it et signets de la page (`NO_NOTES` sans). */
+  notes?: ReaderNote[];
+  labelsById?: Map<number, AnnotationLabel>;
+  /** Absent : post-it et signets en lecture seule (visite guidée). */
+  onEditNote?: (id: number) => void;
+  /** Élément que le carnet vient de désigner (« h-12 », « n-3 ») : il clignote. */
+  flash?: string | null;
   /** Pose ou retire le marque-page ; absent, pas de bouton (visite guidée). */
   onToggleBookmark?: (page: number) => void;
 }
@@ -107,11 +126,18 @@ export const PdfPage = memo(function PdfPage({
   findHits = NO_HITS,
   findCurrent = -1,
   demo,
-  onDeleteHighlight,
+  onEditHighlight,
+  notes = NO_NOTES,
+  labelsById = NO_LABELS,
+  onEditNote,
+  flash = null,
   onToggleBookmark,
 }: Props) {
   const t = useT();
   const scale = width / w;
+  // Note d'un surlignage dont on survole la pastille : une petite carte la montre.
+  const [peek, setPeek] = useState<number | null>(null);
+  const peeked = peek !== null ? saved.find((hl) => hl.id === peek && hl.note) : undefined;
   const src = pageImageUrl(docId, page, renderZoom, contentHash);
   // L'image affichée reste celle qu'on a tant que la nouvelle résolution n'est
   // pas chargée ET décodée : changer `src` directement vidait la page le temps
@@ -323,31 +349,121 @@ export const PdfPage = memo(function PdfPage({
       ) : null}
       {/* Calque de texte transparent : sélection native par-dessus l'image. */}
       {words ? <PageTextLayer words={words} scale={scale} /> : null}
-      {/* Surlignages mémorisés (cliquables pour suppression). */}
+      {/* Surlignages mémorisés : tracés selon leur style (surligné, souligné,
+          barré, encadré), à la couleur de leur étiquette. Toute la ligne est
+          cliquable — l'édition s'ouvre (`data-hl` : l'ancre de la popover). */}
       {saved.length ? (
         <svg
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
         >
-          {saved.map((hl) =>
-            hl.rects.map((r, ri) => (
-              <rect
-                key={`${hl.id}-${ri}`}
-                x={r[0]}
-                y={r[1]}
-                width={r[2] - r[0]}
-                height={r[3] - r[1]}
-                fill={hl.fill}
-                opacity={0.32}
-                rx={1}
-                style={{ pointerEvents: "all", cursor: "pointer" }}
-                onClick={() => onDeleteHighlight(hl.id)}
-              />
-            )),
-          )}
+          {saved.map((hl) => (
+            <g key={hl.id} {...(flash === `h-${hl.id}` ? { "data-flash": "" } : {})}>
+              {hl.rects.map((r, ri) => {
+                const mark = svgStyle(hl.style, hl.fill, r);
+                return (
+                  <rect
+                    key={ri}
+                    x={mark.x}
+                    y={mark.y}
+                    width={mark.width}
+                    height={mark.height}
+                    fill={mark.fill}
+                    fillOpacity={mark.fillOpacity}
+                    stroke={mark.stroke}
+                    strokeWidth={mark.stroke ? 1.5 : undefined}
+                    vectorEffect={mark.stroke ? "non-scaling-stroke" : undefined}
+                    rx={1}
+                  />
+                );
+              })}
+              {hl.rects.map((r, ri) => (
+                <rect
+                  key={`hit-${ri}`}
+                  data-hl={hl.id}
+                  x={r[0]}
+                  y={r[1]}
+                  width={r[2] - r[0]}
+                  height={r[3] - r[1]}
+                  fill="transparent"
+                  style={{ pointerEvents: "all", cursor: "pointer" }}
+                  onClick={() => onEditHighlight(hl.id)}
+                >
+                  <title>{hl.note ? `${hl.labelName} — ${hl.note}` : hl.labelName}</title>
+                </rect>
+              ))}
+            </g>
+          ))}
         </svg>
       ) : null}
+      {/* Pastille d'un surlignage annoté, au bout de sa première ligne : au
+          survol, la note (formules rendues) ; au clic, l'édition. */}
+      {saved.map((hl) => {
+        if (!hl.note || !hl.rects.length) return null;
+        const r = hl.rects[0];
+        return (
+          <button
+            key={`note-${hl.id}`}
+            type="button"
+            data-hl={hl.id}
+            aria-label={t("annotations.note_of", { label: hl.labelName })}
+            onClick={() => onEditHighlight(hl.id)}
+            onMouseEnter={() => setPeek(hl.id)}
+            onMouseLeave={() => setPeek((p) => (p === hl.id ? null : p))}
+            onFocus={() => setPeek(hl.id)}
+            onBlur={() => setPeek((p) => (p === hl.id ? null : p))}
+            style={{
+              position: "absolute",
+              left: r[2] * scale - 4,
+              top: r[1] * scale - 6,
+              width: 10,
+              height: 10,
+              padding: 0,
+              borderRadius: 999,
+              border: "1.5px solid #fff",
+              background: hl.fill,
+              boxShadow: "var(--shadow-sm)",
+              cursor: "pointer",
+              zIndex: 7,
+            }}
+          />
+        );
+      })}
+      {peeked && peeked.note ? (
+        <div
+          role="tooltip"
+          style={{
+            position: "absolute",
+            left: Math.min(peeked.rects[0][2] * scale + 8, width - 268),
+            top: peeked.rects[0][1] * scale + 8,
+            width: 260,
+            maxHeight: 220,
+            overflow: "hidden",
+            padding: "8px 10px",
+            background: "var(--surface)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            boxShadow: "var(--shadow-md)",
+            fontSize: 12.5,
+            lineHeight: 1.45,
+            whiteSpace: "pre-wrap",
+            pointerEvents: "none",
+            zIndex: 9,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--text-soft)" }}>{peeked.labelName}</div>
+          <MathText text={peeked.note} />
+        </div>
+      ) : null}
+      <PageNotesLayer
+        notes={notes}
+        labelsById={labelsById}
+        scale={scale}
+        flashId={flash?.startsWith("n-") ? Number(flash.slice(2)) : null}
+        onEdit={onEditNote}
+      />
       {onToggleBookmark ? <PageBookmarkButton page={page} active={bookmarked} onToggle={onToggleBookmark} /> : null}
     </div>
   );

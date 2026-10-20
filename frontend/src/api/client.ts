@@ -21,6 +21,11 @@ import type {
 import { extraTokenParam } from "./security";
 import type { PickedDocument } from "./platform";
 import type {
+  AnnotationColor,
+  AnnotationLabel,
+  AnnotationLabelsPayload,
+  AnnotationStyle,
+  DocumentAnnotations,
   DocumentDetail,
   DocumentSummary,
   FindOnPage,
@@ -42,6 +47,7 @@ import type {
   ReaderBlock,
   RelinkResult,
   ResumePayload,
+  ReaderNote,
   SavedHighlight,
   SessionAnalysis,
   SessionMetrics,
@@ -75,6 +81,19 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw await apiError(res);
+  }
+  return (await res.json()) as T;
+}
+
+/** Requête JSON d'une autre méthode (DELETE) ; même traitement des erreurs que `postJSON`. */
+async function sendJSON<T>(method: "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
     throw await apiError(res);
@@ -276,15 +295,48 @@ export const api = {
       page: number;
       quote: string;
       rects: number[][];
-      color?: string;
       anchor?: HighlightAnchor | null;
+      label_id?: number;
+      style?: AnnotationStyle;
+      note?: string;
     },
-  ) => postJSON<{ id: number }>(`/api/library/doc/${docId}/highlights`, body),
+  ) => postJSON<{ id: number; highlight: SavedHighlight }>(`/api/library/doc/${docId}/highlights`, body),
+  // Prise de notes (v45). Une édition n'envoie QUE ce qui change : un champ
+  // absent reste tel quel, un champ à null efface (étiquette, note).
+  documentAnnotations: (docId: number) => getJSON<DocumentAnnotations>(`/api/library/doc/${docId}/annotations`),
+  editHighlight: (
+    docId: number,
+    highlightId: number,
+    fields: Partial<{ label_id: number | null; style: AnnotationStyle; note: string | null }>,
+  ) =>
+    postJSON<{ highlight: SavedHighlight }>(`/api/library/doc/${docId}/highlights/${highlightId}/edit`, fields),
   deleteHighlight: (docId: number, highlightId: number) =>
-    fetch(`/api/library/doc/${docId}/highlights/${highlightId}`, { method: "DELETE" }).then((r) => {
-      if (!r.ok) throw new Error(`${r.status}`);
-      return r.json();
+    sendJSON<{ removed: number }>("DELETE", `/api/library/doc/${docId}/highlights/${highlightId}`),
+  createNote: (
+    docId: number,
+    body: { kind: ReaderNote["kind"]; page: number; x?: number | null; y?: number | null; body?: string; label_id?: number | null },
+  ) => postJSON<{ note: ReaderNote }>(`/api/library/doc/${docId}/notes`, body),
+  editNote: (
+    docId: number,
+    noteId: number,
+    fields: Partial<{ body: string; label_id: number | null; x: number; y: number }>,
+  ) => postJSON<{ note: ReaderNote }>(`/api/library/doc/${docId}/notes/${noteId}/edit`, fields),
+  deleteNote: (docId: number, noteId: number) =>
+    sendJSON<{ removed: number }>("DELETE", `/api/library/doc/${docId}/notes/${noteId}`),
+  /** Le carnet en Markdown, en texte (« Copier ») ; le lien de téléchargement est `annotationsExportUrl`. */
+  annotationsMarkdown: (docId: number) =>
+    fetch(annotationsExportUrl(docId)).then(async (r) => {
+      if (!r.ok) throw await apiError(r);
+      return r.text();
     }),
+  annotationLabels: () => getJSON<AnnotationLabelsPayload>("/api/annotations/labels"),
+  createLabel: (name: string, color: AnnotationColor) =>
+    postJSON<{ label: AnnotationLabel }>("/api/annotations/labels", { name, color }),
+  editLabel: (labelId: number, fields: Partial<{ name: string | null; color: AnnotationColor }>) =>
+    postJSON<{ label: AnnotationLabel }>(`/api/annotations/labels/${labelId}/edit`, fields),
+  deleteLabel: (labelId: number) =>
+    sendJSON<{ removed: boolean; released: number }>("DELETE", `/api/annotations/labels/${labelId}`),
+  orderLabels: (ids: number[]) => postJSON<{ labels: AnnotationLabel[] }>("/api/annotations/labels/order", { ids }),
   startSession: (docId: number) => postJSON<{ session_id: number }>("/api/session/start", { doc_id: docId }),
   // Retour à la bibliothèque depuis le sas d'entrée : la session n'a pas eu
   // lieu, elle est effacée plutôt que close (409 si elle a déjà été jouée).
@@ -1071,4 +1123,12 @@ export interface LangCorrection {
 export function pageImageUrl(docId: number, page: number, zoom = 0.4, rev?: string | null): string {
   const version = rev ? `&v=${encodeURIComponent(rev)}` : "";
   return `/api/library/doc/${docId}/page/${page}.png?zoom=${zoom}${version}${extraTokenParam()}`;
+}
+
+// Le carnet d'un document en Markdown : un lien `download` (le cookie du nonce
+// de lancement suffit, comme pour l'export de la base). La coque native
+// autorise les téléchargements (`ALLOW_DOWNLOADS`) : le système demande où
+// enregistrer.
+export function annotationsExportUrl(docId: number): string {
+  return `/api/library/doc/${docId}/annotations.md`;
 }

@@ -1,22 +1,18 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Highlighter, Plus, Search } from "lucide-react";
+import { NotebookPen, Search, StickyNote } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
-import { useConfirm } from "@/components/ui/confirm";
-
 import { api } from "../api/client";
-import type {
-  DocumentDetail,
-  Highlight,
-  HighlightAnchor,
-  PageWord,
-  SavedHighlight,
-  SessionMetrics,
-} from "../api/types";
+import type { DocumentDetail, Highlight, HighlightAnchor, PageWord, ReaderNote, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
+import { AnnotationPopover, annotationSelector, type EditingTarget } from "../features/reader/annotations/AnnotationPopover";
+import { NOTEBOOK_WIDTH, NotebookDrawer, type NotebookTarget } from "../features/reader/annotations/NotebookDrawer";
+import { labelColor, labelName } from "../features/reader/annotations/palette";
+import { loadToolPrefs, saveToolPrefs, SelectionToolbar } from "../features/reader/annotations/SelectionToolbar";
+import { useAnnotations } from "../features/reader/annotations/useAnnotations";
 import { ClikodaPanel, type QaMask } from "../features/reader/ClikodaPanel";
 import { DEMO_METRICS, DEMO_REFLECTION_KEYS, type DemoBeat } from "../features/reader/demoScript";
 import { BlockPages } from "../features/reader/BlockPages";
@@ -24,7 +20,7 @@ import { FindBar } from "../features/reader/find/FindBar";
 import { isMacPlatform } from "../features/reader/find/findNav";
 import { useReaderFind } from "../features/reader/find/useReaderFind";
 import { boundsOf, frameRect, type PageGeometry } from "../features/reader/frame";
-import { NO_HITS, PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
+import { NO_HITS, NO_NOTES, PdfPage, ZONE_PAD_PTS, type SavedPageHighlight } from "../features/reader/PdfPage";
 import { ReaderToolbar, ToolbarIconButton } from "../features/reader/ReaderToolbar";
 import { buildQuote } from "../features/reader/selectionQuote";
 import { placedBoxes } from "../features/reader/textLayer";
@@ -35,8 +31,10 @@ import type { WarmUpTiming } from "../features/session/WarmUp";
 import { PauseSas, type ReadingPause } from "../features/session/PauseSas";
 import { currentStep, useTour } from "../features/tour/useTour";
 import { PostExitRestSas } from "../features/session/PostExitRestSas";
-import { useT } from "../i18n";
+import { useLangStore, useT } from "../i18n";
 
+// Couleurs des passages que CLIKODA cite (`purpose` de sa réponse). Les
+// surlignages de l'élève suivent leur étiquette (annotations/palette).
 const HL_COLORS: Record<string, string> = {
   key: "var(--hl-key)",
   explain: "var(--hl-explain)",
@@ -140,27 +138,14 @@ function mergeLineRects(rects: number[][]): number[][] {
   return merged;
 }
 
-const selBtn: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  border: "1px solid var(--border)",
-  background: "var(--surface-soft)",
-  color: "var(--text)",
-  borderRadius: "var(--radius-sm)",
-  padding: "5px 10px",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
+/** Durée du clignotement d'un élément désigné par le carnet (cf. `note-flash`). */
+const FLASH_MS = 1400;
 
 export function Reader() {
   const { docId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const t = useT();
-  const confirm = useConfirm();
   // `prefers-reduced-motion` est neutralisé en CSS, mais Motion anime en JS :
   // la règle CSS ne l'atteint pas (même raison que dans AppLayout).
   const reduceMotion = useReducedMotion();
@@ -239,9 +224,8 @@ export function Reader() {
   const ratios = useRef<Map<number, number>>(new Map());
   const [highlightsByPage, setHighlightsByPage] = useState<Record<number, { rect: number[]; color: string }[]>>({});
 
-  // Calque de texte transparent (sélection native) + surlignages mémorisés.
+  // Calque de texte transparent (sélection native).
   const [wordsByPage, setWordsByPage] = useState<Record<number, PageWord[]>>({});
-  const [savedHighlights, setSavedHighlights] = useState<SavedHighlight[]>([]);
   // Citations de Clikoda sur pages reconstruites (marquées par recherche pliée).
   const [quoteMarksByPage, setQuoteMarksByPage] = useState<Record<number, TextMark[]>>({});
   const [selection, setSelection] = useState<
@@ -394,51 +378,6 @@ export function Reader() {
     if (groups.length) setHighlightsByPage((prev) => ({ ...prev, [page]: groups }));
   }
 
-  // Surlignages mémorisés : chargés à l'ouverture, redessinés à l'identique.
-  useEffect(() => {
-    if (!Number.isFinite(id)) return;
-    let cancelled = false;
-    api.listHighlights(id).then((items) => !cancelled && setSavedHighlights(items)).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  function removeSavedHighlight(hid: number) {
-    setSavedHighlights((prev) => prev.filter((h) => h.id !== hid));
-    api.deleteHighlight(id, hid).catch(() => {});
-  }
-
-  /**
-   * Suppression d'un surlignage : demandée depuis deux endroits (le lecteur de
-   * code et le calque SVG du PDF), qui appelaient chacun leur `window.confirm`.
-   * Une seule fonction ici — le message et le libellé ne peuvent plus diverger.
-   */
-  async function askRemoveHighlight(hid: number) {
-    const ok = await confirm({
-      title: t("reader.hl_delete_confirm"),
-      confirmLabel: t("common.delete"),
-      destructive: true,
-    });
-    if (ok) removeSavedHighlight(hid);
-  }
-  // La même fonction d'un rendu à l'autre : les pages sont mémoïsées.
-  const deleteHighlight = useStableCallback((hid: number) => void askRemoveHighlight(hid));
-
-  // Surlignages mémorisés groupés par page, rects fusionnés par ligne une fois
-  // pour toutes — et non à chaque rendu de chaque page.
-  const savedByPage = useMemo(() => {
-    const out: Record<number, SavedPageHighlight[]> = {};
-    for (const hl of savedHighlights) {
-      (out[hl.page] ??= []).push({
-        id: hl.id,
-        fill: HL_COLORS[hl.color] ?? "var(--hl-key)",
-        rects: mergeLineRects(hl.rects),
-      });
-    }
-    return out;
-  }, [savedHighlights]);
-
   // Action « ➕ Contexte » : mémorise l'extrait pour la prochaine question.
   function addSelectionToContext() {
     if (!selection) return;
@@ -446,31 +385,24 @@ export function Reader() {
     clearSelection();
   }
 
-  // Action « 🖊 Surligner » : persiste le surlignage (réapparaît la prochaine fois).
-  // Document raster : ancrage par rects (points PDF). Document reconstruit :
-  // ancrage TEXTE {block_id, start, end} + quote (rects vides).
-  async function highlightSelection() {
+  /** Un extrait de plus pour la prochaine question à Clikoda (« Ajouter au
+   *  contexte » d'un surlignage, qu'on ne peut plus sélectionner). */
+  function addToContext(page: number, text: string) {
+    setContextChips((prev) => [...prev, { id: Date.now(), page, text }]);
+  }
+
+  // Surligner la sélection avec une étiquette, dans le style choisi : elle
+  // réapparaît à la réouverture. Document raster : ancrage par rects (points
+  // PDF). Fichier de code : ancrage TEXTE {block_id, start, end} + quote
+  // (rects vides). `openNote` : « Note » de la barre — l'édition s'ouvre,
+  // le champ de la note pris.
+  async function highlightSelection(labelId: number | null, openNote = false) {
     if (!selection) return clearSelection();
     if (!isCode && !selection.rects.length) return clearSelection();
     const { page, text, rects, anchor } = selection;
-    try {
-      const { id: hid } = await api.createHighlight(id, {
-        page,
-        quote: text,
-        rects,
-        color: "key",
-        anchor: anchor ?? undefined,
-      });
-      // Le serveur ne crée pas deux fois le même passage : il rend l'id du
-      // surlignage existant, qu'on remplace au lieu d'empiler une couche.
-      setSavedHighlights((prev) => {
-        const next = { id: hid, page, quote: text, rects, color: "key" as const, anchor };
-        return prev.some((h) => h.id === hid) ? prev.map((h) => (h.id === hid ? next : h)) : [...prev, next];
-      });
-    } catch {
-      /* persistance best-effort */
-    }
     clearSelection();
+    const created = await annotations.createHighlight({ page, quote: text, rects, anchor, labelId, style: tool.style });
+    if (created && openNote) setEditing({ kind: "highlight", id: created.id, focusNote: true });
   }
 
   function clearSelection() {
@@ -568,6 +500,64 @@ export function Reader() {
     });
     return () => setTourControls(null);
   }, [demo, setTourControls]);
+
+  // ── Prise de notes ─────────────────────────────────────────────────────
+  //
+  // Surlignages (étiquette, style, note), post-it et signets du document, et
+  // les étiquettes de l'élève. En lecture seule pendant la visite : rien n'y
+  // est écrit, et ni carnet, ni post-it, ni signet n'y sont proposés.
+  const annotations = useAnnotations(id, { readOnly: demo });
+  const lang = useLangStore((s) => s.lang);
+  // Le dernier style et la dernière étiquette de la barre de sélection.
+  const [tool, setTool] = useState(loadToolPrefs);
+  function chooseTool(next: typeof tool) {
+    setTool(next);
+    saveToolPrefs(next);
+  }
+  // L'étiquette retenue, si elle existe encore ; sinon la première.
+  const toolLabel =
+    tool.labelId !== null && annotations.labelsById.has(tool.labelId) ? tool.labelId : (annotations.labels[0]?.id ?? null);
+  // L'élément en cours d'édition (popover sur la page).
+  const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const closeEditing = useCallback(() => setEditing(null), []);
+  // Les mêmes fonctions d'un rendu à l'autre : les pages sont mémoïsées.
+  const editHighlight = useStableCallback((hid: number) => setEditing({ kind: "highlight", id: hid }));
+  const editNote = useStableCallback((nid: number) => setEditing({ kind: "note", id: nid }));
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  // Pose d'un post-it : le prochain clic sur une page le pose là.
+  const [placing, setPlacing] = useState(false);
+  // L'élément que le carnet vient de désigner, qui clignote sur sa page.
+  const [flash, setFlash] = useState<{ page: number; key: string } | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(null), FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
+
+  // Surlignages mémorisés groupés par page, rects fusionnés par ligne, couleur
+  // et nom d'étiquette résolus une fois pour toutes — et non à chaque rendu de
+  // chaque page. Le nom dépend de la langue (`lang`), pas de `t`, qui change à
+  // chaque rendu.
+  const savedByPage = useMemo(() => {
+    const out: Record<number, SavedPageHighlight[]> = {};
+    for (const hl of annotations.highlights) {
+      const label = hl.label_id !== null ? annotations.labelsById.get(hl.label_id) : null;
+      (out[hl.page] ??= []).push({
+        id: hl.id,
+        fill: labelColor(label),
+        style: hl.style,
+        rects: mergeLineRects(hl.rects),
+        note: hl.note,
+        labelName: labelName(label, lang),
+      });
+    }
+    return out;
+  }, [annotations.highlights, annotations.labelsById, lang]);
+  const notesByPage = useMemo(() => {
+    const out: Record<number, ReaderNote[]> = {};
+    for (const note of annotations.notes) (out[note.page] ??= []).push(note);
+    return out;
+  }, [annotations.notes]);
 
   // Dernière position : on fige la page quittée au tout premier chargement (valeur de
   // la session précédente, écrite en fin de session côté backend). On ignore la page 1
@@ -1196,7 +1186,7 @@ export function Reader() {
     return { block_id: blockEl.dataset.blockId ?? "", start, end: start + sel.toString().length };
   }
 
-  // Sélection de texte -> barre flottante (➕ Contexte / 🖊 Surligner).
+  // Sélection de texte -> barre flottante (Contexte, styles, étiquettes, Note).
   useEffect(() => {
     const onUp = (e: MouseEvent) => {
       // Un clic dans la barre elle-même ne doit rien vider (ses boutons
@@ -1243,20 +1233,25 @@ export function Reader() {
   }, [wordsByPage, isCode]);
 
   // Marques des pages reconstruites : citations de Clikoda + surlignages mémorisés.
+  const flashKey = flash?.key ?? null;
   const marksByPage = useMemo(() => {
     if (!isCode) return {};
     const out: Record<number, TextMark[]> = {};
     for (const [p, marks] of Object.entries(quoteMarksByPage)) out[Number(p)] = [...marks];
-    for (const hl of savedHighlights) {
-      const color = HL_COLORS[hl.color] ?? "var(--hl-key)";
+    for (const hl of annotations.highlights) {
+      const label = hl.label_id !== null ? annotations.labelsById.get(hl.label_id) : null;
       (out[hl.page] ??= []).push({
         text: hl.quote,
-        color: `color-mix(in srgb, ${color} 40%, transparent)`,
+        color: labelColor(label),
+        style: hl.style,
         id: hl.id,
+        label: labelName(label, lang),
+        note: hl.note,
+        flash: flashKey === `h-${hl.id}`,
       });
     }
     return out;
-  }, [isCode, quoteMarksByPage, savedHighlights]);
+  }, [isCode, quoteMarksByPage, annotations.highlights, annotations.labelsById, lang, flashKey]);
 
   // Verrouillage de la lecture pendant une question automatique : on amène la
   // ZONE visée entière dans la vue (à défaut, la page-contexte), et ce cadrage
@@ -1284,6 +1279,96 @@ export function Reader() {
     scrollViewTo(floor === null ? top : Math.min(top, floor), behavior);
   }
 
+  /**
+   * Le carnet amène le lecteur sur un élément : sa boîte cadrée comme une
+   * occurrence de recherche (frameRect), sous le plancher d'une question
+   * bloquante jamais, et il clignote. Fichier de code : la page, puis
+   * l'élément une fois ses blocs rendus (au plus 1 s). Un signet, le
+   * marque-page : le haut de leur page.
+   */
+  function goToAnnotation(target: NotebookTarget) {
+    if (target.kind === "page") {
+      goToPage(target.page);
+      return;
+    }
+    const key = target.kind === "highlight" ? `h-${target.id}` : `n-${target.id}`;
+    setFlash({ page: target.page, key });
+    const floor = lockFloorRef.current;
+    if (locked && floor === null) return;
+    const land = (top: number) => scrollViewTo(floor === null ? top : Math.min(top, floor), "smooth");
+    let box: number[] | null = null;
+    if (target.kind === "highlight") {
+      const rects = annotations.highlights.find((h) => h.id === target.id)?.rects ?? [];
+      box = rects.length ? boundsOf(rects) : null;
+    } else {
+      const note = annotations.notes.find((n) => n.id === target.id);
+      if (note?.x != null && note.y != null) box = [note.x, note.y, note.x + 12, note.y + 12];
+    }
+    const geo = !isCode && box ? pageGeometry(target.page) : null;
+    if (geo && box) {
+      const frame = frameRect(geo, box, frameOptions());
+      land(frame.top);
+      if (frame.dx) setPanX((p) => clampPanX(p + frame.dx));
+      return;
+    }
+    goToPage(target.page);
+    if (!isCode) return;
+    const deadline = performance.now() + 1000;
+    const seek = () => {
+      const el = scrollRef.current;
+      const found = el?.querySelector<HTMLElement>(`[data-page="${target.page}"] ${annotationSelector(target.kind, target.id)}`);
+      if (el && found) {
+        const r = found.getBoundingClientRect();
+        land(clamp(r.top - el.getBoundingClientRect().top + el.scrollTop - ZONE_TOP_INSET, 0, el.scrollHeight));
+        return;
+      }
+      if (performance.now() < deadline) requestAnimationFrame(seek);
+    };
+    requestAnimationFrame(seek);
+  }
+
+  // Pose d'un post-it : un seul gestionnaire de clic, en CAPTURE sur la
+  // colonne — aucune page n'est re-rendue pour l'occasion. Sur un PDF, la
+  // position est celle du clic, en points PDF ; sur un fichier de code, il n'y
+  // en a pas (le post-it s'empile dans la marge). Échap annule.
+  const placeSticky = useStableCallback((e: MouseEvent) => {
+    if (!canAnnotate) {
+      setPlacing(false);
+      return;
+    }
+    const pageEl = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-page]") : null;
+    if (!pageEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const page = Number(pageEl.dataset.page);
+    let x: number | null = null;
+    let y: number | null = null;
+    if (!isCode) {
+      const rect = pageEl.getBoundingClientRect();
+      const [w] = sizes[page - 1] ?? [595, 842];
+      const scale = rect.width / w;
+      x = Math.max(0, (e.clientX - rect.left) / scale);
+      y = Math.max(0, (e.clientY - rect.top) / scale);
+    }
+    setPlacing(false);
+    void annotations
+      .createNote({ kind: "sticky", page, x, y, labelId: toolLabel })
+      .then((note) => note && setEditing({ kind: "note", id: note.id, focusNote: true }));
+  });
+  useEffect(() => {
+    const col = columnRef.current;
+    if (!placing || !col) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlacing(false);
+    };
+    col.addEventListener("click", placeSticky, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      col.removeEventListener("click", placeSticky, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [placing, placeSticky]);
+
   // ── Recherche dans le document (Ctrl/Cmd+F) ──────────────────────────────
   //
   // Elle ne s'ouvre qu'en lecture : ni dans le sas d'entrée, ni dans celui de
@@ -1295,6 +1380,10 @@ export function Reader() {
   const find = useReaderFind(id, currentPage);
   const canFind = Boolean(data) && entered && exit === null && !showPostExitRest && !frozen;
   const findVisible = find.open && canFind;
+  // Carnet et post-it : en lecture, comme la recherche, et jamais pendant la visite.
+  const canAnnotate = canFind && !demo;
+  const notebookVisible = notebookOpen && canAnnotate;
+  const placingVisible = placing && canAnnotate;
   // L'occurrence courante est sous le plancher d'une question bloquante :
   // comptée, mais le lecteur ne descend pas jusqu'à elle.
   const [findLocked, setFindLocked] = useState(false);
@@ -1534,6 +1623,8 @@ export function Reader() {
           <div style={{ display: "flex", justifyContent: "center", minWidth: "min-content", cursor: "grab" }}>
           <div
             ref={columnRef}
+            // Pose d'un post-it : curseur en croix sur les pages (theme/tokens.css).
+            {...(placingVisible ? { "data-placing": "" } : {})}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -1560,7 +1651,11 @@ export function Reader() {
                 locked={locked}
                 lockedPage={lockedPage}
                 marksByPage={marksByPage}
-                onDeleteHighlight={deleteHighlight}
+                onEditHighlight={editHighlight}
+                notesByPage={notesByPage}
+                labelsById={annotations.labelsById}
+                onEditNote={demo ? undefined : editNote}
+                flash={flashKey}
                 findRangesByPage={findVisible ? findRangesByPage : undefined}
                 findCurrent={findVisible ? find.hit : null}
               />
@@ -1590,7 +1685,11 @@ export function Reader() {
                   findHits={findVisible ? findHitsByPage[n] ?? NO_HITS : NO_HITS}
                   findCurrent={findVisible && findPage === n ? findIndex : -1}
                   demo={demo}
-                  onDeleteHighlight={deleteHighlight}
+                  onEditHighlight={editHighlight}
+                  notes={notesByPage[n] ?? NO_NOTES}
+                  labelsById={annotations.labelsById}
+                  onEditNote={demo ? undefined : editNote}
+                  flash={flash?.page === n ? flash.key : null}
                   onToggleBookmark={onToggleBookmark}
                 />
               );
@@ -1609,6 +1708,31 @@ export function Reader() {
         pauseDisabled={!entered || exit !== null}
         page={data ? { current: currentPage, total: data.page_count } : null}
       >
+        {demo ? null : (
+          <>
+            <ToolbarIconButton
+              label={t("reader.notebook_open", { n: annotations.highlights.length + annotations.notes.length })}
+              hint={t("reader.notebook_hint")}
+              disabled={!canAnnotate}
+              pressed={notebookVisible}
+              onClick={() => setNotebookOpen((open) => !open)}
+            >
+              <NotebookPen className="size-3.5" aria-hidden />
+              <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                {annotations.highlights.length + annotations.notes.length}
+              </span>
+            </ToolbarIconButton>
+            <ToolbarIconButton
+              label={t("reader.sticky_tool")}
+              hint={t("reader.sticky_tool_hint")}
+              disabled={!canAnnotate}
+              pressed={placingVisible}
+              onClick={() => setPlacing((on) => !on)}
+            >
+              <StickyNote className="size-3.5" aria-hidden />
+            </ToolbarIconButton>
+          </>
+        )}
         {findVisible ? (
           <FindBar
             query={find.query}
@@ -1634,8 +1758,26 @@ export function Reader() {
         )}
       </ReaderToolbar>
 
-      {/* Contrôles de zoom */}
+      {/* Le carnet du document : à gauche, sous la barre. */}
+      {notebookVisible && data ? (
+        <NotebookDrawer
+          docId={id}
+          pageCount={data.page_count}
+          currentPage={currentPage}
+          bookmark={bookmark}
+          annotations={annotations}
+          onClose={() => setNotebookOpen(false)}
+          onGoTo={goToAnnotation}
+          onAddToContext={addToContext}
+        />
+      ) : null}
+
+      {/* L'élément cliqué sur la page : son édition, qui suit le défilement. */}
+      <AnnotationPopover target={editing} annotations={annotations} onClose={closeEditing} onAddToContext={addToContext} />
+
+      {/* Contrôles de zoom — décalés quand le carnet occupe la gauche. */}
       <ZoomControls
+        left={notebookVisible ? NOTEBOOK_WIDTH + 18 : 18}
         zoom={zoom}
         onChange={(z) => {
           captureZoomAnchor();
@@ -1660,39 +1802,55 @@ export function Reader() {
           la barre hors de l'axe de la sélection. */}
       <AnimatePresence>
         {selection && (
-          <motion.div
-            ref={toolbarRef}
-            initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
-            transition={{ duration: 0.14, ease: [0.33, 1, 0.68, 1] }}
-            style={{
-              position: "absolute",
-              left: clamp(selection.x, 80, (rootRef.current?.clientWidth ?? 800) - 80),
-              top: Math.max(8, selection.y - 44),
-              transform: "translateX(-50%)",
-              display: "flex",
-              gap: 6,
-              padding: 4,
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-md)",
-              boxShadow: "var(--shadow-lg)",
-              zIndex: 60,
-            }}
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <button style={selBtn} onClick={addSelectionToContext}>
-              <Plus className="size-3.5" aria-hidden />
-              {t("reader.add_context")}
-            </button>
-            <button style={selBtn} onClick={highlightSelection}>
-              <Highlighter className="size-3.5" aria-hidden />
-              {t("reader.highlight")}
-            </button>
-          </motion.div>
+          <SelectionToolbar
+            x={selection.x}
+            y={selection.y}
+            rootWidth={rootRef.current?.clientWidth ?? 800}
+            reduceMotion={Boolean(reduceMotion)}
+            toolbarRef={toolbarRef}
+            onContext={addSelectionToContext}
+            annotate={
+              demo
+                ? undefined
+                : {
+                    labels: annotations.labels,
+                    style: tool.style,
+                    labelId: toolLabel,
+                    onStyle: (style) => chooseTool({ ...tool, style }),
+                    onHighlight: (labelId) => {
+                      chooseTool({ ...tool, labelId });
+                      void highlightSelection(labelId);
+                    },
+                    onNote: () => void highlightSelection(toolLabel, true),
+                  }
+            }
+          />
         )}
       </AnimatePresence>
+
+      {/* Pose d'un post-it : ce qu'il faut faire, et comment renoncer. */}
+      {placingVisible ? (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            top: 64,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "8px 16px",
+            background: "var(--surface)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: "var(--shadow-md)",
+            zIndex: 40,
+          }}
+        >
+          {t("annotations.sticky_place_hint")}
+        </div>
+      ) : null}
 
       {/* Bannière de question bloquante. Elle DESCEND dans l'écran : le blocage
           vient d'en haut, comme la barre d'outils à laquelle elle s'accroche. */}
@@ -1781,7 +1939,17 @@ export function Reader() {
   );
 }
 
-function ZoomControls({ zoom, onChange, onReset }: { zoom: number; onChange: (z: number) => void; onReset: () => void }) {
+function ZoomControls({
+  left,
+  zoom,
+  onChange,
+  onReset,
+}: {
+  left: number;
+  zoom: number;
+  onChange: (z: number) => void;
+  onReset: () => void;
+}) {
   const btn: React.CSSProperties = {
     width: 34,
     height: 34,
@@ -1797,7 +1965,7 @@ function ZoomControls({ zoom, onChange, onReset }: { zoom: number; onChange: (z:
     <div
       style={{
         position: "absolute",
-        left: 18,
+        left,
         bottom: 18,
         display: "flex",
         alignItems: "center",

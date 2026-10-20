@@ -314,15 +314,79 @@ export interface HighlightAnchor {
   end: number;
 }
 
+// Prise de notes (schéma v45) : vocabulaires FERMÉS, ceux de
+// config/settings.py (ANNOTATION_COLORS, ANNOTATION_STYLES).
+export type AnnotationColor =
+  | "yellow"
+  | "orange"
+  | "red"
+  | "pink"
+  | "violet"
+  | "blue"
+  | "cyan"
+  | "green"
+  | "lime"
+  | "gray";
+export type AnnotationStyle = "highlight" | "underline" | "strike" | "outline";
+
+/** Étiquette de l'élève, globale à tous ses documents. */
+export interface AnnotationLabel {
+  id: number;
+  /** Étiquette semée (« important », « definition »…) ; null : créée par l'élève. */
+  preset: string | null;
+  /** null : le nom traduit du preset, qui suit la langue de l'interface. */
+  name: string | null;
+  color: AnnotationColor;
+  position: number;
+  /** Éléments qui la portent, tous documents confondus. */
+  usage: number;
+}
+
 // Surlignage persistant (mémorisé en base, rechargé à l'ouverture du PDF).
 export interface SavedHighlight {
   id: number;
   page: number;
   quote: string;
   rects: number[][];
-  color: "key" | "explain" | "reference";
+  /** Ancienne couleur (v20), historique : l'étiquette la remplace. */
+  color: string;
   // Présent pour les documents reconstruits (rects vides dans ce cas).
   anchor?: HighlightAnchor | null;
+  /** null : sans étiquette (supprimée) — couleur neutre. */
+  label_id: number | null;
+  style: AnnotationStyle;
+  note: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** `GET /api/annotations/labels` : les étiquettes, et les bornes de
+ *  config/settings.py que l'interface applique avant d'envoyer. */
+export interface AnnotationLabelsPayload {
+  labels: AnnotationLabel[];
+  name_max: number;
+  max_labels: number;
+  default_color: AnnotationColor;
+}
+
+/** Post-it (posé sur la page) ou signet (un par page). */
+export interface ReaderNote {
+  id: number;
+  document_id: number;
+  page: number;
+  kind: "sticky" | "signet";
+  /** Points PDF, origine haut-gauche ; null pour un signet ou un fichier de code. */
+  x: number | null;
+  y: number | null;
+  body: string;
+  label_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentAnnotations {
+  highlights: SavedHighlight[];
+  notes: ReaderNote[];
 }
 
 // Mot du calque de texte : [x0, y0, x1, y1, "mot"] en points PDF.

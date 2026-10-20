@@ -1,4 +1,5 @@
-import type { ReaderBlock } from "../../api/types";
+import type { AnnotationStyle, ReaderBlock } from "../../api/types";
+import { markCss } from "./annotations/palette";
 import { renderTex, splitMath } from "./renderMath";
 
 /**
@@ -18,8 +19,16 @@ export interface TextMark {
   text: string;
   /** Couleur CSS de fond. */
   color: string;
-  /** Id de surlignage persisté (clic = suppression) — absent pour une citation. */
+  /** Id de surlignage persisté (clic = édition) — absent pour une citation. */
   id?: number;
+  /** Style d'un surlignage mémorisé : `color` est alors la couleur PLEINE de
+   *  son étiquette, que `markCss` rend translucide ou en trait. */
+  style?: AnnotationStyle;
+  /** Nom de l'étiquette et note : l'infobulle du passage. */
+  label?: string;
+  note?: string | null;
+  /** Le carnet vient de le désigner : il clignote. */
+  flash?: boolean;
   /**
    * Cache le passage au lieu de le surligner (rappel libre) : le texte devient
    * invisible mais garde sa place, donc la page ne se réagence pas sous les yeux.
@@ -110,6 +119,18 @@ export function escapeAttr(s: string): string {
   return escapeHtml(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/** Ouverture d'un <mark> de surlignage : style, infobulle, clignotement —
+ *  toute valeur interpolée passe par `escapeAttr`. */
+export function markOpen(mark: TextMark, extraStyle = ""): string {
+  const idAttr = mark.id != null ? ` data-hl="${Number(mark.id)}"` : "";
+  const cursor = mark.id != null ? "cursor:pointer;" : "";
+  const look = mark.style ? markCss(mark.style, mark.color) : `background:${mark.color};`;
+  const tip = mark.label ? (mark.note ? `${mark.label} — ${mark.note}` : mark.label) : "";
+  const title = tip ? ` title="${escapeAttr(tip)}"` : "";
+  const flash = mark.flash ? " data-flash" : "";
+  return `<mark${idAttr}${flash}${title} style="${escapeAttr(look + cursor + extraStyle)}">`;
+}
+
 /**
  * Rend `text` (échappé + formules en KaTeX) avec les `marks` surlignés dans
  * les segments non-math. Une correspondance qui chevauche une formule n'est
@@ -137,16 +158,13 @@ function markSegment(segment: string, marks: TextMark[]): string {
   for (const span of spans) {
     if (span.start < cursor) continue; // chevauchement : premier arrivé gagne
     html += escapeHtml(segment.slice(cursor, span.start)).replace(/\n/g, "<br/>");
-    const idAttr = span.mark.id != null ? ` data-hl="${Number(span.mark.id)}"` : "";
-    const cursorStyle = span.mark.id != null ? "cursor:pointer;" : "";
     // Masque : texte transparent et non sélectionnable — sinon un simple
     // glisser-copier le révélerait, et le rappel n'en serait plus un.
     const maskStyle = span.mark.masked
       ? "color:transparent;user-select:none;-webkit-user-select:none;"
       : "color:inherit;";
     html +=
-      `<mark${idAttr} style="background:${escapeAttr(span.mark.color)};${cursorStyle}` +
-      `border-radius:2px;padding:0 1px;${maskStyle}">` +
+      markOpen(span.mark, `border-radius:2px;padding:0 1px;${maskStyle}`) +
       escapeHtml(segment.slice(span.start, span.end)).replace(/\n/g, "<br/>") +
       "</mark>";
     cursor = span.end;
