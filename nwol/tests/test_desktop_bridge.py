@@ -115,3 +115,18 @@ def test_external_links_open_only_web_urls(monkeypatch):
     assert webbrowser.open(shell.RELEASES_PAGE) is True
     assert webbrowser.open("https://doi.org/10.1037/a0012345", 2, True) is True
     assert opened == [shell.RELEASES_PAGE, "https://doi.org/10.1037/a0012345"]
+
+
+def test_the_native_window_lets_download_links_save(monkeypatch):
+    """`<a download>` (export des données, carnet du lecteur) : pywebview les
+    ignore par défaut, la coque les autorise AVANT `webview.start()` — sans rien
+    exposer de plus au JavaScript."""
+    seen: dict = {}
+    monkeypatch.setitem(webview.settings, "ALLOW_DOWNLOADS", False)
+    monkeypatch.setattr(shell, "_create_window", lambda url, api: None)
+    monkeypatch.setattr(shell, "_build_menu", lambda api: None)
+    monkeypatch.setattr(webview, "start", lambda **_kw: seen.setdefault("downloads", webview.settings["ALLOW_DOWNLOADS"]))
+
+    shell._run_native("http://127.0.0.1:8756/")
+
+    assert seen == {"downloads": True}

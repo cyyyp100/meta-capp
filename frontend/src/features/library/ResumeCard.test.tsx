@@ -52,6 +52,16 @@ describe("ResumeCard", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  it("dit la page du marque-page quand il y en a un", async () => {
+    await renderCard({ document: { ...doc, bookmark_page: 52 }, remaining: remaining() });
+    expect(await screen.findByText("Marque-page · page 52")).toBeInTheDocument();
+  });
+
+  it("dit la dernière page vue sans marque-page", async () => {
+    await renderCard({ document: { ...doc, bookmark_page: null }, remaining: remaining() });
+    expect(await screen.findByText("Page 40")).toBeInTheDocument();
+  });
+
   it("annonce le temps qu'il reste au document, l'allure mesurée en infobulle", async () => {
     await renderCard({ document: doc, remaining: remaining() });
     const label = await screen.findByText("≈ 2 h 10 pour finir");

@@ -11,7 +11,7 @@
 #                       acceptée : minutes = durée conseillée) -> tout est figé :
 #                       ni observation, ni intervention, ni horloge (services/pause)
 #                     {"type":"resume"}  # fin de la pause -> enregistrée en base
-#                     {"type":"start_reading","session_id",
+#                     {"type":"start_reading","session_id","page",
 #                      "warmup":[{"card_id","front_ms","back_ms"}]}  # sas d'entrée
 #                       franchi -> départ du warm-up de la première question
 #                       (aucune intervention avant) ; `warmup` = temps passés sur
@@ -779,6 +779,14 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # d'ici, pas de l'ouverture du socket (cf. policy.start_reading),
                 # et la lecture aussi — le temps du sas n'est pas une lecture de
                 # la page 1 (memory.start_reading).
+                # Le message porte la page à l'écran : ouvert sur le marque-page,
+                # le lecteur n'y est pas en page 1, et un `viewport` perdu
+                # pendant l'ouverture du socket compterait la lecture sur la
+                # page 1. Posée AVANT `start_reading`, qui repart de la page
+                # courante.
+                if msg.page is not None and page != state["page"]:
+                    state["page"] = page
+                    memory.on_page_view(page)
                 policy.start_reading()
                 memory.start_reading(time.monotonic())
                 await attach_session(msg.session_id)

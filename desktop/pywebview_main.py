@@ -607,8 +607,21 @@ def _native_window_unavailable() -> str | None:
     return None
 
 
+def _allow_downloads() -> None:
+    """Les liens `download` de la page s'enregistrent sur le disque.
+
+    pywebview 6.2.1 les ignore par défaut (`ALLOW_DOWNLOADS = False`) : dans la
+    fenêtre native, Réglages ▸ Données ▸ Exporter et l'export du carnet du
+    lecteur ne faisaient rien — et un `.md` se serait affiché comme une page.
+    Autorisés, le système ouvre son panneau d'enregistrement : rien n'est écrit
+    sans un clic de l'utilisateur, et aucune fonction Python n'est exposée au
+    JavaScript pour autant (`pick_pdf` reste la seule)."""
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
+
 def _run_native(start_url: str) -> None:
     _guard_external_links()
+    _allow_downloads()
     api = NativeApi()
     _create_window(start_url, api)
     # La langue du menu est celle qu'a restaurée le lifespan du serveur : le

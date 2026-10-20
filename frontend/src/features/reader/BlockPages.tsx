@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../../api/client";
-import type { ReaderBlock } from "../../api/types";
+import type { AnnotationLabel, ReaderBlock, ReaderNote } from "../../api/types";
 import { useT } from "../../i18n";
 import type { TextMark } from "./anchorText";
+import { PageNotesLayer } from "./annotations/PageNotesLayer";
 import { BlockRenderer } from "./blocks/BlockRenderer";
+import { PageBookmarkButton } from "./PageBookmarkButton";
 
 /**
  * Boucle de pages du lecteur en BLOCS DE TEXTE — les fichiers de code, seuls
  * documents paginés en blocs dans cette édition (les PDF sont rendus en images
  * par le lecteur raster). Un div[data-page=n] par page : les contrats du shell
  * Reader restent intacts (IntersectionObserver de page dominante, page
- * verrouillée, ruban marque-page, sélection native via closest("[data-page]")).
+ * verrouillée, ruban de la dernière position, marque-page, post-it et
+ * signets, sélection native via closest("[data-page]")).
  *
  * Les blocs ne sont chargés qu'autour de la page courante (PREFETCH_RADIUS) :
  * une page pas encore chargée affiche un cadre vide au bon ratio, ce qui garde
@@ -26,13 +29,25 @@ interface Props {
   zoom: number;
   currentPage: number;
   sizes: [number, number][];
+  /** Page quittée à la dernière séance (ruban), nulle quand un marque-page existe. */
+  lastPositionPage: number | null;
+  /** Page du marque-page de l'élève. */
   bookmarkPage: number | null;
+  /** Pose ou retire le marque-page ; absent, pas de bouton (visite guidée). */
+  onToggleBookmark?: (page: number) => void;
   locked: boolean;
   lockedPage: number;
   /** Marques par page : citations de Clikoda + surlignages mémorisés. */
   marksByPage?: Record<number, TextMark[]>;
-  /** Clic sur un <mark data-hl> de surlignage mémorisé. */
-  onDeleteHighlight?: (id: number) => void;
+  /** Clic sur un <mark data-hl> de surlignage mémorisé : son édition. */
+  onEditHighlight?: (id: number) => void;
+  /** Post-it (sans géométrie : empilés dans la marge) et signets, par page. */
+  notesByPage?: Record<number, ReaderNote[]>;
+  labelsById?: Map<number, AnnotationLabel>;
+  /** Absent : post-it et signets en lecture seule (visite guidée). */
+  onEditNote?: (id: number) => void;
+  /** Post-it ou signet que le carnet vient de désigner (« n-3 ») : il clignote. */
+  flash?: string | null;
   /** Occurrences de la recherche par page : plages UTF-16 dans le texte du
    *  bloc de code de la page (un seul bloc par page de code). */
   findRangesByPage?: Record<number, [number, number][]>;
@@ -53,24 +68,30 @@ export function BlockPages({
   zoom,
   currentPage,
   sizes,
+  lastPositionPage,
   bookmarkPage,
+  onToggleBookmark,
   locked,
   lockedPage,
   marksByPage,
-  onDeleteHighlight,
+  onEditHighlight,
+  notesByPage,
+  labelsById,
+  onEditNote,
+  flash = null,
   findRangesByPage,
   findCurrent = null,
 }: Props) {
   const t = useT();
   const [blocksByPage, setBlocksByPage] = useState<BlocksState>({});
 
-  // Suppression d'un surlignage mémorisé : délégation d'événement (les <mark>
+  // Édition d'un surlignage mémorisé : délégation d'événement (les <mark>
   // viennent de dangerouslySetInnerHTML, pas de handler React possible).
   function handleMarkClick(e: React.MouseEvent) {
     const mark = (e.target as HTMLElement).closest("mark[data-hl]");
-    if (mark && onDeleteHighlight) {
+    if (mark && onEditHighlight) {
       const id = Number(mark.getAttribute("data-hl"));
-      if (Number.isFinite(id)) onDeleteHighlight(id);
+      if (Number.isFinite(id)) onEditHighlight(id);
     }
   }
 
@@ -157,7 +178,7 @@ export function BlockPages({
               // préchargement déclencherait une requête en échec.
               <div style={{ width: "100%", height: "100%" }} />
             )}
-            {n === bookmarkPage ? (
+            {n === lastPositionPage ? (
               <div
                 title={t("reader.last_position")}
                 style={{
@@ -172,6 +193,18 @@ export function BlockPages({
                   zIndex: 5,
                 }}
               />
+            ) : null}
+            {notesByPage?.[n] && labelsById ? (
+              <PageNotesLayer
+                notes={notesByPage[n]}
+                labelsById={labelsById}
+                scale={null}
+                flashId={flash?.startsWith("n-") ? Number(flash.slice(2)) : null}
+                onEdit={onEditNote}
+              />
+            ) : null}
+            {onToggleBookmark ? (
+              <PageBookmarkButton page={n} active={n === bookmarkPage} onToggle={onToggleBookmark} />
             ) : null}
           </div>
         );

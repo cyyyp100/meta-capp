@@ -88,8 +88,29 @@ def test_words_and_search_agree_on_the_same_word(tmp_path, make_pdf):
     with PdfDocument(path) as pdf:
         word = next(w for w in pdf.words(1) if w[4] == "Meta")
         rect = pdf.search_text(1, "Meta")[0]
-    for from_words, from_search in zip(word[:4], rect):
-        assert abs(from_words - from_search) < 2.0
+    # À l'horizontale, les deux chemins coïncident. À la verticale, la boîte du
+    # calque couvre le corps de la police (`_char_box`) : elle contient le
+    # glyphe que trouve la recherche, sans déborder d'une ligne de 12 pt.
+    assert abs(word[0] - rect[0]) < 1.5 and abs(word[2] - rect[2]) < 1.5
+    assert word[1] <= rect[1] + 0.01 and word[3] >= rect[3] - 0.01
+    assert word[3] - word[1] < 12 * 1.3
+
+
+def test_the_words_of_a_line_share_one_band(tmp_path, make_pdf):
+    """La boîte serrée d'un glyphe varie d'un mot à l'autre (« ce » : hauteur
+    d'x ; « expliciter » : de l'ascendante à la descendante) : le calque en
+    tirait une bande médiane qui coupait les jambages, et la sélection tombait
+    à côté du texte. Les boîtes de mots couvrent maintenant le corps de la
+    police — la même bande pour toute la ligne, qui contient chaque glyphe."""
+    path = make_pdf(tmp_path / "band.pdf", ["ce que nous allons expliciter"])
+    with PdfDocument(path) as pdf:
+        words = pdf.words(1)
+        glyphs = {w[4]: pdf.search_text(1, w[4])[0] for w in words}
+    assert {round(w[1], 2) for w in words} == {round(words[0][1], 2)}
+    assert {round(w[3], 2) for w in words} == {round(words[0][3], 2)}
+    for x0, y0, x1, y1, text in words:
+        gx0, gy0, gx1, gy1 = glyphs[text]
+        assert y0 <= gy0 + 0.01 and y1 >= gy1 - 0.01, text
 
 
 def test_line_sizes_expose_a_bigger_heading(tmp_path, make_pdf):
@@ -223,3 +244,104 @@ def test_a_hyphenated_word_gives_two_words_one_per_line(tmp_path, make_pdf):
     for x0, y0, x1, y1, _text in (first, second):
         assert y1 - y0 < 12 * 1.5  # une ligne de 12 pt, pas deux
     assert second[1] > first[3] - 1
+
+
+def _tex_accented_pdf(path) -> str:
+    """Une ligne écrite comme TeX en codage OT1 : chaque accent est un glyphe à
+    part, dessiné AVANT sa lettre et centré au-dessus (ou au-dessous, pour la
+    cédille). Plus un accent grave de code, posé À CÔTÉ de ses lettres."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
+
+    size = 12
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    pdf.setFont("Helvetica", size)
+    y = A4[1] - _TEXT_TOP_MARGIN
+    x = 72.0
+
+    def width(text: str) -> float:
+        return stringWidth(text, "Helvetica", size)
+
+    def run(text: str) -> None:
+        nonlocal x
+        pdf.drawString(x, y, text)
+        x += width(text)
+
+    def accented(accent: str, letter: str) -> None:
+        nonlocal x
+        pdf.drawString(x + (width(letter) - width(accent)) / 2, y, accent)
+        pdf.drawString(x, y, letter)
+        x += width(letter)
+
+    run("d")
+    accented("´", "e")
+    run("tails ")
+    run("`ls` ")
+    run("gr")
+    accented("ˆ", "a")
+    run("ce Commen")
+    accented("¸", "c")
+    run("ons")
+    pdf.showPage()
+    pdf.save()
+    return str(path)
+
+
+def test_accents_drawn_apart_are_recomposed(tmp_path):
+    """Les vieux PDF LaTeX posent « ´ » au-dessus de « e » : PDFium extrayait
+    « d´etails », que le carnet citait tel quel, qu'un double-clic coupait à
+    l'accent, que Ctrl/Cmd+F ne trouvait pas (« ´ » se pliait en espace) et
+    que le LLM lisait en morceaux. Recomposés partout — mots, texte de page,
+    texte plié, recherche d'une citation —, sauf l'accent grave du code, posé
+    à côté de ses lettres et non au-dessus."""
+    path = _tex_accented_pdf(tmp_path / "ot1.pdf")
+    with PdfDocument(path) as pdf:
+        assert [w[4] for w in pdf.words(1)] == ["détails", "`ls`", "grâce", "Commençons"]
+        assert pdf.raw_text(1).split() == ["détails", "`ls`", "grâce", "Commençons"]
+        assert "details `ls` grace commencons" in pdf.folded_text(1)
+        assert len(pdf.find_folded(1, "details")) == 1
+        # La citation recomposée (celle que lit le LLM) se retrouve sur la page.
+        assert pdf.search_text(1, "détails")
+        assert pdf.search_text(1, "Commençons")
+
+
+class _FakeTextPage:
+    """Boîtes PDFium (origine bas-gauche) données à la main, par caractère."""
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+    def get_charbox(self, index, loose=False):
+        return self.boxes[index]
+
+
+# Une lettre de 5 pt de large et de haut, posée sur la ligne de base à x = 10.
+_LETTER = (10.0, 0.0, 15.0, 5.0)
+
+
+def test_the_geometry_decides_what_an_accent_belongs_to():
+    above = (11.0, 6.0, 14.0, 8.0)   # au-dessus de la lettre
+    beside = (5.0, 6.0, 9.0, 8.0)    # à gauche, sans la recouvrir
+    below = (11.0, -2.0, 14.0, 0.5)  # sous la ligne de base
+    merges = PdfDocument._accent_merges
+    # Accent puis lettre (l'ordre de TeX) ; i sans point coiffé : « î ».
+    assert merges(_FakeTextPage([above, _LETTER]), "ˆı") == {0: "", 1: "î"}
+    # Lettre puis accent : la barre d'un conjugué, « Q¯ » → « Q̄ ».
+    assert merges(_FakeTextPage([_LETTER, above]), "Q¯") == {0: "Q̄", 1: ""}
+    # La cédille se pose dessous ; un accent aigu, jamais.
+    assert merges(_FakeTextPage([below, _LETTER]), "¸c") == {0: "", 1: "ç"}
+    assert merges(_FakeTextPage([below, _LETTER]), "´e") == {}
+    # À côté de sa lettre, un accent reste ce qu'il est (« `ls` », « l´école »).
+    assert merges(_FakeTextPage([beside, _LETTER]), "`l") == {}
+
+
+def test_recomposed_accents_reach_the_bounded_reading():
+    """La lecture bornée (celle du LLM) et l'indexée ne diffèrent que par des
+    invisibles — blancs autour d'une formule, marqueur de césure U+0002 contre
+    U+FFFE, glyphe sans Unicode : la recomposition passe de l'une à l'autre.
+    Au moindre écart visible, la lecture bornée est rendue telle quelle."""
+    carry = PdfDocument._carry_merges
+    merges = {1: "", 2: "é"}
+    assert carry("d´et\x02ail", "d´et\r\n ￾ail", merges) == "dét\x02ail"
+    assert carry("d´etail", "x´etail", merges) == "d´etail"

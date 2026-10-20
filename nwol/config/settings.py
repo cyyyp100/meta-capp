@@ -1188,7 +1188,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 43
+DB_SCHEMA_VERSION = 45
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -1216,7 +1216,13 @@ ASSISTANT_WARMUP_S = {"normal": 240.0, "coach": 150.0}
 ASSISTANT_REVISIT_TRIGGER = 3       # retours sur une même page
 ASSISTANT_LOW_ATTENTION = 40.0      # seuil de jauge attention
 ASSISTANT_QUESTIONS_TRIGGER = 2     # questions utilisateur sur la même page
-ASSISTANT_MAX_INTERVENTIONS = 6     # par session
+# Plafond sur une fenêtre GLISSANTE de lecture : au plus ASSISTANT_MAX_INTERVENTIONS
+# dans toute période de ASSISTANT_INTERVENTION_WINDOW_S, pauses exclues (comme les
+# cooldowns). C'était un plafond par SÉANCE : les six tombaient dans la première
+# heure, puis Clikoda se taisait jusqu'à la fin — 2 h 47 sans une question sur
+# une séance de 3 h (journal du 2026-10-20).
+ASSISTANT_MAX_INTERVENTIONS = 6
+ASSISTANT_INTERVENTION_WINDOW_S = 3600.0
 
 # Fatigue de production : les réponses de l'étudiant rétrécissent d'une question
 # à l'autre. C'est le signal « il n'apprend plus », qui appelle une pause et non
@@ -1306,6 +1312,34 @@ READING_ESTIMATE_WINDOW = 200        # échantillons récents gardés (l'allure 
 READER_FIND_MIN_CHARS = 2
 READER_FIND_MAX_QUERY_CHARS = 200
 READER_FIND_MAX_PAGE_HITS = 500
+
+# ── Prise de notes du lecteur (schéma v45) ───────────────────────────────────
+# Vocabulaires FERMÉS, validés par services/annotations.py : une couleur est une
+# clé de la palette (chaque clé a son `--note-<clé>` dans theme/tokens.css et son
+# nom accessible `annotations.color.<clé>` dans les deux dictionnaires, cf.
+# tests/test_annotation_palette_tokens.py), un style l'un des quatre tracés.
+ANNOTATION_COLORS = ("yellow", "orange", "red", "pink", "violet", "blue", "cyan", "green", "lime", "gray")
+ANNOTATION_STYLES = ("highlight", "underline", "strike", "outline")
+# Étiquettes semées pour chaque utilisateur, dans cet ordre : (preset, couleur).
+# Leur nom vient de l'i18n (`annotations.preset.<preset>`) tant que l'élève ne
+# l'a pas renommée — il suit alors la langue de l'interface.
+ANNOTATION_PRESETS = (
+    ("important", "yellow"),
+    ("definition", "blue"),
+    ("example", "green"),
+    ("review", "red"),
+    ("question", "violet"),
+    ("idea", "orange"),
+)
+# L'ancienne colonne `reader_highlights.color` (v20) : sa correspondance en
+# étiquette, pour la migration v45 et pour un client qui l'enverrait encore.
+ANNOTATION_LEGACY_COLOR_PRESETS = {"key": "important", "explain": "definition", "reference": "example"}
+ANNOTATION_DEFAULT_COLOR = "yellow"
+ANNOTATION_MAX_LABELS = 24
+ANNOTATION_LABEL_NAME_MAX = 40
+ANNOTATION_NOTE_MAX_CHARS = 4000
+ANNOTATION_QUOTE_MAX_CHARS = 4000
+ANNOTATION_MAX_RECTS = 400
 
 # ── Révision éclair : le RYTHME des cartes du sas d'entrée ──────────────────
 # Les cartes du warm-up ne sont pas notées (un clic retourne, un clic avance) :

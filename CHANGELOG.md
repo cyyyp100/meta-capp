@@ -46,8 +46,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not reached, and one inside a free-recall passage stays hidden. The document is
   indexed once, in batches that leave the PDF engine free for the pages being read
   (`GET /api/library/doc/{id}/find`, `…/page/{n}/find`).
+- **A bookmark to resume reading**, at the top right of every page: one per
+  document, set, moved or removed in a click. The reader opens on the bookmarked
+  page, the entry airlock's curiosity hook is about that page, the "Resume" card
+  names it and the time left counts from it. Without a bookmark the reader opens
+  on page 1, as before. Schema v44 (`documents.bookmark_page`); no existing
+  position is turned into a bookmark (`POST /api/library/doc/{id}/bookmark`).
+- **Note-taking in the reader.** A selection is highlighted with a **label**
+  (Important, Definition, Example, To review, Question, Idea, then your own: ten
+  colors, rename, recolor, reorder, delete) in one of four **styles** (highlighted,
+  underlined, struck through, boxed), and takes a **note** — "Note" in the selection
+  bar opens it directly; formulas `$…$` render in the hover card. **Sticky notes** are
+  placed anywhere on a page (in the margin of a code file), and **page markers** mark
+  the pages that matter, one per page. The **notebook** (toolbar, left drawer) lists the
+  bookmark, the page markers and everything noted, page by page, with filters (labels,
+  types, "with a note") and an accent-insensitive search; a click brings the reader to
+  the item, which blinks, and items are edited in place. **Export (.md)** saves the
+  notebook as Markdown, **Copy as Markdown** puts it on the clipboard. Schema v45
+  (`annotation_labels`, `reader_notes`, and label, style, note on `reader_highlights`):
+  existing highlights get the label of their former color
+  (`GET /api/library/doc/{id}/annotations`, `…/annotations.md`, `/api/annotations/labels`).
 
 ### Changed
+
+- **Clicking a highlight opens it for editing** (label, style, note, add to Clikoda's
+  context, delete) instead of deleting it. A text selection can no longer start on a
+  highlighted passage; "Add to Clikoda's context" makes up for it.
 
 - **The "Resume" card shows the time left in the document** ("≈ 2 h 10 to finish"), at
   the reader's measured pace: the median time per page read in this document, else in
@@ -83,6 +107,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- In the native window, **Settings ▸ Data ▸ Export** did nothing: pywebview ignores
+  download links unless told otherwise. The shell now allows them, and the system's save
+  panel opens (the notebook's Markdown export goes through it too).
+- Deleting a highlight with an id from another document deleted it anyway: the route
+  ignored the document. It is now scoped to the document, like every new route.
+- A passage highlighted or added to Clikoda's context from a PDF was saved without
+  spaces ("inatypicaltrainingscript…"): the reader's text layer is one element per
+  word, and the browser read them glued together. The quote is now rebuilt from
+  the selected words, with spaces, and a word hyphenated at the end of a line is
+  joined back. Quotes saved before keep their old text.
+- The guided tour promised that a document reopens where you stopped; the reader
+  always opened on page 1. The tour now describes the bookmark, which does.
 - A word hyphenated at the end of a line ("differen- / tials") was one word for the
   reader's text layer, with a box covering both lines: selecting it lit up a rectangle
   as tall as the paragraph. It is now two words, each on its line.

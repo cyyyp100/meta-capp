@@ -162,6 +162,7 @@ export function ClikodaPanel({
   paused = null,
   onPauseRequest,
   onDemoReady,
+  onDockChange,
 }: {
   docId: number;
   currentPage: number;
@@ -219,6 +220,11 @@ export function ClikodaPanel({
   onPauseRequest?: (minutes: number) => void;
   /** Rend à la visite de quoi jouer les répliques, tant que le panneau vit. */
   onDemoReady?: (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => void;
+  /**
+   * Largeur que le panneau ANCRÉ à droite retire au lecteur (0 : fermé ou
+   * flottant). Le lecteur centre ses bandeaux dans ce qui reste.
+   */
+  onDockChange?: (width: number) => void;
 }) {
   const t = useT();
   // Clikoda démarre fermé : l'utilisateur (ou une intervention) l'ouvre au besoin.
@@ -562,11 +568,14 @@ export function ClikodaPanel({
     };
   }, [docId, demo, ended]);
 
+  // La page à l'écran, dès que le socket est ouvert (`connected`) : ouvert sur
+  // le marque-page, le lecteur n'est pas en page 1 quand le socket s'ouvre, et
+  // le serveur doit le savoir avant l'entrée en lecture.
   useEffect(() => {
     const ws = wsRef.current;
     if (pausedRef.current) return;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "viewport", page: currentPage, session_id: sessionId ?? null }));
-  }, [currentPage, sessionId]);
+  }, [currentPage, sessionId, connected]);
 
   // Pause de la lecture : un message à l'arrêt, un à la reprise. Le serveur
   // mesure la durée et ce qui l'a précédée (services/pause.py) ; ici on ne fait
@@ -590,10 +599,18 @@ export function ClikodaPanel({
   // question, et juge le rythme de la révision éclair. `connected` couvre le
   // socket pas encore ouvert à la sortie du sas ; un envoi répété est sans
   // effet côté serveur (la révision n'est enregistrée qu'une fois par séance).
+  // La page à l'écran part avec : la lecture y est comptée dès le départ.
   useEffect(() => {
     const ws = wsRef.current;
     if (reading && connected && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "start_reading", session_id: sessionIdRef.current ?? null, warmup: warmupRef.current }));
+      ws.send(
+        JSON.stringify({
+          type: "start_reading",
+          session_id: sessionIdRef.current ?? null,
+          page: pageRef.current,
+          warmup: warmupRef.current,
+        }),
+      );
     }
   }, [reading, connected]);
 
@@ -670,6 +687,14 @@ export function ClikodaPanel({
   useEffect(() => {
     if (!demo) save(LS_LAYOUT, layout);
   }, [layout, demo]);
+
+  const onDockChangeRef = useRef(onDockChange);
+  onDockChangeRef.current = onDockChange;
+  const docked = open && layout === "dockRight" ? dockWidth : 0;
+  useEffect(() => {
+    onDockChangeRef.current?.(docked);
+  }, [docked]);
+  useEffect(() => () => onDockChangeRef.current?.(0), []);
 
   // Géométrie courante du panneau selon la disposition choisie.
   const dockRect: Rect = { x: Math.max(0, parentSize.w - dockWidth), y: DOCK_TOP, width: dockWidth, height: Math.max(240, parentSize.h - DOCK_TOP - 12) };

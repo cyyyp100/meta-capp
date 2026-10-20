@@ -1,12 +1,23 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 43).
+-- (config.settings.DB_SCHEMA_VERSION = 45).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
 -- dans cette édition : llm_pdf_cache, ocr_pages.
 
+CREATE TABLE annotation_labels (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+                   preset     TEXT,
+                   name       TEXT,
+                   color      TEXT NOT NULL,
+                   position   INTEGER NOT NULL DEFAULT 0,
+                   created_at DATETIME DEFAULT (datetime('now')),
+                   UNIQUE(user_id, preset)
+               );
+CREATE INDEX idx_annotation_labels_user ON annotation_labels(user_id, position);
 CREATE TABLE answers (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     question_id        INTEGER REFERENCES questions(id) ON DELETE CASCADE,
@@ -104,7 +115,7 @@ CREATE TABLE documents (
     extraction_engine TEXT,
     has_toc          BOOLEAN DEFAULT 0,
     created_at       DATETIME DEFAULT (datetime('now'))
-, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL, auto_summary TEXT, keywords TEXT DEFAULT '[]', digest_status TEXT DEFAULT 'none');
+, subject TEXT, ocr_status TEXT DEFAULT 'none', ocr_pages_done INTEGER DEFAULT 0, ocr_error TEXT, content_hash TEXT, folder_id INTEGER REFERENCES library_folders(id) ON DELETE SET NULL, auto_summary TEXT, keywords TEXT DEFAULT '[]', digest_status TEXT DEFAULT 'none', bookmark_page INTEGER);
 CREATE INDEX idx_documents_folder ON documents(folder_id);
 CREATE TABLE flashcards (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -696,9 +707,25 @@ CREATE TABLE reader_highlights (
             rects_json   TEXT NOT NULL,
             color        TEXT DEFAULT 'key',
             created_at   DATETIME DEFAULT (datetime('now'))
-        , anchor_json TEXT);
+        , anchor_json TEXT, label_id INTEGER REFERENCES annotation_labels(id) ON DELETE SET NULL, style TEXT NOT NULL DEFAULT 'highlight', note TEXT, updated_at DATETIME);
 CREATE INDEX idx_reader_highlights_doc ON reader_highlights(document_id);
 CREATE INDEX idx_reader_highlights_user_doc ON reader_highlights(user_id, document_id);
+CREATE TABLE reader_notes (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+                   document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                   page        INTEGER NOT NULL,
+                   kind        TEXT NOT NULL CHECK (kind IN ('sticky', 'signet')),
+                   x           REAL,
+                   y           REAL,
+                   body        TEXT NOT NULL DEFAULT '',
+                   label_id    INTEGER REFERENCES annotation_labels(id) ON DELETE SET NULL,
+                   created_at  DATETIME DEFAULT (datetime('now')),
+                   updated_at  DATETIME DEFAULT (datetime('now'))
+               );
+CREATE UNIQUE INDEX idx_reader_notes_signet
+               ON reader_notes(user_id, document_id, page) WHERE kind = 'signet';
+CREATE INDEX idx_reader_notes_user_doc ON reader_notes(user_id, document_id, page);
 CREATE TABLE reading_sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

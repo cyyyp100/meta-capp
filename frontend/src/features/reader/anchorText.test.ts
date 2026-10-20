@@ -119,3 +119,28 @@ describe("renderMarkedText", () => {
     expect(mark.getAttribute("data-hl")).toBe("NaN");
   });
 });
+
+describe("surlignages mémorisés d'un fichier de code", () => {
+  it("tracent leur style, et échappent leur infobulle", () => {
+    const html = renderMarkedText("un passage clé ici", [
+      {
+        text: "passage clé",
+        color: "var(--note-red)",
+        style: "underline",
+        id: 3,
+        label: "Défs",
+        note: '"><img src=x onerror=alert(1)>',
+      },
+    ]);
+    expect(html).toContain('data-hl="3"');
+    expect(html).toContain("text-decoration:underline 2px var(--note-red)");
+    expect(html).not.toContain("<img");
+    expect(html).toContain('title="Défs — &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"');
+  });
+
+  it("clignotent quand le carnet les désigne", () => {
+    const html = renderMarkedText("un passage", [{ text: "passage", color: "var(--note-blue)", style: "highlight", id: 4, flash: true }]);
+    expect(html).toContain("<mark data-hl=\"4\" data-flash");
+    expect(html).toContain("color-mix(in srgb, var(--note-blue) 40%");
+  });
+});

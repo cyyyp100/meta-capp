@@ -111,6 +111,21 @@ def test_remaining_counts_from_the_last_page_seen(fresh_db):
     assert left["measured"] is True and left["scope"] == "document"
 
 
+def test_remaining_counts_from_the_bookmark_before_the_last_page_seen(fresh_db):
+    """Le marque-page est posé par l'élève ; la dernière page vue bouge seule
+    (une séance passée à feuilleter l'annexe). Le temps restant part du premier."""
+    from db.documents import get_document, set_bookmark_page, update_last_page
+    from services.reading_pace import remaining
+
+    doc = _doc("cours.pdf", pages=40)
+    update_last_page(doc["id"], 38)
+    set_bookmark_page(doc["id"], 21)
+    assert remaining(get_document(doc["id"]))["pages"] == 20
+
+    set_bookmark_page(doc["id"], 99)  # hors du document : ignoré, pas une page fantôme
+    assert remaining(get_document(doc["id"]))["pages"] == 3
+
+
 def test_a_document_without_pages_has_no_remaining_time(fresh_db):
     from services.reading_pace import remaining
 

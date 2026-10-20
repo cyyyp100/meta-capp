@@ -28,6 +28,7 @@ from services.library import (
     resume as resume_service,
     search_documents,
     search_page,
+    set_bookmark as set_bookmark_service,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +67,11 @@ class DocumentFolderBody(BaseModel):
 
 class DocumentTitleBody(BaseModel):
     title: str
+
+
+class BookmarkBody(BaseModel):
+    # null = retirer le marque-page.
+    page: int | None = None
 
 
 @router.get("/recent")
@@ -321,6 +327,16 @@ def rename_document(doc_id: int, body: DocumentTitleBody) -> dict:
     l'utilisateur n'est pas renommé — même règle qu'à la suppression."""
     try:
         return {"ok": True, "document": rename_document_service(doc_id, body.title)}
+    except ValueError as exc:
+        missing = get_document(doc_id) is None
+        raise HTTPException(status_code=404 if missing else 400, detail=str(exc))
+
+
+@router.post("/doc/{doc_id}/bookmark")
+def set_bookmark(doc_id: int, body: BookmarkBody) -> dict:
+    """Pose, déplace ou retire (`page: null`) le marque-page du document."""
+    try:
+        return {"ok": True, "document": set_bookmark_service(doc_id, body.page)}
     except ValueError as exc:
         missing = get_document(doc_id) is None
         raise HTTPException(status_code=404 if missing else 400, detail=str(exc))

@@ -56,7 +56,13 @@ export function ResumeCard({
         </div>
         <h2 className="mt-1.5 mb-0 truncate font-serif text-h3 font-bold">{doc.title}</h2>
         <p className="mt-1 mb-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
-          <span>{t("resume.page", { page: Math.max(1, doc.last_page || 1) })}</span>
+          {/* Le marque-page, posé par l'élève, prime : le lecteur s'y ouvre, et le
+              temps restant en part (services/reading_pace.remaining). */}
+          <span>
+            {doc.bookmark_page
+              ? t("resume.bookmark", { page: doc.bookmark_page })
+              : t("resume.page", { page: Math.max(1, doc.last_page || 1) })}
+          </span>
           {resume.remaining && (
             <>
               <span aria-hidden>·</span>

@@ -131,6 +131,24 @@
   --find-hit: #f5a524;
   --find-current: #e8590c;
 
+  /* Prise de notes : la palette FERMÉE des étiquettes (config/settings.py,
+     ANNOTATION_COLORS ; tests/test_annotation_palette_tokens.py). Dans `:root`
+     seulement : comme les surlignages et la recherche, elle se pose sur une
+     page de PDF, claire dans les deux thèmes. Translucide en surligné, pleine
+     en souligné, barré et encadré. `--note-none` : l'élément dont l'étiquette
+     a été supprimée. */
+  --note-yellow: #f2c12e;
+  --note-orange: #f08c2e;
+  --note-red: #e5484d;
+  --note-pink: #e05fa3;
+  --note-violet: #8e6cd8;
+  --note-blue: #4d9de0;
+  --note-cyan: #2fb5c4;
+  --note-green: #4cb36c;
+  --note-lime: #9ccc3a;
+  --note-gray: #8a8f98;
+  --note-none: #a3a7ae;
+
   /* Module langues (feuilleton) : tons du mandarin et genre des noms allemands.
      Toujours DOUBLÉS d'un indicateur non coloré (chiffre du ton, article) :
      la couleur aide, elle ne porte jamais seule l'information (F17). Les cinq
@@ -494,6 +512,80 @@ body {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* Le carnet amène le lecteur sur un élément : il clignote deux fois pour qu'on
+   le trouve sur la page. Rien sous `prefers-reduced-motion` (la règle
+   ci-dessus ramène l'animation à rien). */
+@keyframes note-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  25%,
+  75% {
+    opacity: 0.25;
+  }
+}
+[data-flash] {
+  animation: note-flash 0.6s ease-in-out 2;
+}
+
+/* Pose d'un post-it : le prochain clic sur une page le pose là. */
+[data-placing] [data-page],
+[data-placing] [data-page] * {
+  cursor: crosshair !important;
+}
+
+/* Calque de texte transparent d'une page PDF (features/reader/PageTextLayer).
+   Spans en absolu, comprimés à la largeur de leur mot ; derrière eux, le bloc
+   de fin de contenu (features/reader/textSelection) couvre les vides. */
+[data-textlayer] {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  /* La transparence est celle du CALQUE, la sélection y est opaque : chaque
+     span peint la sienne (plus un bout de « fin de ligne » qui mord sur le mot
+     suivant), et deux sélections translucides superposées foncent — une bande
+     sombre au début de chaque mot. Aplaties d'abord, elles se confondent. Le
+     texte, transparent, n'en est pas affecté. */
+  opacity: 0.28;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+}
+[data-textlayer] > span,
+[data-textlayer] > br {
+  position: absolute;
+  z-index: 1;
+  color: transparent;
+  font-family: sans-serif; /* = TEXT_LAYER_FONT, la police de la mesure */
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+[data-textlayer] ::selection {
+  background: rgb(0 96 255);
+  background: AccentColor;
+}
+[data-textlayer] br::selection {
+  background: transparent;
+}
+[data-textlayer] > [data-textlayer-end] {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Survol d'un surlignage enregistré : un clic l'édite (PdfPage). */
+[data-hl-hover] [data-textlayer] > span {
+  cursor: pointer;
 }
 
 /* ---------------------------------------------------------------------------

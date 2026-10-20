@@ -428,3 +428,92 @@ def test_v43_gives_the_lexicon_the_meaning_of_its_lemmas(fresh_db, monkeypatch):
     store.insert_lexeme(profile_id, {**entry, "lemma_translation": "posséder"}, 3)
     row = store.get_lexeme(profile_id, "tener")
     assert (row["form"], row["translation"], row["lemma_translation"]) == ("Tenemos", "Nous avons", "avoir")
+
+
+def test_v44_adds_the_bookmark_without_converting_positions(fresh_db, monkeypatch):
+    """Une base v43 avec un document lu jusqu'à la page 12 : la migration ajoute
+    `documents.bookmark_page` à NULL. La dernière page vue reste une position
+    passive — la convertir en marque-page poserait à la place de l'élève un
+    repère qu'il n'a pas choisi. Rejouable."""
+    from db import get_connection, migrations
+    from db.documents import get_document, set_bookmark_page, update_last_page, upsert_document
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 43)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    doc_id = upsert_document("/tmp/cours.pdf", "cours.pdf", 40, "pdfium_scroll", False)
+    update_last_page(doc_id, 12)
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 44)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 44
+    doc = get_document(doc_id)
+    assert (doc["last_page"], doc["bookmark_page"]) == (12, None)
+
+    assert set_bookmark_page(doc_id, 30) is True
+    assert get_document(doc_id)["bookmark_page"] == 30
+    assert set_bookmark_page(999, 3) is False
+
+
+def test_v45_labels_the_highlights_by_their_old_color(fresh_db, monkeypatch):
+    """Une base v44 avec un utilisateur et des surlignages « key », « explain »,
+    « reference » (et une couleur inconnue, que l'ancien code ramenait à
+    « key ») : les étiquettes prédéfinies sont semées, chaque surlignage reçoit
+    celle de sa couleur, le style « highlight », pas de note, et `updated_at`
+    = `created_at`. Rejouable. Les notes suivent la suppression du document ;
+    supprimer une étiquette laisse ses surlignages, sans étiquette."""
+    from config.settings import ANNOTATION_PRESETS
+    from db import get_connection, migrations
+    from db.documents import delete_document, upsert_document
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 44)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    doc_id = upsert_document("/tmp/cours.pdf", "cours.pdf", 40, "pdfium_scroll", False)
+    with conn:
+        for color, quote in (("key", "clé"), ("explain", "explication"), ("reference", "référence"), ("odd", "?")):
+            conn.execute(
+                """INSERT INTO reader_highlights (user_id, document_id, page, quote, rects_json, color, created_at)
+                   VALUES (1, ?, 2, ?, '[]', ?, '2026-01-02 03:04:05')""",
+                (doc_id, quote, color),
+            )
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 45)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 45
+
+    labels = conn.execute("SELECT id, preset, name, color FROM annotation_labels ORDER BY position").fetchall()
+    assert [(row["preset"], row["color"]) for row in labels] == list(ANNOTATION_PRESETS)
+    assert all(row["name"] is None for row in labels)
+    preset_of = {row["id"]: row["preset"] for row in labels}
+    rows = conn.execute(
+        "SELECT quote, label_id, style, note, updated_at FROM reader_highlights ORDER BY id"
+    ).fetchall()
+    assert [(row["quote"], preset_of[row["label_id"]]) for row in rows] == [
+        ("clé", "important"), ("explication", "definition"), ("référence", "example"), ("?", "important"),
+    ]
+    assert {(row["style"], row["note"], row["updated_at"]) for row in rows} == {
+        ("highlight", None, "2026-01-02 03:04:05")
+    }
+
+    with conn:
+        conn.execute(
+            "INSERT INTO reader_notes (user_id, document_id, page, kind, body, label_id) VALUES (1, ?, 3, 'signet', '', ?)",
+            (doc_id, labels[0]["id"]),
+        )
+        conn.execute("DELETE FROM annotation_labels WHERE id=?", (labels[1]["id"],))
+    assert conn.execute("SELECT label_id FROM reader_highlights WHERE quote='explication'").fetchone()[0] is None
+    delete_document(doc_id)
+    assert conn.execute("SELECT COUNT(*) FROM reader_notes").fetchone()[0] == 0
