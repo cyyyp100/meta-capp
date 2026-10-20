@@ -162,6 +162,7 @@ export function ClikodaPanel({
   paused = null,
   onPauseRequest,
   onDemoReady,
+  onDockChange,
 }: {
   docId: number;
   currentPage: number;
@@ -219,6 +220,11 @@ export function ClikodaPanel({
   onPauseRequest?: (minutes: number) => void;
   /** Rend à la visite de quoi jouer les répliques, tant que le panneau vit. */
   onDemoReady?: (controls: { openPanel: () => void; play: (beat: DemoBeat) => void } | null) => void;
+  /**
+   * Largeur que le panneau ANCRÉ à droite retire au lecteur (0 : fermé ou
+   * flottant). Le lecteur centre ses bandeaux dans ce qui reste.
+   */
+  onDockChange?: (width: number) => void;
 }) {
   const t = useT();
   // Clikoda démarre fermé : l'utilisateur (ou une intervention) l'ouvre au besoin.
@@ -681,6 +687,14 @@ export function ClikodaPanel({
   useEffect(() => {
     if (!demo) save(LS_LAYOUT, layout);
   }, [layout, demo]);
+
+  const onDockChangeRef = useRef(onDockChange);
+  onDockChangeRef.current = onDockChange;
+  const docked = open && layout === "dockRight" ? dockWidth : 0;
+  useEffect(() => {
+    onDockChangeRef.current?.(docked);
+  }, [docked]);
+  useEffect(() => () => onDockChangeRef.current?.(0), []);
 
   // Géométrie courante du panneau selon la disposition choisie.
   const dockRect: Rect = { x: Math.max(0, parentSize.w - dockWidth), y: DOCK_TOP, width: dockWidth, height: Math.max(240, parentSize.h - DOCK_TOP - 12) };

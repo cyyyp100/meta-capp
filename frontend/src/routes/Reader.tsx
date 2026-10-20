@@ -9,7 +9,13 @@ import { api } from "../api/client";
 import type { DocumentDetail, Highlight, HighlightAnchor, PageWord, ReaderNote, SessionMetrics } from "../api/types";
 import type { TextMark } from "../features/reader/anchorText";
 import { AnnotationPopover, annotationSelector, type EditingTarget } from "../features/reader/annotations/AnnotationPopover";
-import { NOTEBOOK_WIDTH, NotebookDrawer, type NotebookTarget } from "../features/reader/annotations/NotebookDrawer";
+import {
+  clampNotebookWidth,
+  loadNotebookWidth,
+  NotebookDrawer,
+  saveNotebookWidth,
+  type NotebookTarget,
+} from "../features/reader/annotations/NotebookDrawer";
 import { labelColor, labelName } from "../features/reader/annotations/palette";
 import { loadToolPrefs, saveToolPrefs, SelectionToolbar } from "../features/reader/annotations/SelectionToolbar";
 import { useAnnotations } from "../features/reader/annotations/useAnnotations";
@@ -525,6 +531,20 @@ export function Reader() {
   const editHighlight = useStableCallback((hid: number) => setEditing({ kind: "highlight", id: hid }));
   const editNote = useStableCallback((nid: number) => setEditing({ kind: "note", id: nid }));
   const [notebookOpen, setNotebookOpen] = useState(false);
+  // Largeur du carnet, réglée par sa poignée et retenue dans le navigateur.
+  const [notebookWidth, setNotebookWidth] = useState(loadNotebookWidth);
+  const resizeNotebook = useCallback((width: number, done: boolean) => {
+    setNotebookWidth(width);
+    if (done) saveNotebookWidth(width);
+  }, []);
+  // Une fenêtre qui rétrécit ne doit pas laisser le carnet manger le document.
+  useEffect(() => {
+    const onResize = () => setNotebookWidth((width) => clampNotebookWidth(width));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  // Largeur que Clikoda, ancrée à droite, prend au document (0 sinon).
+  const [clikodaDock, setClikodaDock] = useState(0);
   // Pose d'un post-it : le prochain clic sur une page le pose là.
   const [placing, setPlacing] = useState(false);
   // L'élément que le carnet vient de désigner, qui clignote sur sa page.
@@ -1595,6 +1615,29 @@ export function Reader() {
   const width = BASE_WIDTH * zoom;
   widthRef.current = width;
   const sizes = data?.page_sizes_pts ?? [];
+  // Ce que le carnet (à gauche) et Clikoda ancrée (à droite) laissent au
+  // document : les bandeaux du haut s'y centrent.
+  const notebookInset = notebookVisible ? notebookWidth : 0;
+  const topNoticeArea: React.CSSProperties = {
+    position: "absolute",
+    top: 64,
+    left: notebookInset,
+    right: clikodaDock,
+    display: "flex",
+    justifyContent: "center",
+    padding: "0 16px",
+    pointerEvents: "none",
+    zIndex: 40,
+  };
+  const topNotice: React.CSSProperties = {
+    maxWidth: "100%",
+    padding: "8px 16px",
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 600,
+    textAlign: "center",
+    boxShadow: "var(--shadow-md)",
+  };
 
   return (
     // `overflow: hidden` : le lecteur occupe l'écran, rien ne doit en sortir.
@@ -1777,6 +1820,8 @@ export function Reader() {
           currentPage={currentPage}
           bookmark={bookmark}
           annotations={annotations}
+          width={notebookWidth}
+          onResize={resizeNotebook}
           onClose={() => setNotebookOpen(false)}
           onGoTo={goToAnnotation}
           onAddToContext={addToContext}
@@ -1788,7 +1833,7 @@ export function Reader() {
 
       {/* Contrôles de zoom — décalés quand le carnet occupe la gauche. */}
       <ZoomControls
-        left={notebookVisible ? NOTEBOOK_WIDTH + 18 : 18}
+        left={notebookInset + 18}
         zoom={zoom}
         onChange={(z) => {
           captureZoomAnchor();
@@ -1808,9 +1853,9 @@ export function Reader() {
           ailleurs entièrement animé. `motion` est déjà une dépendance de l'app :
           le coût est de six lignes.
 
-          `transform` reste dans le style inline (le centrage), Motion n'anime
-          que l'opacité et un décalage vertical — mélanger les deux ferait sauter
-          la barre hors de l'axe de la sélection. */}
+          Motion réécrit `transform` dès qu'il anime `y` : un centrage en
+          `translateX(-50%)` inline disparaissait. La barre se centre par la
+          valeur `x` de Motion, les bandeaux par un conteneur flex. */}
       <AnimatePresence>
         {selection && (
           <SelectionToolbar
@@ -1841,56 +1886,37 @@ export function Reader() {
 
       {/* Pose d'un post-it : ce qu'il faut faire, et comment renoncer. */}
       {placingVisible ? (
-        <div
-          role="status"
-          style={{
-            position: "absolute",
-            top: 64,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "8px 16px",
-            background: "var(--surface)",
-            color: "var(--text)",
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            fontSize: 13,
-            fontWeight: 600,
-            boxShadow: "var(--shadow-md)",
-            zIndex: 40,
-          }}
-        >
-          {t("annotations.sticky_place_hint")}
+        <div style={topNoticeArea}>
+          <div
+            role="status"
+            style={{ ...topNotice, background: "var(--surface)", color: "var(--text)", border: "1px solid var(--border)" }}
+          >
+            {t("annotations.sticky_place_hint")}
+          </div>
         </div>
       ) : null}
 
       {/* Bannière de question bloquante. Elle DESCEND dans l'écran : le blocage
-          vient d'en haut, comme la barre d'outils à laquelle elle s'accroche. */}
-      <AnimatePresence>
-        {locked && (
-          <motion.div
-            initial={reduceMotion ? false : { opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
-            style={{
-              position: "absolute",
-              top: 64,
-              left: "50%",
-              transform: "translateX(-50%)",
-              padding: "8px 16px",
-              background: "var(--accent)",
-              color: "var(--on-accent)",
-              borderRadius: 999,
-              fontSize: 13,
-              fontWeight: 600,
-              boxShadow: "var(--shadow-md)",
-              zIndex: 40,
-            }}
-          >
-            {t("reader.gated_banner")}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          vient d'en haut, comme la barre d'outils à laquelle elle s'accroche.
+          Centrée par son conteneur : un `translateX(-50%)` inline était écrasé
+          par Motion, et le bandeau partait du milieu de l'écran vers la droite,
+          sous Clikoda. */}
+      <div style={topNoticeArea}>
+        <AnimatePresence>
+          {locked && (
+            <motion.div
+              data-testid="gated-banner"
+              initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+              style={{ ...topNotice, background: "var(--accent)", color: "var(--on-accent)" }}
+            >
+              {t("reader.gated_banner")}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Assistant déplaçable connecté à Clikoda */}
       <ClikodaPanel
@@ -1917,6 +1943,7 @@ export function Reader() {
         paused={pause}
         onPauseRequest={(minutes) => startPause("suggested", minutes)}
         onDemoReady={handleDemoReady}
+        onDockChange={setClikodaDock}
       />
 
       {data && !entered && (

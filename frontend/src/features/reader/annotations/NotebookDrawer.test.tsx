@@ -8,7 +8,7 @@ import { ConfirmProvider } from "@/components/ui/confirm";
 import { api } from "../../../api/client";
 import type { AnnotationLabel, ReaderNote, SavedHighlight } from "../../../api/types";
 import { useLangStore } from "../../../i18n";
-import { NotebookDrawer } from "./NotebookDrawer";
+import { clampNotebookWidth, loadNotebookWidth, NOTEBOOK_MIN_WIDTH, NOTEBOOK_WIDTH, NotebookDrawer, saveNotebookWidth } from "./NotebookDrawer";
 import type { Annotations } from "./useAnnotations";
 
 const labels: AnnotationLabel[] = [
@@ -66,8 +66,9 @@ function annotations(): Annotations {
   } as unknown as Annotations;
 }
 
-function renderDrawer(data = annotations()) {
+function renderDrawer(data = annotations(), width = NOTEBOOK_WIDTH) {
   const onGoTo = vi.fn();
+  const onResize = vi.fn();
   render(
     <ConfirmProvider>
       <NotebookDrawer
@@ -76,13 +77,15 @@ function renderDrawer(data = annotations()) {
         currentPage={4}
         bookmark={6}
         annotations={data}
+        width={width}
+        onResize={onResize}
         onClose={vi.fn()}
         onGoTo={onGoTo}
         onAddToContext={vi.fn()}
       />
     </ConfirmProvider>,
   );
-  return { onGoTo, data };
+  return { onGoTo, onResize, data };
 }
 
 describe("NotebookDrawer", () => {
@@ -156,5 +159,33 @@ describe("NotebookDrawer", () => {
     expect(markdown).toHaveBeenCalledWith(5);
     expect(writeText).toHaveBeenCalledWith("# Notes");
     expect(await screen.findByText("Copié")).toBeInTheDocument();
+  });
+
+  it("s'élargit au clavier, et revient à la largeur par défaut au double-clic", async () => {
+    const { onResize } = renderDrawer(annotations(), 400);
+    const handle = screen.getByRole("separator", { name: "Largeur du carnet" });
+    expect(handle).toHaveAttribute("aria-valuenow", "400");
+    expect(screen.getByRole("complementary", { name: "Carnet" })).toHaveStyle({ width: "400px" });
+
+    handle.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(onResize).toHaveBeenLastCalledWith(416, true);
+    await userEvent.keyboard("{Shift>}{ArrowLeft}{/Shift}");
+    expect(onResize).toHaveBeenLastCalledWith(336, true);
+    await userEvent.keyboard("{Home}");
+    expect(onResize).toHaveBeenLastCalledWith(NOTEBOOK_MIN_WIDTH, true);
+
+    await userEvent.dblClick(handle);
+    expect(onResize).toHaveBeenLastCalledWith(NOTEBOOK_WIDTH, true);
+  });
+
+  it("borne la largeur à la fenêtre et la retient", () => {
+    // Fenêtre de 900 px : le document garde 320 px.
+    expect(clampNotebookWidth(2000, 900)).toBe(580);
+    expect(clampNotebookWidth(100, 900)).toBe(NOTEBOOK_MIN_WIDTH);
+    saveNotebookWidth(452);
+    expect(loadNotebookWidth()).toBe(clampNotebookWidth(452));
+    localStorage.setItem("metacapp-notebook-width", "pas un nombre");
+    expect(loadNotebookWidth()).toBe(clampNotebookWidth(NOTEBOOK_WIDTH));
   });
 });

@@ -12,9 +12,16 @@
 //
 // Une note au-delà de la dernière page (le PDF a perdu des pages depuis) reste
 // listée, grisée, sans « aller à ».
+//
+// Sa largeur s'ajuste par la poignée du bord droit (glisser, flèches au
+// clavier, double-clic pour revenir au défaut). Elle est retenue dans le
+// navigateur, comme celle de Clikoda : une commodité, rien de grave si elle
+// se perd.
 import { Bookmark, Check, ChevronDown, ChevronRight, ClipboardCopy, Download, Flag, StickyNote, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
 
 import { annotationsExportUrl, api } from "../../../api/client";
 import { MathText } from "../../../components/MathText";
@@ -27,7 +34,42 @@ import { labelColor, labelName } from "./palette";
 import { STYLE_ICONS } from "./SelectionToolbar";
 import type { Annotations } from "./useAnnotations";
 
+/** Largeur par défaut du carnet (px), celle que le double-clic sur la poignée rend. */
 export const NOTEBOOK_WIDTH = 340;
+export const NOTEBOOK_MIN_WIDTH = 280;
+const NOTEBOOK_MAX_WIDTH = 720;
+// Ce que le carnet laisse toujours au document, quelle que soit la fenêtre.
+const NOTEBOOK_KEEP_FOR_READING = 320;
+const WIDTH_KEY = "metacapp-notebook-width";
+const KEY_STEP = 16;
+const KEY_STEP_FAST = 64;
+
+/** La plus grande largeur permise dans une fenêtre de `viewport` px. */
+export function maxNotebookWidth(viewport: number = window.innerWidth): number {
+  return Math.max(NOTEBOOK_MIN_WIDTH, Math.min(NOTEBOOK_MAX_WIDTH, viewport - NOTEBOOK_KEEP_FOR_READING));
+}
+
+export function clampNotebookWidth(width: number, viewport: number = window.innerWidth): number {
+  return Math.round(Math.min(Math.max(width, NOTEBOOK_MIN_WIDTH), maxNotebookWidth(viewport)));
+}
+
+/** La dernière largeur choisie, ramenée dans la fenêtre courante. */
+export function loadNotebookWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(WIDTH_KEY));
+    return clampNotebookWidth(Number.isFinite(saved) && saved > 0 ? saved : NOTEBOOK_WIDTH);
+  } catch {
+    return clampNotebookWidth(NOTEBOOK_WIDTH);
+  }
+}
+
+export function saveNotebookWidth(width: number): void {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    /* stockage indisponible : le carnet repartira de la largeur par défaut */
+  }
+}
 
 export type NotebookTarget =
   | { kind: "highlight"; id: number; page: number }
@@ -75,18 +117,134 @@ function clamp2(lines: number): React.CSSProperties {
   return { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
 }
 
+/**
+ * La poignée du bord droit (motif « séparateur de fenêtre » : rôle
+ * `separator`, valeur courante annoncée, flèches au clavier). Pendant un
+ * glissé, une largeur par image au plus ; `done` dit que le geste est fini
+ * (le lecteur retient alors la largeur).
+ */
+function ResizeHandle({ width, onResize }: { width: number; onResize: (width: number, done: boolean) => void }) {
+  const t = useT();
+  const dragRef = useRef<{ startX: number; startWidth: number; next: number; raf: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  // Pendant le glissé : curseur de redimensionnement partout, et aucune
+  // sélection de texte du document sous le pointeur.
+  useEffect(() => {
+    if (!dragging) return;
+    const { cursor, userSelect } = document.body.style;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = cursor;
+      document.body.style.userSelect = userSelect;
+    };
+  }, [dragging]);
+  useEffect(() => () => cancelAnimationFrame(dragRef.current?.raf ?? 0), []);
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startWidth: width, next: width, raf: 0 };
+    setDragging(true);
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    drag.next = clampNotebookWidth(drag.startWidth + e.clientX - drag.startX);
+    if (drag.raf) return;
+    drag.raf = requestAnimationFrame(() => {
+      drag.raf = 0;
+      onResize(drag.next, false);
+    });
+  }
+
+  function endDrag() {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    cancelAnimationFrame(drag.raf);
+    setDragging(false);
+    onResize(drag.next, true);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const step = e.shiftKey ? KEY_STEP_FAST : KEY_STEP;
+    const next =
+      e.key === "ArrowLeft"
+        ? width - step
+        : e.key === "ArrowRight"
+          ? width + step
+          : e.key === "Home"
+            ? NOTEBOOK_MIN_WIDTH
+            : e.key === "End"
+              ? maxNotebookWidth()
+              : null;
+    if (next === null) return;
+    e.preventDefault();
+    onResize(clampNotebookWidth(next), true);
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("reader.notebook_resize")}
+      aria-valuenow={width}
+      aria-valuemin={NOTEBOOK_MIN_WIDTH}
+      aria-valuemax={maxNotebookWidth()}
+      title={t("reader.notebook_resize_hint")}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
+      onDoubleClick={() => onResize(clampNotebookWidth(NOTEBOOK_WIDTH), true)}
+      onKeyDown={onKeyDown}
+      className="group absolute inset-y-0 -right-1.5 z-10 w-3 cursor-col-resize touch-none focus-visible:outline-none"
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 transition-colors duration-fast ease-brand",
+          "group-hover:bg-[var(--accent)] group-focus-visible:bg-[var(--accent)]",
+          dragging ? "bg-[var(--accent)]" : "bg-transparent",
+        )}
+      />
+    </div>
+  );
+}
+
 interface Props {
   docId: number;
   pageCount: number;
   currentPage: number;
   bookmark: number | null;
   annotations: Annotations;
+  /** Largeur du carnet (px), tenue par le lecteur. */
+  width: number;
+  /** Nouvelle largeur demandée par la poignée ; `done` : fin du geste. */
+  onResize: (width: number, done: boolean) => void;
   onClose: () => void;
   onGoTo: (target: NotebookTarget) => void;
   onAddToContext: (page: number, quote: string) => void;
 }
 
-export function NotebookDrawer({ docId, pageCount, currentPage, bookmark, annotations, onClose, onGoTo, onAddToContext }: Props) {
+export function NotebookDrawer({
+  docId,
+  pageCount,
+  currentPage,
+  bookmark,
+  annotations,
+  width,
+  onResize,
+  onClose,
+  onGoTo,
+  onAddToContext,
+}: Props) {
   const t = useT();
   const lang = useLangStore((s) => s.lang);
   const { labels, labelsById, readOnly } = annotations;
@@ -269,7 +427,7 @@ export function NotebookDrawer({ docId, pageCount, currentPage, bookmark, annota
         top: 56,
         left: 0,
         bottom: 0,
-        width: NOTEBOOK_WIDTH,
+        width,
         maxWidth: "calc(100% - 24px)",
         display: "flex",
         flexDirection: "column",
@@ -279,6 +437,7 @@ export function NotebookDrawer({ docId, pageCount, currentPage, bookmark, annota
         zIndex: 45,
       }}
     >
+      <ResizeHandle width={width} onResize={onResize} />
       <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px 8px" }}>
         <h2 style={{ margin: 0, flex: 1, fontSize: 15, fontWeight: 700 }}>{t("reader.notebook_title")}</h2>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>{t("reader.notebook_count", { n: items.length })}</span>

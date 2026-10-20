@@ -99,9 +99,10 @@ export function SelectionToolbar({ x, y, rootWidth, reduceMotion, toolbarRef, on
         position: "absolute",
         left: Math.min(Math.max(x, maxWidth / 2 + 12), rootWidth - maxWidth / 2 - 12),
         top: Math.max(8, y - 44),
-        // `transform` reste ici (le centrage) : Motion n'anime que l'opacité et
-        // un décalage vertical, sinon la barre sauterait hors de l'axe.
-        transform: "translateX(-50%)",
+        // Le centrage passe par Motion (`x`) et non par `transform` : Motion
+        // réécrit `transform` dès qu'il anime `y`, et la barre partait du
+        // centre de la sélection au lieu d'y être centrée.
+        x: "-50%",
         display: "flex",
         flexWrap: "wrap",
         alignItems: "center",
