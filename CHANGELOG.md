@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-21
+
 ### Added
 
 - **Clikoda's model is a setting** (`Settings ▸ Clikoda`). The gemma4 family is declared
@@ -408,5 +410,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cyyyp100/meta-capp/releases/tag/v0.1.0
