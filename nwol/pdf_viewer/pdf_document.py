@@ -2,12 +2,53 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
 from pdf_viewer.engine import PDFIUM_LOCK
 
 logger = logging.getLogger("pdf_viewer.document")
+
+# Accents posés en glyphe à part : les PDF LaTeX en codage OT1 dessinent « é »
+# comme un « ´ » placé au-dessus d'un « e », et PDFium extrait les deux, dans
+# l'ordre de TeX — « d´etails », « `a », « grˆace », « maˆıtre » (i sans point),
+# « Commen¸cons ». Chacun avec sa marque combinante (noms de la liste des
+# glyphes Adobe : acute, grave, circumflex…).
+_SPACING_ACCENTS = {
+    "´": "́",  # ´ aigu
+    "`": "̀",  # ` grave
+    "ˆ": "̂",  # ˆ circonflexe
+    "¨": "̈",  # ¨ tréma
+    "˜": "̃",  # ˜ tilde
+    "¸": "̧",  # ¸ cédille
+    "˛": "̨",  # ˛ ogonek
+    "ˇ": "̌",  # ˇ caron
+    "˘": "̆",  # ˘ brève
+    "˙": "̇",  # ˙ point suscrit
+    "˚": "̊",  # ˚ rond
+    "¯": "̄",  # ¯ macron
+    "˝": "̋",  # ˝ double aigu
+}
+# Ceux-là se posent SOUS la lettre.
+_ACCENTS_BELOW = frozenset({"¸", "˛"})
+# Une lettre accentuée a perdu son point : « ˆı » est « î ».
+_DOTLESS = {"ı": "i", "ȷ": "j"}
+# Un accent COIFFE une lettre quand au moins la moitié de sa largeur est
+# au-dessus d'elle — au-delà de 40 % de sa hauteur (en deçà pour une cédille).
+# Posé à côté, il reste ce qu'il est : un accent grave qui ouvre du code
+# (« `ls` »), une apostrophe tapée « ´ », le « ~ » d'une adresse.
+_ACCENT_MIN_OVERLAP = 0.5
+_ACCENT_MIN_RISE = 0.4
+
+
+def _invisible(char: str) -> bool:
+    """Blanc, caractère de contrôle ou non-caractère : rien à apparier entre
+    les deux lectures de PDFium (cf. `PdfDocument._carry_merges`). Les
+    marqueurs de césure en sont (U+FFFE dans la lecture indexée, U+0002 dans
+    la bornée), comme les glyphes sans Unicode qu'une formule laisse en U+0002
+    d'un côté et en espace de l'autre."""
+    return char.isspace() or unicodedata.category(char) in ("Cc", "Cn")
 
 # Boîte « loose » d'un caractère (cf. `PdfDocument._char_box`) : elle doit
 # contenir le glyphe à cette tolérance près, et ne pas dépasser ce multiple de
@@ -144,7 +185,8 @@ class PdfDocument:
         return sizes
 
     def raw_text(self, page_number: int) -> str:
-        """Texte brut d'une page (contexte secondaire pour le LLM)."""
+        """Texte brut d'une page (contexte secondaire pour le LLM), accents
+        recomposés (`_accent_merges`)."""
         try:
             with self._page(page_number) as page:
                 if page is None:
@@ -152,6 +194,10 @@ class PdfDocument:
                 textpage = page.get_textpage()
                 try:
                     text = textpage.get_text_bounded() or ""
+                    indexed = self._indexed_text(textpage)
+                    merges = self._accent_merges(textpage, indexed)
+                    if merges:
+                        text = self._carry_merges(text, indexed, merges)
                 finally:
                     textpage.close()
         except Exception as exc:  # pragma: no cover - défensif
@@ -197,6 +243,16 @@ class PdfDocument:
         except Exception as exc:  # pragma: no cover - défensif
             logger.debug("search_text page %s: %s", page_number, exc)
             return []
+        if not rects:
+            # PDFium ne cherche que le texte tel qu'il l'extrait. Une citation
+            # recomposée (« détails » sur une page qui dit « d´etails »), ou qui
+            # n'en diffère que par les accents, la casse ou une césure, se
+            # cherche alors dans le texte plié — le même que Ctrl/Cmd+F.
+            from utils.text import fold_query
+
+            folded = fold_query(needle)
+            if folded:
+                rects = [rect for hit in self.find_folded(page_number, folded) for rect in hit]
         return rects
 
     def folded_text(self, page_number: int) -> str:
@@ -214,7 +270,7 @@ class PdfDocument:
                     return ""
                 textpage = page.get_textpage()
                 try:
-                    return fold_with_map(self._indexed_text(textpage))[0]
+                    return fold_with_map(self._composed(textpage)[0])[0]
                 finally:
                     textpage.close()
         except Exception as exc:  # pragma: no cover - défensif
@@ -243,11 +299,12 @@ class PdfDocument:
                 height = float(page.get_size()[1])
                 textpage = page.get_textpage()
                 try:
-                    folded, mapping = fold_with_map(self._indexed_text(textpage))
+                    composed, origin = self._composed(textpage)
+                    folded, mapping = fold_with_map(composed)
                     hits: list[list[tuple[float, float, float, float]]] = []
                     for start in find_all(folded, needle, limit):
-                        first = mapping[start]
-                        last = mapping[start + len(needle) - 1]
+                        first = origin[mapping[start]]
+                        last = origin[mapping[start + len(needle) - 1]]
                         hits.append(self._range_rects(textpage, first, last - first + 1, height))
                     return hits
                 finally:
@@ -276,7 +333,7 @@ class PdfDocument:
                 textpage = page.get_textpage()
                 try:
                     text = self._indexed_text(textpage)
-                    return self._group_words(textpage, text, height)
+                    return self._group_words(textpage, text, height, self._accent_merges(textpage, text))
                 finally:
                     textpage.close()
         except Exception as exc:  # pragma: no cover - défensif
@@ -296,7 +353,7 @@ class PdfDocument:
                 textpage = page.get_textpage()
                 try:
                     text = self._indexed_text(textpage)
-                    return self._group_lines(textpage, text)
+                    return self._group_lines(textpage, text, self._accent_merges(textpage, text))
                 finally:
                     textpage.close()
         except Exception as exc:  # pragma: no cover - défensif
@@ -321,6 +378,88 @@ class PdfDocument:
             # une lecture caractère par caractère, plus lente mais exacte.
             text = "".join((textpage.get_text_range(i, 1) or " ")[:1] for i in range(count))
         return text
+
+    @staticmethod
+    def _accent_merges(textpage, text: str) -> dict[int, str]:
+        """Accents posés en glyphe à part (`_SPACING_ACCENTS`) → remplacements,
+        par index PDFium : l'accent disparaît (« »), la lettre qu'il coiffe
+        devient la lettre accentuée (« ´ » + « e » → « é », « ˆ » + « ı » →
+        « î », « Q » + « ¯ » → « Q̄ »).
+
+        Le texte seul ne suffit pas à décider : « `a » est « à » sous un vieux
+        PDF LaTeX, mais du code dans un cours de programmation. C'est la
+        géométrie qui tranche (`_accent_sits_on`) — un accent coiffe sa
+        lettre, un caractère ordinaire se pose à côté. La lettre est la
+        suivante (l'ordre de TeX), à défaut la précédente."""
+        merges: dict[int, str] = {}
+        for i, char in enumerate(text):
+            mark = _SPACING_ACCENTS.get(char)
+            if mark is None:
+                continue
+            for j in (i + 1, i - 1):
+                if not 0 <= j < len(text) or j in merges or not text[j].isalpha():
+                    continue
+                if PdfDocument._accent_sits_on(textpage, i, j, below=char in _ACCENTS_BELOW):
+                    merges[i] = ""
+                    merges[j] = unicodedata.normalize("NFC", _DOTLESS.get(text[j], text[j]) + mark)
+                    break
+        return merges
+
+    @staticmethod
+    def _accent_sits_on(textpage, accent: int, letter: int, below: bool) -> bool:
+        """L'accent `accent` coiffe-t-il la lettre `letter` (boîtes serrées) ?"""
+        try:
+            a_left, a_bottom, a_right, a_top = (float(v) for v in textpage.get_charbox(accent))
+            l_left, l_bottom, l_right, l_top = (float(v) for v in textpage.get_charbox(letter))
+        except Exception:  # pragma: no cover - défensif (caractère sans glyphe)
+            return False
+        width = a_right - a_left
+        height = l_top - l_bottom
+        if width <= 0 or height <= 0 or l_right <= l_left:
+            return False
+        if min(a_right, l_right) - max(a_left, l_left) < width * _ACCENT_MIN_OVERLAP:
+            return False
+        rise = l_bottom + height * _ACCENT_MIN_RISE
+        return a_top <= rise if below else a_bottom >= rise
+
+    @staticmethod
+    def _composed(textpage) -> tuple[str, list[int]]:
+        """Le texte indexé, accents recomposés, et l'index PDFium de chacun de
+        ses caractères — celui de la lettre pour une lettre accentuée. C'est le
+        texte que plie la recherche (`folded_text`, `find_folded`) : les
+        positions repliées remontent ainsi aux boîtes de PDFium."""
+        text = PdfDocument._indexed_text(textpage)
+        merges = PdfDocument._accent_merges(textpage, text)
+        out: list[str] = []
+        origin: list[int] = []
+        for index, char in enumerate(text):
+            for produced in merges.get(index, char):
+                out.append(produced)
+                origin.append(index)
+        return "".join(out), origin
+
+    @staticmethod
+    def _carry_merges(bounded: str, indexed: str, merges: dict[int, str]) -> str:
+        """Reporte dans la lecture bornée (`get_text_bounded`) les accents
+        recomposés sur la lecture indexée.
+
+        La bornée est celle que lit le LLM : elle n'a pas les blancs que
+        l'indexée ajoute autour d'un exposant ou d'une formule (« composants
+        5\\r\\n. La », « sin \\r\\nx »). Les deux ne diffèrent que par des
+        caractères invisibles (`_invisible`) : les autres se répondent un à un,
+        dans l'ordre. Au premier qui diffère, la lecture bornée est rendue
+        telle quelle, sans recomposition."""
+        visible = ((j, c) for j, c in enumerate(indexed) if not _invisible(c))
+        out: list[str] = []
+        for char in bounded:
+            if _invisible(char):
+                out.append(char)
+                continue
+            j, twin = next(visible, (-1, ""))
+            if twin != char:
+                return bounded
+            out.append(merges.get(j, char))
+        return "".join(out)
 
     @staticmethod
     def _range_rects(
@@ -374,7 +513,7 @@ class PdfDocument:
 
     @staticmethod
     def _group_words(
-        textpage, text: str, height: float
+        textpage, text: str, height: float, merges: dict[int, str] | None = None
     ) -> list[tuple[float, float, float, float, str]]:
         from utils.text import HYPHENATION_MARKERS
 
@@ -400,7 +539,9 @@ class PdfDocument:
             # grand comme le paragraphe. Le tiret, avec sa propre boîte, clôt le
             # premier morceau ; le second commence la ligne suivante.
             hyphen = char in HYPHENATION_MARKERS
-            buffer.append("-" if hyphen else char)
+            # Accent recomposé : il disparaît du mot, sa lettre devient la
+            # lettre accentuée — mais sa boîte reste dans celle du mot.
+            buffer.append("-" if hyphen else (merges or {}).get(index, char))
             char_box = PdfDocument._char_box(textpage, index)
             if char_box is not None:  # caractère sans boîte : ignoré
                 left, bottom, right, top = char_box
@@ -417,7 +558,7 @@ class PdfDocument:
         return words
 
     @staticmethod
-    def _group_lines(textpage, text: str) -> list[tuple[str, float]]:
+    def _group_lines(textpage, text: str, merges: dict[int, str] | None = None) -> list[tuple[str, float]]:
         import pypdfium2.raw as pdfium_c
 
         lines: list[tuple[str, float]] = []
@@ -436,7 +577,7 @@ class PdfDocument:
             if char in ("\r", "\n"):
                 flush()
                 continue
-            buffer.append(char)
+            buffer.append((merges or {}).get(index, char))
             if char.isspace():
                 continue
             try:

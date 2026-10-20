@@ -244,3 +244,104 @@ def test_a_hyphenated_word_gives_two_words_one_per_line(tmp_path, make_pdf):
     for x0, y0, x1, y1, _text in (first, second):
         assert y1 - y0 < 12 * 1.5  # une ligne de 12 pt, pas deux
     assert second[1] > first[3] - 1
+
+
+def _tex_accented_pdf(path) -> str:
+    """Une ligne écrite comme TeX en codage OT1 : chaque accent est un glyphe à
+    part, dessiné AVANT sa lettre et centré au-dessus (ou au-dessous, pour la
+    cédille). Plus un accent grave de code, posé À CÔTÉ de ses lettres."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
+
+    size = 12
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    pdf.setFont("Helvetica", size)
+    y = A4[1] - _TEXT_TOP_MARGIN
+    x = 72.0
+
+    def width(text: str) -> float:
+        return stringWidth(text, "Helvetica", size)
+
+    def run(text: str) -> None:
+        nonlocal x
+        pdf.drawString(x, y, text)
+        x += width(text)
+
+    def accented(accent: str, letter: str) -> None:
+        nonlocal x
+        pdf.drawString(x + (width(letter) - width(accent)) / 2, y, accent)
+        pdf.drawString(x, y, letter)
+        x += width(letter)
+
+    run("d")
+    accented("´", "e")
+    run("tails ")
+    run("`ls` ")
+    run("gr")
+    accented("ˆ", "a")
+    run("ce Commen")
+    accented("¸", "c")
+    run("ons")
+    pdf.showPage()
+    pdf.save()
+    return str(path)
+
+
+def test_accents_drawn_apart_are_recomposed(tmp_path):
+    """Les vieux PDF LaTeX posent « ´ » au-dessus de « e » : PDFium extrayait
+    « d´etails », que le carnet citait tel quel, qu'un double-clic coupait à
+    l'accent, que Ctrl/Cmd+F ne trouvait pas (« ´ » se pliait en espace) et
+    que le LLM lisait en morceaux. Recomposés partout — mots, texte de page,
+    texte plié, recherche d'une citation —, sauf l'accent grave du code, posé
+    à côté de ses lettres et non au-dessus."""
+    path = _tex_accented_pdf(tmp_path / "ot1.pdf")
+    with PdfDocument(path) as pdf:
+        assert [w[4] for w in pdf.words(1)] == ["détails", "`ls`", "grâce", "Commençons"]
+        assert pdf.raw_text(1).split() == ["détails", "`ls`", "grâce", "Commençons"]
+        assert "details `ls` grace commencons" in pdf.folded_text(1)
+        assert len(pdf.find_folded(1, "details")) == 1
+        # La citation recomposée (celle que lit le LLM) se retrouve sur la page.
+        assert pdf.search_text(1, "détails")
+        assert pdf.search_text(1, "Commençons")
+
+
+class _FakeTextPage:
+    """Boîtes PDFium (origine bas-gauche) données à la main, par caractère."""
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+    def get_charbox(self, index, loose=False):
+        return self.boxes[index]
+
+
+# Une lettre de 5 pt de large et de haut, posée sur la ligne de base à x = 10.
+_LETTER = (10.0, 0.0, 15.0, 5.0)
+
+
+def test_the_geometry_decides_what_an_accent_belongs_to():
+    above = (11.0, 6.0, 14.0, 8.0)   # au-dessus de la lettre
+    beside = (5.0, 6.0, 9.0, 8.0)    # à gauche, sans la recouvrir
+    below = (11.0, -2.0, 14.0, 0.5)  # sous la ligne de base
+    merges = PdfDocument._accent_merges
+    # Accent puis lettre (l'ordre de TeX) ; i sans point coiffé : « î ».
+    assert merges(_FakeTextPage([above, _LETTER]), "ˆı") == {0: "", 1: "î"}
+    # Lettre puis accent : la barre d'un conjugué, « Q¯ » → « Q̄ ».
+    assert merges(_FakeTextPage([_LETTER, above]), "Q¯") == {0: "Q̄", 1: ""}
+    # La cédille se pose dessous ; un accent aigu, jamais.
+    assert merges(_FakeTextPage([below, _LETTER]), "¸c") == {0: "", 1: "ç"}
+    assert merges(_FakeTextPage([below, _LETTER]), "´e") == {}
+    # À côté de sa lettre, un accent reste ce qu'il est (« `ls` », « l´école »).
+    assert merges(_FakeTextPage([beside, _LETTER]), "`l") == {}
+
+
+def test_recomposed_accents_reach_the_bounded_reading():
+    """La lecture bornée (celle du LLM) et l'indexée ne diffèrent que par des
+    invisibles — blancs autour d'une formule, marqueur de césure U+0002 contre
+    U+FFFE, glyphe sans Unicode : la recomposition passe de l'une à l'autre.
+    Au moindre écart visible, la lecture bornée est rendue telle quelle."""
+    carry = PdfDocument._carry_merges
+    merges = {1: "", 2: "é"}
+    assert carry("d´et\x02ail", "d´et\r\n ￾ail", merges) == "dét\x02ail"
+    assert carry("d´etail", "x´etail", merges) == "d´etail"
