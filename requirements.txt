@@ -33,7 +33,7 @@
 # PDFium is NOT thread-safe — every call is serialised through
 # pdf_viewer/engine.py:PDFIUM_LOCK. Do not bypass it.
 pypdfium2==5.14.0
-Pillow==12.3.0            # PNG encoding of the rendered pages (PdfBitmap -> file)
+Pillow==13.0.0            # PNG encoding of the rendered pages (PdfBitmap -> file)
 
 # Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
 fastapi==0.136.1
