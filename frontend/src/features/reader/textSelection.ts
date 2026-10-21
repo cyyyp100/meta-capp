@@ -56,8 +56,15 @@ export function registerTextLayer(layer: HTMLElement): () => void {
   };
 }
 
+/** Le glissé fini, chaque bloc retourne à la fin de son calque — sauf s'il y
+ *  est déjà. `append` retire PUIS réinsère, même un dernier enfant : un appui
+ *  dans le blanc tombe sur le bloc, et le nœud de l'appui sorti du DOM entre
+ *  `pointerup` et `mouseup`, le navigateur n'émet pas de `click`. Le post-it,
+ *  qui se pose au clic, ne se posait alors que sur un mot. */
 function resetAll(): void {
-  for (const [layer, end] of layers) layer.append(end);
+  for (const [layer, end] of layers) {
+    if (layer.lastChild !== end) layer.append(end);
+  }
 }
 
 /** Le span du calque qui porte l'extrémité mobile de la sélection, ou null. */
