@@ -61,6 +61,23 @@ def test_max_interventions_per_window_is_enforced(monkeypatch):
     assert len(fired) == 3
 
 
+def test_the_local_edition_has_no_cap(monkeypatch):
+    """Retour d'usage (2026-10-21) : « au bout d'un certain nombre d'interventions,
+    elles s'arrêtent ». L'édition locale ne plafonne plus : seuls les cooldowns,
+    le warm-up et l'anti-répétition règlent la cadence."""
+    from config import settings
+
+    assert settings.ASSISTANT_MAX_INTERVENTIONS is None
+    policy, memory, fired, _ctx, page = make_policy(monkeypatch)
+
+    for n in range(2, 32):  # trente pages, un déclencheur à chacune
+        policy.tick()
+        page["n"] = n
+        memory.on_page_view(n)
+
+    assert len(fired) == 30
+
+
 def test_a_long_session_is_never_silenced_for_good(monkeypatch):
     """Régression (journal du 2026-10-20) : le plafond était par SÉANCE. Sur une
     lecture de 3 h, les six interventions sont tombées dans la première heure,

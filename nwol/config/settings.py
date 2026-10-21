@@ -1221,7 +1221,11 @@ ASSISTANT_QUESTIONS_TRIGGER = 2     # questions utilisateur sur la même page
 # cooldowns). C'était un plafond par SÉANCE : les six tombaient dans la première
 # heure, puis Clikoda se taisait jusqu'à la fin — 2 h 47 sans une question sur
 # une séance de 3 h (journal du 2026-10-20).
-ASSISTANT_MAX_INTERVENTIONS = 6
+# None = AUCUN plafond, et c'est le réglage de l'édition locale (retour d'usage du
+# 2026-10-21 : même glissant, le plafond faisait taire Clikoda). Les cooldowns,
+# le warm-up et l'anti-répétition (page, raison) suffisent à régler la cadence ;
+# une intervention n'y coûte qu'un appel au modèle local.
+ASSISTANT_MAX_INTERVENTIONS: int | None = None
 ASSISTANT_INTERVENTION_WINDOW_S = 3600.0
 
 # Fatigue de production : les réponses de l'étudiant rétrécissent d'une question
