@@ -32,9 +32,11 @@ class QuestionTypeSpec:
     example: tuple[str, str]
     prefer_rule: tuple[str, str]
     target_gauges: tuple[str, ...]   # clés de db.metacog.CRITERIA
-    # Poids de départ du tirage pondéré. UNIFORME (1.0) pour tous les types :
-    # aucun n'est privilégié par principe, seuls le contenu du paragraphe et les
-    # jauges de la session font ensuite pencher la balance (llm/prompts.py).
+    # Poids de départ du tirage pondéré. 1.0 pour tous les types — aucun n'est
+    # privilégié par principe, seuls le contenu du paragraphe et les jauges de
+    # la session font ensuite pencher la balance (llm/prompts.py) —, sauf le
+    # repérage d'erreur, à 0.5 : une reformulation fausse à corriger est un
+    # exercice exigeant, qui lasse vite quand il revient (retour d'usage).
     base_weight: float
     widget: str
     eval_dimension_hint: bool = True  # False -> signal piloté par le verdict
@@ -289,15 +291,15 @@ QUESTION_TYPE_SPECS: tuple[QuestionTypeSpec, ...] = (
             "One thing is wrong in this restatement: which one, and what should it say?",
         ),
         prefer_rule=(
-            "Pour réveiller l'attention ou vérifier une lecture fine, privilégie"
-            " \"error_detection\" : énonce une reformulation contenant UNE erreur subtile"
-            " (signe inversé, condition retirée, cause et effet permutés).",
-            "To wake up attention or check close reading, prefer \"error_detection\":"
-            " state a restatement containing ONE subtle error (inverted sign, dropped"
-            " condition, swapped cause and effect).",
+            "Pour vérifier la lecture fine d'un énoncé précis (condition, signe, cause),"
+            " \"error_detection\" convient : énonce une reformulation contenant UNE erreur"
+            " subtile (signe inversé, condition retirée, cause et effet permutés).",
+            "To check the close reading of a precise statement (condition, sign, cause),"
+            " \"error_detection\" fits: state a restatement containing ONE subtle error"
+            " (inverted sign, dropped condition, swapped cause and effect).",
         ),
         target_gauges=("attention", "context_comprehension"),
-        base_weight=1.0,
+        base_weight=0.5,
         widget=WIDGET_TEXT,
         aliases=(
             "detection_d_erreur",

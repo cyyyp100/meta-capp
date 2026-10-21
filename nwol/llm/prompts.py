@@ -770,10 +770,13 @@ def _question_adaptation(
         }
 
     if attention < 45.0:
-        # Attention basse : réveiller (repérage d'erreur), faire prendre du recul
-        # (métacognition), et écarter les formats longs qui demandent de l'élan.
+        # Attention basse : faire prendre du recul (métacognition), proposer des
+        # formats légers, et écarter les formats longs qui demandent de l'élan.
+        # Le repérage d'erreur n'y gagne qu'un peu sur son poids de base : il
+        # était le favori (2.0) et, l'attention restant basse, revenait sans
+        # cesse (13 % des tirages contre 5,5 % désormais, 3,5 % hors attention basse).
         weights: dict[str, float] = question_types.base_weights()
-        weights["error_detection"] = 2.0
+        weights["error_detection"] *= 1.5
         weights["metacognition"] = 1.8
         weights["anticipation"] = 1.2
         weights["qcm"] = 1.2
