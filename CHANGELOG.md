@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-21
+
+### Fixed
+
+- **Sticky notes can be placed anywhere on the page.** Clicking a blank area
+  (margins, between lines) after "Place a sticky note" did nothing: on release, the
+  text layer's end-of-content block was re-inserted into the page even when already
+  in place, and the browser dropped the click (WebKit and Chromium alike). Only a
+  click right on a word placed the note.
+- **Error-spotting questions come up half as often.** The question picker made them
+  the favourite type whenever attention was low: 13 % of draws then, 5.5 % now
+  (3.5 % otherwise, down from 6.7 %).
+- **Clikoda no longer goes quiet after a number of interventions.** The local
+  edition has no intervention cap; cooldowns, the warm-up and the per-page
+  anti-repetition set the pace.
+- **Attention follows what you actually do while reading.** It stayed low in every
+  session, whatever the learner did:
+  - a session now starts from the profile moved towards neutral
+    (`50 + (profile − 50) × 0.8`) instead of 80 % of it, which pulled every measured
+    gauge down session after session (attention profile 36 → 23 over eight readings);
+  - a written answer no longer costs attention for the time it took (up to 6 points
+    per answer past 12 s — 42 points in a session); the passive drift already
+    observes that time;
+  - asking Clikoda a question, answering one, highlighting and writing a note credit
+    attention (at most once per 20 s per gesture), and so does any pause you resume
+    after, not only the ones Clikoda suggested;
+  - the warm-up flashcards cost at most 5 attention points (up to 15 before).
+- **Curiosity no longer hits 100 in every session.** Each question asked added
+  12.8 points; it now weighs half as much, and curiosity rises more slowly as it
+  nears 100.
+- **A reading session left open by closing the app is closed on the next start**,
+  instead of staying "Session in progress" forever in "My progress": closed at its
+  last trace (the reader now records the reading time every minute), then finalized
+  as if the exit reflection had been skipped, with Clikoda's end-of-session analysis,
+  which is now kept and shown in the session's detail. A session where nothing was
+  read is removed, as when leaving from the entry airlock. The study day counted is
+  the session's own. Schema v46 (`reading_sessions.analysis`,
+  `reading_sessions.finalized_at`); sessions already closed are left as they are.
+
 ## [0.2.0] — 2026-10-21
 
 ### Added
@@ -410,6 +449,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cyyyp100/meta-capp/releases/tag/v0.1.0
