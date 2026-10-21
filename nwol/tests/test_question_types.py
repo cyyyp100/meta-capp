@@ -119,3 +119,32 @@ def test_frontend_declares_a_label_for_every_type():
     for key in qt.KEYS:
         assert source.count(f'"qtype.{key}":') == 2, key       # FR + EN
         assert source.count(f'"qtype.{key}.hint":') == 2, key
+
+
+def test_error_spotting_is_drawn_less_than_the_other_types(monkeypatch):
+    """Retour d'usage : le repérage d'erreur revenait sans cesse. Il était le
+    favori du tirage dès que l'attention passait sous 45 (poids 2.0) — c'est-à-
+    dire, l'attention restant basse, à presque toutes les questions. Il pèse
+    désormais moins qu'un type ordinaire, attention basse ou non."""
+    from llm import prompts
+
+    drawn: list[dict[str, float]] = []
+
+    def capture(weights: dict[str, float]) -> str:
+        drawn.append(dict(weights))
+        return "qcm"
+
+    monkeypatch.setattr(prompts, "_weighted_question_type", capture)
+    paragraph = "Un paragraphe d'exposé, sans formule ni étapes."
+    for attention in (30.0, 60.0):
+        prompts._question_adaptation(
+            paragraph,
+            {"attention": attention, "context_comprehension": 60.0, "curiosity": 60.0, "meta_cognition": 50.0},
+            recent_question_types=[], preferred_question_type=None,
+            has_existing_question=False, standalone=False, has_prior_context=True,
+        )
+    low, normal = drawn
+    assert qt.base_weights()["error_detection"] < 1.0
+    assert normal["error_detection"] < 1.0
+    assert low["error_detection"] < 1.0
+    assert low["error_detection"] < max(low.values())

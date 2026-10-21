@@ -25,6 +25,7 @@ from config.settings import (
     WARMUP_CHECK_ALLOWANCE_S,
     WARMUP_DRIFT_ATTENTION,
     WARMUP_DRIFT_S,
+    WARMUP_MAX_ATTENTION_COST,
     WARMUP_MAX_CARDS,
     WARMUP_MIN_FACE_MS,
     WARMUP_READ_MS_PER_WORD,
@@ -88,7 +89,8 @@ def assess(cards: list[dict]) -> list[dict]:
 
 
 def gauge_deltas(rows: list[dict]) -> dict[str, float]:
-    """Effet cumulé du warm-up sur les jauges (deltas négatifs, jauges touchées seulement)."""
+    """Effet cumulé du warm-up sur les jauges (deltas négatifs, jauges touchées
+    seulement). L'attention n'y perd jamais plus de WARMUP_MAX_ATTENTION_COST."""
     deltas: dict[str, float] = {}
 
     def cost(gauge: str, points: float) -> None:
@@ -104,6 +106,8 @@ def gauge_deltas(rows: list[dict]) -> dict[str, float]:
                 cost("retention", WARMUP_SLOW_FRONT_RETENTION if face == "front" else WARMUP_SLOW_BACK_RETENTION)
             elif pace == "drifted":
                 cost("attention", WARMUP_DRIFT_ATTENTION)
+    if "attention" in deltas:
+        deltas["attention"] = max(deltas["attention"], -float(WARMUP_MAX_ATTENTION_COST))
     return {gauge: round(value, 2) for gauge, value in deltas.items() if value}
 
 

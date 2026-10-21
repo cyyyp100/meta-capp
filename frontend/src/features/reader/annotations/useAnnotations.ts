@@ -24,6 +24,7 @@ import type {
   SavedHighlight,
 } from "../../../api/types";
 import { useT } from "../../../i18n";
+import { reportEngagement } from "../engagement";
 
 const EMPTY: DocumentAnnotations = { highlights: [], notes: [] };
 const NO_LABELS: AnnotationLabel[] = [];
@@ -115,6 +116,7 @@ export function useAnnotations(docId: number, { readOnly }: { readOnly: boolean 
       // L'ordre de lecture (celui du carnet et de l'export) est celui du serveur.
       void queryClient.invalidateQueries({ queryKey: key });
       refreshUsage();
+      reportEngagement("highlight");
       return highlight;
     } catch (err) {
       fail(err);
@@ -132,6 +134,7 @@ export function useAnnotations(docId: number, { readOnly }: { readOnly: boolean 
       ({ highlight }) => {
         write((current) => ({ ...current, highlights: current.highlights.map((h) => (h.id === id ? highlight : h)) }));
         if ("label_id" in fields) refreshUsage();
+        if (fields.note?.trim()) reportEngagement("note");
       },
     );
   }
@@ -163,6 +166,7 @@ export function useAnnotations(docId: number, { readOnly }: { readOnly: boolean 
           : [...current.notes, note],
       }));
       refreshUsage();
+      reportEngagement("note");
       return note;
     } catch (err) {
       fail(err);
@@ -177,6 +181,7 @@ export function useAnnotations(docId: number, { readOnly }: { readOnly: boolean 
       ({ note }) => {
         write((current) => ({ ...current, notes: current.notes.map((n) => (n.id === id ? note : n)) }));
         if ("label_id" in fields) refreshUsage();
+        if (fields.body?.trim()) reportEngagement("note");
       },
     );
   }

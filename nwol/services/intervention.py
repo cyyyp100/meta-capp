@@ -273,9 +273,12 @@ class AssistantInterventionPolicy:
 
     def _window_full(self, now: float) -> bool:
         """Le plafond est-il atteint sur la fenêtre glissante ? Les interventions
-        sorties de la fenêtre sont oubliées au passage."""
+        sorties de la fenêtre sont oubliées au passage. Sans plafond
+        (`ASSISTANT_MAX_INTERVENTIONS` à None, l'édition locale), jamais."""
         horizon = now - ASSISTANT_INTERVENTION_WINDOW_S
         self._recent = [at for at in self._recent if at > horizon]
+        if ASSISTANT_MAX_INTERVENTIONS is None:
+            return False
         return len(self._recent) >= ASSISTANT_MAX_INTERVENTIONS
 
     # ------------------------------------------------------------------

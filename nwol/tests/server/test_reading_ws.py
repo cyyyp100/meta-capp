@@ -202,12 +202,13 @@ def test_reader_websocket_error(client, monkeypatch):
 
 
 def test_live_gauges_seed_and_apply(client):
-    # Seed = profil long terme (50) × 0.8 = 40 ; les signaux font bouger la jauge.
+    # Seed = profil long terme rapproché du neutre : un profil neutre (50) part
+    # de 50 ; les signaux font bouger la jauge.
     from services.session import LiveGauges
 
     lg = LiveGauges()
     snap = lg.snapshot()
-    assert abs(snap["attention"] - 40.0) < 1e-6
+    assert abs(snap["attention"] - 50.0) < 1e-6
     after = lg.apply({"verdict": "correct", "metacog_signals": {"attention": 1.0}})
     assert after["attention"] > snap["attention"]
 
@@ -300,7 +301,7 @@ def _sync(ws) -> None:
         pass
 
 
-def test_manual_pause_is_recorded_and_leaves_the_gauges_alone(client, tmp_path, make_pdf, monkeypatch):
+def test_manual_pause_is_recorded_and_an_immediate_resume_credits_nothing(client, tmp_path, make_pdf, monkeypatch):
     from db.session_pauses import get_session_pauses
     from services import session
 
@@ -322,7 +323,8 @@ def test_manual_pause_is_recorded_and_leaves_the_gauges_alone(client, tmp_path, 
     assert pauses[0]["recommendation_kind"] is None
     assert pauses[0]["planned_s"] is None
     assert pauses[0]["ended_by"] == "resume"
-    assert credits == []  # une pause manuelle est neutre pour les jauges
+    # Reprise immédiate : pas un repos (le prorata est testé dans test_pause.py).
+    assert credits == []
 
 
 def test_suggested_pause_credits_attention_once(client, tmp_path, make_pdf, monkeypatch):
@@ -1499,3 +1501,29 @@ def test_an_evaluated_answer_becomes_the_last_exchange(client, monkeypatch):
     assert received[0] == {"kind": "answer", "lines": [
         ("clikoda", "Quel est le rôle du pas ?"), ("student", "Il règle la vitesse."), ("clikoda", "Il manque la direction."),
     ]}
+
+
+def test_engagement_gestures_reach_the_live_gauges(client, tmp_path, make_pdf, monkeypatch):
+    """Surligner, annoter (message `engage` du lecteur) et questionner Clikoda
+    créditent l'attention ; un geste inconnu, ou fait pendant une pause, non."""
+    from services import session
+
+    gestures: list[str] = []
+    monkeypatch.setattr(
+        session.LiveGauges, "credit_engagement",
+        lambda self, action, now=None: gestures.append(action) or self.snapshot(),
+    )
+    doc_id, sid = _reading_session(client, tmp_path, make_pdf)
+
+    with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": sid})
+        ws.send_json({"type": "engage", "action": "highlight"})
+        ws.send_json({"type": "engage", "action": "note"})
+        ws.send_json({"type": "engage", "action": "inconnu"})
+        ws.send_json({"type": "ask", "question": "Pourquoi ?", "page": 1})
+        ws.send_json({"type": "pause", "source": "manual"})
+        ws.send_json({"type": "engage", "action": "highlight"})
+        ws.send_json({"type": "resume"})
+        _sync(ws)
+
+    assert gestures == ["highlight", "note", "ask"]

@@ -70,17 +70,25 @@ def update_session_progress(
     session_id: int,
     pages_read: int | None = None,
     chapters_completed: list | None = None,
+    duration_s: int | None = None,
 ) -> None:
     """Progression d'une séance en cours.
 
     `pages_read` ne fait que croître : deux écrivains se croisent (le tick du
     socket du lecteur, et `/end` qui lit le compte exact au même moment), et une
-    écriture partie plus tôt ne doit pas effacer une valeur plus récente."""
+    écriture partie plus tôt ne doit pas effacer une valeur plus récente.
+
+    `duration_s` : le temps de lecture d'une séance ENCORE OUVERTE (le battement
+    du socket), qui datera sa clôture si le logiciel est fermé sans « Terminer ».
+    Jamais écrit sur une séance close : `/end` y a posé la durée du client."""
     updates = []
     params: list = []
     if pages_read is not None:
         updates.append("pages_read=MAX(COALESCE(pages_read, 0), ?)")
         params.append(int(pages_read))
+    if duration_s is not None:
+        updates.append("duration_s=CASE WHEN ended_at IS NULL THEN MAX(COALESCE(duration_s, 0), ?) ELSE duration_s END")
+        params.append(max(0, int(duration_s)))
     if chapters_completed is not None:
         updates.append("chapters_completed=?")
         params.append(json.dumps(chapters_completed, ensure_ascii=False))
@@ -188,6 +196,64 @@ def _duration_from_started_at(started_at: str | None) -> int:
         return max(0, int((datetime.now() - started).total_seconds()))
     except ValueError:
         return 0
+
+
+def close_session(session_id: int, ended_at: str, duration_s: int) -> bool:
+    """Clôt une séance restée ouverte, à l'heure et pour la durée données.
+
+    False si elle était déjà close (ou n'existe pas) : on ne réécrit jamais la
+    clôture d'une séance terminée par « Terminer »."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE reading_sessions SET ended_at=?, duration_s=? WHERE id=? AND ended_at IS NULL",
+            (ended_at, max(0, int(duration_s)), session_id),
+        )
+    closed = cur.rowcount > 0
+    if closed:
+        logger.info("Session lecture close au démarrage id=%s durée=%ss", session_id, duration_s)
+    return closed
+
+
+def mark_session_finalized(session_id: int) -> bool:
+    """Pose `finalized_at` une seule fois. False si la séance l'était déjà :
+    deux finalisations ne font pas glisser le profil deux fois."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE reading_sessions SET finalized_at=? WHERE id=? AND finalized_at IS NULL",
+            (datetime.now().isoformat(), session_id),
+        )
+    return cur.rowcount > 0
+
+
+def set_session_analysis(session_id: int, analysis: str) -> None:
+    """Le bilan de Clikoda pour cette séance, relu dans « Ma progression »."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE reading_sessions SET analysis=? WHERE id=?",
+            (str(analysis).strip(), session_id),
+        )
+
+
+def list_open_sessions() -> list[dict]:
+    """Séances jamais closes, de la plus ancienne à la plus récente."""
+    rows = get_connection().execute(
+        "SELECT * FROM reading_sessions WHERE ended_at IS NULL ORDER BY started_at, id"
+    ).fetchall()
+    return [_decode_session(row) for row in rows]
+
+
+def list_unfinalized_sessions() -> list[dict]:
+    """Séances closes que la finalisation n'a jamais atteintes, de la plus
+    ancienne à la plus récente."""
+    rows = get_connection().execute(
+        """SELECT * FROM reading_sessions
+           WHERE ended_at IS NOT NULL AND finalized_at IS NULL
+           ORDER BY started_at, id"""
+    ).fetchall()
+    return [_decode_session(row) for row in rows]
 
 
 def delete_session(session_id: int) -> bool:

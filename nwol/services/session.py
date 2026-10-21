@@ -6,13 +6,18 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date, datetime, timedelta, timezone
 
 from config.settings import (
+    ATTENTION_ENGAGEMENT_COOLDOWN_S,
+    ATTENTION_ENGAGEMENT_CREDIT,
     ATTENTION_PASSIVE_FLOOR,
     ATTENTION_PERSIST_EVERY_S,
+    GAUGE_ASK_CURIOSITY_SCALE,
     PROFILE_SESSION_KIND_WEIGHT,
 )
 from db.answers import get_answers_for_session
+from db.page_dwell import get_page_dwell
 from db.metacog import (
     CRITERIA,
     ensure_profile,
@@ -24,19 +29,33 @@ from db.metacog import (
 )
 from db.practice_sessions import get_practice_session, mark_finalized
 from db.questions import count_assistant_questions
-from db.session_gauges import PRACTICE, READING, get_first_gauges, get_latest_gauges, record_gauges
+from db.session_gauges import (
+    PRACTICE,
+    READING,
+    get_first_gauges,
+    get_latest_gauges,
+    get_session_gauges,
+    record_gauges,
+)
 from db.session_pauses import get_session_pauses
 from db.session_reflections import (
     get_recent_reflection_questions,
     save_session_reflection,
 )
+from db.sessions import (
+    close_session,
+    get_session,
+    list_open_sessions,
+    list_unfinalized_sessions,
+    mark_session_finalized,
+    set_session_analysis,
+    update_session_progress,
+)
 from db.sessions import delete_session as _delete_session
 from db.sessions import end_session as _end_session
-from db.sessions import get_session
 from db.sessions import start_session as _start_session
-from db.sessions import update_session_progress
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
-from llm.ollama_client import cancel_pending_generations
+from llm.ollama_client import SESSION_SUMMARY_FALLBACK, cancel_pending_generations
 from metacog.gauges import (
     VERDICT_CRITERIA,
     clamp_gauge,
@@ -47,7 +66,7 @@ from metacog.gauges import (
 )
 from metacog.profile import compute_alpha, compute_confidence, update_profile
 from metacog.reflection import fallback_meta_cognition_analysis, pick_reflection_question
-from services import session_memory, warmup
+from services import llm_models, session_memory, warmup
 from services.pause import summarize as summarize_pauses
 
 logger = logging.getLogger("services.session")
@@ -61,6 +80,8 @@ __all__ = [
     "session_analysis",
     "finalize_session",
     "nudge_metacog_profile",
+    "close_abandoned_sessions",
+    "finalize_pending_sessions",
     "LiveGauges",
 ]
 
@@ -84,14 +105,16 @@ _PROFILE_NUDGE_CRITERIA = VERDICT_CRITERIA
 class LiveGauges:
     """Jauges métacognitives live d'une session de lecture web (en mémoire).
 
-    Seed = profil long terme × 0.8, puis deux sources de mouvement :
+    Seed = profil long terme rapproché du neutre (`initialize_session_gauges`),
+    puis ces sources de mouvement :
 
-      * `apply` — les `metacog_signals`/`verdict` que chaque réponse d'assistant
-        ou évaluation renvoie déjà, plus le temps de réponse et la série
-        d'erreurs (le modèle d'attention les attendait depuis toujours) ;
-      * `apply_reading_behaviour` — la dérive passive du comportement de lecture,
-        seul chemin par lequel `attention` bouge sans LLM ;
-      * `recover_attention` — le crédit d'une pause recommandée et prise ;
+      * `apply` — les `metacog_signals`/`verdict` de l'évaluation d'une réponse,
+        plus la série d'erreurs ; `apply_question` — ceux de la réponse de
+        Clikoda à une question de l'élève, curiosité freinée ;
+      * `apply_reading_behaviour` — la dérive passive du comportement de lecture ;
+      * `credit_engagement` — ce que l'élève FAIT de sa lecture (questionner,
+        répondre, surligner, annoter) ;
+      * `recover_attention` — le crédit d'une pause prise ;
       * `apply_warmup` — l'effet du RYTHME de la révision éclair du sas
         d'entrée (cf. `services.warmup`), versé une fois, à l'entrée en lecture.
 
@@ -107,11 +130,13 @@ class LiveGauges:
         self._gauges = make_gauges(profile)
         self._t0 = time.monotonic()
         self._last_passive_record = 0.0
+        # Dernier crédit versé, par geste (`credit_engagement`).
+        self._last_engagement: dict[str, float] = {}
         if session_id is not None:
             self.attach_session(session_id)
 
     def attach_session(self, session_id: int) -> None:
-        """Rattache la session et fige son AMORCE (profil × 0,8) en base.
+        """Rattache la session et fige son AMORCE en base.
 
         Le lecteur ouvre son WebSocket avant de connaître le `session_id` : sans
         ce rattachement explicite, la première ligne écrite dans `session_gauges`
@@ -123,19 +148,54 @@ class LiveGauges:
         self.session_id = int(session_id)
         self._record()
 
-    def apply(
-        self,
-        evaluation: dict | None,
-        response_time_ms: int | None = None,
-        consecutive_incorrect: int = 0,
-    ) -> dict[str, float]:
-        """Intègre les signaux d'une réponse/évaluation puis renvoie l'état courant."""
+    def apply(self, evaluation: dict | None, consecutive_incorrect: int = 0) -> dict[str, float]:
+        """Intègre l'évaluation d'une réponse puis renvoie l'état courant.
+
+        Le TEMPS mis à répondre n'y coûte rien à l'attention, contrairement à une
+        séance de pratique : dans le lecteur, la dérive passive observe déjà ce
+        temps-là (fenêtre masquée, aucun geste), et le compter une seconde fois
+        coûtait jusqu'à 6 points à chaque réponse rédigée — passé 12 s, c'est-à-
+        dire toujours (de 58 s à 14 min sur les séances 59 et 60)."""
         update_gauges_from_evaluation(
             self._gauges,
             evaluation or {},
-            response_time_ms=response_time_ms,
             consecutive_incorrect=consecutive_incorrect,
         )
+        self._record()
+        return self.snapshot()
+
+    def apply_question(self, result: dict | None) -> dict[str, float]:
+        """Intègre les signaux de la réponse de Clikoda à une question de l'élève.
+
+        Questionner de sa propre initiative est le signal de curiosité par
+        excellence, et le prompt exige un signal d'au moins 1,0 : +12,8 points par
+        question, la jauge saturait à 100 en quatre questions, à chaque séance.
+        La question pèse `GAUGE_ASK_CURIOSITY_SCALE` de ce signal — et toute
+        hausse de la curiosité ralentit à l'approche de 100 (`GaugeState.update`)."""
+        update_gauges_from_evaluation(
+            self._gauges,
+            result or {},
+            signal_scale={"curiosity": GAUGE_ASK_CURIOSITY_SCALE},
+        )
+        self._record()
+        return self.snapshot()
+
+    def credit_engagement(self, action: str, now: float | None = None) -> dict[str, float]:
+        """Crédit d'attention d'un geste de lecture active (`ATTENTION_ENGAGEMENT_CREDIT`).
+
+        Au plus une fois par `ATTENTION_ENGAGEMENT_COOLDOWN_S` et par geste : une
+        rafale de surlignages est UN moment d'engagement. Un geste inconnu ne
+        crédite rien. Il ne peut que remonter la jauge."""
+        points = float(ATTENTION_ENGAGEMENT_CREDIT.get(action, 0.0))
+        gauge = self._gauges.get("attention")
+        if gauge is None or points <= 0.0:
+            return self.snapshot()
+        now = time.monotonic() if now is None else float(now)
+        last = self._last_engagement.get(action)
+        if last is not None and now - last < ATTENTION_ENGAGEMENT_COOLDOWN_S:
+            return self.snapshot()
+        self._last_engagement[action] = now
+        gauge.apply_delta(points)
         self._record()
         return self.snapshot()
 
@@ -170,7 +230,7 @@ class LiveGauges:
         return self.snapshot()
 
     def recover_attention(self, points: float) -> dict[str, float]:
-        """Crédit d'attention d'une pause réellement prise.
+        """Crédit d'attention d'une pause réellement prise (`services.pause.attention_credit`).
 
         La dérive passive est suspendue pendant la pause (cf. le ticker du
         lecteur) ; ce crédit-ci est le bénéfice de la pause elle-même, versé une
@@ -195,6 +255,11 @@ class LiveGauges:
                 gauge.apply_delta(float(delta))
         self._record()
         return self.snapshot()
+
+    def elapsed_s(self) -> float:
+        """Temps de lecture de la séance (pauses reprises exclues) : l'axe `t`
+        des mesures, et le battement qui date une séance quittée sans « Terminer »."""
+        return max(0.0, time.monotonic() - self._t0)
 
     def skip(self, seconds: float) -> None:
         """Retire une pause de l'horloge des mesures : le `t` de `session_gauges`
@@ -331,9 +396,15 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
     except Exception:  # pragma: no cover - best-effort, LLM indisponible
         logger.debug("Analyse de session ignorée (LLM indisponible)", exc_info=True)
 
+    analysis = str(summary.get("qualitative_summary") or "").strip()
+    if analysis and analysis != SESSION_SUMMARY_FALLBACK:
+        # Relu dans « Ma progression », comme le bilan d'un quiz : celui d'une
+        # séance reprise au démarrage n'a été affiché nulle part ailleurs. Le
+        # texte générique du repli (Ollama absent) n'est pas un bilan.
+        _safe(lambda: set_session_analysis(session_id, analysis), None)
     recent = _safe(lambda: get_recent_reflection_questions(user_id), [])
     return {
-        "analysis": str(summary.get("qualitative_summary") or ""),
+        "analysis": analysis,
         "question": pick_reflection_question(
             summary.get("metacognitive_questions") or [],
             avoid=list(REFLECTION_QUESTIONS) + list(recent),
@@ -471,9 +542,9 @@ def _update_general_analysis(
 def _measured_gauges(session_id: int, scope: str = READING) -> dict[str, float]:
     """Jauges de fin de session, AMPUTÉES de celles qui n'ont jamais bougé.
 
-    Une session démarre à profil × 0,8. Une jauge que la séance n'a pas exercée
-    finit donc exactement à son amorce — 20 % sous le profil — et la remonter
-    telle quelle tirait le profil vers le bas à chaque session, sans qu'aucune
+    Une session démarre à son amorce (le profil rapproché du neutre). Une jauge
+    que la séance n'a pas exercée finit donc exactement là, et la remonter telle
+    quelle tirait le profil vers cette amorce à chaque session, sans qu'aucune
     mesure ne le justifie. On ne remonte que ce qui a bougé ; le moteur de profil
     laisse les autres critères intacts (`update_profile_gauges_from_session`
     retombe sur la valeur courante quand un critère est absent).
@@ -544,6 +615,8 @@ def nudge_metacog_profile(
     measure_meta: bool = True,
     kind: str | None = None,
     meta_delta: float | None = None,
+    study_day: date | None = None,
+    refresh_analysis: bool = True,
 ) -> dict:
     """Finalisation métacognitive partagée : lecture, quiz, séance de langue.
 
@@ -576,6 +649,11 @@ def nudge_metacog_profile(
     appris et déplace moins le profil. La catégorie se déduit de la séance
     (lecture, ou celle de la séance de pratique) ; `kind` la donne quand il n'y a
     pas de séance (ancien client du quiz, leçon close avant les séances de pratique).
+
+    `study_day` : le jour d'étude à compter (aujourd'hui par défaut) — celui de
+    la séance quand elle est finalisée le lendemain, au démarrage.
+    `refresh_analysis=False` : le portrait de l'apprenant n'est pas régénéré
+    (aucun appel au LLM — reprise en mode économe).
     """
     if practice_session_id is not None and not mark_finalized(int(practice_session_id)):
         logger.info("Séance de pratique %s déjà finalisée : profil inchangé", practice_session_id)
@@ -592,7 +670,7 @@ def nudge_metacog_profile(
     # finalisations (lecture, séance de langue, quiz) — et pas dans un `GET`.
     # Best-effort : une série non enregistrée ne doit pas faire échouer une
     # finalisation qui, elle, a bien eu lieu.
-    _safe(lambda: record_study_day(user_id), None)
+    _safe(lambda: record_study_day(user_id, day=study_day), None)
 
     profile = ensure_profile(user_id)
     profile_gauges = {c: float(profile.get(c, 50.0)) for c in CRITERIA}
@@ -622,13 +700,15 @@ def nudge_metacog_profile(
                 user_id, {"meta_cognition": meta_target}, session_id,
                 confidence={"meta_cognition": kind_weight}, practice_session_id=practice_session_id,
             )
-            _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
+            if refresh_analysis:
+                _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
             return {c: float(updated.get(c, 50.0)) for c in CRITERIA}
         # Rien n'a été mesuré : la session a eu lieu (elle compte), mais elle n'a
         # aucune raison de déplacer le profil.
         logger.info("Session %s finalisée sans aucune mesure : profil inchangé", session_id)
         update_profile_values(user_id, {}, increment_sessions=True)
-        _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
+        if refresh_analysis:
+            _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
         return {}
 
     confidence = compute_confidence(measures)
@@ -694,7 +774,8 @@ def nudge_metacog_profile(
         update_profile_values(user_id, new_values, increment_sessions=True)
 
     # Analyse générale de l'apprenant (best-effort, après le nudge profil).
-    _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
+    if refresh_analysis:
+        _update_general_analysis(session_id, pairs, metrics, session_gauges or {}, user_id)
     return new_values
 
 
@@ -703,13 +784,140 @@ def finalize_session(
     responses: list[str],
     questions: list[str] | None = None,
     user_id: int = DEFAULT_USER_ID,
+    *,
+    study_day: date | None = None,
+    refresh_analysis: bool = True,
 ) -> dict:
+    """Fin du sas de sortie : réflexions, profil, série d'étude — une seule fois.
+
+    Une seconde finalisation (double envoi, ou la reprise au démarrage d'une
+    séance que le sas avait déjà finalisée) ne fait pas glisser le profil deux
+    fois : `finalized_at` ne se pose qu'une fois."""
     metrics = session_metrics(session_id)
     score = float(metrics["success_rate"])
+    if not mark_session_finalized(session_id):
+        logger.info("Session %s déjà finalisée : profil inchangé", session_id)
+        return {"ok": True, "score": score, "streak": _safe(lambda: get_streak(user_id), {})}
     nudge_metacog_profile(
         user_id, score, responses, metrics,
         session_id=session_id, questions=questions,
+        study_day=study_day, refresh_analysis=refresh_analysis,
     )
     # La série a déjà avancé dans `nudge_metacog_profile` : on la relit pour que
     # le sas de sortie puisse l'annoncer sans un aller-retour de plus.
     return {"ok": True, "score": score, "streak": _safe(lambda: get_streak(user_id), {})}
+
+
+# ── Séances quittées en fermant le logiciel ─────────────────────────────────
+#
+# Une lecture n'était close que par « Terminer ». Fermer la fenêtre en pleine
+# lecture la laissait ouverte pour toujours : « Session en cours » dans la frise
+# de « Ma progression », jamais mesurée dans le profil. Au démarrage suivant,
+# elle est close à l'heure de sa dernière trace, puis finalisée comme si l'élève
+# avait passé les questions du sas de sortie — avec le bilan de Clikoda, que
+# personne n'a lu et qui se relit dans le détail de la séance.
+
+
+def close_abandoned_sessions() -> dict[str, list[int]]:
+    """Démarrage, AVANT toute requête : clôt les lectures restées ouvertes.
+
+    Aucun lecteur ne peut encore y être rattaché (instance unique, serveur qui
+    démarre). Une séance où rien n'a été lu — quittée depuis le sas d'entrée —
+    est effacée, comme `abandon_session` l'aurait fait. Les autres sont closes
+    à l'heure de leur dernière trace : départ + temps de lecture (le battement
+    du socket, à défaut la courbe de jauges ou le temps par page) + pauses.
+    Uniquement la base : la finalisation, qui peut appeler le LLM, est
+    `finalize_pending_sessions`, en thread."""
+    closed: list[int] = []
+    deleted: list[int] = []
+    for session in _safe(list_open_sessions, []):
+        sid = int(session["id"])
+        try:
+            if not _was_read(session):
+                if _delete_session(sid):
+                    deleted.append(sid)
+                continue
+            duration = _reading_time_s(session)
+            pause_s = summarize_pauses(get_session_pauses(sid))["pause_s"]
+            if close_session(sid, _ended_at(session, duration + pause_s), duration):
+                closed.append(sid)
+        except Exception:  # jamais bloquant au démarrage : la séance attendra
+            logger.exception("Clôture de la séance abandonnée %s impossible", sid)
+    if closed or deleted:
+        logger.info("Séances abandonnées : %s close(s), %s effacée(s) sans lecture", closed, deleted)
+    return {"closed": closed, "deleted": deleted}
+
+
+def finalize_pending_sessions(user_id: int = DEFAULT_USER_ID) -> list[int]:
+    """Démarrage, en thread : finalise les lectures closes jamais finalisées.
+
+    Celles que `close_abandoned_sessions` vient de clore, et celles dont le sas
+    de sortie a été fermé avec le logiciel. Pour chacune, comme au sas : le
+    bilan de Clikoda (persisté), puis la finalisation SANS réponse — « Passer ».
+    Le jour d'étude compté est celui de la séance, pas celui du démarrage ; le
+    portrait de l'apprenant n'est régénéré qu'une fois, après la dernière. En
+    mode économe, rien n'est demandé au LLM (pas de travail de fond) : le profil
+    glisse, le bilan reste vide."""
+    economy = _safe(llm_models.economy, False)
+    pending = _safe(list_unfinalized_sessions, [])
+    done: list[int] = []
+    for index, session in enumerate(pending):
+        sid = int(session["id"])
+        try:
+            if not economy and not str(session.get("analysis") or "").strip():
+                session_analysis(sid, user_id)
+            finalize_session(
+                sid, [], user_id=user_id,
+                study_day=_local_day(session.get("started_at")),
+                # Le portrait de l'apprenant porte sur tout l'historique : une
+                # fois, après la dernière séance reprise, suffit.
+                refresh_analysis=not economy and index == len(pending) - 1,
+            )
+            done.append(sid)
+        except Exception:
+            logger.exception("Finalisation de la séance %s impossible", sid)
+    if done:
+        logger.info("Séances finalisées au démarrage : %s", done)
+    return done
+
+
+def _was_read(session: dict) -> bool:
+    """Quelque chose a-t-il eu lieu ? Une page lue, une réponse, une question."""
+    sid = int(session["id"])
+    return (
+        int(session.get("pages_read") or 0) > 0
+        or bool(get_answers_for_session(sid))
+        or count_assistant_questions(sid) > 0
+    )
+
+
+def _reading_time_s(session: dict) -> int:
+    """Le temps de lecture d'une séance quittée sans « Terminer » : le plus long
+    de ce qu'elle a laissé (battement, courbe de jauges, temps par page)."""
+    sid = int(session["id"])
+    heartbeat = float(session.get("duration_s") or 0)
+    curve = max((float(row["t"]) for row in get_session_gauges(sid)), default=0.0)
+    dwell = sum(float(row.get("dwell_s") or 0.0) for row in get_page_dwell(sid))
+    return int(round(max(heartbeat, curve, dwell)))
+
+
+def _started(started_at: str | None) -> datetime | None:
+    """Départ d'une séance, à l'heure locale (SQLite le date en UTC)."""
+    try:
+        return datetime.fromisoformat(str(started_at)).replace(tzinfo=timezone.utc).astimezone()
+    except (TypeError, ValueError):
+        return None
+
+
+def _ended_at(session: dict, elapsed_s: float) -> str:
+    """Heure de clôture, au format de `db.sessions.end_session` (locale, naïve)."""
+    started = _started(session.get("started_at"))
+    if started is None:
+        return datetime.now().isoformat()
+    return (started + timedelta(seconds=max(0.0, elapsed_s))).replace(tzinfo=None).isoformat()
+
+
+def _local_day(started_at: str | None) -> date | None:
+    started = _started(started_at)
+    return started.date() if started else None
+

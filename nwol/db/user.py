@@ -93,13 +93,16 @@ def get_streak(user_id: int = DEFAULT_USER_ID) -> dict:
     }
 
 
-def record_study_day(user_id: int = DEFAULT_USER_ID) -> dict:
-    """Enregistre AUJOURD'HUI comme jour d'étude et fait avancer la série.
+def record_study_day(user_id: int = DEFAULT_USER_ID, day: date | None = None) -> dict:
+    """Enregistre AUJOURD'HUI (ou `day`) comme jour d'étude et fait avancer la série.
 
     Appelée une seule fois par session terminée (`services/session.py`). Le même
-    jour compté deux fois ne bouge rien."""
+    jour compté deux fois ne bouge rien. `day` : le jour de la séance quand elle
+    est finalisée plus tard — une lecture quittée en fermant le logiciel l'est
+    au démarrage suivant, et ouvrir l'app le lendemain n'est pas étudier. Un jour
+    antérieur au dernier compté ne change plus la série."""
     ensure_default_user()
-    today = date.today()
+    today = day or date.today()
     conn = get_connection()
     row = conn.execute(
         "SELECT streak, longest_streak, last_study_day FROM login_streak WHERE user_id=?",
@@ -116,10 +119,10 @@ def record_study_day(user_id: int = DEFAULT_USER_ID) -> dict:
         return get_streak(user_id)
 
     last = row["last_study_day"]
-    if last == today.isoformat():
+    if last and str(last) >= today.isoformat():
         return get_streak(user_id)
 
-    gap = _days_since(last)
+    gap = _days_since(last, today)
     if gap is not None and gap <= STREAK_GRACE_DAYS + 1:
         streak = int(row["streak"] or 0) + 1
     else:
@@ -137,12 +140,12 @@ def record_study_day(user_id: int = DEFAULT_USER_ID) -> dict:
     return get_streak(user_id)
 
 
-def _days_since(day: str | None) -> int | None:
-    """Nombre de jours entre `day` (ISO) et aujourd'hui. None si illisible."""
+def _days_since(day: str | None, until: date | None = None) -> int | None:
+    """Nombre de jours entre `day` (ISO) et `until` (aujourd'hui). None si illisible."""
     if not day:
         return None
     try:
-        return (date.today() - date.fromisoformat(str(day))).days
+        return ((until or date.today()) - date.fromisoformat(str(day))).days
     except ValueError:
         return None
 

@@ -75,6 +75,14 @@ async def _lifespan(_app: FastAPI):
     from services.relink import backfill_content_hashes
 
     threading.Thread(target=backfill_content_hashes, daemon=True, name="content-hash-backfill").start()
+    # Lectures quittées en fermant le logiciel : closes ICI, avant la première
+    # requête (aucun lecteur n'y est rattaché), puis finalisées en thread comme
+    # un sas de sortie passé — le bilan de Clikoda passe par le LLM. Importées
+    # ICI pour que les tests puissent remplacer la seconde (tests/conftest.py).
+    from services.session import close_abandoned_sessions, finalize_pending_sessions
+
+    close_abandoned_sessions()
+    threading.Thread(target=finalize_pending_sessions, daemon=True, name="sessions-finalize").start()
     logger.info("Serveur Meta-Capp prêt (v%s).", APP_VERSION)
     yield
 

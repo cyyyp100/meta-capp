@@ -113,6 +113,20 @@ def no_startup_backfill(monkeypatch):
     return real
 
 
+@pytest.fixture(autouse=True)
+def no_startup_session_finalize(monkeypatch):
+    """Le démarrage du serveur (lifespan) finalise en thread les lectures que
+    la fermeture du logiciel a laissées en plan (services/session). Ce thread
+    survivrait au test qui l'a lancé et lirait la base du suivant. Coupé
+    partout ; le test qui le vérifie reçoit la vraie fonction par cette fixture.
+    La clôture, elle, est synchrone et tourne normalement."""
+    from services import session
+
+    real = session.finalize_pending_sessions
+    monkeypatch.setattr(session, "finalize_pending_sessions", lambda *a, **k: [])
+    return real
+
+
 @pytest.fixture(autouse=True, scope="session")
 def no_real_logs_or_assets(tmp_path_factory):
     """En dev, le journal (`logs/nwol.log`) et les assets (`nwol/assets` : cache

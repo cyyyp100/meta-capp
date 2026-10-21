@@ -10,7 +10,7 @@ ALPHA_MIN = 0.05
 # duquel une session pèse de tout son poids. En dessous, elle pèse au prorata :
 # une session de deux réponses ne doit pas déplacer le profil autant qu'une
 # session de dix, sinon une séance courte tire durablement le profil vers son
-# amorce (profil × 0,8).
+# amorce.
 FULL_CONFIDENCE_MEASURES = 4
 
 

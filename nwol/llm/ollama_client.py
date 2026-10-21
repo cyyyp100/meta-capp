@@ -2018,6 +2018,12 @@ def _fallback_rephrasing_from_prompt(prompt: str) -> dict | None:
     })
 
 
+# Le bilan de séance du repli local : un texte générique, qui ne dit rien de la
+# séance. Affiché au sas faute de mieux, il n'est jamais persisté comme un bilan
+# (services/session.session_analysis).
+SESSION_SUMMARY_FALLBACK = "Session résumée localement : les indicateurs principaux ont été conservés."
+
+
 def _fallback_session_summary_from_prompt(prompt: str) -> dict | None:
     data = _extract_prompt_json(prompt, "Données de session") or {}
     if not isinstance(data, dict):
@@ -2036,7 +2042,7 @@ def _fallback_session_summary_from_prompt(prompt: str) -> dict | None:
             "flashcards_created": max(0, flashcards),
             "rephrasings_count": max(0, rephrasings),
             "success_rate": max(0.0, min(1.0, success_rate)),
-            "qualitative_summary": "Session résumée localement : les indicateurs principaux ont été conservés.",
+            "qualitative_summary": SESSION_SUMMARY_FALLBACK,
             "metacognitive_questions": _fallback_meta_questions(seed=data.get("session_id")),
         }
     })

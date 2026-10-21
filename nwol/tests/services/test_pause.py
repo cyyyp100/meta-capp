@@ -3,7 +3,7 @@
 # Deux questions seulement : combien de temps, et est-ce que la pause suivait
 # une recommandation du LLM. Plus le crédit d'attention, réservé à la pause
 # conseillée par Clikoda.
-from config.settings import PAUSE_ATTENTION_RECOVERY, PAUSE_RECOMMENDATION_WINDOW_S
+from config.settings import PAUSE_ATTENTION_RECOVERY, PAUSE_DEFAULT_MIN, PAUSE_RECOMMENDATION_WINDOW_S
 from services.pause import PauseTracker, attention_credit, summarize
 
 
@@ -77,7 +77,7 @@ def test_an_unknown_source_counts_as_manual():
     assert record.planned_s is None
 
 
-def test_only_a_suggested_pause_that_was_taken_credits_attention():
+def test_a_pause_that_was_taken_credits_attention():
     def record(source, duration, planned, ended_by="resume"):
         tracker = PauseTracker()
         tracker.start(0.0, source=source, planned_s=planned)
@@ -86,8 +86,12 @@ def test_only_a_suggested_pause_that_was_taken_credits_attention():
     # Au prorata du temps pris sur la durée conseillée, plafonné à 100 %.
     assert attention_credit(record("suggested", 150.0, 300.0)) == PAUSE_ATTENTION_RECOVERY / 2
     assert attention_credit(record("suggested", 900.0, 300.0)) == PAUSE_ATTENTION_RECOVERY
-    # Une pause manuelle est neutre pour les jauges.
-    assert attention_credit(record("manual", 900.0, 300.0)) == 0.0
+    # Une pause manuelle aussi (retour d'usage du 2026-10-21 : le repos rend
+    # l'attention quel que soit celui qui l'a proposé), au prorata de la durée
+    # par défaut — une reprise immédiate ne crédite (presque) rien.
+    assert attention_credit(record("manual", PAUSE_DEFAULT_MIN * 60.0, None)) == PAUSE_ATTENTION_RECOVERY
+    assert attention_credit(record("manual", PAUSE_DEFAULT_MIN * 30.0, None)) == PAUSE_ATTENTION_RECOVERY / 2
+    assert attention_credit(record("manual", 0.0, None)) == 0.0
     # Une séance fermée pendant la pause : plus de lecture à mesurer.
     assert attention_credit(record("suggested", 300.0, 300.0, ended_by="disconnect")) == 0.0
 

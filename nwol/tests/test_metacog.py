@@ -7,12 +7,18 @@ from db.metacog import CRITERIA
 # ── Jauges (pur, sans DB) ────────────────────────────────────────────────────
 
 def test_initialize_session_gauges_inherits_profile():
-    from metacog.gauges import SESSION_INHERITANCE_FACTOR, initialize_session_gauges
+    """L'amorce est le profil rapproché du neutre — jamais 20 % sous le profil,
+    qui tirait toute jauge mesurée sans rien de net vers 0, séance après séance
+    (l'attention : 36 -> 23 en huit lectures)."""
+    from metacog.gauges import NEUTRAL_GAUGE, SESSION_INHERITANCE_FACTOR, initialize_session_gauges
 
-    values = initialize_session_gauges({"attention": 80.0})
-    assert values["attention"] == pytest.approx(80.0 * SESSION_INHERITANCE_FACTOR)
-    # Critère absent du profil -> base 50 héritée.
-    assert values["curiosity"] == pytest.approx(50.0 * SESSION_INHERITANCE_FACTOR)
+    values = initialize_session_gauges({"attention": 80.0, "retention": 20.0, "creativity": 50.0})
+    assert values["attention"] == pytest.approx(50.0 + 30.0 * SESSION_INHERITANCE_FACTOR)
+    # Un profil bas repart un peu plus haut : la séance a sa chance.
+    assert 20.0 < values["retention"] < NEUTRAL_GAUGE
+    # Un profil neutre repart du neutre ; critère absent du profil -> neutre.
+    assert values["creativity"] == pytest.approx(NEUTRAL_GAUGE)
+    assert values["curiosity"] == pytest.approx(NEUTRAL_GAUGE)
     assert set(values) == set(CRITERIA)
 
 
@@ -158,13 +164,13 @@ def test_a_verdict_pulls_only_the_targeted_performance_gauges():
     from config.settings import GAUGE_VERDICT_TARGETS, GAUGE_VERDICT_WEIGHT
     from metacog.gauges import make_gauges, update_gauges_from_verdict
 
-    gauges = make_gauges({c: 50.0 for c in CRITERIA})  # amorce : 40 partout
+    gauges = make_gauges({c: 50.0 for c in CRITERIA})  # amorce : 50 partout
     values = update_gauges_from_verdict(gauges, "correct", ("retention", "attention"))
-    expected = 40.0 + GAUGE_VERDICT_WEIGHT * (GAUGE_VERDICT_TARGETS["correct"] - 40.0)
+    expected = 50.0 + GAUGE_VERDICT_WEIGHT * (GAUGE_VERDICT_TARGETS["correct"] - 50.0)
     assert values["retention"] == pytest.approx(expected)
     assert values["attention"] == pytest.approx(expected)
     for untouched in ("context_comprehension", "curiosity", "creativity", "meta_cognition"):
-        assert values[untouched] == pytest.approx(40.0)
+        assert values[untouched] == pytest.approx(50.0)
 
 
 def test_a_verdict_never_moves_curiosity_creativity_or_metacognition():
@@ -176,8 +182,8 @@ def test_a_verdict_never_moves_curiosity_creativity_or_metacognition():
     values = update_gauges_from_verdict(
         gauges, "correct", ("curiosity", "creativity", "meta_cognition", "context_comprehension"),
     )
-    assert values["context_comprehension"] > 40.0
-    assert values["curiosity"] == values["creativity"] == values["meta_cognition"] == pytest.approx(40.0)
+    assert values["context_comprehension"] > 50.0
+    assert values["curiosity"] == values["creativity"] == values["meta_cognition"] == pytest.approx(50.0)
 
 
 def test_a_missing_verdict_moves_nothing():
@@ -205,8 +211,10 @@ def test_a_verdict_session_converges_on_its_success_rate_whatever_its_seed():
 
 
 def test_slow_answers_and_error_streaks_cost_attention_even_untargeted():
-    """Lenteur et série d'erreurs sont des observations : elles coûtent de
-    l'attention quel que soit le type, comme dans le lecteur."""
+    """Lenteur et série d'erreurs sont des observations : dans une séance de
+    pratique, elles coûtent de l'attention quel que soit le type. (Le lecteur,
+    lui, observe le temps par sa dérive passive : la lenteur n'y coûte rien de
+    plus — cf. `test_a_slow_written_answer_costs_no_attention_in_the_reader`.)"""
     from metacog.gauges import make_gauges, update_gauges_from_verdict
 
     gauges = make_gauges({c: 50.0 for c in CRITERIA})
@@ -214,7 +222,7 @@ def test_slow_answers_and_error_streaks_cost_attention_even_untargeted():
         gauges, "incorrect", ("retention",), response_time_ms=24000, consecutive_incorrect=3,
     )
     # 6 points de lenteur (plafond) + 2 de série d'erreurs.
-    assert values["attention"] == pytest.approx(40.0 - 6.0 - 2.0)
+    assert values["attention"] == pytest.approx(50.0 - 6.0 - 2.0)
 
 
 def test_a_continuous_score_sits_on_the_verdict_scale():
@@ -431,6 +439,67 @@ def test_replay_lowers_attention_only_on_stalls_when_answers_do_not_cost_it():
 
     _, low = replay({c: ATTENTION_PASSIVE_FLOOR + 1 for c in CRITERIA}, [stall])[-1]
     assert low["attention"] == pytest.approx(ATTENTION_PASSIVE_FLOOR)
+
+
+def test_a_slow_written_answer_costs_no_attention_in_the_reader(fresh_db):
+    """Une réponse rédigée prend du temps (de 58 s à 14 min sur les séances 59
+    et 60) : passé 12 s, chacune coûtait jusqu'à 6 points d'attention. Dans le
+    lecteur, la dérive passive observe déjà ce temps-là — la réponse n'est plus
+    mesurée qu'à son verdict et à ses signaux."""
+    import inspect
+
+    from services.session import LiveGauges
+
+    gauges = LiveGauges()
+    before = gauges.snapshot()["attention"]
+    after = gauges.apply({"verdict": "partial", "metacog_signals": {}})
+    assert after["attention"] == pytest.approx(before)
+    assert "response_time_ms" not in inspect.signature(LiveGauges.apply).parameters
+
+
+def test_reading_actively_credits_attention_once_per_gesture_and_cooldown(fresh_db):
+    """Questionner, répondre, surligner, annoter : chaque geste crédite
+    l'attention, au plus une fois par ATTENTION_ENGAGEMENT_COOLDOWN_S et par
+    geste — une rafale de surlignages est UN moment d'engagement."""
+    from config.settings import ATTENTION_ENGAGEMENT_COOLDOWN_S, ATTENTION_ENGAGEMENT_CREDIT
+    from services.session import LiveGauges
+
+    gauges = LiveGauges()
+    start = gauges.snapshot()["attention"]
+    gauges.credit_engagement("highlight", now=100.0)
+    gauges.credit_engagement("highlight", now=105.0)  # même rafale : rien de plus
+    gauges.credit_engagement("ask", now=106.0)  # un autre geste compte
+    expected = start + ATTENTION_ENGAGEMENT_CREDIT["highlight"] + ATTENTION_ENGAGEMENT_CREDIT["ask"]
+    assert gauges.snapshot()["attention"] == pytest.approx(expected)
+    gauges.credit_engagement("highlight", now=100.0 + ATTENTION_ENGAGEMENT_COOLDOWN_S)
+    expected += ATTENTION_ENGAGEMENT_CREDIT["highlight"]
+    assert gauges.snapshot()["attention"] == pytest.approx(expected)
+    gauges.credit_engagement("inconnu", now=500.0)
+    assert gauges.snapshot()["attention"] == pytest.approx(expected)
+
+
+def test_curiosity_no_longer_saturates_after_a_few_questions(fresh_db):
+    """Chaque question posée à Clikoda faisait +12,8 points de curiosité (signal
+    exigé ≥ 1,0, plus le bonus de curiosity_signals) : 100 en quatre questions,
+    à chaque séance. La question pèse moitié moins, et la hausse ralentit à
+    l'approche de 100 : vingt questions n'y arrivent pas."""
+    from services.session import LiveGauges
+
+    ask = {
+        "answer": "…",
+        "metacog_signals": {"curiosity": 1.0},
+        "curiosity_signals": {"asked_follow_up_question": True},
+    }
+    gauges = LiveGauges()
+    start = gauges.snapshot()["curiosity"]
+    first = gauges.apply_question(ask)["curiosity"] - start
+    assert 0.0 < first < 12.8 / 2
+    for _ in range(3):
+        gauges.apply_question(ask)
+    assert gauges.snapshot()["curiosity"] < 75.0  # quatre questions : loin de 100
+    for _ in range(16):
+        gauges.apply_question(ask)
+    assert gauges.snapshot()["curiosity"] < 95.0
 
 
 def test_live_gauges_passive_drift_stops_at_the_floor(fresh_db):

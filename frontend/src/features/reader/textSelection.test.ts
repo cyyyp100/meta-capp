@@ -87,6 +87,23 @@ describe("registerTextLayer", () => {
     unregister();
   });
 
+  it("un clic dans le blanc ne sort pas le bloc du DOM (sinon, pas de `click` : le post-it ne se pose pas)", async () => {
+    const { layer } = makeLayer();
+    const unregister = registerTextLayer(layer);
+    const removed: Node[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) removed.push(...record.removedNodes);
+    });
+    observer.observe(layer, { childList: true });
+
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("pointerup"));
+    await Promise.resolve(); // les mutations sont livrées en microtâche
+    observer.disconnect();
+    expect(removed).toEqual([]);
+    unregister();
+  });
+
   it("ne bouge rien hors d'un glissé (sélection au clavier, effacée par le lecteur)", () => {
     const { layer, words } = makeLayer();
     const unregister = registerTextLayer(layer);

@@ -19,7 +19,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from config.settings import PAUSE_ATTENTION_RECOVERY, PAUSE_RECOMMENDATION_WINDOW_S
+from config.settings import PAUSE_ATTENTION_RECOVERY, PAUSE_DEFAULT_MIN, PAUSE_RECOMMENDATION_WINDOW_S
 
 PAUSE_SOURCES = ("manual", "suggested")
 
@@ -128,14 +128,17 @@ class PauseTracker:
 def attention_credit(record: PauseRecord) -> float:
     """Crédit d'attention versé au retour d'une pause.
 
-    Seule la pause CONSEILLÉE et reprise en crédite une, au prorata du temps
-    pris sur la durée conseillée : une reprise au bout de dix secondes n'est pas
-    un repos, sans quoi « accepter puis reprendre » remonterait la jauge
-    gratuitement. Une pause manuelle est neutre, et une pause interrompue par la
-    fin de séance ne crédite rien — il n'y a plus de lecture à mesurer."""
-    if record.source != "suggested" or record.ended_by != "resume" or not record.planned_s:
+    Toute pause reprise en crédite une, au prorata du temps pris sur la durée
+    conseillée — celle de la carte de Clikoda, ou PAUSE_DEFAULT_MIN pour une
+    pause que l'élève prend de lui-même : une reprise au bout de dix secondes
+    n'est pas un repos, sans quoi « pause puis reprendre » remonterait la jauge
+    gratuitement. Une pause manuelle était neutre ; or le repos rend l'attention
+    quel que soit celui qui l'a proposé. Une pause interrompue par la fin de
+    séance ne crédite rien — il n'y a plus de lecture à mesurer."""
+    if record.ended_by != "resume":
         return 0.0
-    ratio = max(0.0, min(1.0, record.duration_s / record.planned_s))
+    reference_s = record.planned_s or PAUSE_DEFAULT_MIN * 60.0
+    ratio = max(0.0, min(1.0, record.duration_s / reference_s))
     return PAUSE_ATTENTION_RECOVERY * ratio
 
 

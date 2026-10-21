@@ -761,6 +761,8 @@ export interface ProgressSession {
   ended_at: string;
   completed: boolean;
   metrics: SessionMetrics;
+  /** Ce que Clikoda a écrit à la fin de la séance — relu, jamais régénéré. */
+  analysis?: string;
   gauges: GaugeSeries;
   profile_changes: ProgressChange[];
   reflections: Reflection[];

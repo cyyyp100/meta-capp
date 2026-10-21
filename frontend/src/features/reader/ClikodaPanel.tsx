@@ -34,6 +34,7 @@ import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
 import { ReflectionBadge, VerdictBadge } from "../questions/VerdictBadge";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
+import { onEngagement } from "./engagement";
 import { renderMathToHtml } from "./renderMath";
 
 interface QaFeedback {
@@ -557,6 +558,12 @@ export function ClikodaPanel({
     };
     const engagedEvents: (keyof WindowEventMap)[] = ["wheel", "scroll", "mousemove", "keydown", "pointerdown", "touchmove"];
     for (const ev of engagedEvents) window.addEventListener(ev, reportEngaged, { capture: true, passive: true });
+    // Lecture active : un surlignage, une note enregistrés (le carnet). Le
+    // serveur en crédite l'attention, à sa cadence.
+    const offEngagement = onEngagement((action) => {
+      if (pausedRef.current || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "engage", action }));
+    });
 
     wsRef.current = ws;
     return () => {
@@ -564,6 +571,7 @@ export function ClikodaPanel({
       window.removeEventListener("blur", reportPresence);
       window.removeEventListener("focus", reportPresence);
       for (const ev of engagedEvents) window.removeEventListener(ev, reportEngaged, { capture: true });
+      offEngagement();
       ws.close();
     };
   }, [docId, demo, ended]);

@@ -42,7 +42,7 @@ def start(
     lang_lesson_id: int | None = None,
     started_at: str | None = None,
 ) -> int:
-    """Ouvre une séance de pratique et fige son AMORCE : profil × 0,8.
+    """Ouvre une séance de pratique et fige son AMORCE (`initialize_session_gauges`).
 
     Même départ qu'une lecture, et pour la même raison : c'est le repère qui
     distingue une jauge exercée d'une jauge restée intacte (`_measured_gauges`)."""

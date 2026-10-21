@@ -17,7 +17,15 @@ from config.settings import (
 )
 from db.metacog import CRITERIA
 
+# Amorce d'une séance : le profil, rapproché du neutre (50) de 20 %. C'était
+# profil × 0,8 — 20 % sous le profil, quel qu'il soit. Une jauge mesurée sans
+# rien de net à en dire finissait à son amorce, et le profil glissait vers elle :
+# l'attention, toujours mesurée (dérive passive), perdait un cinquième de sa
+# valeur à chaque séance neutre (profil 36 -> 23 en huit lectures, oct. 2026),
+# et chaque séance repartait plus bas que la précédente. Rapprochée du neutre,
+# l'amorce ne tire plus que vers 50, à la hausse comme à la baisse.
 SESSION_INHERITANCE_FACTOR = 0.8
+NEUTRAL_GAUGE = 50.0
 PROFILE_SESSION_WEIGHT = 0.1
 
 # Les seuls critères qu'un verdict (ou un taux de réussite) informe honnêtement.
@@ -72,6 +80,11 @@ class GaugeState:
                 delta += 0.3
             elif verdict == "incorrect":
                 delta -= 1.5
+            if self.name == "curiosity" and delta > 0:
+                # Plafond doux : la hausse est proportionnelle à ce qui reste à
+                # gagner. L'élève fait monter la curiosité à volonté (chaque
+                # question qu'il pose) : sans ce frein, elle saturait à 100.
+                delta *= (100.0 - self.value) / 100.0
             self.value = _clamp(self.value + delta)
         return self.value
 
@@ -89,10 +102,12 @@ def make_gauges(profile: dict | None = None) -> dict[str, GaugeState]:
 
 
 def initialize_session_gauges(profile_gauges: dict | None) -> dict[str, float]:
+    """Amorce d'une séance : chaque critère du profil, rapproché du neutre."""
     profile_gauges = profile_gauges or {}
     values: dict[str, float] = {}
     for criterion in CRITERIA:
-        values[criterion] = _clamp(float(profile_gauges.get(criterion, 50.0)) * SESSION_INHERITANCE_FACTOR)
+        profile = float(profile_gauges.get(criterion, NEUTRAL_GAUGE))
+        values[criterion] = _clamp(NEUTRAL_GAUGE + (profile - NEUTRAL_GAUGE) * SESSION_INHERITANCE_FACTOR)
     return values
 
 
@@ -118,7 +133,11 @@ def update_gauges_from_evaluation(
     evaluation: dict,
     response_time_ms: int | None = None,
     consecutive_incorrect: int = 0,
+    signal_scale: dict[str, float] | None = None,
 ) -> dict[str, float]:
+    """`signal_scale` : part du signal retenue, par critère (1 pour les autres) —
+    la question que pose l'élève ne compte que pour une part de la curiosité
+    (`services.session.LiveGauges.apply_question`)."""
     signals = evaluation.get("metacog_signals") or {}
     verdict = evaluation.get("verdict")
     # Type de question : oriente quelles jauges la réponse fait bouger en priorité.
@@ -153,6 +172,7 @@ def update_gauges_from_evaluation(
             continue
         signal = _effective_signal(criterion, signals, evaluation)
         signal *= _type_signal_scale(criterion, target_gauges)
+        signal *= float((signal_scale or {}).get(criterion, 1.0))
         values[criterion] = gauge.update(
             signal=signal,
             verdict=verdict,
@@ -194,8 +214,8 @@ def update_gauges_from_verdict(
 
     Le modèle du lecteur (`update_gauges_from_evaluation`) suppose des signaux :
     privé d'eux, il ne déplace une jauge que de ±1,5 par réponse, et une séance
-    de QCM finirait au ras de son amorce (profil × 0,8) — elle tirerait le profil
-    vers le bas par construction. Ici, chaque jauge visée parcourt
+    de QCM finirait au ras de son amorce — elle tirerait le profil vers cette
+    amorce, pas vers ce qu'elle a mesuré. Ici, chaque jauge visée parcourt
     `GAUGE_VERDICT_WEIGHT` du chemin vers la cible du verdict : après quelques
     réponses, elle dit le taux de réussite de la séance, d'où qu'elle parte.
 
@@ -260,11 +280,11 @@ def _replay_steps(seed: dict | None, measures: list[dict]):
     verdict partout, dérive de la métacognition. Dans le lecteur, une séance en
     compte beaucoup et ses signaux dominent ; dans une séance de pratique, une
     seule réponse rédigée au milieu de QCM laissait la curiosité ou la
-    métacognition à un cheveu de leur amorce (profil × 0,8)… et les comptait
-    pour mesurées : le profil glissait vers elles, à la baisse. Une mesure ne
+    métacognition à un cheveu de leur amorce… et les comptait pour mesurées :
+    le profil glissait vers elles sans qu'aucune mesure le justifie. Une mesure ne
     déplace donc ici que ce qu'elle informe ; le reste reprend sa valeur."""
     seed = seed or {}
-    default = 50.0 * SESSION_INHERITANCE_FACTOR
+    default = initialize_session_gauges({})["attention"]  # l'amorce d'un profil neutre
     gauges = {c: GaugeState(c, _clamp(float(seed.get(c, default)))) for c in CRITERIA}
     yield 0.0, snapshot(gauges), set()
     position = 0
