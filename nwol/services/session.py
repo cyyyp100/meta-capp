@@ -8,8 +8,11 @@ import logging
 import time
 
 from config.settings import (
+    ATTENTION_ENGAGEMENT_COOLDOWN_S,
+    ATTENTION_ENGAGEMENT_CREDIT,
     ATTENTION_PASSIVE_FLOOR,
     ATTENTION_PERSIST_EVERY_S,
+    GAUGE_ASK_CURIOSITY_SCALE,
     PROFILE_SESSION_KIND_WEIGHT,
 )
 from db.answers import get_answers_for_session
@@ -84,14 +87,16 @@ _PROFILE_NUDGE_CRITERIA = VERDICT_CRITERIA
 class LiveGauges:
     """Jauges métacognitives live d'une session de lecture web (en mémoire).
 
-    Seed = profil long terme × 0.8, puis deux sources de mouvement :
+    Seed = profil long terme rapproché du neutre (`initialize_session_gauges`),
+    puis ces sources de mouvement :
 
-      * `apply` — les `metacog_signals`/`verdict` que chaque réponse d'assistant
-        ou évaluation renvoie déjà, plus le temps de réponse et la série
-        d'erreurs (le modèle d'attention les attendait depuis toujours) ;
-      * `apply_reading_behaviour` — la dérive passive du comportement de lecture,
-        seul chemin par lequel `attention` bouge sans LLM ;
-      * `recover_attention` — le crédit d'une pause recommandée et prise ;
+      * `apply` — les `metacog_signals`/`verdict` de l'évaluation d'une réponse,
+        plus la série d'erreurs ; `apply_question` — ceux de la réponse de
+        Clikoda à une question de l'élève, curiosité freinée ;
+      * `apply_reading_behaviour` — la dérive passive du comportement de lecture ;
+      * `credit_engagement` — ce que l'élève FAIT de sa lecture (questionner,
+        répondre, surligner, annoter) ;
+      * `recover_attention` — le crédit d'une pause prise ;
       * `apply_warmup` — l'effet du RYTHME de la révision éclair du sas
         d'entrée (cf. `services.warmup`), versé une fois, à l'entrée en lecture.
 
@@ -107,11 +112,13 @@ class LiveGauges:
         self._gauges = make_gauges(profile)
         self._t0 = time.monotonic()
         self._last_passive_record = 0.0
+        # Dernier crédit versé, par geste (`credit_engagement`).
+        self._last_engagement: dict[str, float] = {}
         if session_id is not None:
             self.attach_session(session_id)
 
     def attach_session(self, session_id: int) -> None:
-        """Rattache la session et fige son AMORCE (profil × 0,8) en base.
+        """Rattache la session et fige son AMORCE en base.
 
         Le lecteur ouvre son WebSocket avant de connaître le `session_id` : sans
         ce rattachement explicite, la première ligne écrite dans `session_gauges`
@@ -123,19 +130,54 @@ class LiveGauges:
         self.session_id = int(session_id)
         self._record()
 
-    def apply(
-        self,
-        evaluation: dict | None,
-        response_time_ms: int | None = None,
-        consecutive_incorrect: int = 0,
-    ) -> dict[str, float]:
-        """Intègre les signaux d'une réponse/évaluation puis renvoie l'état courant."""
+    def apply(self, evaluation: dict | None, consecutive_incorrect: int = 0) -> dict[str, float]:
+        """Intègre l'évaluation d'une réponse puis renvoie l'état courant.
+
+        Le TEMPS mis à répondre n'y coûte rien à l'attention, contrairement à une
+        séance de pratique : dans le lecteur, la dérive passive observe déjà ce
+        temps-là (fenêtre masquée, aucun geste), et le compter une seconde fois
+        coûtait jusqu'à 6 points à chaque réponse rédigée — passé 12 s, c'est-à-
+        dire toujours (de 58 s à 14 min sur les séances 59 et 60)."""
         update_gauges_from_evaluation(
             self._gauges,
             evaluation or {},
-            response_time_ms=response_time_ms,
             consecutive_incorrect=consecutive_incorrect,
         )
+        self._record()
+        return self.snapshot()
+
+    def apply_question(self, result: dict | None) -> dict[str, float]:
+        """Intègre les signaux de la réponse de Clikoda à une question de l'élève.
+
+        Questionner de sa propre initiative est le signal de curiosité par
+        excellence, et le prompt exige un signal d'au moins 1,0 : +12,8 points par
+        question, la jauge saturait à 100 en quatre questions, à chaque séance.
+        La question pèse `GAUGE_ASK_CURIOSITY_SCALE` de ce signal — et toute
+        hausse de la curiosité ralentit à l'approche de 100 (`GaugeState.update`)."""
+        update_gauges_from_evaluation(
+            self._gauges,
+            result or {},
+            signal_scale={"curiosity": GAUGE_ASK_CURIOSITY_SCALE},
+        )
+        self._record()
+        return self.snapshot()
+
+    def credit_engagement(self, action: str, now: float | None = None) -> dict[str, float]:
+        """Crédit d'attention d'un geste de lecture active (`ATTENTION_ENGAGEMENT_CREDIT`).
+
+        Au plus une fois par `ATTENTION_ENGAGEMENT_COOLDOWN_S` et par geste : une
+        rafale de surlignages est UN moment d'engagement. Un geste inconnu ne
+        crédite rien. Il ne peut que remonter la jauge."""
+        points = float(ATTENTION_ENGAGEMENT_CREDIT.get(action, 0.0))
+        gauge = self._gauges.get("attention")
+        if gauge is None or points <= 0.0:
+            return self.snapshot()
+        now = time.monotonic() if now is None else float(now)
+        last = self._last_engagement.get(action)
+        if last is not None and now - last < ATTENTION_ENGAGEMENT_COOLDOWN_S:
+            return self.snapshot()
+        self._last_engagement[action] = now
+        gauge.apply_delta(points)
         self._record()
         return self.snapshot()
 
@@ -170,7 +212,7 @@ class LiveGauges:
         return self.snapshot()
 
     def recover_attention(self, points: float) -> dict[str, float]:
-        """Crédit d'attention d'une pause réellement prise.
+        """Crédit d'attention d'une pause réellement prise (`services.pause.attention_credit`).
 
         La dérive passive est suspendue pendant la pause (cf. le ticker du
         lecteur) ; ce crédit-ci est le bénéfice de la pause elle-même, versé une
@@ -471,9 +513,9 @@ def _update_general_analysis(
 def _measured_gauges(session_id: int, scope: str = READING) -> dict[str, float]:
     """Jauges de fin de session, AMPUTÉES de celles qui n'ont jamais bougé.
 
-    Une session démarre à profil × 0,8. Une jauge que la séance n'a pas exercée
-    finit donc exactement à son amorce — 20 % sous le profil — et la remonter
-    telle quelle tirait le profil vers le bas à chaque session, sans qu'aucune
+    Une session démarre à son amorce (le profil rapproché du neutre). Une jauge
+    que la séance n'a pas exercée finit donc exactement là, et la remonter telle
+    quelle tirait le profil vers cette amorce à chaque session, sans qu'aucune
     mesure ne le justifie. On ne remonte que ce qui a bougé ; le moteur de profil
     laisse les autres critères intacts (`update_profile_gauges_from_session`
     retombe sur la valeur courante quand un critère est absent).

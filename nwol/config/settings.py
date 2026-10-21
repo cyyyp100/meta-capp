@@ -1252,8 +1252,11 @@ ASSISTANT_MATH_AHEAD_DWELL_S = 15.0
 # (bornée côté serveur), qui sert de référence au crédit ci-dessous.
 PAUSE_DEFAULT_MIN = 5
 PAUSE_MAX_MIN = 20
-# Crédit d'attention versé au retour d'une pause CONSEILLÉE, au prorata du temps
-# pris sur la durée conseillée. Une pause manuelle est neutre pour les jauges.
+# Crédit d'attention versé au retour d'une pause, au prorata du temps pris sur
+# la durée conseillée (PAUSE_DEFAULT_MIN pour une pause que l'élève prend de
+# lui-même). Une pause manuelle était neutre ; or le repos rend l'attention quel
+# que soit celui qui l'a proposé, et décider de s'arrêter est de l'autorégulation
+# (retour d'usage du 2026-10-21 : « je fais des pauses et l'attention reste basse »).
 PAUSE_ATTENTION_RECOVERY = 12.0
 # Une pause « suit une recommandation » si une intervention du LLM (ou un
 # conseil de séance) est arrivée moins de N secondes avant son début. Le type et
@@ -1275,6 +1278,22 @@ ATTENTION_DRIFT_PER_MIN = 2.0        # points/min perdus au-delà de la grâce
 ATTENTION_AWAY_PER_MIN = 6.0         # points/min perdus fenêtre masquée / hors focus
 ATTENTION_PROGRESS_BONUS = 1.2       # points gagnés par nouvelle page lue (PAGE_READ_MIN_DWELL_S)
 ATTENTION_PASSIVE_FLOOR = 15.0       # plancher de la seule dérive passive
+# Engagement : ce que l'élève FAIT de sa lecture prouve qu'il y est. Poser une
+# question à Clikoda, répondre à la sienne, surligner, annoter ne rapportaient
+# rien à l'attention : seule la progression d'une page la créditait, et toute
+# réponse rédigée lui COÛTAIT (au-delà de 12 s de réponse, jusqu'à 6 points —
+# les dix réponses des séances 59 et 60 ont pris de 58 s à 14 min). Chaque geste
+# crédite l'attention, au plus une fois par ATTENTION_ENGAGEMENT_COOLDOWN_S et
+# par geste : surligner dix lignes d'affilée ne vaut pas dix fois l'effort.
+# Lus uniquement par `services/session.LiveGauges.credit_engagement` ; le
+# lecteur envoie `engage` (surligner, annoter), le socket compte le reste.
+ATTENTION_ENGAGEMENT_CREDIT: dict[str, float] = {
+    "ask": 2.0,        # une question posée à Clikoda
+    "answer": 1.5,     # une réponse écrite à la question de Clikoda
+    "highlight": 1.0,  # un passage surligné, souligné, barré ou encadré
+    "note": 1.5,       # une note, un post-it ou un signet écrits
+}
+ATTENTION_ENGAGEMENT_COOLDOWN_S = 20.0
 # Une séance sans canal temps réel (séance de langue) n'observe l'attention que
 # par INTERVALLES — une page tournée, une question répondue. Un intervalle plus
 # long que permis ne coûte que sa part inexpliquée (dépassement × part du temps
@@ -1373,6 +1392,10 @@ WARMUP_RUSH_META = 1.5
 WARMUP_SLOW_FRONT_RETENTION = 1.0
 WARMUP_SLOW_BACK_RETENTION = 2.0
 WARMUP_DRIFT_ATTENTION = 3.0
+# Plafond du coût en attention de toute la révision éclair : cinq cartes cliquées
+# sans lire coûtaient 15 points (séance 59), plus qu'un quart d'heure loin de
+# l'écran — pour un prélude d'une minute dont les cartes sont parfois déjà sues.
+WARMUP_MAX_ATTENTION_COST = 5.0
 
 # ── Poids d'une séance dans le profil long terme, par catégorie ──────────────
 # Le profil glisse vers les jauges de chaque séance finalisée d'une part α
@@ -1397,8 +1420,18 @@ PROFILE_SESSION_KIND_WEIGHT: dict[str, float] = {"reading": 1.0, "lang": 1.0, "q
 # LLM garde le modèle du lecteur (signaux, `update_gauges_from_evaluation`).
 GAUGE_VERDICT_TARGETS: dict[str, float] = {"correct": 100.0, "partial": 60.0, "incorrect": 15.0}
 # Part du chemin vers la cible parcourue à chaque verdict : au bout de huit
-# réponses, la jauge dit la séance plutôt que son amorce (profil × 0,8).
+# réponses, la jauge dit la séance plutôt que son amorce.
 GAUGE_VERDICT_WEIGHT = 0.2
+
+# Curiosité : questionner de sa propre initiative en est LE signal, et le prompt
+# de réponse exige un signal d'au moins 1,0 — +12,8 points par question posée à
+# Clikoda : la jauge atteignait 100 en trois ou quatre questions, à chaque séance
+# (retour d'usage du 2026-10-21). La question posée ne pèse plus que cette part
+# de son signal, et toute hausse de la curiosité est proportionnelle à ce qui
+# reste à gagner, (100 − valeur) / 100 (`metacog.gauges.GaugeState.update`) :
+# la dixième question d'une séance en dit moins que la première, et 100 n'est
+# plus jamais atteint. Lu par `services/session.LiveGauges.apply_question`.
+GAUGE_ASK_CURIOSITY_SCALE = 0.5
 
 # Question réflexive (métacognition, anticipation : `no_wrong_answer` dans
 # config/question_types.py) : il n'y a pas de mauvaise réponse, donc pas de

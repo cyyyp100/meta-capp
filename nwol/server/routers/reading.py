@@ -6,6 +6,9 @@
 #                     {"type":"activity","hidden":bool,"engaged":bool}  # fenêtre
 #                       masquée / app au second plan, ou (engaged) défilement /
 #                       souris / clavier -> alimentent la dérive passive d'attention
+#                     {"type":"engage","action":"highlight"|"note"}  # l'élève a
+#                       surligné / annoté -> crédit d'attention (une question
+#                       posée ou une réponse écrite sont comptées ici même)
 #                     {"type":"pause","source":"manual"|"suggested","minutes":int|null}
 #                       # pause OUVERTE (bouton de l'élève, ou carte de Clikoda
 #                       acceptée : minutes = durée conseillée) -> tout est figé :
@@ -47,6 +50,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from config.settings import (
     ASSISTANT_DEFAULT_MODE,
     ASSISTANT_MODES,
+    ATTENTION_ENGAGEMENT_CREDIT,
     FOCUS_DEFAULT_MIN,
     PAUSE_DEFAULT_MIN,
     PAUSE_MAX_MIN,
@@ -116,11 +120,12 @@ class ReaderMessage(BaseModel):
 
     type: Literal[
         "viewport", "mode", "focus", "ask", "rephrase", "recap", "hook",
-        "start_qa", "qa_answer", "activity", "pause", "resume", "start_reading",
+        "start_qa", "qa_answer", "activity", "engage", "pause", "resume", "start_reading",
     ]
     page: int | None = None
     hidden: bool = False
     engaged: bool = False
+    action: str | None = None
     minutes: int | None = None
     source: str = "manual"
     session_id: int | None = None
@@ -155,6 +160,12 @@ class ReaderMessage(BaseModel):
     def _known_source(cls, value):
         # Une source inconnue ne jette pas la pause : elle compte comme manuelle.
         return value if value in PAUSE_SOURCES else "manual"
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _known_action(cls, value):
+        # Un geste inconnu ne crédite rien (le message reste valide, sans effet).
+        return value if value in ATTENTION_ENGAGEMENT_CREDIT else None
 
     @field_validator("session_id", mode="before")
     @classmethod
@@ -625,10 +636,17 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         except Exception:  # persistance best-effort : la lecture reprend quoi qu'il arrive
             logger.debug("Persistance de la pause ignorée", exc_info=True)
 
+    async def credit_engagement(action: str, now: float) -> None:
+        """Verse le crédit d'attention d'un geste (décidé par LiveGauges, qui
+        écrit en base : exécuteur)."""
+        gauges = state["live_gauges"]
+        if gauges is not None:
+            await loop.run_in_executor(None, gauges.credit_engagement, action, now)
+
     async def resume_reading(now: float) -> None:
         """Reprise : fin de pause, crédit d'attention éventuel, enregistrement.
 
-        Le crédit (pause conseillée seulement, au prorata) est décidé par
+        Le crédit (au prorata du temps pris sur la durée conseillée) est décidé par
         services/pause ; ici on ne fait que le verser. Les écritures partent en
         exécuteur."""
         record = end_pause(now, "resume")
@@ -743,6 +761,17 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     memory.on_interaction(time.monotonic())
                 continue
 
+            if kind == "engage":
+                # Surligner, annoter : un geste de lecture active, donc aussi
+                # une présence. En pause, l'élève n'est pas là (le lecteur est
+                # masqué) : rien n'est compté.
+                if pause.active or msg.action is None:
+                    continue
+                now = time.monotonic()
+                memory.on_interaction(now)
+                await credit_engagement(msg.action, now)
+                continue
+
             if kind == "pause":
                 # Bouton « Pause » de l'élève, ou carte de Clikoda acceptée (la
                 # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
@@ -773,6 +802,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # L'élève prend la main : une question automatique en génération
                 # n'a plus sa place (cf. on_intervention).
                 state["user_turn"] += 1
+            if kind == "ask" and (msg.question or "").strip():
+                # Questionner, répondre : l'engagement est le geste lui-même,
+                # crédité qu'Ollama réponde ou non.
+                await credit_engagement("ask", time.monotonic())
+            elif kind == "qa_answer" and (msg.answer or "").strip():
+                await credit_engagement("answer", time.monotonic())
 
             if kind == "start_reading":
                 # Sas d'entrée franchi : le warm-up de la première question part
@@ -832,7 +867,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 def on_ask_success(result: dict, _q=question, _page=page, _sid=state["session_id"]) -> None:
                     end_generation()
                     if state["live_gauges"] is not None:
-                        state["live_gauges"].apply(result)
+                        state["live_gauges"].apply_question(result)
                     answer = result.get("answer", "")
                     remember_turn("ask", ("student", _q), ("clikoda", answer))
                     state["exchanges"].append({"question": _q, "answer": answer})
@@ -904,9 +939,10 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     # Type de la question -> jauges type-aware (curiosité ≠ contexte).
                     ev["question_type"] = state.get("qa_question_type")
                     verdict = ev.get("verdict")
-                    # Deux signaux comportementaux que le modèle d'attention attend
-                    # depuis toujours et que personne ne lui donnait : le temps mis à
-                    # répondre, et la série d'erreurs en cours.
+                    # Le temps mis à répondre (fatigue, persistance) et la série
+                    # d'erreurs en cours (attention). Le temps ne coûte rien à
+                    # l'attention ici : la dérive passive l'observe déjà
+                    # (cf. LiveGauges.apply).
                     sent_at = float(state.get("qa_sent_at") or 0.0)
                     response_time_ms = (
                         int(max(0.0, time.monotonic() - sent_at) * 1000) if sent_at else None
@@ -917,7 +953,6 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     if state["live_gauges"] is not None:
                         state["live_gauges"].apply(
                             ev,
-                            response_time_ms=response_time_ms,
                             consecutive_incorrect=int(state["consecutive_incorrect"]),
                         )
                     # Verdict ET forme : la longueur de ce qui vient d'être écrit

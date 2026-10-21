@@ -7,6 +7,7 @@ import pytest
 
 from config.settings import (
     WARMUP_DRIFT_ATTENTION,
+    WARMUP_MAX_ATTENTION_COST,
     WARMUP_MAX_CARDS,
     WARMUP_RUSH_ATTENTION,
     WARMUP_RUSH_META,
@@ -69,6 +70,16 @@ def test_each_pace_costs_its_own_gauges():
     # Un décrochage ne dit plus rien de la mémoire : il ne coûte que l'attention.
     assert gauge_deltas([{"front_pace": "drifted", "back_pace": "steady"}]) == {"attention": -WARMUP_DRIFT_ATTENTION}
     assert gauge_deltas([{"front_pace": "steady", "back_pace": "steady"}]) == {}
+
+
+def test_a_whole_rushed_warmup_costs_attention_at_most_the_cap():
+    """Séance 59 : cinq cartes cliquées sans lire coûtaient 15 points
+    d'attention, plus qu'un quart d'heure loin de l'écran. Le coût est plafonné ;
+    la métacognition, elle, paie toujours chaque face."""
+    rows = [{"front_pace": "rushed", "back_pace": "rushed"}] * WARMUP_MAX_CARDS
+    deltas = gauge_deltas(rows)
+    assert deltas["attention"] == -WARMUP_MAX_ATTENTION_COST
+    assert deltas["meta_cognition"] == -2 * WARMUP_MAX_CARDS * WARMUP_RUSH_META
 
 
 def test_record_judges_on_stored_text_and_counts_once(fresh_db):

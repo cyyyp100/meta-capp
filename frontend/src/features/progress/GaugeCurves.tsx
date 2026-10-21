@@ -9,7 +9,7 @@
 // ce que porte l'axe — le temps (lecture, épisode), le numéro de question (quiz)
 // ou d'exercice (leçon de langue) —, que le serveur déclare (`gauges.axis`).
 //
-// Le trait pointillé porte l'AMORCE (profil × 0,8). Sans lui, une jauge restée
+// Le trait pointillé porte l'AMORCE (le profil rapproché du neutre). Sans lui, une jauge restée
 // à son point de départ ressemble à une mesure — c'est exactement la confusion
 // que `services/session._measured_gauges` évite déjà côté finalisation.
 import {

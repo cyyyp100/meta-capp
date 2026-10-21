@@ -329,7 +329,7 @@ def _counts(user_id: int) -> dict[str, int]:
 def _gauge_series(session_id: int, scope: str = READING, axis: str = "time") -> dict:
     """Courbes intra-session, une série par jauge, plus son amorce.
 
-    L'amorce (profil × 0,8, cf. `services/session.LiveGauges.attach_session` et
+    L'amorce (le profil rapproché du neutre, cf. `services/session.LiveGauges.attach_session` et
     `services/practice.start`) est remontée à part : une jauge restée dessus n'a
     rien mesuré, et la lire comme un « net retrait » est exactement l'erreur que
     `_measured_gauges` évite déjà côté finalisation. L'écran doit pouvoir faire
