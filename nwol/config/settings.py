@@ -1188,7 +1188,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 45
+DB_SCHEMA_VERSION = 46
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -1310,6 +1310,11 @@ ATTENTION_PERSIST_EVERY_S = 60.0     # cadence d'écriture des jauges passives e
 # Lu par services/session_memory.pages_read, seul auteur du compte
 # (`reading_sessions.pages_read`) et du bonus de progression ci-dessus.
 PAGE_READ_MIN_DWELL_S = 5.0
+# Une séance ouverte écrit son temps de lecture (`reading_sessions.duration_s`)
+# au plus une fois par cet intervalle. Fermer le logiciel sans « Terminer » ne
+# laisse rien d'autre : c'est ce temps-là qui date la clôture de la séance au
+# démarrage suivant (services/session.close_abandoned_sessions).
+SESSION_HEARTBEAT_S = 60.0
 
 # ── Temps restant d'un document (carte « Reprendre ») ────────────────────────
 # Le « ≈ N min » de la carte était la médiane des 40 dernières séances, quiz et

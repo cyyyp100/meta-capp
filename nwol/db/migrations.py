@@ -235,6 +235,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 45)
         current = 45
 
+    if current < 46 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v46(conn)
+        _set_version(conn, 46)
+        current = 46
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -2037,6 +2042,38 @@ def _migrate_to_v45(conn) -> None:
             len(users), int(relabelled or 0), int(dated or 0),
         )
     logger.info("Migration SQLite v45 terminée")
+
+
+def _migrate_to_v46(conn) -> None:
+    """Une lecture quittée en fermant le logiciel se clôt au démarrage suivant
+    (`reading_sessions.analysis`, `reading_sessions.finalized_at`).
+
+    Une séance n'était close que par « Terminer » : fermer la fenêtre en pleine
+    lecture la laissait ouverte pour toujours, « Session en cours » dans la frise
+    de « Ma progression », jamais mesurée dans le profil. Elle est désormais
+    close et finalisée au démarrage suivant, comme si l'élève avait passé les
+    questions du sas de sortie (services/session). Deux colonnes le permettent :
+
+    * `finalized_at` — la finalisation a eu lieu (une seule fois, comme
+      `practice_sessions.finalized_at`). Une séance close mais jamais finalisée
+      (logiciel fermé dans le sas de sortie) se reconnaît à elle ;
+    * `analysis` — le bilan de Clikoda, persisté comme celui d'un quiz ou d'une
+      séance de langue : celui d'une séance reprise au démarrage n'a été lu par
+      personne, il se relit dans le détail de la séance.
+
+    Les séances déjà closes sont réputées finalisées (`finalized_at` = leur
+    clôture) : la reprise ne rejoue pas l'historique. Rejouable : les colonnes ne
+    sont ajoutées qu'une fois, et la date n'est posée que là où elle manque."""
+    logger.info("Migration SQLite v46 démarrée")
+    with conn:
+        _ensure_column(conn, "reading_sessions", "analysis", "TEXT")
+        _ensure_column(conn, "reading_sessions", "finalized_at", "DATETIME")
+        dated = conn.execute(
+            "UPDATE reading_sessions SET finalized_at = ended_at "
+            "WHERE finalized_at IS NULL AND ended_at IS NOT NULL"
+        ).rowcount
+        logger.info("Migration v46 : %d séance(s) close(s) réputée(s) finalisée(s)", int(dated or 0))
+    logger.info("Migration SQLite v46 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

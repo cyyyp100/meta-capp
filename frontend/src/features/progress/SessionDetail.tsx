@@ -19,6 +19,7 @@ import type { ProgressKind, SessionPause } from "@/api/client";
 import { useT } from "../../i18n";
 import { formatDuration } from "../session/duration";
 import {
+  AnalysisBlock,
   Bar,
   Block,
   DetailHeader,
@@ -74,6 +75,7 @@ function ReadingDetail({ sessionId }: { sessionId: number }) {
 
       <GaugesBlock gauges={data.gauges} />
       <ProfileChangesBlock changes={data.profile_changes} />
+      <AnalysisBlock analysis={data.analysis ?? ""} />
       <ReflectionsBlock reflections={data.reflections} />
 
       {data.page_dwell.length > 0 && (

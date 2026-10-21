@@ -54,6 +54,7 @@ from config.settings import (
     FOCUS_DEFAULT_MIN,
     PAUSE_DEFAULT_MIN,
     PAUSE_MAX_MIN,
+    SESSION_HEARTBEAT_S,
     WARMUP_MAX_CARDS,
 )
 from db.answers import save_answer
@@ -271,6 +272,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         "qa_history": [],  # Q&R de la session relayées au LLM (5 dernières)
         "pages_read": 0,  # pages LUES au dernier tick (bonus de progression)
         "pages_read_saved": 0,  # dernier compte écrit en base (reading_sessions)
+        "heartbeat_at": 0.0,  # dernier temps de lecture écrit en base (save_heartbeat)
         "pending_warmup": None,  # temps de la révision éclair, en attente du session_id
         "closed_session": None,  # séance close qu'un message a voulu rattacher (refusée)
     }
@@ -575,6 +577,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         except Exception:  # persistance best-effort : le prochain tick réessaie
             logger.debug("Persistance des pages lues ignorée", exc_info=True)
 
+    def save_heartbeat(now: float, force: bool = False) -> None:
+        """Écrit le temps de lecture de la séance ouverte, au plus une fois par
+        SESSION_HEARTBEAT_S. Fermer le logiciel sans « Terminer » ne laisse que
+        lui pour dater la clôture de la séance au démarrage suivant
+        (services/session.close_abandoned_sessions). Une séance déjà close
+        garde la durée que `/end` y a posée (db.sessions.update_session_progress)."""
+        sid = state["session_id"]
+        gauges = state["live_gauges"]
+        if not sid or gauges is None:
+            return
+        if not force and now - state["heartbeat_at"] < SESSION_HEARTBEAT_S:
+            return
+        state["heartbeat_at"] = now
+        try:
+            update_session_progress(int(sid), duration_s=int(gauges.elapsed_s()))
+        except Exception:  # persistance best-effort : le prochain battement réessaie
+            logger.debug("Persistance du temps de lecture ignorée", exc_info=True)
+
     def passive_attention(elapsed_s: float, now: float, read: int) -> None:
         """Fait vivre la jauge d'attention à partir du COMPORTEMENT de lecture.
 
@@ -589,6 +609,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         progressed = max(0, read - int(state["pages_read"]))
         state["pages_read"] = read
         save_pages_read(read)
+        save_heartbeat(now)
         gauges = state["live_gauges"]
         if gauges is None:
             return
@@ -1065,6 +1086,8 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     {int(k): int(v) for k, v in memory.visits_by_page.items()},
                 )
             save_pages_read(len(memory.pages_read()))
+            if memory.reading_started:
+                save_heartbeat(time.monotonic(), force=True)
         except Exception:  # pragma: no cover - persistance best-effort
             logger.debug("Persistance du dwell ignorée", exc_info=True)
         if state["session_id"]:

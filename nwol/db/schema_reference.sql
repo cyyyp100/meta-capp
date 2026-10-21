@@ -1,7 +1,7 @@
 -- Schéma de référence de Meta-Capp — GÉNÉRÉ, ne pas éditer à la main.
 --
 -- Forme réelle d'une base neuve après application des migrations
--- (config.settings.DB_SCHEMA_VERSION = 45).
+-- (config.settings.DB_SCHEMA_VERSION = 46).
 -- Régénérer avec :  python scripts/dump_schema.py
 --
 -- Tables créées par une migration mais sans code lecteur ni écrivain
@@ -735,7 +735,7 @@ CREATE TABLE reading_sessions (
     pages_read   INTEGER DEFAULT 0,
     duration_s   INTEGER,
     chapters_completed TEXT
-);
+, analysis TEXT, finalized_at DATETIME);
 CREATE TABLE rephrasing (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     question_id       INTEGER REFERENCES questions(id) ON DELETE SET NULL,

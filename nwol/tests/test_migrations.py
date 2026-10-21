@@ -517,3 +517,34 @@ def test_v45_labels_the_highlights_by_their_old_color(fresh_db, monkeypatch):
     assert conn.execute("SELECT label_id FROM reader_highlights WHERE quote='explication'").fetchone()[0] is None
     delete_document(doc_id)
     assert conn.execute("SELECT COUNT(*) FROM reader_notes").fetchone()[0] == 0
+
+
+def test_v46_keeps_open_sessions_open_and_closed_ones_finalized(fresh_db, monkeypatch):
+    """Une base v45 avec une lecture close et une restée ouverte (logiciel
+    fermé en pleine lecture) : la migration ajoute `analysis` et `finalized_at`.
+    La séance close est réputée finalisée — la reprise au démarrage ne rejoue
+    pas l'historique ; l'ouverte reste ouverte, à clore au démarrage. Rejouable."""
+    from db import get_connection, migrations
+    from db.documents import upsert_document
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+    from db.sessions import end_session, get_session, start_session
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 45)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    doc_id = upsert_document("/tmp/cours.pdf", "cours.pdf", 40, "pdfium_scroll", False)
+    closed = start_session(doc_id)
+    end_session(closed, duration_s=600)
+    left_open = start_session(doc_id)
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 46)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 46
+    done, pending = get_session(closed), get_session(left_open)
+    assert done["finalized_at"] == done["ended_at"] and done["analysis"] is None
+    assert pending["ended_at"] is None and pending["finalized_at"] is None

@@ -137,6 +137,10 @@ def get_session_progress(session_id: int, user_id: int = DEFAULT_USER_ID) -> dic
         "ended_at": session.get("ended_at") or "",
         "completed": bool(session.get("ended_at")),
         "metrics": _safe(lambda: session_metrics(int(session_id)), {}),
+        # Le bilan de Clikoda, relu tel qu'écrit (vide si le LLM n'a pas pu le
+        # faire). Celui d'une séance quittée en fermant le logiciel n'a été
+        # écrit qu'au démarrage suivant : c'est ici qu'on le lit.
+        "analysis": str(session.get("analysis") or ""),
         "gauges": _gauge_series(int(session_id), READING, axis="time"),
         "profile_changes": changes,
         # Les mots de l'apprenant, relus TELS QUELS. Ni résumés, ni reformulés.
