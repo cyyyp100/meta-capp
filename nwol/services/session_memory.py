@@ -1,4 +1,4 @@
-# reader/session_memory.py — Mémoire courte de la session de lecture
+# services/session_memory.py — Mémoire courte de la session de lecture
 #
 # Alimente la politique d'intervention et la synthèse de fin de session :
 # pages vues (avec temps cumulé et nombre de visites), questions posées à

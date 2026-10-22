@@ -292,3 +292,17 @@ def test_manual_card_lang_prompt_fits(family, lang, machine):
         "front": side, "back": side, "languages": tuple(LANGUAGE_SCRIPTS), "explain_lang": lang,
     })
     _check("flashcard_lang_rules", prompt, lang, machine)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("family", ["latin", "hanzi", "arabe"])
+def test_lang_correction_prompt_fits(family, lang, machine):
+    """Correction d'une production : phrase attendue et tentative au plafond de
+    LANG_CORRECTION_MAX_CHARS (le service coupe au-delà), dans l'écriture la
+    plus coûteuse, et un nom de langue au plafond de LANG_NAME_MAX_CHARS."""
+    from config.settings import LANG_CORRECTION_MAX_CHARS, LANG_NAME_MAX_CHARS
+
+    text = {"latin": LONG_FR * 2, "hanzi": "我" * 500, "arabe": "كِتَابُهُ " * 100}[family][:LANG_CORRECTION_MAX_CHARS]
+    assert len(text) == LANG_CORRECTION_MAX_CHARS
+    prompt = prompts.build_lang_correction_prompt("x" * LANG_NAME_MAX_CHARS, text, text)
+    _check("lang_correction", prompt, lang, machine)

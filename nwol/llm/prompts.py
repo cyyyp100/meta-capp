@@ -13,12 +13,16 @@ from config.settings import (
     DOCUMENT_DIGEST_PROMPT_CHARS,
     LANGUAGE_SCRIPTS,
     LATIN_SCRIPT,
+    PROFILE_ANALYSIS_ANSWER_TOKENS,
+    PROFILE_ANALYSIS_QUESTION_TOKENS,
+    PROFILE_ANALYSIS_REFLECTIONS,
     PROMPT_TOKEN_WEIGHTS,
     SCRIPT_HINTS,
     SCRIPTS,
     TONAL_LANGUAGES,
     compact_context,
     prompt_limits,
+    task_options,
 )
 from config.subjects import DISCIPLINES, LANGUAGE_SUBJECTS
 
@@ -1734,6 +1738,10 @@ def build_profile_analysis_prompt(
     session qui vient de s'achever n'est que l'indice le plus récent, versé au
     portrait précédent. Sans ce cadrage, le modèle racontait la dernière séance —
     c'est exactement ce que la page profil ne doit pas afficher."""
+    reflections = _fit_reflections(reflections)
+    # Écrite par le modèle dans le budget de sortie de cette même tâche : elle
+    # n'en sort que par une base importée ou modifiée à la main.
+    previous_analysis = _fit_tokens(previous_analysis or "", task_options("profile_analysis")["num_predict"])
     if _i18n.current_lang() == "en":
         return f"""You are the metacognitive coach of MetaC-App, keeping an evolving portrait of the learner.
 
@@ -2234,6 +2242,19 @@ Renvoie une entrée par question en conservant le même "id". Rien en dehors du 
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _fit_reflections(reflections: list[dict] | None) -> list[dict]:
+    """Réponses de réflexion du sas de sortie, bornées en tokens du modèle actif
+    (PROFILE_ANALYSIS_*) : l'élève y écrit librement, et un prompt qui déborde
+    perd son DÉBUT — les consignes et le profil."""
+    return [
+        {
+            "question": _fit_tokens(str(item.get("question") or ""), PROFILE_ANALYSIS_QUESTION_TOKENS),
+            "answer": _fit_tokens(str(item.get("answer") or ""), PROFILE_ANALYSIS_ANSWER_TOKENS),
+        }
+        for item in list(reflections or [])[:PROFILE_ANALYSIS_REFLECTIONS]
+    ]
 
 
 # ── Module langue ─────────────────────────────────────────────────────────────
