@@ -44,7 +44,7 @@ pydantic==2.10.6          # request bodies in server/routers (used directly)
 # Native desktop shell (embeds the local web UI in an OS window)
 pywebview==6.2.1
 # Windows-only: pywebview's EdgeChromium/WebView2 backend needs the .NET binding.
-pythonnet==3.0.5 ; sys_platform == "win32"
+pythonnet==3.2.1 ; sys_platform == "win32"
 # Linux: the native window needs GTK or Qt, deliberately NOT pinned here —
 # GTK requires system libraries pip cannot install, Qt is ~200 MB. Without
 # either, the app opens in the default browser (desktop/pywebview_main.py).
