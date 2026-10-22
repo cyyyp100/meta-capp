@@ -991,6 +991,12 @@ LANG_WRITING_LENGTH: dict[str, tuple[tuple[int, int], ...]] = {
 LANG_WRITING_TARGET_WORDS = 3            # mots du jour à employer
 LANG_WRITING_BANK_WORDS = 8              # banque de mots proposée à côté de la consigne
 LANG_WRITING_MAX_ERRORS = 3              # erreurs relevées par la correction, les plus importantes d'abord
+# Correction d'une production courte (services/lang.correct_attempt) : phrase
+# attendue et tentative coupées à cette longueur avant le prompt (num_ctx 2048,
+# tests/services/test_lang_prompt_budget.py) ; le nom de la langue, au sien. Une
+# phrase d'exercice tient en 160 caractères (LANG_LESSON_TEXT_MAX_CHARS).
+LANG_CORRECTION_MAX_CHARS = 400
+LANG_NAME_MAX_CHARS = 40
 # Vocabulaire des erreurs, hérité de la correction du flux historique
 # (llm/prompts.build_lang_correction_prompt) : une seule taxonomie dans l'application.
 LANG_WRITING_ERROR_TYPES: tuple[str, ...] = (
@@ -1163,6 +1169,16 @@ DOCUMENT_DIGEST_EXCERPT_CHARS = 4000
 DOCUMENT_DIGEST_PROMPT_CHARS = 2400
 DOCUMENT_SUMMARY_MAX_CHARS = 220
 DOCUMENT_KEYWORDS_MAX = 6
+
+# Analyse générale de l'apprenant (llm/prompts.build_profile_analysis_prompt,
+# tâche profile_analysis, num_ctx 4096). Les réponses de réflexion du sas de
+# sortie y entraient sans borne : trois réponses de 2000 caractères, ou de 500
+# en chinois, débordaient le contexte et Ollama coupait les consignes. Bornées
+# en TOKENS du modèle actif (deux questions fixes + une générée) ; la base garde
+# le texte entier. Banc : tests/services/test_reader_prompt_budget.py.
+PROFILE_ANALYSIS_REFLECTIONS = 3
+PROFILE_ANALYSIS_ANSWER_TOKENS = 300
+PROFILE_ANALYSIS_QUESTION_TOKENS = 60
 
 # Base de données, logs et assets : en app empaquetée (gelée) -> données
 # utilisateur de l'OS (persistent entre mises à jour, _MEIPASS est en lecture

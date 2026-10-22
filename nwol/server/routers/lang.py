@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from config.settings import LANG_WRITING_MAX_CHARS
+from config.settings import LANG_CORRECTION_MAX_CHARS, LANG_NAME_MAX_CHARS, LANG_WRITING_MAX_CHARS
 from services import lang_hook, lang_runs, lang_writing
 from services.lang import (
     complete_lesson,
@@ -30,9 +30,12 @@ class LessonBody(BaseModel):
 
 
 class CorrectBody(BaseModel):
-    language: str
-    target_phrase: str
-    user_attempt: str
+    # Le service coupe à LANG_CORRECTION_MAX_CHARS ; ici, seulement un
+    # garde-fou contre une requête démesurée. La langue entre telle quelle
+    # dans le prompt : elle est bornée ici.
+    language: str = Field(max_length=LANG_NAME_MAX_CHARS)
+    target_phrase: str = Field(max_length=LANG_CORRECTION_MAX_CHARS * 4)
+    user_attempt: str = Field(max_length=LANG_CORRECTION_MAX_CHARS * 4)
 
 
 class SrReviewBody(BaseModel):
