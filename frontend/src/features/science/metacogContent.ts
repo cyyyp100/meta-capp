@@ -266,26 +266,26 @@ export const scienceContent: Record<Lang, ScienceContent> = {
   fr: {
     title: "Pourquoi Meta-Capp fonctionne comme ça ?",
     intro: [
-      "Cette page transpose dans la version web la page explicative qui existait déjà dans l'application Tkinter. Elle liste les sources psychologiques utilisées pour justifier les sas, les questions, les flashcards, les jauges et le profil métacognitif.",
+      "Chaque étape d'une séance — le sas d'entrée, la révision éclair, les questions de Clikoda, les jauges, le bilan et le repos de fin — s'appuie sur un résultat de recherche en psychologie de l'apprentissage. Cette page dit lequel, et ce que Meta-Capp en fait concrètement.",
       "Les jauges ne sont pas des mesures médicales. Ce sont des indicateurs pédagogiques internes qui résument des signaux observables pour adapter le rythme, les questions et les révisions.",
-      "La version web garde le principe central : lire librement, interagir avec Clikoda, produire des réponses, recevoir du feedback, consolider le profil, puis terminer par un sas de réflexion et une pause de repos.",
+      "Le principe central : lire librement, interroger Clikoda, produire des réponses plutôt que relire, recevoir un retour immédiat, puis prendre un temps de réflexion et de repos avant de quitter le document.",
     ],
     definition: {
       title: "Définition simple",
       body:
         "Dans le modèle fondateur de Flavell, l'apprenant ne fait pas seulement une tâche : il surveille aussi son activité mentale. Il peut repérer une confusion, estimer son niveau de certitude, choisir de relire, demander un exemple, changer de stratégie ou s'arrêter pour réfléchir. Dans Meta-Capp, cette idée devient une boucle : question, réponse, feedback, jauges, adaptation, réflexion de fin de session.",
     },
-    flowTitle: "Flux web actuel",
+    flowTitle: "Le déroulé d'une séance de lecture",
     flowIntro:
-      "Le schéma Tkinter historique dépendait d'assets générés. La version web garde ici un schéma textuel stable, fidèle au lecteur scroll libre actuel.",
+      "Une séance suit toujours le même cycle : se préparer, agir, puis prendre du recul (Zimmerman). Chaque étape a sa raison, détaillée plus bas.",
     flowSteps: [
-      "Sas d'entrée : ralentir, poser l'attention, recevoir une accroche de curiosité.",
-      "Warm-up : revoir les cartes dues avant d'ajouter de nouvelles informations.",
-      "Lecture libre : parcourir le PDF en scroll, avec Clikoda connectée à la page visible.",
-      "Questions et feedback : questions libres, Q&R guidée, verdicts et surlignages.",
-      "Profil : jauges live, historique, flashcards et courbes de progression.",
-      "Sas de sortie : métriques, réflexion métacognitive, finalisation de session.",
-      "Repos final : une courte pause sans stimulation nouvelle pour laisser consolider.",
+      "Sas d'entrée : ralentir, poser son attention, recevoir une accroche de curiosité.",
+      "Révision éclair : revoir les cartes à échéance avant d'ajouter du nouveau.",
+      "Lecture libre : le document s'affiche tel quel, en défilement continu, et Clikoda suit la page à l'écran.",
+      "Questions et retours : questions libres, « Quiz-moi », questions de Clikoda quand la lecture s'y prête, verdicts et passages surlignés.",
+      "Pauses : sur demande ou conseillées par Clikoda ; le temps de pause ne compte pas comme temps de lecture.",
+      "Sas de sortie : bilan de Clikoda, questions de réflexion, mise à jour du profil.",
+      "Repos final : une minute sans stimulation nouvelle pour laisser l'apprentissage se consolider.",
     ],
     sections: [
       {
@@ -293,22 +293,22 @@ export const scienceContent: Record<Lang, ScienceContent> = {
         title: "Fonctionnement concret du logiciel",
         cards: [
           {
-            title: "Lecture scroll libre",
-            body: "Le document reste entier et scrollable. La page dominante visible donne le contexte envoyé à Clikoda, au lieu d'un flux Tkinter bloqué paragraphe par paragraphe.",
-            user: "L'utilisateur lit naturellement, zoome et scrolle sans progression verrouillée.",
-            system: "Le système suit page visible, dwell time, visites, échanges récents et session active.",
+            title: "Lecture libre",
+            body: "Le document reste entier et défile librement : on lit, on zoome, on revient en arrière sans progression imposée. La page la plus visible donne son contexte à Clikoda, qui peut aussi chercher dans tout le document.",
+            user: "L'utilisateur lit naturellement, zoome et défile sans progression verrouillée.",
+            system: "Meta-Capp suit la page visible, le temps passé par page, les retours en arrière et les échanges récents.",
           },
           {
             title: "Assistant Clikoda",
-            body: "Clikoda répond aux questions, reformule, résume la page courante, génère des accroches et peut lancer une question guidée.",
-            user: "Une bulle déplaçable accompagne la lecture.",
-            system: "Les réponses libres peuvent mettre à jour les jauges live et les échanges sont persistés.",
+            body: "Clikoda répond aux questions, reformule, résume la page, propose une accroche et pose une question sur demande (« Quiz-moi »). Elle intervient aussi d'elle-même quand la lecture s'y prête : page longuement relue, attention en baisse, formules à venir, réponses qui raccourcissent.",
+            user: "Une bulle déplaçable accompagne la lecture ; trois modes (discret, normal, coach) règlent sa présence.",
+            system: "Ses interventions respectent des délais et ne se répètent pas ; les échanges sont conservés et font évoluer les jauges.",
           },
           {
             title: "Questions adaptatives",
-            body: "Les questions peuvent viser compréhension, application, curiosité, visualisation, métacognition ou anticipation. Le web utilise surtout la page visible, le profil, les jauges live et les difficultés passées.",
+            body: "Les questions peuvent viser la compréhension, l'application, la curiosité, la visualisation, la métacognition, l'anticipation, le rappel ou le repérage d'erreur. Leur type s'adapte aux jauges de la séance, au profil et aux difficultés passées.",
             user: "La question arrive dans le contexte de la page lue.",
-            system: "La question et la réponse guidée sont persistées dans les tables pédagogiques.",
+            system: "Questions et réponses sont conservées : elles nourrissent les révisions et les quiz.",
           },
           {
             title: "Feedback immédiat",
@@ -324,9 +324,9 @@ export const scienceContent: Record<Lang, ScienceContent> = {
           },
           {
             title: "Sas de sortie",
-            body: "Le bilan web enregistre les réflexions et consolide le profil depuis les jauges live ou, en repli, depuis les métriques de réussite.",
-            user: "La session se termine par quelques réponses personnelles.",
-            system: "Les réflexions sont stockées et le profil durable est nudgé en fin de session.",
+            body: "La séance se clôt par un bilan de Clikoda et trois questions de réflexion. Le profil durable glisse vers les jauges de la séance, avec plus de poids pour les premières séances, quand il reste encore peu connu.",
+            user: "La séance se termine par quelques réponses personnelles.",
+            system: "Les réflexions sont conservées ; une séance quittée en fermant l'application est close et bilanée au lancement suivant.",
           },
         ],
       },
@@ -383,7 +383,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
       },
       {
         id: "memory",
-        title: "Méthodes d'apprentissage ajoutées dans la page",
+        title: "Méthodes d'apprentissage mobilisées",
         intro:
           "Ces méthodes rendent la métacognition actionnable : l'étudiant ne se contente pas de lire, il vérifie, récupère, espace, mélange, explique et relie ce qu'il apprend à ses propres questions.",
         cards: [
@@ -427,32 +427,32 @@ export const scienceContent: Record<Lang, ScienceContent> = {
       },
     ],
     referencesTitle: "Sources scientifiques",
-    referencesIntro: "Références reprises de la page Tkinter existante, avec l'ajout explicite du repos éveillé de Dewar et al.",
+    referencesIntro: "Les travaux sur lesquels s'appuient les choix décrits plus haut.",
     references: referencesFr,
   },
   en: {
     title: "Why does Meta-Capp work this way?",
     intro: [
-      "This page ports to the web the explanatory page that already existed in the Tkinter application. It lists the psychological sources used to justify the airlocks, questions, flashcards, gauges and metacognitive profile.",
+      "Every step of a session — the entry airlock, the quick review, Clikoda's questions, the gauges, the closing summary and rest — rests on a finding from the psychology of learning. This page says which one, and what Meta-Capp actually does with it.",
       "The gauges are not medical measures. They are internal pedagogical indicators that summarize observable signals to adapt pacing, questions and reviews.",
-      "The web version keeps the central idea: read freely, interact with Clikoda, produce answers, receive feedback, consolidate the profile, then close with reflection and a short rest pause.",
+      "The central idea: read freely, ask Clikoda, produce answers rather than re-read, get immediate feedback, then take time to reflect and rest before leaving the document.",
     ],
     definition: {
       title: "Simple definition",
       body:
         "In Flavell's foundational model, the learner does not just perform a task: they also monitor their own mental activity. They can notice confusion, estimate certainty, choose to re-read, ask for an example, change strategy or pause to reflect. In Meta-Capp, this becomes a loop: question, answer, feedback, gauges, adaptation, end-of-session reflection.",
     },
-    flowTitle: "Current web flow",
+    flowTitle: "How a reading session unfolds",
     flowIntro:
-      "The historical Tkinter diagram depended on generated assets. The web version uses a stable textual diagram faithful to the current free-scroll reader.",
+      "A session always follows the same cycle: prepare, act, then step back (Zimmerman). Each step has a reason, detailed below.",
     flowSteps: [
       "Entry airlock: slow down, settle attention, receive a curiosity hook.",
-      "Warm-up: review due cards before adding new information.",
-      "Free reading: scroll through the PDF, with Clikoda connected to the visible page.",
-      "Questions and feedback: free questions, guided Q&A, verdicts and highlights.",
-      "Profile: live gauges, history, flashcards and progress curves.",
-      "Exit airlock: metrics, metacognitive reflection, session finalization.",
-      "Final rest: a short pause without new stimulation to let learning consolidate.",
+      "Quick review: go over due cards before adding anything new.",
+      "Free reading: the document is shown as is, in continuous scroll, and Clikoda follows the page on screen.",
+      "Questions and feedback: free questions, “Quiz me”, Clikoda's own questions when the reading calls for them, verdicts and highlighted passages.",
+      "Breaks: on request or suggested by Clikoda; break time does not count as reading time.",
+      "Exit airlock: Clikoda's summary, reflection questions, profile update.",
+      "Final rest: one minute without new stimulation to let learning consolidate.",
     ],
     sections: [
       {
@@ -460,22 +460,22 @@ export const scienceContent: Record<Lang, ScienceContent> = {
         title: "How the software works",
         cards: [
           {
-            title: "Free-scroll reading",
-            body: "The document stays whole and scrollable. The dominant visible page gives Clikoda its context instead of a Tkinter paragraph-by-paragraph gated flow.",
+            title: "Free reading",
+            body: "The document stays whole and scrolls freely: read, zoom, go back, with no imposed progression. The most visible page gives Clikoda its context, and she can also search the whole document.",
             user: "The user reads naturally, zooms and scrolls without a locked progression.",
-            system: "The system tracks visible page, dwell time, visits, recent exchanges and the active session.",
+            system: "Meta-Capp tracks the visible page, time spent per page, returns to earlier pages and recent exchanges.",
           },
           {
             title: "Clikoda assistant",
-            body: "Clikoda answers questions, rephrases, summarizes the current page, generates curiosity hooks and can start a guided question.",
-            user: "A draggable bubble accompanies reading.",
-            system: "Free answers can update live gauges and exchanges are persisted.",
+            body: "Clikoda answers questions, rephrases, summarizes the page, offers a curiosity hook and asks a question on request (“Quiz me”). She also steps in on her own when the reading calls for it: a page re-read at length, attention dropping, formulas ahead, answers getting shorter.",
+            user: "A draggable bubble accompanies reading; three modes (discreet, normal, coach) set how present she is.",
+            system: "Her interventions respect delays and never repeat themselves; exchanges are kept and move the gauges.",
           },
           {
             title: "Adaptive questions",
-            body: "Questions can target comprehension, application, curiosity, visualization, metacognition or anticipation. The web path mainly uses the visible page, profile, live gauges and past difficulties.",
+            body: "Questions can target comprehension, application, curiosity, visualization, metacognition, anticipation, recall or error spotting. Their type adapts to the session gauges, the profile and past difficulties.",
             user: "The question arrives in the context of the page being read.",
-            system: "The guided question and answer are persisted in the pedagogical tables.",
+            system: "Questions and answers are kept: they feed reviews and quizzes.",
           },
           {
             title: "Immediate feedback",
@@ -491,9 +491,9 @@ export const scienceContent: Record<Lang, ScienceContent> = {
           },
           {
             title: "Exit airlock",
-            body: "The web summary records reflections and consolidates the profile from live gauges or, as fallback, from success metrics.",
+            body: "The session closes with Clikoda's summary and three reflection questions. The lasting profile moves toward the session gauges, with more weight for the first sessions, while it is still little known.",
             user: "The session ends with a few personal answers.",
-            system: "Reflections are stored and the lasting profile is nudged at session end.",
+            system: "Reflections are kept; a session left by closing the app is closed and summarized at the next launch.",
           },
         ],
       },
@@ -550,7 +550,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
       },
       {
         id: "memory",
-        title: "Learning methods included in the page",
+        title: "Learning methods put to work",
         intro:
           "These methods make metacognition actionable: the student does not only read, but checks, retrieves, spaces, mixes, explains and connects learning to personal questions.",
         cards: [
@@ -594,7 +594,7 @@ export const scienceContent: Record<Lang, ScienceContent> = {
       },
     ],
     referencesTitle: "Scientific sources",
-    referencesIntro: "References ported from the existing Tkinter page, with the explicit addition of Dewar et al. on wakeful rest.",
+    referencesIntro: "The research behind the choices described above.",
     references: referencesEn,
   },
 };
