@@ -80,6 +80,9 @@ class AssistantInterventionPolicy:
         self._busy = False
         self._paused = False
         self._pending = False
+        # Numéro de la décision attendue : une décision ne compte qu'une fois,
+        # et celle d'avant un `reset()` ne compte plus (cf. `_handle_decision`).
+        self._decision_seq = 0
         self._last_global = _NEVER
         self._last_by_page: dict[int, float] = {}
         self._fired_reasons: set[tuple[int, str]] = set()
@@ -138,6 +141,7 @@ class AssistantInterventionPolicy:
         self._busy = False
         self._paused = False
         self._pending = False
+        self._decision_seq += 1
         self._last_global = _NEVER
         self._last_by_page.clear()
         self._fired_reasons.clear()
@@ -190,16 +194,37 @@ class AssistantInterventionPolicy:
         # Signaux à usage unique que la détection consomme : rendus si la
         # décision est jetée (pause), comme si elle n'avait jamais été demandée.
         rearm = (self._flashcard_prompted, self._due_card, self._fatigue_at_answers)
-        reason = self._detect_trigger(page, mode, now)
-        if reason is None:
-            return
-        if reason not in _SESSION_SCOPED_TRIGGERS and (page, reason) in self._fired_reasons:
+        # Tout ce qui lit la page (texte, base) AVANT de s'engager : une lecture
+        # qui lève ne doit jamais laisser une décision « attendue » qui n'a pas
+        # été demandée — la politique se tairait jusqu'à la fin de la séance.
+        try:
+            reason = self._detect_trigger(page, mode, now)
+            if reason is None:
+                return
+            if reason not in _SESSION_SCOPED_TRIGGERS and (page, reason) in self._fired_reasons:
+                return
+            context = self._decision_context(page, reason, mode, now)
+        except Exception:
+            logger.warning("Intervention : lecture de la page %s impossible", page, exc_info=True)
+            self._flashcard_prompted, self._due_card, self._fatigue_at_answers = rearm
             return
 
         self._fired_reasons.add((page, reason))
         self._pending = True
+        self._decision_seq += 1
+        seq = self._decision_seq
         logger.info("Intervention candidate page=%s raison=%s mode=%s", page, reason, mode)
 
+        def _on_done(decision: dict | None) -> None:
+            self._handle_decision(decision, page, reason, rearm, seq)
+
+        try:
+            self._request_decision(context, _on_done)
+        except Exception as exc:
+            logger.warning("Décision d'intervention impossible : %s", exc)
+            self._pending = False
+
+    def _decision_context(self, page: int, reason: str, mode: str, now: float) -> dict:
         context = {
             "trigger": reason,
             "page": page,
@@ -219,15 +244,7 @@ class AssistantInterventionPolicy:
             context["next_page_text"] = self._next_page_text[:1200]
         if reason == "answer_fatigue":
             context["answer_lengths"] = self._memory.recent_answer_lengths(ASSISTANT_FATIGUE_WINDOW)
-
-        def _on_done(decision: dict | None) -> None:
-            self._handle_decision(decision, page, reason, rearm)
-
-        try:
-            self._request_decision(context, _on_done)
-        except Exception as exc:
-            logger.debug("Décision d'intervention impossible : %s", exc)
-            self._pending = False
+        return context
 
     def _handle_decision(
         self,
@@ -235,7 +252,13 @@ class AssistantInterventionPolicy:
         trigger_page: int,
         reason: str,
         rearm: tuple[bool, dict | None, int],
+        seq: int | None = None,
     ) -> None:
+        if seq is not None and (seq != self._decision_seq or not self._pending):
+            # Décision déjà comptée (rappel en double), ou d'avant un `reset()` :
+            # elle ne doit ni relancer un cooldown, ni livrer une intervention.
+            logger.debug("Décision d'intervention ignorée (n° %s, attendue n° %s)", seq, self._decision_seq)
+            return
         self._pending = False
         if self._paused or self._busy:
             # Décision partie avant la pause, revenue pendant : jetée, et le

@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 
@@ -871,6 +873,225 @@ def test_reader_ws_gated_question_from_intervention(client, monkeypatch):
         assert evt["type"] == "gated_question"
         assert evt["page"] == 1
         assert "clé" in evt["question"]
+
+
+def _receive_until(ws, wanted: str, timeout: float = 5.0) -> dict:
+    """Premier événement `wanted` reçu du socket, ou échec au bout de `timeout`.
+
+    `receive_json` n'a pas de délai : un Clikoda devenu muet bloquait le test
+    au lieu de le faire échouer."""
+    import queue as queue_mod
+    import threading
+
+    box: queue_mod.Queue = queue_mod.Queue()
+
+    def pump() -> None:
+        try:
+            while True:
+                evt = ws.receive_json()
+                box.put(evt)
+                if evt.get("type") == wanted:
+                    return
+        except Exception as exc:  # socket fermé : l'échec se lit dans la file
+            box.put({"type": "__closed__", "error": repr(exc)})
+
+    threading.Thread(target=pump, daemon=True).start()
+    seen: list[str] = []
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            evt = box.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue_mod.Empty:
+            break
+        if evt.get("type") == wanted:
+            return evt
+        seen.append(evt.get("type"))
+        if evt.get("type") == "__closed__":
+            break
+    raise AssertionError(f"aucun « {wanted} » en {timeout} s (reçu : {seen})")
+
+
+def _auto_questions(monkeypatch, *, tick=0.02):
+    """Politique sans cadence, décision « ask_question » immédiate."""
+    from server.routers import reading
+    from services import assistant
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", tick)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(
+        assistant, "build_intervention_context",
+        lambda doc_id, page, **k: {"trigger": "long_dwell", "page": page},
+    )
+    monkeypatch.setattr(
+        reading, "decide_intervention_async",
+        lambda ctx, ok, err, **kw: ok({"should_intervene": True, "kind": "ask_question"}),
+    )
+
+
+def test_a_question_that_fails_to_launch_never_silences_clikoda(client, monkeypatch):
+    """Retour d'usage (2026-10-22) : plus aucune question automatique dans le
+    lecteur. Un service qui levait avant la mise en file laissait la
+    génération comptée en vol — la politique se taisait jusqu'à la fin de la
+    séance. La question suivante (autre page) doit arriver."""
+    from services import assistant
+
+    _auto_questions(monkeypatch)
+    calls: list[int] = []
+
+    def generate(doc_id, page, ok, err, **kw):
+        calls.append(page)
+        if len(calls) == 1:
+            raise RuntimeError("page illisible")
+        ok({"question": "Idée clé ?", "choices": None, "question_type": "comprehension"})
+
+    monkeypatch.setattr(assistant, "generate_page_question", generate)
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        deadline = time.monotonic() + 5
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert calls == [1]
+        ws.send_json({"type": "viewport", "page": 2})
+        evt = _receive_until(ws, "gated_question")
+    assert evt["page"] == 2 and "clé" in evt["question"]
+
+
+def test_the_ticker_survives_a_failing_step(client, monkeypatch):
+    """Une exception dans un pas du ticker tuait sa tâche en silence : plus
+    d'observation, plus de battement, plus aucune intervention."""
+    from server.routers import reading
+    from services import assistant, session_memory
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.02)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(assistant, "build_intervention_context", lambda *a, **k: {"trigger": "long_dwell", "page": 1})
+    monkeypatch.setattr(
+        reading, "decide_intervention_async",
+        lambda ctx, ok, err, **kw: ok({"should_intervene": True, "kind": "offer_help", "message": "Besoin d'aide ?"}),
+    )
+    real = session_memory.SessionMemory.pages_read
+    failures = {"left": 3}
+
+    def flaky(self, *a, **k):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise RuntimeError("mémoire de séance illisible")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(session_memory.SessionMemory, "pages_read", flaky)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        # L'observation échoue, la décision a lieu quand même…
+        evt = _receive_until(ws, "intervention")
+        # … et le ticker continue de tourner après chaque échec.
+        deadline = time.monotonic() + 5
+        while failures["left"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert failures["left"] == 0
+    assert evt["message"] == "Besoin d'aide ?"
+
+
+def test_a_page_that_cannot_be_read_never_leaves_a_decision_pending(client, monkeypatch):
+    """La politique se déclarait en attente d'une décision AVANT de lire la
+    page : une lecture qui levait la laissait attendre pour toujours."""
+    from server.routers import reading
+    from services import assistant, library
+
+    monkeypatch.setattr(reading, "_TICK_SECONDS", 0.02)
+    _relax_policy(monkeypatch, dwell=0.0, cooldown=0.0, warmup=0.0)
+    monkeypatch.setattr(assistant, "build_intervention_context", lambda *a, **k: {"trigger": "long_dwell", "page": 1})
+    monkeypatch.setattr(
+        reading, "decide_intervention_async",
+        lambda ctx, ok, err, **kw: ok({"should_intervene": True, "kind": "offer_help", "message": "Besoin d'aide ?"}),
+    )
+    failures = {"left": 3}
+
+    def flaky_text(doc_id, page):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise RuntimeError("PDF illisible")
+        return ""
+
+    monkeypatch.setattr(library, "page_text", flaky_text)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        evt = _receive_until(ws, "intervention")
+    assert failures["left"] == 0
+    assert evt["message"] == "Besoin d'aide ?"
+
+
+def test_a_failing_message_does_not_close_the_channel(client, monkeypatch):
+    """Une exception dans le traitement d'un message fermait le socket : le
+    lecteur gardait sa page, mais Clikoda ne répondait plus à rien."""
+    from server.routers import reading
+    from services import assistant
+
+    def broken_session(_sid):
+        raise RuntimeError("base verrouillée")
+
+    monkeypatch.setattr(reading, "get_session", broken_session)
+    monkeypatch.setattr(assistant, "answer_question", lambda d, p, q, ok, err, **kw: ok({"answer": "Réponse."}))
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "viewport", "page": 1, "session_id": 123})
+        ws.send_json({"type": "ask", "question": "Et ensuite ?", "page": 1})
+        evt = _receive_until(ws, "answer")
+    assert evt["answer"] == "Réponse."
+
+
+def test_a_service_failure_is_reported_and_the_reader_goes_on(client, monkeypatch):
+    """Le service lève avant la mise en file : l'élève voit une erreur (son
+    panneau ne tourne pas indéfiniment), et la demande suivante est servie."""
+    from services import assistant
+
+    answers = iter([RuntimeError("index absent"), {"answer": "Deuxième essai."}])
+
+    def answer(d, p, q, ok, err, **kw):
+        nxt = next(answers)
+        if isinstance(nxt, Exception):
+            raise nxt
+        ok(nxt)
+
+    monkeypatch.setattr(assistant, "answer_question", answer)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "ask", "question": "Premier essai ?", "page": 1})
+        err = _receive_until(ws, "error")
+        ws.send_json({"type": "ask", "question": "Second essai ?", "page": 1})
+        evt = _receive_until(ws, "answer")
+    assert err["cancelled"] is False and err["message"]
+    assert evt["answer"] == "Deuxième essai."
+
+
+def test_an_answer_never_frees_clikoda_while_a_question_is_being_generated(client, monkeypatch):
+    """Une réponse libre décomptait DEUX générations : pendant qu'une question
+    automatique se préparait encore, la politique se croyait libre et lançait
+    une autre décision."""
+    from services import assistant
+
+    _auto_questions(monkeypatch)
+    decided: list[int] = []
+    from server.routers import reading
+
+    def decide(ctx, ok, err, **kw):
+        decided.append(ctx.get("page"))
+        ok({"should_intervene": True, "kind": "ask_question"})
+
+    monkeypatch.setattr(reading, "decide_intervention_async", decide)
+    in_flight: list = []
+    monkeypatch.setattr(assistant, "generate_page_question", lambda d, p, ok, err, **kw: in_flight.append(ok))
+    monkeypatch.setattr(assistant, "answer_question", lambda d, p, q, ok, err, **kw: ok({"answer": "Réponse."}))
+
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_reading"})
+        deadline = time.monotonic() + 5
+        while not in_flight and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(in_flight) == 1  # la question automatique est en génération
+        ws.send_json({"type": "ask", "question": "Et ça ?", "page": 1})
+        _receive_until(ws, "answer")
+        ws.send_json({"type": "viewport", "page": 2})
+        time.sleep(0.3)  # une quinzaine de ticks
+    assert decided == [1]
 
 
 def test_reader_ws_warmup_silences_start_of_reading(client, monkeypatch):
