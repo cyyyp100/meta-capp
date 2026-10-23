@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-10-23
+
+### Changed
+
+- **Clikoda has a face: the sperm whale of the new logo.** In the reader, the
+  closed bubble is now the whale itself, in the app's orange and without a
+  background, instead of a sphere with two eyes. She faces the document,
+  floats and blinks now and then (twice per cycle, once a double blink, at
+  uneven moments). While she inspects the page she sends three clicks at it,
+  without blinking. When the discussion is open and she is thinking, the
+  outline of her head draws itself and her three clicks go out one after the
+  other in front of her jaw (a *coda*, a sperm whale's call), in place of the
+  three bouncing dots. The panel header shows her head instead of a sparkle.
+  With *reduce motion* set in the system, all of this stays still.
+
+### Added
+
+- **The application has its own icon.** The macOS bundle and the Windows
+  executable used PyInstaller's default icon. They now carry Clikoda's tile
+  (`desktop/icons/meta-capp.icns` and `.ico`, with a simplified silhouette for
+  16–32 px). The browser tab shows it too (`favicon.ico`, `favicon.svg`), and so
+  does the sidebar, next to the name. `scripts/build_icons.py` rebuilds every
+  size from the two 1024 px renders in `desktop/icons/source/`, next to the
+  vector drawing and its generator.
+
 ## [0.2.2] — 2026-10-23
 
 ### Fixed
@@ -474,7 +499,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/cyyyp100/meta-capp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...v0.2.0

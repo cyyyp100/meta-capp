@@ -706,4 +706,35 @@ describe("ClikodaPanel", () => {
     expect(screen.queryByText(/⚠️/)).toBeNull();
     expect(screen.queryByText(/réfléchit|thinking/i)).toBeNull();
   });
+
+  // La bulle fermée est le cachalot du logo : il cligne de l'œil au repos, et
+  // cesse de cligner pour lancer ses clics quand il inspecte la page.
+  it("la bulle cligne de l'œil, et lance son coda quand Clikoda inspecte la page", async () => {
+    render(wrap(<ClikodaPanel docId={1} currentPage={1} sessionId={null} />));
+    const bubble = await screen.findByRole("button", { name: /clikoda|ouvrir|open/i });
+    expect(bubble.querySelector("[data-clikoda-head='fill'] .clikoda-blink")).not.toBeNull();
+    expect(bubble.querySelector("[data-clikoda-coda]")).toBeNull();
+
+    await act(async () => FakeWebSocket.last?.emit({ type: "scanning", active: true }));
+    expect(bubble).toHaveAttribute("data-scanning");
+    expect(bubble.querySelector(".clikoda-blink")).toBeNull();
+    expect(bubble.querySelectorAll("[data-clikoda-coda] circle")).toHaveLength(3);
+
+    await act(async () => FakeWebSocket.last?.emit({ type: "scanning", active: false }));
+    expect(bubble).not.toHaveAttribute("data-scanning");
+    expect(bubble.querySelector(".clikoda-blink")).not.toBeNull();
+  });
+
+  it("pendant qu'elle réfléchit, le contour de sa tête et ses trois clics remplacent les points", async () => {
+    await renderOpenPanel();
+    await userEvent.type(chatBox(), "Une question");
+    await userEvent.click(screen.getByRole("button", { name: /envoyer|send/i }));
+    const status = screen.getByText(/réfléchit|thinking/i).closest("[role='status']");
+    const head = status?.querySelector("[data-clikoda-head='outline']");
+    expect(head).not.toBeNull();
+    expect(head?.querySelectorAll("[data-clikoda-coda] circle")).toHaveLength(3);
+
+    await act(async () => FakeWebSocket.last?.emit({ type: "answer", answer: "Voilà." }));
+    expect(document.querySelector("[data-clikoda-head='outline']")).toBeNull();
+  });
 });

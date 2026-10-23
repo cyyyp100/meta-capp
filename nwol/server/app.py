@@ -146,8 +146,14 @@ def _pin_bundle_mime_types() -> None:
     où `.js` vaut parfois `text/plain` (clé réécrite par un éditeur ou un
     installeur). Un module ES servi ainsi est refusé par le navigateur, et avec
     `nosniff` (S9, `server/security.py`) le script d'amorce aussi : l'application
-    s'ouvrirait sur une page blanche chez ces utilisateurs-là seulement."""
-    for mime, ext in (("text/javascript", ".js"), ("text/javascript", ".mjs"), ("text/css", ".css")):
+    s'ouvrirait sur une page blanche chez ces utilisateurs-là seulement. Même
+    sort pour le logo (`favicon.svg`, aussi la marque de la barre latérale)."""
+    for mime, ext in (
+        ("text/javascript", ".js"),
+        ("text/javascript", ".mjs"),
+        ("text/css", ".css"),
+        ("image/svg+xml", ".svg"),
+    ):
         mimetypes.add_type(mime, ext)
 
 

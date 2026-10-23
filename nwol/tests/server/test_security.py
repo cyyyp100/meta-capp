@@ -94,10 +94,12 @@ def test_bundle_mime_types_do_not_depend_on_the_windows_registry():
     from server.app import create_app
 
     mimetypes.add_type("text/plain", ".js")  # ce que certains postes Windows déclarent
+    mimetypes.add_type("text/xml", ".svg")
     create_app()
 
     assert mimetypes.guess_type("index-abc123.js")[0] == "text/javascript"
     assert mimetypes.guess_type("index-abc123.css")[0] == "text/css"
+    assert mimetypes.guess_type("favicon.svg")[0] == "image/svg+xml"
 
 
 def test_token_required_when_configured(client, launch_token):
