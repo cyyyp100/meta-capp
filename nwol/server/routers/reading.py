@@ -40,9 +40,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from contextlib import contextmanager
-from typing import Iterator, Literal
+from typing import Callable, Iterator, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -318,14 +319,6 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         d'un « Quiz-moi » encore sans réponse."""
         policy.set_busy(bool(state["generating"] > 0 or state["gated"] or state["qa_pending"]))
 
-    def start_generation() -> None:
-        state["generating"] += 1
-        refresh_busy()
-
-    def end_generation() -> None:
-        state["generating"] = max(0, state["generating"] - 1)
-        refresh_busy()
-
     def remember_turn(kind: str, *lines: tuple[str, str]) -> None:
         """Retient le dernier échange de la séance (cf. state["last_turn"]) ;
         `lines` : (« student » | « clikoda », texte), les vides écartés."""
@@ -333,28 +326,24 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         if kept:
             state["last_turn"] = {"kind": kind, "lines": kept}
 
-    def make_callbacks():
-        def on_success(result: dict) -> None:
-            end_generation()
-            push_threadsafe(loop, out, {
-                "type": "answer",
-                "answer": result.get("answer", ""),
-                "highlights": result.get("highlights", []),
-            })
+    def reply(result: dict) -> None:
+        """La réponse d'une demande de l'élève (question, reformulation, résumé…)."""
+        push_threadsafe(loop, out, {
+            "type": "answer",
+            "answer": result.get("answer", ""),
+            "highlights": result.get("highlights", []),
+        })
 
-        def on_error(message: str) -> None:
-            end_generation()
-            # Une demande annulée (bouton « Annuler » du panneau, ou lecteur
-            # quitté) n'est pas une panne : le panneau, qui a déjà rendu la
-            # main, ne la redit pas avec un « ⚠️ ».
-            cancelled = is_cancelled_error(message)
-            push_threadsafe(loop, out, {
-                "type": "error",
-                "message": t("assistant.cancelled") if cancelled else str(message),
-                "cancelled": cancelled,
-            })
-
-        return on_success, on_error
+    def report_error(message: str) -> None:
+        """L'échec d'une demande de l'élève. Une demande annulée (bouton
+        « Annuler » du panneau, ou lecteur quitté) n'est pas une panne : le
+        panneau, qui a déjà rendu la main, ne la redit pas avec un « ⚠️ »."""
+        cancelled = is_cancelled_error(message)
+        push_threadsafe(loop, out, {
+            "type": "error",
+            "message": t("assistant.cancelled") if cancelled else str(message),
+            "cancelled": cancelled,
+        })
 
     def loading(task: str) -> dict:
         """Le `loading` d'une demande, avec l'attente à annoncer (ou null).
@@ -383,12 +372,101 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         finally:
             close_caller_slot()
 
+    def launch(
+        task: str,
+        start: Callable[[Callable, Callable], None],
+        on_success: Callable[[dict], None],
+        on_error: Callable[[str], None],
+        *,
+        announce: bool = True,
+    ) -> None:
+        """LE chemin de toute génération du lecteur.
+
+        `start(ok, err)` enfile la tâche (un service de `services/assistant`).
+        La génération est comptée en vol — la politique d'intervention se tait —
+        puis décomptée UNE fois, quoi qu'il arrive : service qui lève avant
+        d'enfiler, rappel en double, résultat dont le traitement lève. `busy`
+        n'est recalculé qu'après le traitement : une question émise passe de
+        « en génération » à « attend sa réponse » sans fenêtre où Clikoda
+        paraîtrait libre.
+
+        Avant, chaque demande tenait ce compte à la main : une réponse libre le
+        décomptait deux fois (Clikoda « libre » pendant qu'une question
+        automatique se préparait), et un service qui levait avant la mise en
+        file le laissait à 1 — plus aucune intervention de la séance, quand ce
+        n'était pas le socket lui-même qui se fermait.
+
+        `announce` : l'attente est annoncée au client (`announced`). Pas pour
+        une question automatique, que personne n'a demandée."""
+        lock = threading.Lock()
+        settled = False
+
+        def settle(handler: Callable, value) -> None:
+            nonlocal settled
+            with lock:
+                if settled:
+                    return
+                settled = True
+            state["generating"] = max(0, state["generating"] - 1)
+            try:
+                handler(value)
+            except Exception:
+                logger.exception("Lecteur : traitement du résultat %s en échec", task)
+                if handler is not on_error:
+                    try:
+                        on_error(t("assistant.failed"))
+                    except Exception:  # pragma: no cover - le décompte est fait
+                        logger.exception("Lecteur : signalement de l'échec %s impossible", task)
+            finally:
+                refresh_busy()
+
+        state["generating"] += 1
+        refresh_busy()
+        try:
+            if announce:
+                with announced(task):
+                    start(lambda result: settle(on_success, result), lambda message: settle(on_error, message))
+            else:
+                start(lambda result: settle(on_success, result), lambda message: settle(on_error, message))
+        except Exception:
+            logger.exception("Lecteur : génération %s impossible à lancer", task)
+            settle(on_error, t("assistant.failed"))
+
     def emit_question(result: dict, page: int, sid, gated: bool) -> None:
         """Persiste une question Q&R générée et l'émet vers le client.
 
         `gated=True` -> question automatique bloquante (l'UI verrouille le scroll
-        sur la page-contexte jusqu'à la bonne réponse)."""
+        sur la page-contexte jusqu'à la bonne réponse). Appelée par `launch`,
+        qui décompte la génération et recalcule `busy` après elle.
+
+        L'événement est construit AVANT que la question soit marquée en attente :
+        une question « attendue » que le client n'a jamais reçue faisait taire
+        Clikoda jusqu'à la fin de la séance."""
         qtype = result.get("question_type") or "open"
+        session_hint = str(result.get("session_hint") or "").strip()
+        event = {
+            "type": "gated_question" if gated else "qa_question",
+            "question": result.get("question", ""),
+            "choices": result.get("choices"),
+            "question_type": qtype,
+            # Conseil de régulation de séance (« ton attention est basse, fais une
+            # pause courte ») : le prompt le demande sous le seuil d'attention,
+            # le repli hors ligne le remplit aussi, le schéma le valide — et il
+            # s'arrêtait ici, à un dict près du client. Vide la plupart du temps.
+            "session_hint": session_hint,
+            # Passage à masquer dans la page (rappel libre) : citation + texte de
+            # remplacement, résolus par le service. None quand il n'y a rien à cacher.
+            "mask": _safe_mask(result, page),
+            # Zone précise visée par la question : citation que le lecteur
+            # retrouve sur la page pour la cadrer entière à l'écran. Entre la
+            # décision d'intervenir et l'arrivée de la question, l'étudiant a pu
+            # zoomer ou défiler : c'est cette citation, pas la page, qui dit où
+            # revenir. Best-effort : None -> le lecteur cadre le haut de page.
+            "zone": _safe_zone(result, page),
+            # Page-contexte de la question : le client y cadre la zone. Elle a
+            # pu changer entre « Quiz-moi » et l'arrivée de la question.
+            "page": page,
+        }
         try:
             state["qa_qid"] = save_question(
                 doc_id, "page", f"Page {page}", page, page,
@@ -411,45 +489,22 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         state["qa_sent_at"] = time.monotonic()
         state["recent_qtypes"].append(qtype)
         del state["recent_qtypes"][:-5]
-        state["generating"] = max(0, state["generating"] - 1)
         state["qa_pending"] = True
         remember_turn("question", ("clikoda", result.get("question", "")))
-        session_hint = str(result.get("session_hint") or "").strip()
         if session_hint:
             # Conseil de régulation du LLM : une pause prise juste après le suit.
             pause.note_recommendation("session_hint")
-        event = {
-            "type": "gated_question" if gated else "qa_question",
-            "question": result.get("question", ""),
-            "choices": result.get("choices"),
-            "question_type": qtype,
-            # Conseil de régulation de séance (« ton attention est basse, fais une
-            # pause courte ») : le prompt le demande sous le seuil d'attention,
-            # le repli hors ligne le remplit aussi, le schéma le valide — et il
-            # s'arrêtait ici, à un dict près du client. Vide la plupart du temps.
-            "session_hint": session_hint,
-            # Passage à masquer dans la page (rappel libre) : citation + texte de
-            # remplacement, résolus par le service. None quand il n'y a rien à cacher.
-            "mask": assistant.resolve_paragraph_mask(
-                doc_id, page, result.get("paragraph_mask")
-            ),
-            # Zone précise visée par la question : citation que le lecteur
-            # retrouve sur la page pour la cadrer entière à l'écran. Entre la
-            # décision d'intervenir et l'arrivée de la question, l'étudiant a pu
-            # zoomer ou défiler : c'est cette citation, pas la page, qui dit où
-            # revenir. Best-effort : None -> le lecteur cadre le haut de page.
-            "zone": _safe_zone(result, page),
-            # Page-contexte de la question : le client y cadre la zone. Elle a
-            # pu changer entre « Quiz-moi » et l'arrivée de la question.
-            "page": page,
-        }
         if gated:
             # Question bloquante : le lecteur se verrouille jusqu'à la bonne réponse.
             state["gated"] = True
-        # Un seul point de bascule : la génération est finie, la question attend
-        # sa réponse (la politique se tait jusque-là).
-        refresh_busy()
         push_threadsafe(loop, out, event)
+
+    def _safe_mask(result: dict, page: int) -> dict | None:
+        try:
+            return assistant.resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+        except Exception:  # le masque est un confort : sans lui, la question reste posée
+            logger.warning("Masque de question non résolu", exc_info=True)
+            return None
 
     def _safe_zone(result: dict, page: int) -> dict | None:
         try:
@@ -516,18 +571,21 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 # celle-ci tomberait par-dessus. Ni persistée, ni émise.
                 if state["user_turn"] != turn or state["qa_pending"]:
                     logger.info("Question automatique abandonnée : l'élève a pris la main entre-temps")
-                    end_generation()
                     return
                 emit_question(result, p, s, gated=True)
 
-            start_generation()
-            assistant.generate_page_question(
-                doc_id, page,
+            launch(
+                "question",
+                lambda ok, err: assistant.generate_page_question(
+                    doc_id, page, ok, err,
+                    session_gauges=gauges,
+                    recent_question_types=list(state["recent_qtypes"]),
+                    history=list(state["qa_history"]),
+                ),
                 on_auto_question,
-                lambda _m: end_generation(),
-                session_gauges=gauges,
-                recent_question_types=list(state["recent_qtypes"]),
-                history=list(state["qa_history"]),
+                # Personne ne l'a demandée : son échec ne s'affiche pas.
+                lambda message: logger.info("Question automatique non générée : %s", message),
+                announce=False,
             )
             return
         kind = str(payload.get("kind") or "offer_help")
@@ -722,6 +780,17 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
         if deltas and state["live_gauges"] is not None:
             await loop.run_in_executor(None, state["live_gauges"].apply_warmup, deltas)
 
+    tick_failures: set[str] = set()
+
+    def tick_failed(step: str) -> None:
+        """Un pas du ticker a levé : journalisé (avec sa trace la première fois),
+        et le ticker continue. Une exception tuait la tâche en silence — plus
+        d'observation, plus de battement, plus AUCUNE intervention jusqu'à la
+        fin de la séance, alors que les questions de l'élève marchaient encore."""
+        first = step not in tick_failures
+        tick_failures.add(step)
+        logger.warning("Lecteur : pas « %s » du ticker en échec", step, exc_info=first)
+
     async def _ticker() -> None:
         last_tick = time.monotonic()
         while True:
@@ -739,13 +808,317 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
             # mesuré par la mémoire de séance, qui a son horloge — le ticker lui
             # en imposait une seconde, pour la même mesure (la fermeture, elle,
             # appelle déjà `pages_read()` sans argument).
-            read = len(memory.pages_read())
-            await loop.run_in_executor(None, passive_attention, elapsed, now, read)
+            try:
+                read = len(memory.pages_read())
+                await loop.run_in_executor(None, passive_attention, elapsed, now, read)
+            except Exception:
+                tick_failed("observation")
             if state["gated"] or now < state["focus_until"]:
                 # Question bloquante en cours ou mode focus : Clikoda se tait.
                 continue
             # `tick` lit le texte de page et la DB : jamais dans la boucle asyncio.
-            await loop.run_in_executor(None, policy.tick)
+            try:
+                await loop.run_in_executor(None, policy.tick)
+            except Exception:
+                tick_failed("décision")
+
+    async def handle(msg: ReaderMessage) -> None:
+        """Traite UN message du client. Une exception n'y ferme plus le canal
+        (cf. la boucle plus bas) : le lecteur gardait sa page, mais plus de
+        Clikoda — ni réponse, ni intervention — jusqu'à sa réouverture."""
+        kind = msg.type
+        page = clamp_page(msg.page)
+
+        if kind == "viewport":
+            await attach_session(msg.session_id)
+            await flush_warmup()
+            # En pause, la page ne bouge pas (le lecteur est masqué) : un
+            # viewport tardif ne doit pas ouvrir de dwell sur une autre page.
+            if page != state["page"] and not pause.active:
+                state["page"] = page
+                memory.on_page_view(page)
+            return
+
+        if kind == "activity":
+            # Deux signaux de présence : la fenêtre (masquée / second plan =
+            # absent) et le geste (scroll, souris, clavier = présent, même si
+            # la page dominante ne change pas — deuxième colonne, retour sur
+            # un schéma). Le second remet la stagnation à zéro.
+            if pause.active:
+                return  # l'élève est parti : on ne l'observe plus
+            state["away"] = bool(msg.hidden)
+            if msg.engaged and not msg.hidden:
+                memory.on_interaction(time.monotonic())
+            return
+
+        if kind == "engage":
+            # Surligner, annoter : un geste de lecture active, donc aussi
+            # une présence. En pause, l'élève n'est pas là (le lecteur est
+            # masqué) : rien n'est compté.
+            if pause.active or msg.action is None:
+                return
+            now = time.monotonic()
+            memory.on_interaction(now)
+            await credit_engagement(msg.action, now)
+            return
+
+        if kind == "pause":
+            # Bouton « Pause » de l'élève, ou carte de Clikoda acceptée (la
+            # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
+            minutes = PAUSE_DEFAULT_MIN if msg.minutes is None else int(msg.minutes)
+            attention = (state["live_gauges"].snapshot() if state["live_gauges"] else {}).get("attention")
+            now = time.monotonic()
+            if pause.start(
+                now,
+                source=msg.source,
+                planned_s=minutes * 60.0,
+                page=state["page"],
+                attention=attention,
+            ):
+                state["away"] = False
+                policy.set_paused(True)
+                memory.pause(now)
+            return
+
+        if kind == "resume":
+            await resume_reading(time.monotonic())
+            return
+
+        if pause.active and kind in _PAUSED_ACTIONS:
+            # L'écran de pause couvre déjà le panneau : défense en profondeur,
+            # rien ne se génère ni ne s'évalue tant que l'élève n'est pas revenu.
+            return
+        if kind in _PAUSED_ACTIONS:
+            # L'élève prend la main : une question automatique en génération
+            # n'a plus sa place (cf. on_intervention).
+            state["user_turn"] += 1
+        if kind == "ask" and (msg.question or "").strip():
+            # Questionner, répondre : l'engagement est le geste lui-même,
+            # crédité qu'Ollama réponde ou non.
+            await credit_engagement("ask", time.monotonic())
+        elif kind == "qa_answer" and (msg.answer or "").strip():
+            await credit_engagement("answer", time.monotonic())
+
+        if kind == "start_reading":
+            # Sas d'entrée franchi : le warm-up de la première question part
+            # d'ici, pas de l'ouverture du socket (cf. policy.start_reading),
+            # et la lecture aussi — le temps du sas n'est pas une lecture de
+            # la page 1 (memory.start_reading).
+            # Le message porte la page à l'écran : ouvert sur le marque-page,
+            # le lecteur n'y est pas en page 1, et un `viewport` perdu
+            # pendant l'ouverture du socket compterait la lecture sur la
+            # page 1. Posée AVANT `start_reading`, qui repart de la page
+            # courante.
+            if msg.page is not None and page != state["page"]:
+                state["page"] = page
+                memory.on_page_view(page)
+            policy.start_reading()
+            memory.start_reading(time.monotonic())
+            await attach_session(msg.session_id)
+            if msg.warmup:
+                state["pending_warmup"] = msg.warmup
+            await flush_warmup()
+            return
+
+        if kind == "mode":
+            mode = str(msg.mode or ASSISTANT_DEFAULT_MODE)
+            state["mode"] = mode if mode in ASSISTANT_MODES else ASSISTANT_DEFAULT_MODE
+            await out.put({
+                "type": "system",
+                "message": t("assistant.mode_changed", mode=t(f"assistant.mode_{state['mode']}")),
+            })
+            return
+
+        if kind == "focus":
+            now = time.monotonic()
+            if now < state["focus_until"]:
+                state["focus_until"] = 0.0
+                await out.put({"type": "system", "message": "Mode focus désactivé."})
+            else:
+                state["focus_until"] = now + _FOCUS_DURATION_S
+                await out.put({
+                    "type": "system",
+                    "message": f"Mode focus activé ({FOCUS_DEFAULT_MIN} min sans interruption).",
+                })
+            return
+
+        if kind == "ask":
+            question = (msg.question or "").strip()
+            if not question:
+                return
+            memory.on_user_question(page, question)
+            recent_exchanges = list(state["exchanges"])
+            session_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+            selected_snippets = msg.selected_snippets
+            await out.put(loading("assistant_answer"))
+
+            def on_ask_success(result: dict, _q=question, _page=page, _sid=state["session_id"]) -> None:
+                if state["live_gauges"] is not None:
+                    state["live_gauges"].apply_question(result)
+                answer = result.get("answer", "")
+                remember_turn("ask", ("student", _q), ("clikoda", answer))
+                state["exchanges"].append({"question": _q, "answer": answer})
+                del state["exchanges"][:-6]  # ne garder que les 6 derniers échanges
+                if answer:
+                    try:
+                        save_assistant_exchange(doc_id, _page, _q, answer, session_id=_sid)
+                    except Exception:  # persistance best-effort
+                        logger.debug("Persistance de l'échange assistant ignorée", exc_info=True)
+                reply(result)
+
+            launch(
+                "assistant_answer",
+                lambda ok, err, _q=question, _page=page, _turn=state["last_turn"]: assistant.answer_question(
+                    doc_id, _page, _q, ok, err,
+                    recent_exchanges=recent_exchanges,
+                    session_gauges=session_gauges,
+                    selected_snippets=selected_snippets,
+                    previous_turn=_turn,
+                ),
+                on_ask_success,
+                report_error,
+            )
+        elif kind in ("rephrase", "recap", "hook"):
+            # Reformuler, résumer, curiosité : ce que Clikoda en dit devient
+            # le dernier échange (« redis-le plus simplement » y renvoie).
+            def on_command_success(result: dict) -> None:
+                remember_turn("command", ("clikoda", result.get("answer", "")))
+                reply(result)
+
+            task, run = {
+                "rephrase": ("rephrasing", assistant.rephrase_page),
+                "recap": ("chapter_summary", assistant.chapter_recap),
+                "hook": ("curiosity_hook", assistant.curiosity_hook),
+            }[kind]
+            await out.put(loading(task))
+            launch(task, lambda ok, err, _page=page: run(doc_id, _page, ok, err), on_command_success, report_error)
+        elif kind == "start_qa":
+            sid = msg.session_id
+            await out.put(loading("question"))
+            qa_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
+            launch(
+                "question",
+                lambda ok, err, _page=page: assistant.generate_page_question(
+                    doc_id, _page, ok, err,
+                    session_gauges=qa_gauges,
+                    recent_question_types=list(state["recent_qtypes"]),
+                    history=list(state["qa_history"]),
+                ),
+                lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
+                report_error,
+            )
+        elif kind == "qa_answer":
+            sid = msg.session_id
+            question = msg.question or ""
+            answer = (msg.answer or "").strip()
+            if not answer:
+                return
+            qid = state.get("qa_qid")
+            await out.put(loading("evaluation"))
+
+            def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
+                # La question a sa réponse : elle n'attend plus (la politique
+                # peut reparler, sauf verrou maintenu par une réponse fausse).
+                state["qa_pending"] = False
+                # Signaux dérivés de la FORME de la réponse (longueur, questions
+                # posées, connecteurs, analogies) : ils enrichissent curiosité et
+                # créativité que le LLM seul sous-estime.
+                ev = augment_evaluation_with_response_signals(ev, _answer)
+                # Type de la question -> jauges type-aware (curiosité ≠ contexte).
+                ev["question_type"] = state.get("qa_question_type")
+                verdict = ev.get("verdict")
+                # Le temps mis à répondre (fatigue, persistance) et la série
+                # d'erreurs en cours (attention). Le temps ne coûte rien à
+                # l'attention ici : la dérive passive l'observe déjà
+                # (cf. LiveGauges.apply).
+                sent_at = float(state.get("qa_sent_at") or 0.0)
+                response_time_ms = (
+                    int(max(0.0, time.monotonic() - sent_at) * 1000) if sent_at else None
+                )
+                state["consecutive_incorrect"] = (
+                    int(state["consecutive_incorrect"]) + 1 if verdict == "incorrect" else 0
+                )
+                if state["live_gauges"] is not None:
+                    state["live_gauges"].apply(
+                        ev,
+                        consecutive_incorrect=int(state["consecutive_incorrect"]),
+                    )
+                # Verdict ET forme : la longueur de ce qui vient d'être écrit
+                # est la matière du signal de fatigue (`answer_fatigue`).
+                memory.on_answer(
+                    _page, verdict,
+                    chars=len(_answer.strip()),
+                    response_time_ms=response_time_ms,
+                )
+                # Q&R de la session : relayée aux prochains prompts (génération
+                # comme évaluation), qui la citaient sans jamais la recevoir.
+                state["qa_history"].append({
+                    "question": str(_q or state.get("qa_text") or "")[:_MAX_HISTORY_TEXT_CHARS],
+                    "question_type": ev.get("question_type") or "",
+                    "answer": _answer[:_MAX_HISTORY_TEXT_CHARS],
+                    "verdict": verdict or "",
+                })
+                del state["qa_history"][:-_MAX_HISTORY]
+                remember_turn(
+                    "answer",
+                    ("clikoda", _q or state.get("qa_text") or ""),
+                    ("student", _answer),
+                    ("clikoda", ev.get("feedback", "")),
+                )
+                try:
+                    save_answer(
+                        question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,
+                        verdict=verdict, feedback=ev.get("feedback"), session_id=_sid,
+                        response_time_ms=response_time_ms,
+                    )
+                except Exception:  # persistance best-effort
+                    logger.debug("Persistance de la réponse ignorée", exc_info=True)
+                # Flashcard auto-portante proposée à la bonne réponse : la
+                # politique (verdict, doublon, renvoi au document) est celle
+                # du service. Seule une carte neuve est annoncée.
+                flashcard_created = False
+                try:
+                    flashcard_created = flashcards_service.create_auto_flashcard(
+                        ev.get("flashcard"),
+                        verdict=verdict,
+                        question_id=_qid,
+                        document_id=doc_id,
+                        session_id=_sid,
+                    )
+                except Exception:  # persistance best-effort
+                    logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
+                # Idée principale présente (correct/partial) -> fin du verrouillage.
+                if verdict in ("correct", "partial"):
+                    state["gated"] = False
+                    refresh_busy()
+                push_threadsafe(loop, out, {
+                    "type": "qa_feedback",
+                    "verdict": ev.get("verdict", ""),
+                    "feedback": ev.get("feedback", ""),
+                    "hint": ev.get("hint", ""),
+                    "completion": ev.get("completion", ""),
+                    # Passages de la page qui justifient le verdict / corrigent
+                    # l'erreur : surlignés comme pour une réponse libre.
+                    "highlights": ev.get("highlights", []),
+                    "flashcard_created": flashcard_created,
+                    # Question réflexive : pas de bonne ni de mauvaise réponse,
+                    # l'UI referme la carte et dit « réflexion notée ».
+                    "no_wrong_answer": bool(ev.get("no_wrong_answer")),
+                })
+
+            launch(
+                "evaluation",
+                lambda ok, err, _page=page, _q=question, _answer=answer, _qid=qid: assistant.evaluate_page_answer(
+                    doc_id, _page, _q, _answer, ok, err,
+                    question_type=state.get("qa_question_type") or "",
+                    # La question persistée porte sa réponse canonique et ses
+                    # propositions : le service s'en sert pour corriger.
+                    question_id=_qid,
+                    history=list(state["qa_history"]),
+                ),
+                on_eval,
+                report_error,
+            )
 
     sender_task = asyncio.create_task(_sender())
     ticker_task = asyncio.create_task(_ticker())
@@ -757,298 +1130,12 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 msg = ReaderMessage.model_validate(raw)
             except ValidationError:
                 continue  # message inconnu/malformé : ignoré, le canal reste ouvert
-            kind = msg.type
-            page = clamp_page(msg.page)
-
-            if kind == "viewport":
-                await attach_session(msg.session_id)
-                await flush_warmup()
-                # En pause, la page ne bouge pas (le lecteur est masqué) : un
-                # viewport tardif ne doit pas ouvrir de dwell sur une autre page.
-                if page != state["page"] and not pause.active:
-                    state["page"] = page
-                    memory.on_page_view(page)
-                continue
-
-            if kind == "activity":
-                # Deux signaux de présence : la fenêtre (masquée / second plan =
-                # absent) et le geste (scroll, souris, clavier = présent, même si
-                # la page dominante ne change pas — deuxième colonne, retour sur
-                # un schéma). Le second remet la stagnation à zéro.
-                if pause.active:
-                    continue  # l'élève est parti : on ne l'observe plus
-                state["away"] = bool(msg.hidden)
-                if msg.engaged and not msg.hidden:
-                    memory.on_interaction(time.monotonic())
-                continue
-
-            if kind == "engage":
-                # Surligner, annoter : un geste de lecture active, donc aussi
-                # une présence. En pause, l'élève n'est pas là (le lecteur est
-                # masqué) : rien n'est compté.
-                if pause.active or msg.action is None:
-                    continue
-                now = time.monotonic()
-                memory.on_interaction(now)
-                await credit_engagement(msg.action, now)
-                continue
-
-            if kind == "pause":
-                # Bouton « Pause » de l'élève, ou carte de Clikoda acceptée (la
-                # durée conseillée sert au crédit). La pause dure jusqu'à `resume`.
-                minutes = PAUSE_DEFAULT_MIN if msg.minutes is None else int(msg.minutes)
-                attention = (state["live_gauges"].snapshot() if state["live_gauges"] else {}).get("attention")
-                now = time.monotonic()
-                if pause.start(
-                    now,
-                    source=msg.source,
-                    planned_s=minutes * 60.0,
-                    page=state["page"],
-                    attention=attention,
-                ):
-                    state["away"] = False
-                    policy.set_paused(True)
-                    memory.pause(now)
-                continue
-
-            if kind == "resume":
-                await resume_reading(time.monotonic())
-                continue
-
-            if pause.active and kind in _PAUSED_ACTIONS:
-                # L'écran de pause couvre déjà le panneau : défense en profondeur,
-                # rien ne se génère ni ne s'évalue tant que l'élève n'est pas revenu.
-                continue
-            if kind in _PAUSED_ACTIONS:
-                # L'élève prend la main : une question automatique en génération
-                # n'a plus sa place (cf. on_intervention).
-                state["user_turn"] += 1
-            if kind == "ask" and (msg.question or "").strip():
-                # Questionner, répondre : l'engagement est le geste lui-même,
-                # crédité qu'Ollama réponde ou non.
-                await credit_engagement("ask", time.monotonic())
-            elif kind == "qa_answer" and (msg.answer or "").strip():
-                await credit_engagement("answer", time.monotonic())
-
-            if kind == "start_reading":
-                # Sas d'entrée franchi : le warm-up de la première question part
-                # d'ici, pas de l'ouverture du socket (cf. policy.start_reading),
-                # et la lecture aussi — le temps du sas n'est pas une lecture de
-                # la page 1 (memory.start_reading).
-                # Le message porte la page à l'écran : ouvert sur le marque-page,
-                # le lecteur n'y est pas en page 1, et un `viewport` perdu
-                # pendant l'ouverture du socket compterait la lecture sur la
-                # page 1. Posée AVANT `start_reading`, qui repart de la page
-                # courante.
-                if msg.page is not None and page != state["page"]:
-                    state["page"] = page
-                    memory.on_page_view(page)
-                policy.start_reading()
-                memory.start_reading(time.monotonic())
-                await attach_session(msg.session_id)
-                if msg.warmup:
-                    state["pending_warmup"] = msg.warmup
-                await flush_warmup()
-                continue
-
-            if kind == "mode":
-                mode = str(msg.mode or ASSISTANT_DEFAULT_MODE)
-                state["mode"] = mode if mode in ASSISTANT_MODES else ASSISTANT_DEFAULT_MODE
-                await out.put({
-                    "type": "system",
-                    "message": t("assistant.mode_changed", mode=t(f"assistant.mode_{state['mode']}")),
-                })
-                continue
-
-            if kind == "focus":
-                now = time.monotonic()
-                if now < state["focus_until"]:
-                    state["focus_until"] = 0.0
-                    await out.put({"type": "system", "message": "Mode focus désactivé."})
-                else:
-                    state["focus_until"] = now + _FOCUS_DURATION_S
-                    await out.put({
-                        "type": "system",
-                        "message": f"Mode focus activé ({FOCUS_DEFAULT_MIN} min sans interruption).",
-                    })
-                continue
-
-            on_success, on_error = make_callbacks()
-
-            if kind == "ask":
-                question = (msg.question or "").strip()
-                if not question:
-                    continue
-                memory.on_user_question(page, question)
-                recent_exchanges = list(state["exchanges"])
-                session_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
-                selected_snippets = msg.selected_snippets
-                await out.put(loading("assistant_answer"))
-
-                def on_ask_success(result: dict, _q=question, _page=page, _sid=state["session_id"]) -> None:
-                    end_generation()
-                    if state["live_gauges"] is not None:
-                        state["live_gauges"].apply_question(result)
-                    answer = result.get("answer", "")
-                    remember_turn("ask", ("student", _q), ("clikoda", answer))
-                    state["exchanges"].append({"question": _q, "answer": answer})
-                    del state["exchanges"][:-6]  # ne garder que les 6 derniers échanges
-                    if answer:
-                        try:
-                            save_assistant_exchange(doc_id, _page, _q, answer, session_id=_sid)
-                        except Exception:  # persistance best-effort
-                            logger.debug("Persistance de l'échange assistant ignorée", exc_info=True)
-                    on_success(result)
-
-                start_generation()
-                with announced("assistant_answer"):
-                    assistant.answer_question(
-                        doc_id, page, question, on_ask_success, on_error,
-                        recent_exchanges=recent_exchanges,
-                        session_gauges=session_gauges,
-                        selected_snippets=selected_snippets,
-                        previous_turn=state["last_turn"],
-                    )
-            elif kind in ("rephrase", "recap", "hook"):
-                # Reformuler, résumer, curiosité : ce que Clikoda en dit devient
-                # le dernier échange (« redis-le plus simplement » y renvoie).
-                def on_command_success(result: dict, _ok=on_success) -> None:
-                    remember_turn("command", ("clikoda", result.get("answer", "")))
-                    _ok(result)
-
-                task, run = {
-                    "rephrase": ("rephrasing", assistant.rephrase_page),
-                    "recap": ("chapter_summary", assistant.chapter_recap),
-                    "hook": ("curiosity_hook", assistant.curiosity_hook),
-                }[kind]
-                await out.put(loading(task))
-                start_generation()
-                with announced(task):
-                    run(doc_id, page, on_command_success, on_error)
-            elif kind == "start_qa":
-                sid = msg.session_id
-                await out.put(loading("question"))
-                qa_gauges = state["live_gauges"].snapshot() if state["live_gauges"] else {}
-                start_generation()
-                with announced("question"):
-                    assistant.generate_page_question(
-                        doc_id, page,
-                        lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
-                        on_error,
-                        session_gauges=qa_gauges,
-                        recent_question_types=list(state["recent_qtypes"]),
-                        history=list(state["qa_history"]),
-                    )
-            elif kind == "qa_answer":
-                sid = msg.session_id
-                question = msg.question or ""
-                answer = (msg.answer or "").strip()
-                if not answer:
-                    continue
-                qid = state.get("qa_qid")
-                await out.put(loading("evaluation"))
-
-                def on_eval(ev: dict, _sid=sid, _qid=qid, _answer=answer, _page=page, _q=question) -> None:
-                    # La question a sa réponse : elle n'attend plus (la politique
-                    # peut reparler, sauf verrou maintenu par une réponse fausse).
-                    state["qa_pending"] = False
-                    end_generation()
-                    # Signaux dérivés de la FORME de la réponse (longueur, questions
-                    # posées, connecteurs, analogies) : ils enrichissent curiosité et
-                    # créativité que le LLM seul sous-estime.
-                    ev = augment_evaluation_with_response_signals(ev, _answer)
-                    # Type de la question -> jauges type-aware (curiosité ≠ contexte).
-                    ev["question_type"] = state.get("qa_question_type")
-                    verdict = ev.get("verdict")
-                    # Le temps mis à répondre (fatigue, persistance) et la série
-                    # d'erreurs en cours (attention). Le temps ne coûte rien à
-                    # l'attention ici : la dérive passive l'observe déjà
-                    # (cf. LiveGauges.apply).
-                    sent_at = float(state.get("qa_sent_at") or 0.0)
-                    response_time_ms = (
-                        int(max(0.0, time.monotonic() - sent_at) * 1000) if sent_at else None
-                    )
-                    state["consecutive_incorrect"] = (
-                        int(state["consecutive_incorrect"]) + 1 if verdict == "incorrect" else 0
-                    )
-                    if state["live_gauges"] is not None:
-                        state["live_gauges"].apply(
-                            ev,
-                            consecutive_incorrect=int(state["consecutive_incorrect"]),
-                        )
-                    # Verdict ET forme : la longueur de ce qui vient d'être écrit
-                    # est la matière du signal de fatigue (`answer_fatigue`).
-                    memory.on_answer(
-                        _page, verdict,
-                        chars=len(_answer.strip()),
-                        response_time_ms=response_time_ms,
-                    )
-                    # Q&R de la session : relayée aux prochains prompts (génération
-                    # comme évaluation), qui la citaient sans jamais la recevoir.
-                    state["qa_history"].append({
-                        "question": str(_q or state.get("qa_text") or "")[:_MAX_HISTORY_TEXT_CHARS],
-                        "question_type": ev.get("question_type") or "",
-                        "answer": _answer[:_MAX_HISTORY_TEXT_CHARS],
-                        "verdict": verdict or "",
-                    })
-                    del state["qa_history"][:-_MAX_HISTORY]
-                    remember_turn(
-                        "answer",
-                        ("clikoda", _q or state.get("qa_text") or ""),
-                        ("student", _answer),
-                        ("clikoda", ev.get("feedback", "")),
-                    )
-                    try:
-                        save_answer(
-                            question_id=_qid, user_id=DEFAULT_USER_ID, answer_text=_answer,
-                            verdict=verdict, feedback=ev.get("feedback"), session_id=_sid,
-                            response_time_ms=response_time_ms,
-                        )
-                    except Exception:  # persistance best-effort
-                        logger.debug("Persistance de la réponse ignorée", exc_info=True)
-                    # Flashcard auto-portante proposée à la bonne réponse : la
-                    # politique (verdict, doublon, renvoi au document) est celle
-                    # du service. Seule une carte neuve est annoncée.
-                    flashcard_created = False
-                    try:
-                        flashcard_created = flashcards_service.create_auto_flashcard(
-                            ev.get("flashcard"),
-                            verdict=verdict,
-                            question_id=_qid,
-                            document_id=doc_id,
-                            session_id=_sid,
-                        )
-                    except Exception:  # persistance best-effort
-                        logger.debug("Création de la flashcard automatique ignorée", exc_info=True)
-                    # Idée principale présente (correct/partial) -> fin du verrouillage.
-                    if verdict in ("correct", "partial"):
-                        state["gated"] = False
-                        refresh_busy()
-                    push_threadsafe(loop, out, {
-                        "type": "qa_feedback",
-                        "verdict": ev.get("verdict", ""),
-                        "feedback": ev.get("feedback", ""),
-                        "hint": ev.get("hint", ""),
-                        "completion": ev.get("completion", ""),
-                        # Passages de la page qui justifient le verdict / corrigent
-                        # l'erreur : surlignés comme pour une réponse libre.
-                        "highlights": ev.get("highlights", []),
-                        "flashcard_created": flashcard_created,
-                        # Question réflexive : pas de bonne ni de mauvaise réponse,
-                        # l'UI referme la carte et dit « réflexion notée ».
-                        "no_wrong_answer": bool(ev.get("no_wrong_answer")),
-                    })
-
-                start_generation()
-                with announced("evaluation"):
-                    assistant.evaluate_page_answer(
-                        doc_id, page, question, answer, on_eval, on_error,
-                        question_type=state.get("qa_question_type") or "",
-                        # La question persistée porte sa réponse canonique et ses
-                        # propositions : le service s'en sert pour corriger.
-                        question_id=qid,
-                        history=list(state["qa_history"]),
-                    )
+            try:
+                await handle(msg)
+            except Exception:
+                # Un message qui échoue (base indisponible, service qui lève…)
+                # est perdu, pas le canal : la lecture et Clikoda continuent.
+                logger.exception("Lecteur : message « %s » en échec", msg.type)
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover

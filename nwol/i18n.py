@@ -41,6 +41,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Bulle assistante ──────────────────────────────────────────────
         "assistant.mode_changed": "Mode d'accompagnement : {mode}",
         "assistant.cancelled": "Demande annulée.",
+        "assistant.failed": "Clikoda n'a pas pu traiter cette demande. Réessaie.",
         "assistant.mode_discret": "Discret",
         "assistant.mode_normal": "Normal",
         "assistant.mode_coach": "Coach",
@@ -248,6 +249,7 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Assistant bubble ──────────────────────────────────────────────
         "assistant.mode_changed": "Guidance mode: {mode}",
         "assistant.cancelled": "Request cancelled.",
+        "assistant.failed": "Clikoda could not handle this request. Please try again.",
         "assistant.mode_discret": "Discreet",
         "assistant.mode_normal": "Normal",
         "assistant.mode_coach": "Coach",

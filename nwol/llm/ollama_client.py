@@ -15,8 +15,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from config import question_types
 from config.settings import (
     OLLAMA_BACKGROUND_TASKS,
@@ -151,6 +152,48 @@ def _task_domain(label: str) -> str:
     générations, jamais la pré-génération d'un épisode de langue (G18) : les
     deux vivent dans la même file, pas dans le même écran."""
     return "lang" if (label or "").startswith("lang_") else "default"
+
+
+# ── Travail de fond ──────────────────────────────────────────────────────────
+# Une tâche que PERSONNE n'attend à l'écran (la finalisation, au démarrage, des
+# lectures quittées en fermant le logiciel) s'enfile dans `background_tasks()`.
+# Elle y garde son label — donc son budget, ses options, son prompt — mais :
+#   * sa priorité est décalée de `_BACKGROUND_PRIORITY_OFFSET` : elle passe après
+#     TOUT ce qu'un écran attend, et les tâches de fond gardent leur ordre entre
+#     elles. Le bilan d'une séance reprise partait à la priorité du sas de sortie
+#     (1), devant chaque question et chaque intervention du lecteur ;
+#   * elle vit dans le domaine « background » : fermer le lecteur ne coupe pas un
+#     travail qu'il n'a pas demandé ;
+#   * un appel synchrone (`services/llm_bridge.run_llm_sync`) n'y compte pas son
+#     temps de file dans son budget, comme les autres appelants de fond.
+_BACKGROUND_PRIORITY_OFFSET = 100
+_BACKGROUND_DOMAIN = "background"
+_BACKGROUND = threading.local()
+
+
+@contextmanager
+def background_tasks() -> Iterator[None]:
+    """Toute tâche enfilée dans ce bloc (par ce thread) est un travail de fond."""
+    previous = in_background()
+    _BACKGROUND.value = True
+    try:
+        yield
+    finally:
+        _BACKGROUND.value = previous
+
+
+def in_background() -> bool:
+    return bool(getattr(_BACKGROUND, "value", False))
+
+
+def _task_placement(label: str) -> tuple[int, str]:
+    """(priorité, domaine d'annulation) d'une tâche, à sa mise en file."""
+    priority = _TASK_PRIORITY.get(label, 6)
+    if in_background():
+        return priority + _BACKGROUND_PRIORITY_OFFSET, _BACKGROUND_DOMAIN
+    return priority, _task_domain(label)
+
+
 _LLM_QUEUE: queue.PriorityQueue = queue.PriorityQueue()
 _QUEUE_COUNTER = itertools.count()
 # Fin de la dernière tâche du worker (horloge monotone) : `llm_idle_for`.
@@ -165,14 +208,13 @@ _EMPTY_SQRT_RE = re.compile(r"\\+sqrt\s*\{\s*\}")
 # un token obsolète ne sont pas lancées : leur `on_error` reçoit
 # CANCELLED_MESSAGE, pour qu'un appelant qui attend (pont synchrone) soit
 # libéré tout de suite et qu'un travail de fond puisse se remettre en file.
-# Un token par domaine (`_task_domain`) : `_generation_token` est celui du
-# domaine par défaut (lecteur, quiz, brainstorming…), le module langue a le sien.
-_generation_token: int = 0
-_lang_generation_token: int = 0
+# Un token par domaine (`_task_placement`) : « default » (lecteur, quiz,
+# brainstorming…), « lang » (module langue), « background » (travail de fond).
+_generation_tokens: dict[str, int] = {"default": 0, "lang": 0, _BACKGROUND_DOMAIN: 0}
 
 
 def _domain_token(domain: str) -> int:
-    return _lang_generation_token if domain == "lang" else _generation_token
+    return _generation_tokens.get(domain, 0)
 
 
 class GenerationCancelled(RuntimeError):
@@ -290,14 +332,9 @@ def cancel_pending_generations(domain: str = "default") -> None:
 
     Les appelants historiques (fermeture du lecteur, fin de session PDF)
     passent par le domaine par défaut : ils ne touchent plus à la génération
-    d'un épisode de langue, qui avait perdu son travail à chaque fois (G18)."""
-    global _generation_token, _lang_generation_token
-    if domain == "lang":
-        _lang_generation_token += 1
-        token = _lang_generation_token
-    else:
-        _generation_token += 1
-        token = _generation_token
+    d'un épisode de langue, qui avait perdu son travail à chaque fois (G18),
+    ni au travail de fond (`background_tasks`)."""
+    token = _generation_tokens[domain] = _generation_tokens.get(domain, 0) + 1
     _abort_inflight_generation(domain)
     logger.info("Génération LLM annulée (domaine=%s, token=%s)", domain, token)
 
@@ -465,6 +502,10 @@ def _task_system_lang() -> str | None:
 # d'être étiré (llm/throughput), travaillait encore pour un appelant parti et
 # bloquait le worker unique.
 _TASK_DEADLINE = threading.local()
+# Domaine d'annulation de la tâche en cours sur le worker (`_task_placement`) :
+# celui que la génération en vol déclare (`_inflight`). Il ne se déduit pas du
+# label — un bilan de séance est du lecteur, ou du fond (`background_tasks`).
+_TASK_DOMAIN = threading.local()
 
 
 def _start_task_clock(label: str, slot: "CallerSlot | None") -> None:
@@ -498,8 +539,16 @@ def _queue_worker() -> None:
         finally:
             # L'échéance d'une tâche ne doit jamais borner la suivante.
             _TASK_DEADLINE.value = None
+            _TASK_DOMAIN.value = None
             _LAST_TASK_DONE = time.monotonic()
             _LLM_QUEUE.task_done()
+
+
+def on_llm_worker() -> bool:
+    """Le thread courant est-il le worker LLM ? Les rappels des tâches y
+    tournent : ils ne doivent jamais attendre une autre tâche
+    (`services/llm_bridge.run_llm_sync`), qui ne partirait qu'après eux."""
+    return threading.current_thread() is _worker_thread
 
 
 def llm_idle_for() -> float | None:
@@ -1113,6 +1162,119 @@ def _is_escaped(text: str, index: int) -> bool:
     return backslashes % 2 == 1
 
 
+class _Outcome:
+    """Les deux issues d'une tâche : rendues UNE fois, et toujours.
+
+    Le contrat de la file, tenu ici pour TOUTES les tâches (`_enqueue_task`) :
+    chaque tâche mise en file finit par exactement un rappel — `on_success`
+    (résultat, ou repli local) ou `on_error` (panne, annulation, appelant
+    parti, travail de fond suspendu). Le lecteur compte ses générations en vol
+    et la politique d'intervention attend sa décision : une tâche jetée sans
+    rappel (appelant parti), ou rappelée deux fois (un `on_success` qui levait
+    recevait aussi `on_error`), laissait Clikoda muette pour la séance, ou la
+    déclarait libre trop tôt. Un rappel qui lève est une erreur de l'appelant :
+    journalisée avec sa trace, jamais convertie en second rappel."""
+
+    __slots__ = ("label", "delivered", "_on_success", "_on_error")
+
+    def __init__(self, label: str, on_success, on_error) -> None:
+        self.label = label
+        self.delivered = False
+        self._on_success = on_success
+        self._on_error = on_error
+
+    def success(self, result) -> None:
+        self._deliver(self._on_success, result)
+
+    def error(self, message) -> None:
+        self._deliver(self._on_error, message)
+
+    def _deliver(self, callback, value) -> None:
+        if self.delivered:
+            return
+        self.delivered = True
+        try:
+            callback(value)
+        except Exception:
+            logger.exception("Rappel de la tâche LLM %s en échec", self.label)
+
+
+def _enqueue_task(
+    label: str,
+    model: str,
+    work: Callable[[], object],
+    on_success,
+    on_error,
+    when_suspended: Callable[[], object | None] | None = None,
+) -> None:
+    """Met une tâche en file : LE chemin de toutes les générations.
+
+    `work()` tourne sur le worker et rend le résultat. `when_suspended()` sert
+    une tâche de fond refusée en mode économe : un repli local, ou None pour
+    un refus. Priorité et domaine d'annulation : `_task_placement`. Le contrat
+    de `_Outcome` vaut pour toute sortie, y compris celle qu'une modification
+    future oublierait : une tâche finie sans rappel est rendue comme annulée."""
+    priority, domain = _task_placement(label)
+    captured_token = _domain_token(domain)
+    slot = _current_caller_slot()
+    if slot is not None:
+        slot.timeout_s = task_wall_timeout_s(label)
+    outcome = _Outcome(label, on_success, on_error)
+
+    def _run() -> None:
+        _TASK_DOMAIN.value = domain
+        try:
+            if _domain_token(domain) != captured_token:
+                logger.debug("Tâche LLM %s annulée (token obsolète)", label)
+                outcome.error(CANCELLED_MESSAGE)
+                return
+            if slot is not None and slot.abandon.is_set():
+                # L'appelant synchrone a renoncé (il a déjà levé) : rien ne part
+                # chez Ollama, et le rappel ne trouve plus personne.
+                logger.debug("Tâche LLM %s jetée (appelant parti)", label)
+                outcome.error(CANCELLED_MESSAGE)
+                return
+            if background_suspended(label):
+                # Vérifié au DÉPART et non à la mise en file : le mode a pu changer
+                # pendant l'attente (réglage modifié, autre modèle).
+                fallback = when_suspended() if when_suspended is not None else None
+                if fallback is not None:
+                    logger.info("Tâche de fond %s : mode économe, repli local sans appel au modèle", label)
+                    outcome.success(fallback)
+                else:
+                    logger.info("Tâche de fond %s suspendue : mode économe", label)
+                    outcome.error(SUSPENDED_MESSAGE)
+                return
+            _start_task_clock(label, slot)
+            logger.info("Génération LLM %s lancée modèle=%s", label, model or _active_model())
+            result = work()
+            logger.info("Génération LLM %s terminée", label)
+            if _domain_token(domain) != captured_token:
+                logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
+                outcome.error(CANCELLED_MESSAGE)
+                return
+            outcome.success(result)
+        except GenerationCancelled as exc:
+            # Attendu, pas une panne : le lecteur a été fermé pendant la
+            # génération. L'appelant est prévenu (un pont synchrone n'attend
+            # pas son timeout pour rien), sans ligne d'erreur dans le journal.
+            logger.debug("Génération LLM %s interrompue : %s", label, exc)
+            outcome.error(CANCELLED_MESSAGE)
+        except Exception as exc:
+            logger.error("Échec génération LLM %s : %s", label, exc)
+            outcome.error(str(exc))
+        finally:
+            if not outcome.delivered:
+                logger.error("Tâche LLM %s finie sans rappel : rendue comme annulée", label)
+                outcome.error(CANCELLED_MESSAGE)
+            # Rendu par la tâche elle-même, pas seulement par la boucle du
+            # worker : jouée sur un autre thread (tests), elle y laissait son
+            # domaine, et l'appel suivant s'y déclarait à tort.
+            _TASK_DOMAIN.value = None
+
+    _LLM_QUEUE.put((priority, next(_QUEUE_COUNTER), _run))
+
+
 def _run_json_async(
     label: str,
     prompt: str,
@@ -1136,62 +1298,22 @@ def _run_json_async(
     du chapitre, éléments lus) : sans lui, le repli réanalysait le prompt qu'il
     venait de construire et y récupérait ses propres mots-bouchons."""
     options = task_options(label)
-    priority = _TASK_PRIORITY.get(label, 6)
-    seq = next(_QUEUE_COUNTER)
-    domain = _task_domain(label)
-    captured_token = _domain_token(domain)
-    slot = _current_caller_slot()
-    if slot is not None:
-        slot.timeout_s = task_wall_timeout_s(label)
 
-    def _run() -> None:
-        if _domain_token(domain) != captured_token:
-            logger.debug("Tâche LLM %s annulée (token obsolète)", label)
-            on_error(CANCELLED_MESSAGE)
-            return
-        if slot is not None and slot.abandon.is_set():
-            logger.debug("Tâche LLM %s jetée (appelant parti)", label)
-            return
-        if background_suspended(label):
-            # Vérifié au DÉPART et non à la mise en file : le mode a pu changer
-            # pendant l'attente (réglage modifié, autre modèle).
-            fallback = _fallback_json_result(label, prompt, parser, "", fallback_context)
-            if fallback is not None:
-                logger.info("Tâche de fond %s : mode économe, repli local sans appel au modèle", label)
-                on_success(fallback)
-            else:
-                logger.info("Tâche de fond %s suspendue : mode économe", label)
-                on_error(SUSPENDED_MESSAGE)
-            return
-        _start_task_clock(label, slot)
+    def work() -> dict:
         _CALL_METRICS.value = [] if on_metrics is not None else None
         _SYSTEM_LANG.value = system_lang
         try:
-            logger.info("Génération LLM %s lancée modèle=%s", label, model or _active_model())
-            try:
-                parsed = _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [],
-                                        options=options, json_schema=json_schema,
-                                        fallback_context=fallback_context)
-            finally:
-                _flush_call_metrics(on_metrics)
-                _SYSTEM_LANG.value = None
-            logger.info("Génération LLM %s terminée", label)
-            if _domain_token(domain) != captured_token:
-                logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
-                on_error(CANCELLED_MESSAGE)
-                return
-            on_success(parsed)
-        except GenerationCancelled as exc:
-            # Attendu, pas une panne : le lecteur a été fermé pendant la
-            # génération. L'appelant est prévenu (un pont synchrone n'attend
-            # pas son timeout pour rien), sans ligne d'erreur dans le journal.
-            logger.debug("Génération LLM %s interrompue : %s", label, exc)
-            on_error(CANCELLED_MESSAGE)
-        except Exception as exc:
-            logger.error("Échec génération LLM %s : %s", label, exc)
-            on_error(str(exc))
+            return _generate_json(label, prompt, parser, model=model, retries=3, image_paths=image_paths or [],
+                                  options=options, json_schema=json_schema,
+                                  fallback_context=fallback_context)
+        finally:
+            _flush_call_metrics(on_metrics)
+            _SYSTEM_LANG.value = None
 
-    _LLM_QUEUE.put((priority, seq, _run))
+    _enqueue_task(
+        label, model, work, on_success, on_error,
+        when_suspended=lambda: _fallback_json_result(label, prompt, parser, "", fallback_context),
+    )
 
 
 def _run_text_async(
@@ -1209,55 +1331,22 @@ def _run_text_async(
     file priorisée pour rester sérialisé avec les autres tâches LLM.
     """
     options = task_options(label)
-    priority = _TASK_PRIORITY.get(label, 6)
-    seq = next(_QUEUE_COUNTER)
-    domain = _task_domain(label)
-    captured_token = _domain_token(domain)
-    slot = _current_caller_slot()
-    if slot is not None:
-        slot.timeout_s = task_wall_timeout_s(label)
 
-    def _run() -> None:
-        if _domain_token(domain) != captured_token:
-            logger.debug("Tâche LLM %s annulée (token obsolète)", label)
-            on_error(CANCELLED_MESSAGE)
-            return
-        if slot is not None and slot.abandon.is_set():
-            logger.debug("Tâche LLM %s jetée (appelant parti)", label)
-            return
-        if background_suspended(label):
-            logger.info("Tâche de fond %s suspendue : mode économe", label)
-            on_error(SUSPENDED_MESSAGE)
-            return
-        _start_task_clock(label, slot)
+    def work() -> str:
+        images = _images_for(model, image_paths)
         try:
-            logger.info("Génération LLM %s (texte) lancée modèle=%s", label, model or _active_model())
-            images = _images_for(model, image_paths)
-            try:
-                raw = _call_ollama(prompt, model, images=images, options=options, format_json=False, task=label)
-            except (GenerationCancelled, ModelOutOfMemory):
-                raise
-            except Exception as exc:
-                if images:
-                    logger.warning("Génération %s avec image échouée : %s — nouvel essai sans image.",
-                                   label, _image_retry_reason(exc))
-                    raw = _call_ollama(prompt, model, images=[], options=options, format_json=False, task=label)
-                else:
-                    raise
-            logger.info("Génération LLM %s terminée", label)
-            if _domain_token(domain) != captured_token:
-                logger.debug("Résultat LLM %s ignoré (token obsolète)", label)
-                on_error(CANCELLED_MESSAGE)
-                return
-            on_success((raw or "").strip())
-        except GenerationCancelled as exc:
-            logger.debug("Génération LLM %s interrompue : %s", label, exc)
-            on_error(CANCELLED_MESSAGE)
+            raw = _call_ollama(prompt, model, images=images, options=options, format_json=False, task=label)
+        except (GenerationCancelled, ModelOutOfMemory):
+            raise
         except Exception as exc:
-            logger.error("Échec génération LLM %s : %s", label, exc)
-            on_error(str(exc))
+            if not images:
+                raise
+            logger.warning("Génération %s avec image échouée : %s — nouvel essai sans image.",
+                           label, _image_retry_reason(exc))
+            raw = _call_ollama(prompt, model, images=[], options=options, format_json=False, task=label)
+        return (raw or "").strip()
 
-    _LLM_QUEUE.put((priority, seq, _run))
+    _enqueue_task(label, model, work, on_success, on_error)
 
 
 def _generate_json(
@@ -2374,7 +2463,7 @@ def _call_ollama_http(prompt: str, model: str, images: list[str] | None = None, 
     with _INFLIGHT_LOCK:
         _inflight["conn"] = conn
         _inflight["cancelled"] = False
-        _inflight["domain"] = _task_domain(task)
+        _inflight["domain"] = getattr(_TASK_DOMAIN, "value", None) or _task_domain(task)
     started = time.monotonic()
     try:
         conn.connect()

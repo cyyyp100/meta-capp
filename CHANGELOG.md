@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-10-23
+
+### Fixed
+
+- **Clikoda's automatic questions no longer stop during a reading.** Several
+  paths could silence her for the rest of a session without any visible error:
+  a failure while preparing a question left it counted as "in progress" forever,
+  an error in the reader's background loop stopped it for good, an error while
+  handling one message closed the connection, and a free answer counted twice,
+  so Clikoda could look idle while a question was still being prepared. Every
+  request from the reader now goes through a single path that always settles
+  it, and failures are logged instead of silencing Clikoda.
+- **Sessions resumed at startup no longer get in the way of reading.** Their
+  summaries ran ahead of every question in the reader, started before the speed
+  calibration (on a model the calibration then set aside), and closing the reader
+  cut them off. They now run as background work, after the calibration and after
+  anything a screen is waiting for.
+- **Every task in Clikoda's queue ends with exactly one callback**, even when its
+  caller has given up or an error occurs outside the generation itself; a
+  callback can no longer wait on another task (it used to freeze the queue until
+  the timeout).
+- **"Why does Meta-Capp work this way?" no longer talks about a web port of a
+  Tkinter app.** The introduction, the session flow and the description of the
+  software now describe the app as it works today.
+
 ## [0.2.1] — 2026-10-21
 
 ### Fixed
@@ -449,7 +474,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cyyyp100/meta-capp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cyyyp100/meta-capp/releases/tag/v0.1.0

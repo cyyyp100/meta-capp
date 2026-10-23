@@ -55,7 +55,7 @@ from db.sessions import delete_session as _delete_session
 from db.sessions import end_session as _end_session
 from db.sessions import start_session as _start_session
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
-from llm.ollama_client import SESSION_SUMMARY_FALLBACK, cancel_pending_generations
+from llm.ollama_client import SESSION_SUMMARY_FALLBACK, background_tasks, cancel_pending_generations
 from metacog.gauges import (
     VERDICT_CRITERIA,
     clamp_gauge,
@@ -857,22 +857,28 @@ def finalize_pending_sessions(user_id: int = DEFAULT_USER_ID) -> list[int]:
     Le jour d'étude compté est celui de la séance, pas celui du démarrage ; le
     portrait de l'apprenant n'est régénéré qu'une fois, après la dernière. En
     mode économe, rien n'est demandé au LLM (pas de travail de fond) : le profil
-    glisse, le bilan reste vide."""
+    glisse, le bilan reste vide.
+
+    Personne n'attend ces bilans : ils partent en TRAVAIL DE FOND
+    (`ollama_client.background_tasks`), après tout ce que le lecteur demande.
+    À la priorité du sas de sortie, chacun passait devant les questions et les
+    interventions de la lecture qu'on venait d'ouvrir."""
     economy = _safe(llm_models.economy, False)
     pending = _safe(list_unfinalized_sessions, [])
     done: list[int] = []
     for index, session in enumerate(pending):
         sid = int(session["id"])
         try:
-            if not economy and not str(session.get("analysis") or "").strip():
-                session_analysis(sid, user_id)
-            finalize_session(
-                sid, [], user_id=user_id,
-                study_day=_local_day(session.get("started_at")),
-                # Le portrait de l'apprenant porte sur tout l'historique : une
-                # fois, après la dernière séance reprise, suffit.
-                refresh_analysis=not economy and index == len(pending) - 1,
-            )
+            with background_tasks():
+                if not economy and not str(session.get("analysis") or "").strip():
+                    session_analysis(sid, user_id)
+                finalize_session(
+                    sid, [], user_id=user_id,
+                    study_day=_local_day(session.get("started_at")),
+                    # Le portrait de l'apprenant porte sur tout l'historique : une
+                    # fois, après la dernière séance reprise, suffit.
+                    refresh_analysis=not economy and index == len(pending) - 1,
+                )
             done.append(sid)
         except Exception:
             logger.exception("Finalisation de la séance %s impossible", sid)
