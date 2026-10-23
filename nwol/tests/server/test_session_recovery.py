@@ -182,7 +182,7 @@ def test_the_server_start_closes_sessions_left_open(client, tmp_path, make_pdf):
 )
 def test_a_study_day_can_be_the_day_of_the_session(client, last, day, expected):
     from db import get_connection
-    from db.user import get_streak, record_study_day
+    from db.user import record_study_day
 
     conn = get_connection()
     with conn:
@@ -191,7 +191,10 @@ def test_a_study_day_can_be_the_day_of_the_session(client, last, day, expected):
             (last,),
         )
     record_study_day(1, day=day)
-    assert get_streak(1)["streak"] == expected
+    # La série ÉCRITE : `get_streak` la lit par rapport à aujourd'hui, et l'affiche
+    # à zéro passé le jour de grâce — ce test ne passait que les 20 et 21 octobre.
+    row = conn.execute("SELECT streak FROM login_streak WHERE user_id=1").fetchone()
+    assert row["streak"] == expected
 
 
 def test_the_offline_fallback_is_never_stored_as_an_analysis(client, tmp_path, make_pdf):
