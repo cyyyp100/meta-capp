@@ -917,7 +917,7 @@ export function ClikodaPanel({
       <div ref={panelRef} style={panelStyle}>
         <div className="clikoda-drag" style={{ ...headerStyle, cursor: layout === "dockRight" ? "default" : "move" }}>
           <strong className="flex items-center gap-1.5 text-sm text-accent-foreground">
-            <ClikodaHead className="h-3.5 w-auto shrink-0" style={{ color: "var(--clikoda)" }} />
+            <ClikodaHead className="h-3.5 w-auto shrink-0" style={{ color: "var(--accent-ink)" }} />
             Clikoda
             {/* Le voyant était 🟢/⚪️ : deux emoji dont le rendu change d'un OS à
                 l'autre, et dont personne ne devine le sens. Une pastille + une
@@ -1097,7 +1097,7 @@ export function ClikodaPanel({
                     distinguait une attente en cours d'une interface figée. Le
                     contour de sa tête se trace, et ses trois clics partent devant
                     elle — un coda, le signal d'un cachalot. */}
-                <ClikodaHead outline coda className="h-6 w-auto shrink-0" style={{ color: "var(--clikoda)" }} />
+                <ClikodaHead outline coda className="h-6 w-auto shrink-0" style={{ color: "var(--accent-ink)" }} />
                 {t("clikoda.thinking")}
               </div>
               {/* Machine lente ou mode économe : l'attente se chiffre en minutes.
@@ -1219,10 +1219,11 @@ const chipClose: React.CSSProperties = {
   border: "none", background: "transparent", color: "var(--accent-ink)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
 };
 
-// ── Bulle Clikoda : le cachalot du logo sur sa tuile, déplaçable. ─────────────────
-// Au repos, elle flotte et cligne de l'œil. Pendant qu'elle inspecte la page
-// (`scanning`), elle se retourne vers le PDF et y lance ses clics — l'écholocation
-// du cachalot — sans cligner.
+// ── Bulle Clikoda : le cachalot du logo, à l'accent, sans fond, déplaçable. ───────
+// Tournée vers le PDF (le lecteur est à gauche de la bulle, rangée par défaut à
+// droite). Au repos, elle flotte et cligne de l'œil. Pendant qu'elle inspecte la
+// page (`scanning`), elle y lance ses clics — l'écholocation du cachalot — sans
+// cligner.
 function ClikodaBubble({
   scanning,
   onOpen,
@@ -1235,27 +1236,30 @@ function ClikodaBubble({
   /** Visite guidée : toujours le même coin, et pas déplaçable. */
   fixed?: boolean;
 }) {
-  const SIZE = 64;
+  // La silhouette seule (164 × 94) : la boîte suit ses proportions, plus de
+  // quoi flotter.
+  const WIDTH = 68;
+  const HEIGHT = 44;
   const movedRef = useRef(false);
 
-  const start: Rect = { ...loadRect(LS_BUBBLE, { x: 0, y: 0, width: SIZE, height: SIZE }) };
-  const corner = { x: Math.max(12, window.innerWidth - SIZE - 26), y: Math.max(12, window.innerHeight - SIZE - 26) };
+  const start: Rect = { ...loadRect(LS_BUBBLE, { x: 0, y: 0, width: WIDTH, height: HEIGHT }) };
+  const corner = { x: Math.max(12, window.innerWidth - WIDTH - 26), y: Math.max(12, window.innerHeight - HEIGHT - 26) };
   // La position mémorisée est ignorée pendant la visite : l'étape qui présente
   // la bulle doit la trouver au même endroit chez tout le monde.
   const defaultPos = fixed || !(start.x || start.y) ? corner : { x: start.x, y: start.y };
 
   return (
     <Rnd
-      default={{ x: defaultPos.x, y: defaultPos.y, width: SIZE, height: SIZE }}
+      default={{ x: defaultPos.x, y: defaultPos.y, width: WIDTH, height: HEIGHT }}
       enableResizing={false}
       disableDragging={fixed}
       bounds="parent"
       onDragStart={() => { movedRef.current = false; }}
       onDrag={() => { movedRef.current = true; }}
-      onDragStop={(_e, d) => save(LS_BUBBLE, { x: d.x, y: d.y, width: SIZE, height: SIZE })}
+      onDragStop={(_e, d) => save(LS_BUBBLE, { x: d.x, y: d.y, width: WIDTH, height: HEIGHT })}
       style={{ zIndex: 50 }}
     >
-      <div data-tour="clikoda" className="clikoda-float" style={{ width: SIZE, height: SIZE }}>
+      <div data-tour="clikoda" className="clikoda-float" style={{ width: WIDTH, height: HEIGHT }}>
         {/* C'était un <div onClick> : la seule façon d'ouvrir Clikoda était un clic
             souris — pas de tabulation, pas d'Entrée, rien d'annoncé. Un vrai
             <button> rend l'assistant atteignable au clavier, et `movedRef`
@@ -1266,22 +1270,23 @@ function ClikodaBubble({
           aria-label={title}
           data-scanning={scanning || undefined}
           onClick={() => { if (!movedRef.current) onOpen(); }}
-          className="border-none p-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="rounded-md border-none bg-transparent p-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           style={bubbleStyle}
         >
-          {/* L'œil est peint de la couleur de la tuile (et non percé) : c'est
-              lui qui se ferme. Retournée, la tête montre le côté du PDF —
-              le lecteur est à gauche de la bulle, rangée par défaut à droite. */}
+          {/* L'œil est peint (et non percé) : c'est lui qui se ferme. Percé, il
+              laisserait voir la page — et ne pourrait pas cligner. Le miroir
+              porte aussi les clics, qui partent donc vers le PDF. */}
           <ClikodaHead
-            eye="var(--clikoda-tile)"
+            eye="var(--on-accent)"
             blink={!scanning}
             coda={scanning}
             codaOverflow
             style={{
-              width: 48,
-              color: "var(--clikoda-mist)",
-              transform: scanning ? "rotateY(180deg)" : "rotateY(0deg)",
-              transition: "transform 0.6s cubic-bezier(0.2,0.8,0.2,1)",
+              width: WIDTH,
+              color: "var(--accent)",
+              transform: "scaleX(-1)",
+              // Sans fond, c'est l'ombre qui la détache de la page.
+              filter: "drop-shadow(0 6px 8px rgba(11, 18, 32, 0.28))",
             }}
           />
         </button>
@@ -1291,11 +1296,7 @@ function ClikodaBubble({
 }
 
 const bubbleStyle: React.CSSProperties = {
-  width: "100%", height: "100%", borderRadius: "50%", cursor: "pointer",
-  display: "grid", placeItems: "center", perspective: 240,
-  background: "var(--clikoda-tile)",
-  // Un liseré clair : la tuile reste détachée sur le fond de nuit du thème sombre.
-  boxShadow: "0 12px 24px -8px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.10)",
+  width: "100%", height: "100%", cursor: "pointer", display: "grid", placeItems: "center",
 };
 
 /** Pause recommandée : une carte qu'on peut PRENDRE.

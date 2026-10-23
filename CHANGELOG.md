@@ -12,15 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Clikoda has a face: the sperm whale of the new logo.** In the reader, the
-  closed bubble is now the whale on its teal tile instead of a sphere with two
-  eyes. She floats and blinks now and then (twice per cycle, once a double
-  blink, at uneven moments). While she inspects the page she turns towards the
-  document and sends three clicks at it, without blinking. When the discussion is
-  open and she is thinking, the outline of her head draws itself and her three
-  clicks go out one after the other in front of her jaw (a *coda*, a sperm
-  whale's call), in place of the three bouncing dots. The panel header shows
-  her head instead of a sparkle. With *reduce motion* set in the system, all of
-  this stays still.
+  closed bubble is now the whale itself, in the app's orange and without a
+  background, instead of a sphere with two eyes. She faces the document,
+  floats and blinks now and then (twice per cycle, once a double blink, at
+  uneven moments). While she inspects the page she sends three clicks at it,
+  without blinking. When the discussion is open and she is thinking, the
+  outline of her head draws itself and her three clicks go out one after the
+  other in front of her jaw (a *coda*, a sperm whale's call), in place of the
+  three bouncing dots. The panel header shows her head instead of a sparkle.
+  With *reduce motion* set in the system, all of this stays still.
 
 ### Added
 

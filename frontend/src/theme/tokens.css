@@ -149,17 +149,6 @@
   --note-gray: #8a8f98;
   --note-none: #a3a7ae;
 
-  /* Clikoda, le cachalot du logo (desktop/icons/source/, features/reader/
-     ClikodaHead.tsx). Sa sarcelle n'est PAS une seconde couleur de marque : elle
-     ne sert qu'au personnage. `--clikoda` est son encre posée sur l'interface
-     (en-tête de la discussion, contour quand elle réfléchit) et s'éclaircit en
-     sombre ; la tuile et la brume sont celles de l'icône et ne bougent pas avec
-     le thème : ce sont les couleurs du personnage, pas de l'interface. Ses
-     clics sont à l'accent : l'ambre du logo. */
-  --clikoda: #135863;
-  --clikoda-tile: #135863;
-  --clikoda-mist: #eef4f1;
-
   /* Module langues (feuilleton) : tons du mandarin et genre des noms allemands.
      Toujours DOUBLÉS d'un indicateur non coloré (chiffre du ton, article) :
      la couleur aide, elle ne porte jamais seule l'information (F17). Les cinq
@@ -270,10 +259,6 @@
 
   --hover-surface: #172136;
   --hover-ink: #f8fafc;
-
-  /* La sarcelle du logo tombe à 2,2:1 sur la surface sombre : éclaircie,
-     6,7:1 (`--surface`), même teinte. */
-  --clikoda: #58a9b3;
 
   --code-comment: #7c8aa3;
   --code-string: #5eead4;
@@ -547,6 +532,9 @@ body {
 }
 
 /* Clikoda vivante (features/reader/ClikodaHead.tsx, ClikodaPanel.tsx).
+   Dans le lecteur, elle est peinte à l'accent — `--accent` en grand (la bulle),
+   `--accent-ink` en petit sur fond clair (en-tête, contour) — et non à la
+   sarcelle de l'icône : c'est l'orange de l'interface qui la désigne.
    Bulle fermée : elle flotte et cligne de l'œil — deux fois par cycle, dont un
    double clignement, à des instants inégaux : un clignement réglé comme un
    métronome se remarque. Zone ouverte, quand elle réfléchit : son contour se
