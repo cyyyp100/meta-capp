@@ -93,3 +93,31 @@ def test_correct_route_persists_errors(client, monkeypatch):
     pid = get_or_create_lang_profile(1, "espagnol")["id"]
     assert "holaa" in {e["word"] for e in get_lang_errors_for_revision(pid)}
 
+
+def test_correct_route_bounds_its_texts(client, monkeypatch):
+    """Les textes partent coupés au plafond du prompt ; une requête démesurée
+    (ou un nom de langue trop long) est refusée avant le modèle."""
+    from config.settings import LANG_CORRECTION_MAX_CHARS, LANG_NAME_MAX_CHARS
+
+    seen = {}
+
+    def _capture(language, target_phrase, user_attempt, on_success, on_error, model=None):
+        seen.update(target=target_phrase, attempt=user_attempt)
+        on_success({"verdict": "correct", "corrections": [], "feedback": "", "score": 1.0})
+
+    monkeypatch.setattr("services.lang.generate_lang_correction_async", _capture)
+
+    long = "a" * (LANG_CORRECTION_MAX_CHARS * 2)
+    resp = client.post(
+        "/api/lang/correct",
+        json={"language": "espagnol", "target_phrase": long, "user_attempt": long},
+    )
+    assert resp.status_code == 200
+    assert len(seen["target"]) == len(seen["attempt"]) == LANG_CORRECTION_MAX_CHARS
+
+    for body in (
+        {"language": "espagnol", "target_phrase": "a" * (LANG_CORRECTION_MAX_CHARS * 4 + 1), "user_attempt": "a"},
+        {"language": "x" * (LANG_NAME_MAX_CHARS + 1), "target_phrase": "hola", "user_attempt": "hola"},
+    ):
+        assert client.post("/api/lang/correct", json=body).status_code == 422
+

@@ -8,6 +8,7 @@ import logging
 import threading
 
 from config.settings import (
+    LANG_CORRECTION_MAX_CHARS,
     LANG_LEGACY_CONTEXT_WORDS,
     LANG_LEGACY_PASSIVE_TO_ACTIVE,
     LANG_LEGACY_PLACEMENT_CEFR_THRESHOLDS,
@@ -238,7 +239,12 @@ def correct_attempt(
     user_id: int = DEFAULT_USER_ID,
 ) -> dict:
     """Corrige une production (types translation/production/dictation) et persiste
-    les erreurs pour alimenter la révision adaptative (boucle fermée)."""
+    les erreurs pour alimenter la révision adaptative (boucle fermée).
+
+    Les deux textes sont coupés à LANG_CORRECTION_MAX_CHARS : au-delà, Ollama
+    tronquerait le DÉBUT du prompt, c'est-à-dire les consignes."""
+    target_phrase = target_phrase[:LANG_CORRECTION_MAX_CHARS]
+    user_attempt = user_attempt[:LANG_CORRECTION_MAX_CHARS]
     profile = get_or_create_lang_profile(user_id, language)
     try:
         result = run_llm_sync(

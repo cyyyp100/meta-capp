@@ -257,3 +257,39 @@ def test_the_tiny_model_never_gets_the_last_exchange(machine, lang):
     )
     shown = "Quel est le rôle du pas ?" in prompt
     assert shown is (machine.profile.tier != "tiny"), machine.profile.name
+
+
+@pytest.fixture(params=[(p, eco) for p in {(p.tokenizer, p.max_num_ctx): p for p in LLM_MODELS.values()}.values()
+                        for eco in (False, True)],
+                ids=lambda p: f"{p[0].name}-{'econome' if p[1] else 'normal'}")
+def any_machine(request, monkeypatch):
+    """Tous les profils, contexte plein compris : `profile_analysis` garde le
+    même num_ctx de 4096 sur chaque modèle."""
+    profile, economy = request.param
+    monkeypatch.setattr(settings, "_active_profile", lambda: profile)
+    monkeypatch.setattr(settings, "_economy", lambda: economy)
+    monkeypatch.setattr(llm_models, "active_profile", lambda: profile)
+    return SimpleNamespace(profile=profile, economy=economy, tokenizer=profile.tokenizer)
+
+
+@pytest.mark.parametrize("page_kind", ["prose", "chinois"])
+def test_profile_analysis_prompt_fits(any_machine, lang, page_kind):
+    """Analyse générale de l'apprenant au sas de sortie : réflexions écrites
+    librement, longues et dans l'écriture la plus coûteuse, une de trop, une
+    analyse précédente démesurée, tous les critères sur un long historique."""
+    trends = {key: {"first": 50.0, "current": 61.3, "delta_total": 11.3,
+                    "recent": [55.2, 57.8, 59.1, 60.4, 61.3], "sessions_measured": 142} for key in GAUGES}
+    metrics = {f"metrique_{i}": 1234.5 for i in range(14)}
+    reflections = [{"question": PAGES[page_kind][:600], "answer": PAGES[page_kind]}] * 4
+    prompt = prompts.build_profile_analysis_prompt(
+        profile=GAUGES, criteria_trends=trends, sessions_count=142, session_metrics=metrics,
+        session_gauges=GAUGES, reflections=reflections, previous_analysis=PAGES[page_kind],
+    )
+    _check("profile_analysis", prompt, lang, any_machine)
+
+
+def test_profile_analysis_keeps_short_reflections_whole():
+    """La borne ne touche pas une réflexion ordinaire."""
+    answer = "J'ai compris la descente de gradient, mais le pas reste flou."
+    prompt = prompts.build_profile_analysis_prompt(reflections=[{"question": "Q ?", "answer": answer}])
+    assert answer in prompt
