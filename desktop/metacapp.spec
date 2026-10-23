@@ -37,8 +37,9 @@ ENTITLEMENTS = os.path.join(ROOT, "desktop", "entitlements.plist") if CODESIGN_I
 
 
 def _icon(extension: str) -> str | None:
-    """Icône de l'application si elle existe (`desktop/icons/meta-capp.icns|.ico`) ;
-    sans elle, PyInstaller pose la sienne."""
+    """Icône de l'application si elle existe (`desktop/icons/meta-capp.icns|.ico`,
+    versionnées, refaites par `scripts/build_icons.py`) ; sans elle, PyInstaller
+    pose la sienne."""
     path = os.path.join(ROOT, "desktop", "icons", f"meta-capp.{extension}")
     return path if os.path.isfile(path) else None
 

@@ -5,7 +5,6 @@ import {
   Lightbulb,
   Maximize2,
   PanelRight,
-  Sparkles,
   Target,
   X,
 } from "lucide-react";
@@ -33,6 +32,7 @@ import { AnswerInput } from "../questions/AnswerInput";
 import { QuestionStem } from "../questions/QuestionStem";
 import { QuestionTypeBadge } from "../questions/QuestionTypeBadge";
 import { ReflectionBadge, VerdictBadge } from "../questions/VerdictBadge";
+import { ClikodaHead } from "./ClikodaHead";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
 import { onEngagement } from "./engagement";
 import { renderMathToHtml } from "./renderMath";
@@ -917,7 +917,7 @@ export function ClikodaPanel({
       <div ref={panelRef} style={panelStyle}>
         <div className="clikoda-drag" style={{ ...headerStyle, cursor: layout === "dockRight" ? "default" : "move" }}>
           <strong className="flex items-center gap-1.5 text-sm text-accent-foreground">
-            <Sparkles className="size-4" aria-hidden />
+            <ClikodaHead className="h-3.5 w-auto shrink-0" style={{ color: "var(--clikoda)" }} />
             Clikoda
             {/* Le voyant était 🟢/⚪️ : deux emoji dont le rendu change d'un OS à
                 l'autre, et dont personne ne devine le sens. Une pastille + une
@@ -1094,16 +1094,10 @@ export function ClikodaPanel({
             <div className="flex flex-col gap-1.5 self-start">
               <div role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-muted-foreground">
                 {/* Le texte italique « Clikoda réfléchit… » était immobile : rien ne
-                    distinguait une attente en cours d'une interface figée. */}
-                <span className="flex gap-1" aria-hidden>
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="size-1.5 animate-bounce rounded-full bg-muted-light"
-                      style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }}
-                    />
-                  ))}
-                </span>
+                    distinguait une attente en cours d'une interface figée. Le
+                    contour de sa tête se trace, et ses trois clics partent devant
+                    elle — un coda, le signal d'un cachalot. */}
+                <ClikodaHead outline coda className="h-6 w-auto shrink-0" style={{ color: "var(--clikoda)" }} />
                 {t("clikoda.thinking")}
               </div>
               {/* Machine lente ou mode économe : l'attente se chiffre en minutes.
@@ -1225,9 +1219,10 @@ const chipClose: React.CSSProperties = {
   border: "none", background: "transparent", color: "var(--accent-ink)", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1,
 };
 
-// ── Bulle Clikoda : sphère 3D à deux yeux mobiles, déplaçable. ────────────────────
-// Au repos, les pupilles suivent le curseur. Pendant que Clikoda inspecte la page
-// (`scanning`), la bulle se tourne vers le PDF et fixe son regard de ce côté.
+// ── Bulle Clikoda : le cachalot du logo sur sa tuile, déplaçable. ─────────────────
+// Au repos, elle flotte et cligne de l'œil. Pendant qu'elle inspecte la page
+// (`scanning`), elle se retourne vers le PDF et y lance ses clics — l'écholocation
+// du cachalot — sans cligner.
 function ClikodaBubble({
   scanning,
   onOpen,
@@ -1241,33 +1236,13 @@ function ClikodaBubble({
   fixed?: boolean;
 }) {
   const SIZE = 64;
-  const sphereRef = useRef<HTMLButtonElement>(null);
   const movedRef = useRef(false);
-  const [pupil, setPupil] = useState({ x: 0, y: 0 });
 
   const start: Rect = { ...loadRect(LS_BUBBLE, { x: 0, y: 0, width: SIZE, height: SIZE }) };
   const corner = { x: Math.max(12, window.innerWidth - SIZE - 26), y: Math.max(12, window.innerHeight - SIZE - 26) };
   // La position mémorisée est ignorée pendant la visite : l'étape qui présente
   // la bulle doit la trouver au même endroit chez tout le monde.
   const defaultPos = fixed || !(start.x || start.y) ? corner : { x: start.x, y: start.y };
-
-  // Suivi du curseur (désactivé en scanning : le regard est épinglé vers le PDF).
-  useEffect(() => {
-    if (scanning) return;
-    const onMove = (e: MouseEvent) => {
-      const el = sphereRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const ang = Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
-      const reach = 3.2;
-      setPupil({ x: Math.cos(ang) * reach, y: Math.sin(ang) * reach });
-    };
-    window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
-  }, [scanning]);
-
-  // En scanning : pupilles vers le PDF (gauche), sinon suivi du curseur.
-  const look = scanning ? { x: -3.4, y: 0.6 } : pupil;
 
   return (
     <Rnd
@@ -1280,65 +1255,47 @@ function ClikodaBubble({
       onDragStop={(_e, d) => save(LS_BUBBLE, { x: d.x, y: d.y, width: SIZE, height: SIZE })}
       style={{ zIndex: 50 }}
     >
-      <style>{BUBBLE_KEYFRAMES}</style>
-      <div
-        data-tour="clikoda"
-        style={{ width: SIZE, height: SIZE, perspective: 320, animation: "clikodaFloat 4.2s ease-in-out infinite" }}
-      >
+      <div data-tour="clikoda" className="clikoda-float" style={{ width: SIZE, height: SIZE }}>
         {/* C'était un <div onClick> : la seule façon d'ouvrir Clikoda était un clic
             souris — pas de tabulation, pas d'Entrée, rien d'annoncé. Un vrai
             <button> rend l'assistant atteignable au clavier, et `movedRef`
             continue de distinguer un clic d'une fin de glissement. */}
         <button
-          ref={sphereRef}
           type="button"
           title={title}
           aria-label={title}
+          data-scanning={scanning || undefined}
           onClick={() => { if (!movedRef.current) onOpen(); }}
           className="border-none p-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-          style={{ ...sphereStyle, transform: scanning ? "rotateY(-32deg) scale(1.04)" : "rotateY(0deg) scale(1)" }}
+          style={bubbleStyle}
         >
-          <div style={{ display: "flex", gap: 9, transform: "translateZ(10px)" }}>
-            <Eye look={look} />
-            <Eye look={look} />
-          </div>
+          {/* L'œil est peint de la couleur de la tuile (et non percé) : c'est
+              lui qui se ferme. Retournée, la tête montre le côté du PDF —
+              le lecteur est à gauche de la bulle, rangée par défaut à droite. */}
+          <ClikodaHead
+            eye="var(--clikoda-tile)"
+            blink={!scanning}
+            coda={scanning}
+            codaOverflow
+            style={{
+              width: 48,
+              color: "var(--clikoda-mist)",
+              transform: scanning ? "rotateY(180deg)" : "rotateY(0deg)",
+              transition: "transform 0.6s cubic-bezier(0.2,0.8,0.2,1)",
+            }}
+          />
         </button>
       </div>
     </Rnd>
   );
 }
 
-function Eye({ look }: { look: { x: number; y: number } }) {
-  return (
-    <div style={eyeWhiteStyle}>
-      <div style={{ ...pupilStyle, transform: `translate(${look.x}px, ${look.y}px)` }} />
-    </div>
-  );
-}
-
-const BUBBLE_KEYFRAMES = `
-@keyframes clikodaFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-`;
-const sphereStyle: React.CSSProperties = {
-  width: "100%", height: "100%", borderRadius: "50%", position: "relative", cursor: "pointer",
-  display: "grid", placeItems: "center",
-  background:
-    "radial-gradient(circle at 34% 26%, rgba(255,255,255,0.85), rgba(255,255,255,0) 34%)," +
-    "radial-gradient(circle at 68% 74%, var(--accent-hover), var(--accent) 52%, color-mix(in srgb, var(--accent) 55%, #000) 100%)",
-  boxShadow:
-    "0 12px 24px -8px rgba(0,0,0,0.45), inset -6px -8px 14px rgba(0,0,0,0.30), inset 6px 8px 16px rgba(255,255,255,0.35)",
-  transformStyle: "preserve-3d",
-  transition: "transform 0.5s cubic-bezier(0.2,0.8,0.2,1)",
-};
-// Le blanc de l'œil reste un blanc littéral, et NON `var(--on-accent)` : c'est
-// un trait du personnage, pas du texte posé sur l'accent. En sombre `--on-accent`
-// vaut une encre presque noire — Clikoda s'y retrouverait avec des yeux noirs.
-const eyeWhiteStyle: React.CSSProperties = {
-  width: 17, height: 17, borderRadius: "50%", background: "#fff",
-  display: "grid", placeItems: "center", boxShadow: "inset 0 1px 2px rgba(0,0,0,0.25)",
-};
-const pupilStyle: React.CSSProperties = {
-  width: 7.5, height: 7.5, borderRadius: "50%", background: "#1b1b2b", transition: "transform 0.12s ease-out",
+const bubbleStyle: React.CSSProperties = {
+  width: "100%", height: "100%", borderRadius: "50%", cursor: "pointer",
+  display: "grid", placeItems: "center", perspective: 240,
+  background: "var(--clikoda-tile)",
+  // Un liseré clair : la tuile reste détachée sur le fond de nuit du thème sombre.
+  boxShadow: "0 12px 24px -8px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.10)",
 };
 
 /** Pause recommandée : une carte qu'on peut PRENDRE.

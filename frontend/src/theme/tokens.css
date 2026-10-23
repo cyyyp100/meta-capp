@@ -149,6 +149,17 @@
   --note-gray: #8a8f98;
   --note-none: #a3a7ae;
 
+  /* Clikoda, le cachalot du logo (desktop/icons/source/, features/reader/
+     ClikodaHead.tsx). Sa sarcelle n'est PAS une seconde couleur de marque : elle
+     ne sert qu'au personnage. `--clikoda` est son encre posée sur l'interface
+     (en-tête de la discussion, contour quand elle réfléchit) et s'éclaircit en
+     sombre ; la tuile et la brume sont celles de l'icône et ne bougent pas avec
+     le thème : ce sont les couleurs du personnage, pas de l'interface. Ses
+     clics sont à l'accent : l'ambre du logo. */
+  --clikoda: #135863;
+  --clikoda-tile: #135863;
+  --clikoda-mist: #eef4f1;
+
   /* Module langues (feuilleton) : tons du mandarin et genre des noms allemands.
      Toujours DOUBLÉS d'un indicateur non coloré (chiffre du ton, article) :
      la couleur aide, elle ne porte jamais seule l'information (F17). Les cinq
@@ -259,6 +270,10 @@
 
   --hover-surface: #172136;
   --hover-ink: #f8fafc;
+
+  /* La sarcelle du logo tombe à 2,2:1 sur la surface sombre : éclaircie,
+     6,7:1 (`--surface`), même teinte. */
+  --clikoda: #58a9b3;
 
   --code-comment: #7c8aa3;
   --code-string: #5eead4;
@@ -529,6 +544,97 @@ body {
 }
 [data-flash] {
   animation: note-flash 0.6s ease-in-out 2;
+}
+
+/* Clikoda vivante (features/reader/ClikodaHead.tsx, ClikodaPanel.tsx).
+   Bulle fermée : elle flotte et cligne de l'œil — deux fois par cycle, dont un
+   double clignement, à des instants inégaux : un clignement réglé comme un
+   métronome se remarque. Zone ouverte, quand elle réfléchit : son contour se
+   trace, puis les trois clics du coda partent l'un après l'autre devant sa
+   mâchoire. `transform-box: fill-box` : l'œil et chaque clic se transforment
+   autour de leur propre centre, pas de celui du dessin. */
+@keyframes clikoda-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(-1.5deg);
+  }
+}
+.clikoda-float {
+  animation: clikoda-float 4.2s ease-in-out infinite;
+}
+@keyframes clikoda-blink {
+  0%,
+  44%,
+  46.4%,
+  88%,
+  90.2%,
+  92.4%,
+  100% {
+    transform: scaleY(1);
+  }
+  45%,
+  89%,
+  91.2% {
+    transform: scaleY(0.1);
+  }
+}
+.clikoda-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: clikoda-blink 7s ease-in-out infinite;
+}
+@keyframes clikoda-trace {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.clikoda-trace {
+  stroke-dasharray: 100;
+  animation: clikoda-trace 0.8s var(--ease) both;
+}
+@keyframes clikoda-click {
+  0%,
+  55%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.6);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.clikoda-coda circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0.25;
+  animation: clikoda-click 1.3s ease-out infinite;
+}
+.clikoda-coda circle:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.clikoda-coda circle:nth-child(3) {
+  animation-delay: 0.32s;
+}
+/* La règle générale ramène les animations à 0,001 ms, mais une animation
+   infinie aussi courte se lit à un instant quelconque de son cycle à chaque
+   image : l'œil et les clics papilloteraient. Ici on les arrête net. */
+@media (prefers-reduced-motion: reduce) {
+  .clikoda-float,
+  .clikoda-blink,
+  .clikoda-trace,
+  .clikoda-coda circle {
+    animation: none;
+  }
+  .clikoda-coda circle {
+    opacity: 1;
+  }
 }
 
 /* Pose d'un post-it : le prochain clic sur une page le pose là. */

@@ -80,7 +80,13 @@ export function AppLayout() {
   return (
     <div className="flex h-full">
       <aside className="flex w-58 shrink-0 flex-col border-r border-border bg-surface px-3.5 py-5.5">
-        <div data-tour="brand" className="px-2.5 pb-4.5 font-serif text-h2 font-bold tracking-tight">
+        {/* Le logo est l'icône de l'application, en version petite taille
+            (scripts/build_icons.py) : à 28 px, le dessin complet perd son œil. */}
+        <div
+          data-tour="brand"
+          className="flex items-center gap-2.5 px-2.5 pb-4.5 font-serif text-h2 font-bold tracking-tight"
+        >
+          <img src="/favicon.svg" alt="" width={28} height={28} className="size-7 shrink-0" />
           Meta-Capp
         </div>
 
