@@ -127,6 +127,39 @@ def no_startup_session_finalize(monkeypatch):
     return real
 
 
+class _CapturedQueue:
+    """File LLM de substitution : les tâches enfilées sont gardées et jouées par
+    le test, dans l'ordre de priorité, sur SON thread.
+
+    Ces tests attendaient le worker LLM unique de l'application : quand une
+    tâche laissée par un test précédent l'occupait plus de 3 s, ils échouaient
+    (une fois sur trois dans la suite langue complète, jamais seuls — § 14,
+    n° 9). `get`/`task_done` restent ceux de la vraie file : le worker, s'il
+    termine une tâche pendant le test, retourne attendre là où il attendait."""
+
+    def __init__(self, real):
+        self.items: list = []
+        self.get = real.get
+        self.task_done = real.task_done
+
+    def put(self, item) -> None:
+        self.items.append(item)
+
+    def run_all(self) -> None:
+        for _prio, _seq, fn in sorted(self.items, key=lambda it: it[:2]):
+            fn()
+        self.items.clear()
+
+
+@pytest.fixture
+def captured_queue(monkeypatch):
+    from llm import ollama_client
+
+    queue = _CapturedQueue(ollama_client._LLM_QUEUE)
+    monkeypatch.setattr(ollama_client, "_LLM_QUEUE", queue)
+    return queue
+
+
 @pytest.fixture(autouse=True, scope="session")
 def no_real_logs_or_assets(tmp_path_factory):
     """En dev, le journal (`logs/nwol.log`) et les assets (`nwol/assets` : cache

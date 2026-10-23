@@ -9,7 +9,8 @@ import logging
 import threading
 from typing import Any, Callable
 
-from llm.ollama_client import close_caller_slot, open_caller_slot
+from config.settings import OLLAMA_BACKGROUND_QUEUE_WAIT_S
+from llm.ollama_client import close_caller_slot, in_background, on_llm_worker, open_caller_slot
 
 logger = logging.getLogger("services.llm_bridge")
 
@@ -34,12 +35,22 @@ def run_llm_sync(call: Callable[[Callable, Callable], None], timeout: float | No
     hebdomadaire) : le budget ne part qu'au moment où le worker prend la
     tâche, et l'attente en file est bornée à part par ce nombre. Sans lui (un
     endpoint que l'utilisateur attend), la file compte dans le budget : mieux
-    vaut une erreur qu'un écran qui attend indéfiniment.
+    vaut une erreur qu'un écran qui attend indéfiniment. Dans
+    `ollama_client.background_tasks()`, l'appelant est de fond par définition :
+    sans `queue_wait_s`, il reçoit `OLLAMA_BACKGROUND_QUEUE_WAIT_S`.
 
     Sur timeout, on lève le drapeau d'abandon : il n'y a qu'UN worker LLM, et
     une tâche encore en file dont plus personne ne veut le résultat retarderait
     tout ce qui suit.
+
+    Jamais depuis le worker LLM (le rappel d'une autre tâche) : la tâche
+    attendue ne partirait qu'après lui, et la file entière restait figée
+    jusqu'au timeout. On lève tout de suite.
     """
+    if on_llm_worker():
+        raise RuntimeError("run_llm_sync appelé depuis le worker LLM : la tâche attendue ne partirait jamais")
+    if queue_wait_s is None and in_background():
+        queue_wait_s = OLLAMA_BACKGROUND_QUEUE_WAIT_S
     box: dict[str, Any] = {}
     done = threading.Event()
     slot = open_caller_slot()

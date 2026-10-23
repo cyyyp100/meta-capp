@@ -165,45 +165,12 @@ def test_cancelled_generation_is_not_retried(monkeypatch):
 def test_cancel_without_inflight_call_is_harmless():
     from llm import ollama_client
 
-    before = ollama_client._generation_token
+    before = ollama_client._domain_token("default")
     ollama_client.cancel_pending_generations()
-    assert ollama_client._generation_token == before + 1
+    assert ollama_client._domain_token("default") == before + 1
 
 
 # ── Domaines d'annulation (K3, G18) ───────────────────────────────────────────
-
-class _CapturedQueue:
-    """File LLM de substitution : les tâches enfilées sont gardées et jouées par
-    le test, dans l'ordre de priorité, sur SON thread.
-
-    Ces tests attendaient le worker LLM unique de l'application : quand une
-    tâche laissée par un test précédent l'occupait plus de 3 s, ils échouaient
-    (une fois sur trois dans la suite langue complète, jamais seuls — § 14,
-    n° 9). `get`/`task_done` restent ceux de la vraie file : le worker, s'il
-    termine une tâche pendant le test, retourne attendre là où il attendait."""
-
-    def __init__(self, real):
-        self.items: list = []
-        self.get = real.get
-        self.task_done = real.task_done
-
-    def put(self, item) -> None:
-        self.items.append(item)
-
-    def run_all(self) -> None:
-        for _prio, _seq, fn in sorted(self.items, key=lambda it: it[:2]):
-            fn()
-        self.items.clear()
-
-
-@pytest.fixture
-def captured_queue(monkeypatch):
-    from llm import ollama_client
-
-    queue = _CapturedQueue(ollama_client._LLM_QUEUE)
-    monkeypatch.setattr(ollama_client, "_LLM_QUEUE", queue)
-    return queue
-
 
 def test_reader_cancel_never_touches_a_language_generation(monkeypatch, captured_queue):
     """Fermer le lecteur coupait aussi la pré-génération d'un épisode : les

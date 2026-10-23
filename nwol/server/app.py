@@ -67,7 +67,27 @@ async def _lifespan(_app: FastAPI):
     # éteint, n'a rien à faire dans le chemin de démarrage.
     from services.llm_models import refresh_active
 
-    threading.Thread(target=refresh_active, daemon=True, name="llm-calibration").start()
+    # Lectures quittées en fermant le logiciel : closes ICI, avant la première
+    # requête (aucun lecteur n'y est rattaché), puis finalisées comme un sas de
+    # sortie passé — le bilan de Clikoda passe par le LLM, en travail de fond.
+    # Importées ICI pour que les tests puissent remplacer la seconde
+    # (tests/conftest.py).
+    from services.session import close_abandoned_sessions, finalize_pending_sessions
+
+    close_abandoned_sessions()
+
+    def _llm_startup() -> None:
+        # Le calibrage d'abord : il fixe le modèle (le choix automatique écarte
+        # un modèle trop lent) et les budgets. Le premier bilan partait avant
+        # lui, sur un gemma4:12b que le calibrage écartait ensuite. Un calibrage
+        # en échec ne prive pas les séances de leur finalisation.
+        try:
+            refresh_active()
+        except Exception:
+            logger.exception("Calibrage de Clikoda impossible au démarrage")
+        finalize_pending_sessions()
+
+    threading.Thread(target=_llm_startup, daemon=True, name="llm-startup").start()
     # Empreinte des documents importés avant qu'elle existe : c'est elle qui
     # les reconnaîtra s'ils sont déplacés (services/relink). En thread : relire
     # chaque fichier n'a rien à faire dans le démarrage. Importée ICI et non en
@@ -75,14 +95,6 @@ async def _lifespan(_app: FastAPI):
     from services.relink import backfill_content_hashes
 
     threading.Thread(target=backfill_content_hashes, daemon=True, name="content-hash-backfill").start()
-    # Lectures quittées en fermant le logiciel : closes ICI, avant la première
-    # requête (aucun lecteur n'y est rattaché), puis finalisées en thread comme
-    # un sas de sortie passé — le bilan de Clikoda passe par le LLM. Importées
-    # ICI pour que les tests puissent remplacer la seconde (tests/conftest.py).
-    from services.session import close_abandoned_sessions, finalize_pending_sessions
-
-    close_abandoned_sessions()
-    threading.Thread(target=finalize_pending_sessions, daemon=True, name="sessions-finalize").start()
     logger.info("Serveur Meta-Capp prêt (v%s).", APP_VERSION)
     yield
 

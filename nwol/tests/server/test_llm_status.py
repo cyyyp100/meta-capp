@@ -208,7 +208,7 @@ def fluency(client, ollama, monkeypatch, reference_model):
     # Le démarrage du serveur lance `refresh_active` dans un thread (server/app) :
     # fini avant les espions, il ne s'y mêle pas.
     for thread in threading.enumerate():
-        if thread.name == "llm-calibration":
+        if thread.name == "llm-startup":
             thread.join(timeout=5)
     monkeypatch.setattr(llm_models, "set_aside", reference_model.set_aside)
     monkeypatch.setattr(llm_models, "judge_fluency", reference_model.judge_fluency)

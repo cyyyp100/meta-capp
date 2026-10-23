@@ -153,6 +153,73 @@ def test_economy_mode_finalizes_without_asking_the_llm(
     assert session["finalized_at"] and session["analysis"] is None
 
 
+def test_the_startup_finalization_is_background_work(
+    client, tmp_path, make_pdf, monkeypatch, captured_queue, no_startup_session_finalize,
+):
+    """Retour d'usage (2026-10-22) : au démarrage, le bilan de chaque séance
+    reprise partait à la priorité du sas de sortie, devant les questions et
+    les interventions de la lecture qu'on venait d'ouvrir — et fermer ce
+    lecteur le coupait. Désormais tout ce qu'elle demande au LLM (bilan,
+    portrait de l'apprenant) passe après l'écran, hors de portée du lecteur."""
+    import threading
+    import time
+
+    from llm import ollama_client
+    from services.session import close_abandoned_sessions
+
+    seen: list[tuple[str, object]] = []
+
+    def generate(label, *_a, **_k):
+        seen.append((label, ollama_client._TASK_DOMAIN.value))
+        return {"session_summary": {"qualitative_summary": "Bilan de fond.", "metacognitive_questions": []}}
+
+    monkeypatch.setattr(ollama_client, "_generate_json", generate)
+    sid = _session(client, _import_doc(client, tmp_path, make_pdf))
+    _read_something(sid)
+    close_abandoned_sessions()
+    captured_queue.run_all()  # la fiche du document importé : une tâche d'écran
+    seen.clear()
+
+    done: dict[str, list[int]] = {}
+    worker = threading.Thread(target=lambda: done.setdefault("ids", no_startup_session_finalize()), daemon=True)
+    worker.start()
+    priorities: list[int] = []
+    deadline = time.monotonic() + 10
+    while worker.is_alive() and time.monotonic() < deadline:
+        if captured_queue.items:
+            priorities += [item[0] for item in captured_queue.items]
+            captured_queue.run_all()
+        time.sleep(0.01)
+    worker.join(timeout=1)
+
+    assert done.get("ids") == [sid]
+    assert [label for label, _ in seen] == ["session_summary", "profile_analysis"]
+    assert {domain for _, domain in seen} == {"background"}
+    assert priorities and min(priorities) > max(ollama_client._TASK_PRIORITY.values())
+
+
+def test_the_startup_finalizes_after_the_calibration(client, monkeypatch):
+    """Le premier bilan partait avant le calibrage du débit — sur un gemma4:12b
+    que le calibrage écartait ensuite du choix automatique."""
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+    from services import llm_models
+    from services import session as session_service
+
+    order: list[str] = []
+    monkeypatch.setattr(llm_models, "refresh_active", lambda: order.append("calibration"))
+    monkeypatch.setattr(session_service, "finalize_pending_sessions", lambda: order.append("finalization"))
+    with TestClient(create_app(), base_url="http://127.0.0.1:8756") as restarted:
+        restarted.headers["host"] = "127.0.0.1:8756"
+        for thread in threading.enumerate():
+            if thread.name == "llm-startup":
+                thread.join(timeout=5)
+    assert order == ["calibration", "finalization"]
+
+
 def test_the_server_start_closes_sessions_left_open(client, tmp_path, make_pdf):
     """Branché au démarrage : un nouveau serveur sur la même base clôt la séance
     avant la première requête — la frise ne dit plus « Session en cours »."""
