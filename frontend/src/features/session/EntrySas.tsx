@@ -210,7 +210,9 @@ export function EntrySas({
         <div className="mb-3 text-[13px] font-bold tracking-[1px] text-brand-ink uppercase">
           {t(copy.label)}
         </div>
-        <h2 className="m-0 mb-2.5 font-serif text-2xl font-bold text-foreground">{title}</h2>
+        {/* Un nom de fichier sans espace (« a_b_c.pdf ») ne se coupe nulle part :
+            sans ce retour forcé il déborde du panneau, décentré à droite. */}
+        <h2 className="m-0 mb-2.5 font-serif text-2xl font-bold text-foreground [overflow-wrap:anywhere]">{title}</h2>
         <p className="leading-relaxed text-text-soft">{t(copy.text)}</p>
         <div className="mt-3">
           <WhyButton whyKey="entry" />
