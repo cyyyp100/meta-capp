@@ -17,6 +17,7 @@ from i18n import t
 from server import security
 from server.config import APP_VERSION, DEV_ORIGINS, FRONTEND_DIST
 from server.routers import (
+    about,
     annotations,
     brainstorming,
     data,
@@ -207,6 +208,7 @@ def create_app() -> FastAPI:
     app.include_router(updates.router, prefix="/api")
     app.include_router(onboarding.router, prefix="/api")
     app.include_router(shell.router, prefix="/api")
+    app.include_router(about.router, prefix="/api")
 
     # En production, sert le frontend compilé depuis la même origine.
     _pin_bundle_mime_types()

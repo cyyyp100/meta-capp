@@ -514,7 +514,7 @@ Everything Meta-Capp knows about you sits in one SQLite file on your own disk �
   read the latest version number — no identifier, no parameter; like any web
   request, GitHub sees your IP address and the app version. Nothing is downloaded or
   installed automatically.
-- **Portability**: export everything in one click (Profile → *My data*) — it is a
+- **Portability**: export everything in one click (Settings ▸ Data ▸ *Export my data*) — it is a
   standard SQLite file you can open yourself.
 - **Erasure**: an *Erase everything* button wipes profile, questions, flashcards,
   documents, logs and the safety copy kept when a backup is restored. Deleting the
@@ -522,6 +522,9 @@ Everything Meta-Capp knows about you sits in one SQLite file on your own disk �
 - **Logs** stay on your disk until you export them (*Report a problem*). They hold
   file names and error traces, never the text of your documents; your home folder
   shows as `~`. Read them before attaching them to a public issue.
+
+The full privacy policy is in [PRIVACY.md](PRIVACY.md), also linked from
+Settings ▸ Help ▸ About, next to the third-party licenses.
 
 ---
 
