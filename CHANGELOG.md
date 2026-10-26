@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-10-26
+
 ### Added
 
 - **Settings ▸ Help ▸ About shows the third-party licenses.** The notices
@@ -15,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clikoda says she is an AI.** Her first message in the reader, the guided
   tour and the About card state that she is a local language model and can be
   wrong (EU AI Act, article 50).
+
+### Fixed
+
+- A long document name without spaces no longer overflows the entry screen
+  and pushes its title off-centre: it now wraps anywhere.
+
+### Security
+
+- Dependencies: npm advisories fixed in the build tooling (`undici`, `zod`);
+  `radix-ui` 1.8.1, `vitest` 5, `@vitejs/plugin-react` 6.1.2.
 
 ## [0.2.3] — 2026-10-23
 
@@ -508,7 +520,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/cyyyp100/meta-capp/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/cyyyp100/meta-capp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/cyyyp100/meta-capp/compare/v0.2.0...v0.2.1
