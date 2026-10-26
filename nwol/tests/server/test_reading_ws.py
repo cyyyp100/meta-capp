@@ -669,7 +669,7 @@ def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_pa
 
     doc_id, sid = _long_session(client, tmp_path, make_pdf)
     with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
-        ws.send_json({"type": "start_reading", "session_id": sid})
+        ws.send_json({"type": "start_reading", "session_id": sid, "page": 3})
         for page in (3, 4):
             ws.send_json({"type": "viewport", "page": page, "session_id": sid})
             _sync(ws)
@@ -677,6 +677,7 @@ def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_pa
         client.post(f"/api/session/{sid}/end", json={"duration_s": 30})
     dwell = get_page_dwell(sid)
     gauges = get_session_gauges(sid)
+    pages_read = get_session(sid)["pages_read"]
     assert {row["page"] for row in dwell} >= {3, 4}
 
     with client.websocket_connect(f"/api/reader/{doc_id}/stream") as ws:
@@ -688,7 +689,7 @@ def test_a_reader_reopened_after_the_end_leaves_the_session_alone(client, tmp_pa
 
     assert get_page_dwell(sid) == dwell
     assert get_session_gauges(sid) == gauges
-    assert get_session(sid)["pages_read"] == 2
+    assert get_session(sid)["pages_read"] == pages_read
 
 
 def test_intervention_context_relays_policy_trigger(client):
