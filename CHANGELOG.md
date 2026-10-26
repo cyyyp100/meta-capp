@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Settings ▸ Help ▸ About shows the third-party licenses.** The notices
+  shipped in every build (`THIRD_PARTY_NOTICES.txt`) open in a window of the
+  app, next to a link to the privacy policy, now versioned as `PRIVACY.md`.
+- **Clikoda says she is an AI.** Her first message in the reader, the guided
+  tour and the About card state that she is a local language model and can be
+  wrong (EU AI Act, article 50).
+
 ## [0.2.3] — 2026-10-23
 
 ### Changed

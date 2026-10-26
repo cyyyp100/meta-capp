@@ -132,6 +132,12 @@ async function apiError(res: Response): Promise<ApiError> {
 
 export const api = {
   health: () => getJSON<Health>("/api/health"),
+  /** Mentions des licences tierces embarquées (texte brut) ; 404 en dev si non générées. */
+  aboutNotices: () =>
+    fetch("/api/about/notices").then(async (r) => {
+      if (!r.ok) throw await apiError(r);
+      return r.text();
+    }),
   statsOverview: () => getJSON<MetacogOverview>("/api/stats/overview"),
   document: (id: number) => getJSON<DocumentDetail>(`/api/library/doc/${id}`),
 

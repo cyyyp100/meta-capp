@@ -9,3 +9,6 @@ export const PROJECT_PAGE = "https://github.com/cyyyp100/meta-capp";
 
 /** Section « Editions — Local vs Pro » du README : ce que la version Pro ajoute. */
 export const PRO_EDITION_URL = `${PROJECT_PAGE}#editions--local-vs-pro`;
+
+/** Politique de confidentialité, versionnée dans le dépôt (`PRIVACY.md`). */
+export const PRIVACY_URL = `${PROJECT_PAGE}/blob/main/PRIVACY.md`;

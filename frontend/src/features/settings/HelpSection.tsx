@@ -6,15 +6,23 @@
 // automatique de journaux serait exactement ce que l'édition locale promet de
 // ne pas faire.
 import { useQuery } from "@tanstack/react-query";
-import { Download, ExternalLink, PlayCircle } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Download, ExternalLink, FileText, PlayCircle, Shield } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { SettingsCard } from "./SettingsPrimitives";
 
-import { PROJECT_PAGE } from "../../config/links";
+import { PRIVACY_URL, PROJECT_PAGE } from "../../config/links";
 import { useT } from "../../i18n";
 
 export function HelpSection({ focusAbout = false }: { focusAbout?: boolean }) {
@@ -71,8 +79,63 @@ export function HelpSection({ focusAbout = false }: { focusAbout?: boolean }) {
       <section ref={about}>
         <SettingsCard title={t("user.about")} description={t("settings.about.version", { version: health?.version ?? "—" })}>
           <p className="m-0 text-sm leading-relaxed text-text-soft">{t("settings.about.blurb")}</p>
+          {/* AI Act, art. 50 : dire qu'on parle à une IA. Clikoda le dit aussi
+              elle-même à l'ouverture de sa bulle (`clikoda.welcome`). */}
+          <p className="m-0 mt-2 text-sm leading-relaxed text-text-soft">{t("settings.about.ai")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">
+                <Shield className="size-4" aria-hidden />
+                {t("settings.about.privacy")}
+              </a>
+            </Button>
+            <LicensesButton />
+          </div>
         </SettingsCard>
       </section>
     </>
+  );
+}
+
+/** Les mentions embarquées dans le binaire, lues à l'ouverture seulement
+ *  (≈ 400 Ko : inutile de les charger pour qui ne les ouvre jamais). Elles
+ *  s'affichent dans l'app : un lien vers `/api/...` partirait dans le
+ *  navigateur du système, qui n'a pas le jeton de lancement. */
+function LicensesButton() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const { data, isError, isLoading } = useQuery({
+    queryKey: ["about", "notices"],
+    queryFn: api.aboutNotices,
+    enabled: open,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="secondary">
+          <FileText className="size-4" aria-hidden />
+          {t("settings.about.licenses")}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[88vh] sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle className="pr-8">{t("settings.about.licenses")}</DialogTitle>
+          <DialogDescription>{t("settings.about.licenses_hint")}</DialogDescription>
+        </DialogHeader>
+        {isError ? (
+          <p className="m-0 text-sm text-text-soft">{t("settings.about.licenses_missing")}</p>
+        ) : (
+          <pre
+            aria-busy={isLoading}
+            className="m-0 max-h-[64vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-soft p-3 font-mono text-xs leading-relaxed"
+          >
+            {data ?? "…"}
+          </pre>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
