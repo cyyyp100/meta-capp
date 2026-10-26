@@ -4,6 +4,8 @@
 
 ### The AI-native cognitive learning companion for educational PDFs
 
+**English** · [Français](README.fr.md)
+
 **Your PDF, exactly as its author designed it but with a living AI reading companion beside it that watches how you learn, answers in context, and speaks up only when it actually helps.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg?style=flat-square)](LICENSE)
@@ -152,6 +154,32 @@ Meta-Capp runs entirely locally using **Gemma 4 through [Ollama](https://ollama.
 Educational data stays on the learner's machine: mistakes, doubts, weaknesses, confusion, curiosity, reflection. **These should not become cloud products.**
 
 If Ollama is offline, nothing breaks: the reader stays fully usable and the assistant visibly falls asleep.
+
+### Education for everyone, everywhere
+
+Access to education should not depend on a fibre line, a data plan or a cloud subscription. Installing Meta-Capp takes one download — which can be copied from one machine to another — and after that it needs **no connection at all**: in a remote village, on a boat, in a region where the network comes and goes, in a classroom without Wi-Fi.
+
+And where teachers are scarce, a patient companion that explains the page, asks questions back and turns what you learned into flashcards can make a real difference. Not to replace teachers — to stand beside learners who have none at hand.
+
+What running the AI locally brings:
+
+- **No connection needed** — no outage, no rate limit, no network round trip; the app works the same on a plane as at home.
+- **Free to use** — no cost per question, no subscription, no quota.
+- **Private by construction** — nothing to send, so nothing to leak, sell or train on. No third party processes the learner's data.
+- **Runs on modest hardware** — from a 4 GB laptop (tiny model, economy mode) to a workstation, with or without a GPU.
+- **No lock-in** — open-weight models and open source code: it keeps working whatever a provider decides about its prices, terms or service.
+- **Auditable** — everything the assistant does is in this repository, and everything it stores is in one SQLite file the learner can export or erase.
+
+### Built with the EU AI Act in mind
+
+Meta-Capp is designed in line with the European AI Act (Regulation (EU) 2024/1689):
+
+- **Transparency** — Clikoda introduces itself as an AI, and the app says it can be wrong. Nobody is led to believe they are talking to a human.
+- **No emotion recognition, no biometrics** — the gauges are inferred from reading behaviour (time on a page, questions, answers). No camera, no microphone, no biometric data.
+- **The learner stays in charge** — no grade, no admission or orientation decision. Every intervention can be dismissed, the *discret* mode silences Clikoda entirely, and a pause freezes everything.
+- **Open and local** — MIT source code, local models, data that never leaves the machine.
+
+This describes how the software is designed; it is not a legal certification.
 
 ---
 
@@ -471,26 +499,21 @@ CI runs the backend suite, the frontend build and the security scans (`pip-audit
 
 **This repository is the complete local edition, and it is free forever under the MIT license.** It is not a crippled demo: the reader, the assistant, the metacognitive engine, the gauges, the flashcards and the session memory are all here, all working, all offline.
 
-Meta-Capp **Pro** is a separate, hosted edition for people who want the same pedagogy without owning a GPU — and with capabilities a small local model simply cannot deliver.
+Meta-Capp **Pro** is a separate, hosted edition for people who want the same pedagogy with a more capable AI — and without owning a GPU.
 
 | | **Local** — this repo | **Pro** — hosted |
 |---|:--:|:--:|
 | Price | **Free**, MIT | Subscription |
 | Setup | Install Ollama, pull a model | Nothing to install |
-| Inference | On your machine (the gemma4 family, or a tiny model on 4 GB — your choice) | Frontier hosted models via API |
-| Answer depth on hard material | Bounded by your hardware | Full-size reasoning models |
-| Renders any PDF as-is | ✅ | ✅ |
-| Scanned / handwritten PDFs | ❌ | ✅ **OCR reconstruction** |
-| Semantic re-layout of messy documents | ❌ | ✅ |
-| Voice — talk to Clikoda, listen back | ❌ | ✅ **Speech** |
-| Languages | 5 languages, A1 → C1, reading and writing | 30 more, up to C2, listening and speaking |
+| AI model | On your machine (the gemma4 family, or a tiny model on 4 GB — your choice) | More capable hosted models |
+| Answers and corrections on hard material | Bounded by your hardware | Deeper and more reliable |
 | Language episodes (story, lesson, written correction) | Written on your machine, a few minutes each, in the background | Generated much faster |
 | Works with zero GPU / low-end laptop | Degraded | ✅ |
-| Cognitive engine, gauges, flashcards | ✅ | ✅ |
+| Same reader, cognitive engine, gauges, flashcards | ✅ | ✅ |
+| Works offline | ✅ | ❌ Needs a connection |
 | Your data stays local | ✅ Always | Processing is remote |
-| Support | Community issues | Priority |
 
-> **Interested in Pro, a school/university deployment, or early access?**
+> **Interested in Pro or early access?**
 > Open a [discussion](https://github.com/cyyyp100/meta-capp/discussions) — that is the fastest way to reach the maintainer.
 
 Contributions to this repository stay in this repository, under MIT. Anything that talks to a remote service, verifies a subscription, or gates a feature behind a plan does **not** belong here — see [CONTRIBUTING.md](CONTRIBUTING.md).
