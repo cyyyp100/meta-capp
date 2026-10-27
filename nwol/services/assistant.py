@@ -324,25 +324,48 @@ def generate_page_question(
     generator(context, on_success, on_error)
 
 
-def resolve_paragraph_mask(doc_id: int, page: int, mask: dict | None) -> dict | None:
-    """Transforme le masque du LLM (indices de caractères) en citation affichable.
+def resolve_paragraph_mask(doc_id: int, page: int, mask: dict | None, excerpt: str = "") -> dict | None:
+    """Transforme le masque du LLM en citation affichable.
 
-    Le LLM renvoie `paragraph_mask` en indices dans le texte de la page ; l'UI, elle,
-    localise un passage par sa **citation** (même chemin que les surlignages :
-    `library.search_page`). C'est ici qu'on convertit, pour que le routeur WS n'ait
-    plus qu'à transporter. Renvoie None si le masque est absent ou intraduisible."""
+    L'UI localise un passage par sa **citation** (même chemin que les
+    surlignages : `library.search_page`) ; c'est ici qu'on la choisit, pour que
+    le routeur WS n'ait plus qu'à transporter. Renvoie None si le masque est
+    absent ou intraduisible.
+
+    Le passage que le modèle RECOPIE (`excerpt`, son `source_excerpt`) passe
+    avant ses indices de caractères : mesuré sur gemma4, les indices tombent
+    à côté (« …nd everyday life. Bayes' theorem… » caché, la réponse restée
+    lisible et cadrée par la zone de la question), la recopie, elle, est
+    exacte. Les indices ne servent plus que de repli, élargis au mot entier."""
     if not isinstance(mask, dict) or not mask.get("enabled"):
         return None
     text = library.page_text(doc_id, page) or ""
-    try:
-        start = int(mask.get("start_char", 0))
-        end = int(mask.get("end_char", 0))
-    except (TypeError, ValueError):
-        return None
-    quote = " ".join(text[max(0, start):end].split())
+    placeholder = (mask.get("placeholder") or "").strip()
+    quote = _snap_excerpt_to_page(excerpt, text) if excerpt else None
+    if quote is None:
+        try:
+            start = int(mask.get("start_char", 0))
+            end = int(mask.get("end_char", 0))
+        except (TypeError, ValueError):
+            return None
+        quote = " ".join(_widen_to_words(text, start, end).split())
     if len(quote) < _MIN_MASK_CHARS:
         return None
-    return {"quote": quote, "placeholder": (mask.get("placeholder") or "").strip()}
+    return {"quote": quote, "placeholder": placeholder}
+
+
+def _widen_to_words(text: str, start: int, end: int) -> str:
+    """Tranche `text[start:end]` élargie aux mots entiers : un « nd everyday »
+    coupé ne se retrouve pas toujours sur la page, et laisse lisible la moitié
+    d'un mot."""
+    start, end = max(0, start), min(len(text), end)
+    if start >= end:
+        return ""
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return text[start:end]
 
 
 def resolve_question_zone(doc_id: int, page: int, result: dict | None) -> dict | None:
@@ -358,9 +381,10 @@ def resolve_question_zone(doc_id: int, page: int, result: dict | None) -> dict |
     None : le lecteur se rabat sur le haut de la page."""
     result = result or {}
     text = library.page_text(doc_id, page) or ""
-    quote = _snap_excerpt_to_page(str(result.get("source_excerpt") or ""), text)
+    excerpt = str(result.get("source_excerpt") or "")
+    quote = _snap_excerpt_to_page(excerpt, text)
     if quote is None:
-        mask = resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+        mask = resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"), excerpt)
         quote = mask["quote"] if mask else None
     if not quote:
         return None

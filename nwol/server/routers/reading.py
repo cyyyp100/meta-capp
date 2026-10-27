@@ -501,7 +501,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
 
     def _safe_mask(result: dict, page: int) -> dict | None:
         try:
-            return assistant.resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+            return assistant.resolve_paragraph_mask(
+                doc_id, page, result.get("paragraph_mask"), str(result.get("source_excerpt") or ""),
+            )
         except Exception:  # le masque est un confort : sans lui, la question reste posée
             logger.warning("Masque de question non résolu", exc_info=True)
             return None
