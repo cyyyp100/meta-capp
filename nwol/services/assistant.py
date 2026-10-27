@@ -213,15 +213,28 @@ def answer_question(
 # Toutes les actions ci-dessous normalisent la sortie en {answer, highlights}
 # pour que le transport (WebSocket) reste uniforme.
 
+def _snippets_or_page(doc_id: int, page: int, selected_snippets: list[str] | None) -> str:
+    """Le texte sur lequel travaille une commande (reformuler, résumer,
+    accrocher) : les extraits joints au contexte quand l'élève en a mis, la
+    page sinon. Il a choisi CE passage ; la commande portait sur toute la page.
+    Même borne que la page : chaque prompt coupe ce texte comme il la coupait."""
+    snippets = [" ".join(str(s or "").split()) for s in selected_snippets or []]
+    snippets = [s for s in snippets if s]
+    if snippets:
+        return "\n\n".join(snippets)
+    return library.page_text(doc_id, page)
+
+
 def rephrase_page(
     doc_id: int,
     page: int,
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_rephrasing_async,
 ) -> None:
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
 
     def _wrap(result: dict) -> None:
         text = (result.get("rephrased_paragraph") or "").strip()
@@ -242,9 +255,10 @@ def chapter_recap(
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_chapter_summary_async,
 ) -> None:
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
     context = {
         "chapter_title": chapter_title_for_page(doc_id, page),
         "paragraphs_summary": [page_text[:1500]] if page_text else [],
@@ -265,10 +279,11 @@ def curiosity_hook(
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_curiosity_hook_async,
 ) -> None:
     doc = _get_document(doc_id) or {}
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
 
     def _wrap(result: dict) -> None:
         on_success({"answer": (result.get("curiosity_hook") or "").strip() or "(pas de hook)", "highlights": []})
@@ -296,6 +311,7 @@ def generate_page_question(
     session_gauges: dict | None = None,
     recent_question_types: list[str] | None = None,
     history: list[dict] | None = None,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_question_async,
 ) -> None:
     doc = _get_document(doc_id) or {}
@@ -319,6 +335,9 @@ def generate_page_question(
         "preferred_question_type": FORCE_QUESTION_TYPE,
         "past_struggles": _safe(lambda: get_recurring_struggles(doc_id=doc_id), []),
         "user_highlights": _safe(lambda: get_highlight_quotes(doc_id, page=page), []),
+        # Extraits joints au contexte : la question porte sur eux en priorité.
+        # La page reste le texte de référence (zone, masque, question autonome).
+        "selected_snippets": list(selected_snippets or []),
         "image_paths": _page_image_paths(doc_id, page),
     }
     generator(context, on_success, on_error)

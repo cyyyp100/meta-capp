@@ -123,7 +123,7 @@ def test_question_prompt_fits(machine, lang, page_kind):
         paragraph=PAGES[page_kind], chapter_title="Chapitre 4 — Méthodes du premier ordre", doc_title="Un titre.pdf",
         metacog_profile=PROFILE, history=HISTORY, session_gauges=GAUGES,
         recent_question_types=["comprehension", "application", "connection", "recall", "metacognition"],
-        standalone=True, past_struggles=STRUGGLES, user_highlights=QUOTES,
+        standalone=True, past_struggles=STRUGGLES, user_highlights=QUOTES, selected_snippets=QUOTES,
     )
     _check("question", prompt, lang, machine)
 

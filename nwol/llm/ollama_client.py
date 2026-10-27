@@ -765,6 +765,7 @@ def generate_question_async(
         standalone=bool(context.get("standalone", False)),
         past_struggles=context.get("past_struggles") or [],
         user_highlights=context.get("user_highlights") or [],
+        selected_snippets=context.get("selected_snippets") or [],
     )
     return _run_json_async(
         "question",

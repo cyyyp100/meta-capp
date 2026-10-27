@@ -292,12 +292,17 @@ def build_question_prompt(
     standalone: bool = False,
     past_struggles: list[dict] | None = None,
     user_highlights: list[str] | None = None,
+    selected_snippets: list[str] | None = None,
 ) -> str:
     history = history or []
     session_gauges = session_gauges or {}
     lim = prompt_limits()
     page = _page_excerpt(paragraph, lim, "question")
-    student_context = _student_context_block(None, user_highlights)
+    # Les extraits joints prennent leur place aux surlignages : le bloc garde
+    # au plus `quotes` lignes en tout, la borne que mesurent les bancs.
+    snippets = list(selected_snippets or [])[:lim.quotes]
+    highlights = list(user_highlights or [])[:max(0, lim.quotes - len(snippets))]
+    student_context = _student_context_block(snippets, highlights)
     recent_question_types = _normalize_recent_question_types(
         recent_question_types or _question_types_from_history(history)
     )
@@ -309,7 +314,7 @@ def build_question_prompt(
         has_existing_question=has_existing_question,
         standalone=standalone,
         # « connection » n'a de sens que s'il y a un déjà-lu auquel se raccrocher.
-        has_prior_context=bool(history or past_struggles or user_highlights),
+        has_prior_context=bool(history or past_struggles or highlights or snippets),
     )
     sid = source_block_id or ""
     if compact_context():

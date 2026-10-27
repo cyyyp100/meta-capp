@@ -250,6 +250,29 @@ describe("ClikodaPanel", () => {
     expect(sent().filter((m) => m.type === "resume")).toHaveLength(1);
   });
 
+  // Les quatre actions rapides partaient sans le contexte joint : seule une
+  // question tapée l'emportait. Elles l'emportent, puis le rendent.
+  it("envoie le contexte joint avec les actions rapides et « Quiz-moi »", async () => {
+    const sent = () => (FakeWebSocket.last?.sent ?? []).map((m) => JSON.parse(m));
+    const chips = [{ id: 1, page: 3, text: "Le passage choisi." }];
+    const consumed = vi.fn();
+    await renderOpenPanel({ contextChips: chips, onContextConsumed: consumed });
+    await waitFor(() => expect(FakeWebSocket.last).not.toBeNull());
+
+    await userEvent.click(screen.getByRole("button", { name: /reformuler|rephrase/i }));
+    expect(sent()).toContainEqual(expect.objectContaining({ type: "rephrase", selected_snippets: ["Le passage choisi."] }));
+    expect(consumed).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      FakeWebSocket.last?.emit({ type: "answer", answer: "Reformulé.", highlights: [] });
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /interroge-moi|quiz me/i }));
+    // Extraits d'une seule page : c'est elle qui fait page-contexte.
+    expect(sent()).toContainEqual(
+      expect.objectContaining({ type: "start_qa", page: 3, selected_snippets: ["Le passage choisi."] }),
+    );
+  });
+
   // Le conseil de régulation de séance était produit par le modèle, validé par
   // le schéma… et jeté par le routeur. Il s'affiche avec la question.
   it("affiche le conseil de séance attaché à une question", async () => {
