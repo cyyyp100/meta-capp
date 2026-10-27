@@ -163,9 +163,9 @@ If Ollama is offline, nothing breaks: the reader stays fully usable and the assi
 
 ### Education for everyone, everywhere
 
-Access to education should not depend on a fibre line, a data plan or a cloud subscription. Installing Meta-Capp takes one download — which can be copied from one machine to another — and after that it needs **no connection at all**: in a remote village, on a boat, in a region where the network comes and goes, in a classroom without Wi-Fi.
+Access to education should not depend on a fibre line, a data plan or a cloud subscription. Installing Meta-Capp takes one download (which can be copied from one machine to another) and after that it needs **no connection at all**: in a remote village, on a boat, in a region where the network comes and goes, in a classroom without Wi-Fi.
 
-And where teachers are scarce, a patient companion that explains the page, asks questions back and turns what you learned into flashcards can make a real difference. Not to replace teachers — to stand beside learners who have none at hand.
+And where teachers are scarce, a patient companion that explains the page, asks questions back and turns what you learned into flashcards can make a real difference. Not to replace teachers but to stand beside learners who have none at hand.
 
 What running the AI locally brings:
 
