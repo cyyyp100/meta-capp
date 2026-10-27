@@ -36,6 +36,7 @@ import { ClikodaHead } from "./ClikodaHead";
 import { DEMO_BEATS, DEMO_QUESTION, DEMO_QUOTES, DEMO_THINKING_MS, type DemoBeat } from "./demoScript";
 import { onEngagement } from "./engagement";
 import { renderMathToHtml } from "./renderMath";
+import { MathText } from "../../components/MathText";
 
 interface QaFeedback {
   verdict: string;
@@ -1063,9 +1064,12 @@ export function ClikodaPanel({
                 <div
                   style={bubble(m.role === "user" ? "user" : "assistant")}
                   onClick={m.role === "assistant" ? handlePageRefClick : undefined}
-                  {...(m.role === "assistant"
-                    ? { dangerouslySetInnerHTML: { __html: renderMathToHtml(m.text, { pageLinks: true, maxPage: pageCount }) } }
-                    : { children: m.text })}
+                  dangerouslySetInnerHTML={{
+                    __html: renderMathToHtml(
+                      m.text,
+                      m.role === "assistant" ? { pageLinks: true, maxPage: pageCount } : undefined,
+                    ),
+                  }}
                 />
                 {m.role === "assistant" && i > 0 && (
                   <button
@@ -1325,7 +1329,7 @@ function PauseCard({
         {t("clikoda.pause_title")}
       </div>
 
-      {pause.message && <div style={{ fontSize: 13, color: "var(--text)" }}>{pause.message}</div>}
+      {pause.message && <MathText text={pause.message} style={{ display: "block", fontSize: 13, color: "var(--text)" }} />}
 
       <div className="text-xs text-muted-foreground">{t("clikoda.pause_note")}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1392,7 +1396,7 @@ function QaCard({
           <Coffee className="mt-px size-3.5 shrink-0 text-brand-ink" aria-hidden />
           <span>
             <span className="sr-only">{t("clikoda.hint_label")} : </span>
-            {record.hint}
+            <MathText text={record.hint} />
           </span>
         </div>
       )}

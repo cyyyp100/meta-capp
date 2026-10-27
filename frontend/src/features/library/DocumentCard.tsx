@@ -12,6 +12,7 @@
 // rare, c'est la seule chose à faire avec ce document tant qu'il n'est pas relié.
 import { FileQuestionMark } from "lucide-react";
 import { useRef, useState } from "react";
+import { MathText } from "../../components/MathText";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -170,7 +171,11 @@ export function DocumentCard({
               <div style={pendingText}>{t("library.digest_pending")}</div>
             ) : (
               <>
-                {doc.summary && <div className="doc-summary" style={ribbonText}>{doc.summary}</div>}
+                {doc.summary && (
+                  <div className="doc-summary" style={ribbonText}>
+                    <MathText text={doc.summary} />
+                  </div>
+                )}
                 {doc.keywords.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
                     {doc.keywords.map((keyword) => (

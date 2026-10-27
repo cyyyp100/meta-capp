@@ -3741,6 +3741,7 @@ Constraints:
 {search_rule}{figure_rule}{previous_rule}- Never invent facts about the document that neither the page nor the other pages show.
 - If one of the listed flashcards already covers the question, naturally point it out ("You already have a flashcard on this") and connect your answer to it.
 - Keep the answer compact (4-8 sentences): it is displayed in a small floating panel.
+- Math in LaTeX between $...$; in JSON, double every backslash: "$u_n \\\\sim n$".
 - meta_cognition stays at 0.0.
 - Reminder: "answer" is in English."""
 
@@ -3796,6 +3797,7 @@ Contraintes :
 {search_rule}{figure_rule}{previous_rule}- N'invente jamais de fait sur le document que ni la page ni les autres pages ne montrent.
 - Si une des flashcards listées couvre déjà la question, signale-le naturellement ("Tu as déjà une flashcard sur ce point") et relie ta réponse à elle.
 - Réponse compacte (4 à 8 phrases) : elle s'affiche dans un petit panneau flottant.
+- Maths en LaTeX entre $...$ ; dans le JSON, double chaque backslash : "$u_n \\\\sim n$".
 - meta_cognition reste à 0.0.
 - Rappel : "answer" est en français."""
 

@@ -9,6 +9,7 @@ import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import type { GaugeSeries, ProgressChange, Reflection } from "@/api/client";
 
 import { useT } from "../../i18n";
+import { MathText } from "../../components/MathText";
 import { criterionLabel } from "../stats/labels";
 import { GaugeCurves } from "./GaugeCurves";
 
@@ -124,11 +125,13 @@ export function ReflectionsBlock({
         <div className="flex flex-col gap-4">
           {reflections.map((reflection, index) => (
             <div key={index}>
-              <p className="m-0 text-[13px] font-semibold text-muted-foreground">{reflection.question}</p>
+              <p className="m-0 text-[13px] font-semibold text-muted-foreground">
+                <MathText text={reflection.question} />
+              </p>
               {/* `whitespace-pre-wrap` : ce que quelqu'un a écrit se relit
                   comme il l'a écrit, retours à la ligne compris. */}
               <p className="mt-1.5 mb-0 border-l-2 border-brand pl-3 text-sm leading-relaxed whitespace-pre-wrap">
-                {reflection.answer}
+                <MathText text={reflection.answer} />
               </p>
             </div>
           ))}
@@ -144,7 +147,11 @@ export function AnalysisBlock({ analysis, children }: { analysis: string; childr
   if (!analysis && !children) return null;
   return (
     <Block title={t("progress.analysis")}>
-      {analysis && <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap text-text-soft">{analysis}</p>}
+      {analysis && (
+        <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap text-text-soft">
+          <MathText text={analysis} />
+        </p>
+      )}
       {children}
     </Block>
   );

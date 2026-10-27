@@ -359,6 +359,56 @@ _MULTICHAR_REGEX_TO_LATEX: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# Les noms de commandes LaTeX que les modèles écrivent, sans backslash. Sert à
+# démêler un échappement JSON d'une commande (`\t` + « heta » = `\theta` ?).
+# Les symboles viennent de la table ci-dessus ; le reste est la structure
+# (fonctions, polices, accents, délimiteurs, espaces) qu'aucun caractère
+# Unicode ne porte.
+LATEX_COMMANDS: frozenset[str] = frozenset(
+    {
+        match
+        for value in (*_UNICODE_TO_LATEX.values(), *_MULTICHAR_UNICODE_TO_LATEX.values())
+        for match in re.findall(r"\\([A-Za-z]+)", value)
+    }
+    | {
+        # Lettres et symboles absents de la table
+        "epsilon", "varrho", "varpi", "Upsilon", "hbar", "aleph", "imath", "jmath",
+        "Re", "Im", "wp", "top", "bot", "angle", "prime", "star", "ast", "circ", "bullet",
+        "dagger", "flat", "sharp", "natural", "infty", "dots", "vdots", "ddots", "cdots",
+        "ldots", "colon", "mid", "nmid", "ne", "le", "ge", "leqslant", "geqslant", "nleq",
+        "ngeq", "nsim", "ni", "notin", "subsetneq", "supsetneq", "land", "lor", "lnot",
+        "implies", "iff", "to", "gets", "longrightarrow", "longleftarrow", "Longleftarrow",
+        "Leftarrow", "rightleftharpoons", "uparrow", "downarrow", "vert", "Vert", "lvert",
+        "rvert", "lVert", "rVert", "backslash", "setminus", "bigcup", "bigcap", "bigoplus",
+        "bigotimes", "bigvee", "bigwedge", "coprod", "triangle", "square", "Box", "diamond",
+        "models", "vdash", "dashv", "smile", "frown", "asymp", "doteq", "preceq", "succeq",
+        "lesssim", "gtrsim", "therefore", "because", "nexists", "neg",
+        # Fonctions et opérateurs nommés
+        "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh",
+        "cosh", "tanh", "coth", "exp", "log", "ln", "lg", "lim", "liminf", "limsup", "max",
+        "min", "sup", "inf", "arg", "argmax", "argmin", "det", "dim", "ker", "deg", "gcd",
+        "hom", "Pr", "mod", "bmod", "pmod", "operatorname",
+        # Structure : fractions, racines, sommes, matrices
+        "frac", "dfrac", "tfrac", "cfrac", "binom", "dbinom", "tbinom", "sqrt", "sum",
+        "prod", "int", "iint", "iiint", "oint", "partial", "nabla", "begin", "end",
+        "left", "right", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr",
+        "middle", "limits", "nolimits", "displaystyle", "textstyle", "scriptstyle",
+        "substack", "stackrel", "overset", "underset", "atop", "choose", "cases",
+        "langle", "rangle", "lfloor", "rfloor", "lceil", "rceil", "lbrace", "rbrace",
+        # Polices, texte et accents
+        "mathbb", "mathcal", "mathrm", "mathbf", "mathit", "mathsf", "mathtt", "mathfrak",
+        "mathscr", "boldsymbol", "bm", "text", "textbf", "textit", "textrm", "texttt",
+        "textsf", "emph", "mbox", "hat", "widehat", "check", "tilde", "widetilde", "bar",
+        "overline", "underline", "vec", "overrightarrow", "overleftarrow", "dot", "ddot",
+        "acute", "grave", "breve", "mathring", "overbrace", "underbrace", "boxed",
+        "cancel", "not",
+        # Espaces et sauts
+        "quad", "qquad", "enspace", "thinspace", "space", "hspace", "vspace", "newline",
+        "phantom", "hfill",
+    }
+)
+
+
 _SPLIT_COMMAND_RE = re.compile(r"\\(?:\s+[A-Za-z]){2,}")
 _SPACED_TEXT_CMD_RE = re.compile(r"\\t\s+e\s+x\s+t|\\tex\s+t|\\t\s+h\s+(?:e|ta)", re.I)
 _ORPHAN_SCRIPT_RE = re.compile(r"^\s*(?:\${1,2})?\s*[_^]\{")
