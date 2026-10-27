@@ -160,7 +160,7 @@ def test_session_analysis_carries_the_generated_question(client, tmp_path, make_
 
     Elle était générée par le prompt de session puis jetée : le sas affichait
     trois questions en dur."""
-    from services.session import REFLECTION_QUESTIONS
+    from services.session import reflection_questions
 
     doc_id = _import_doc(client, tmp_path, make_pdf)
     sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
@@ -169,7 +169,27 @@ def test_session_analysis_carries_the_generated_question(client, tmp_path, make_
     body = client.get(f"/api/session/{sid}/analysis").json()
     question = body["question"]
     assert question.strip() and question.endswith("?")
-    assert question not in REFLECTION_QUESTIONS  # jamais un doublon des fixes
+    assert question not in reflection_questions()  # jamais un doublon des fixes
+
+
+def test_exit_questions_follow_the_interface_language(client, tmp_path, make_pdf):
+    """Les questions du sas de sortie, et la question de secours, suivent la
+    langue de l'interface : elles étaient écrites en dur en français."""
+    import i18n
+
+    doc_id = _import_doc(client, tmp_path, make_pdf)
+    sid = client.post("/api/session/start", json={"doc_id": doc_id}).json()["session_id"]
+    i18n.set_lang("en")
+    try:
+        fixed = client.post(f"/api/session/{sid}/end", json={"duration_s": 30}).json()["reflection_questions"]
+        generated = client.get(f"/api/session/{sid}/analysis").json()["question"]
+    finally:
+        i18n.set_lang("fr")
+    assert fixed == [
+        "What is the most important thing you understood in this session?",
+        "Which point is still unclear and deserves another look?",
+    ]
+    assert not any(ch in generated for ch in "éèàù"), generated
 
 
 def test_finalize_persists_the_generated_question_text(client, tmp_path, make_pdf):

@@ -41,6 +41,10 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Bulle assistante ──────────────────────────────────────────────
         "assistant.mode_changed": "Mode d'accompagnement : {mode}",
         "assistant.cancelled": "Demande annulée.",
+        # ── Sas de sortie ─────────────────────────────────────────────────
+        "session.reflection_q1": "Qu'as-tu compris de plus important dans cette session ?",
+        "session.reflection_q2": "Quel point reste flou et mériterait d'être revu ?",
+        "session.reflection_n": "Réflexion {n}",
         "assistant.failed": "Clikoda n'a pas pu traiter cette demande. Réessaie.",
         "assistant.mode_discret": "Discret",
         "assistant.mode_normal": "Normal",
@@ -249,6 +253,10 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── Assistant bubble ──────────────────────────────────────────────
         "assistant.mode_changed": "Guidance mode: {mode}",
         "assistant.cancelled": "Request cancelled.",
+        # ── Exit screen ───────────────────────────────────────────────────
+        "session.reflection_q1": "What is the most important thing you understood in this session?",
+        "session.reflection_q2": "Which point is still unclear and deserves another look?",
+        "session.reflection_n": "Reflection {n}",
         "assistant.failed": "Clikoda could not handle this request. Please try again.",
         "assistant.mode_discret": "Discreet",
         "assistant.mode_normal": "Normal",

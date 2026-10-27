@@ -2,23 +2,57 @@ from __future__ import annotations
 
 import re
 
-QUESTION_BANK = [
-    "Quel moment de la session t'a semblé le plus clair, et pourquoi ?",
-    "Qu'est-ce qui t'a demandé le plus d'effort mental aujourd'hui ?",
-    "Quelle stratégie t'a aidé à avancer quand tu étais bloqué ?",
-    "Quel point reste fragile dans ta compréhension maintenant ?",
-    "À quel moment as-tu senti que ta compréhension progressait ?",
-    "Qu'aurais-tu pu faire différemment pour mieux comprendre ?",
-    "Comment évalues-tu ton niveau de compréhension à la fin de cette session ?",
-    "Quelle partie t'a ralenti, et comment l'as-tu repérée ?",
-    "Si tu devais réexpliquer l'idée principale, où hésiterais-tu encore ?",
-]
+from i18n import current_lang
 
-_DEFAULT_QUESTIONS = [
-    "Quel est ton ressenti global sur cette session ?",
-    "Quels points t'ont le plus bloqué ou ralenti ?",
-    "Comment auto-évalues-tu ta compréhension maintenant ?",
-]
+# La banque de secours parle la langue de l'interface : elle remplace la
+# question générée quand le modèle n'en propose pas, et le sas l'affiche telle
+# quelle à côté des questions fixes (`services.session.reflection_questions`).
+_QUESTION_BANKS = {
+    "fr": [
+        "Quel moment de la session t'a semblé le plus clair, et pourquoi ?",
+        "Qu'est-ce qui t'a demandé le plus d'effort mental aujourd'hui ?",
+        "Quelle stratégie t'a aidé à avancer quand tu étais bloqué ?",
+        "Quel point reste fragile dans ta compréhension maintenant ?",
+        "À quel moment as-tu senti que ta compréhension progressait ?",
+        "Qu'aurais-tu pu faire différemment pour mieux comprendre ?",
+        "Comment évalues-tu ton niveau de compréhension à la fin de cette session ?",
+        "Quelle partie t'a ralenti, et comment l'as-tu repérée ?",
+        "Si tu devais réexpliquer l'idée principale, où hésiterais-tu encore ?",
+    ],
+    "en": [
+        "Which moment of the session felt clearest to you, and why?",
+        "What took the most mental effort today?",
+        "Which strategy helped you move on when you were stuck?",
+        "Which point is still fragile in your understanding now?",
+        "When did you feel your understanding was making progress?",
+        "What could you have done differently to understand better?",
+        "How would you rate your understanding at the end of this session?",
+        "Which part slowed you down, and how did you notice it?",
+        "If you had to explain the main idea again, where would you still hesitate?",
+    ],
+}
+
+_DEFAULT_QUESTIONS_BY_LANG = {
+    "fr": [
+        "Quel est ton ressenti global sur cette session ?",
+        "Quels points t'ont le plus bloqué ou ralenti ?",
+        "Comment auto-évalues-tu ta compréhension maintenant ?",
+    ],
+    "en": [
+        "How do you feel about this session overall?",
+        "Which points blocked or slowed you down the most?",
+        "How would you rate your understanding now?",
+    ],
+}
+
+
+def _question_bank() -> list[str]:
+    return _QUESTION_BANKS.get(current_lang(), _QUESTION_BANKS["fr"])
+
+
+def _default_questions() -> list[str]:
+    return _DEFAULT_QUESTIONS_BY_LANG.get(current_lang(), _DEFAULT_QUESTIONS_BY_LANG["fr"])
+
 
 _QUESTION_WORDS = (
     "pourquoi",
@@ -97,21 +131,22 @@ def normalize_meta_cognition_questions(
         if len(selected) == 3:
             return selected
 
+    bank = _question_bank()
     offset = _offset(seed_context)
-    rotated_bank = QUESTION_BANK[offset:] + QUESTION_BANK[:offset]
-    for question in rotated_bank + _DEFAULT_QUESTIONS:
+    rotated_bank = bank[offset:] + bank[:offset]
+    for question in rotated_bank + _default_questions():
         clean = _clean_question(question)
         key = _normalize_question(clean)
         if key in seen:
             continue
-        if key in previous and len(selected) + len(previous) < len(QUESTION_BANK):
+        if key in previous and len(selected) + len(previous) < len(bank):
             continue
         selected.append(clean)
         seen.add(key)
         if len(selected) == 3:
             return selected
 
-    return selected[:3] or _DEFAULT_QUESTIONS
+    return selected[:3] or _default_questions()
 
 
 def pick_reflection_question(
@@ -135,7 +170,7 @@ def pick_reflection_question(
     ):
         if _normalize_question(question) not in avoid_keys:
             return question
-    return _DEFAULT_QUESTIONS[-1]
+    return _default_questions()[-1]
 
 
 def fallback_meta_cognition_analysis(
@@ -289,7 +324,7 @@ def _normalize_question(question: str) -> str:
 def _offset(seed_context: str | int | None) -> int:
     if seed_context is None:
         return 0
-    return sum(ord(char) for char in str(seed_context)) % max(1, len(QUESTION_BANK))
+    return sum(ord(char) for char in str(seed_context)) % max(1, len(_question_bank()))
 
 
 def _ratio_score(value: float) -> float:
