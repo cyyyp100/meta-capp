@@ -30,6 +30,12 @@
 | **📄 Aucune reconstruction** | **🧠 Moteur cognitif silencieux** | **🔒 Rien ne quitte votre machine** |
 | Le PDF est affiché tel quel, fidèle à l'original, en défilement libre. Ni découpage, ni remise en page, ni verrou. | Six jauges cachées, des questions adaptatives, des flashcards et une mémoire de session tournent derrière la page. | Inférence locale avec Ollama. Ni compte, ni télémétrie, ni cloud, ni abonnement. |
 
+<br>
+
+![Sélection d'un passage du PDF et question à Clikoda : le modèle local répond et le passage sur lequel il s'appuie s'allume dans la page](.github/media/ask-in-context.gif)
+
+<sub>Sélectionnez un passage, ajoutez-le au contexte, posez votre question. La réponse vient de Gemma 4, qui tourne sur l'ordinateur avec Ollama ; l'attente est accélérée, comme l'indique le badge à l'écran. La démo est en anglais.</sub>
+
 </div>
 
 ---
@@ -193,6 +199,9 @@ Ce paragraphe décrit la conception du logiciel ; ce n'est pas une certification
 | **Interventions autonomes** | Propositions d'aide, questions, suggestions de pause, reformulations de page, décidées par le LLM, avec des délais de repos globaux et par page |
 | **Modes de l'assistant** | *discret* (ne parle jamais en premier), *normal*, *coach* (intervient davantage), mémorisés par utilisateur |
 | **Questionnement adaptatif** | Chaîne complète question → réponse → évaluation → retour → flashcard, sans jamais bloquer la lecture |
+| **Actions rapides sur votre sélection** | Reformuler, Résumer, Curiosité et Interroge-moi portent sur les passages ajoutés au contexte, sinon sur la page |
+| **Quiz sans attente** | Les réponses rédigées sont corrigées par Clikoda en arrière-plan : la question suivante arrive tout de suite, les corrections attendent dans le bilan |
+| **Relecture hebdomadaire des flashcards** | Une fois par semaine, Clikoda relit vos cartes : une réponse fausse, une question ambiguë, une carte qui n'a de sens qu'à côté du PDF. Rien ne change sans vous |
 | **Jauges cognitives cachées** | Attention, compréhension, curiosité, mémorisation, créativité, métacognition : calculées et enregistrées, jamais insistantes |
 | **Mémoire de session** | Pages vues, temps passé, retours en arrière, questions par page, difficultés détectées |
 | **Flashcards manuelles** | Un clic transforme une réponse utile de l'assistant en flashcard |
@@ -217,6 +226,25 @@ Ce paragraphe décrit la conception du logiciel ; ce n'est pas une certification
 5. **Demandez ce que vous voulez.** Cliquez sur la bulle, tapez, appuyez sur Entrée. La réponse cite la page sur laquelle vous étiez au moment de la question.
 6. **Relevez des défis.** Parfois, c'est Clikoda qui *vous* pose une question. Répondez-y (la réponse est évaluée, nourrit votre profil et peut devenir une flashcard), ou fermez-la.
 7. **Terminez la session.** Synthèse, questions métacognitives, mise à jour du profil.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Avant la lecture** : un sas de 30 secondes, puis la révision éclair d'une flashcard d'une séance précédente.
+
+![Le sas d'entrée décompte, puis une flashcard se retourne et le lecteur s'ouvre](.github/media/before-reading.gif)
+
+</td>
+<td width="50%" valign="top">
+
+**Interroge-moi** : une question générée à partir de la page, une réponse rédigée, et le retour de Clikoda.
+
+![Clikoda pose une question sur la page, l'élève tape sa réponse, le retour de Clikoda s'affiche](.github/media/quiz-me.gif)
+
+</td>
+</tr>
+</table>
 
 ---
 

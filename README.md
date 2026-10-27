@@ -30,6 +30,12 @@
 | **📄 Zero reconstruction** | **🧠 Silent cognitive engine** | **🔒 Nothing leaves your machine** |
 | The PDF is rendered as-is, full fidelity, free scroll. No chunking, no re-layout, no gates. | Six hidden gauges, adaptive questions, flashcards and session memory run behind the page. | Local inference via Ollama. No account, no telemetry, no cloud, no subscription. |
 
+<br>
+
+![Selecting a passage in a PDF and asking Clikoda about it: the local model answers and the passage it relies on lights up in the page](.github/media/ask-in-context.gif)
+
+<sub>Select a passage, add it as context, ask. The answer comes from Gemma 4 running on the laptop through Ollama; the waiting time is sped up, as the badge on screen says.</sub>
+
 </div>
 
 ---
@@ -193,6 +199,9 @@ This describes how the software is designed; it is not a legal certification.
 | **Autonomous Interventions** | LLM-decided help offers, questions, pause suggestions, page rephrasings — with global and per-page cooldowns |
 | **Assistant Modes** | *discret* (never speaks first), *normal*, *coach* (intervenes more) — persisted per user |
 | **Adaptive Questioning** | Full question → answer → evaluation → feedback → flashcard pipeline, non-blocking |
+| **Quick Actions on Your Selection** | Rephrase, Recap, Curiosity and Quiz me work on the passages you attached as context, or on the page |
+| **Quiz Without Waiting** | Written answers are graded by Clikoda in the background; the next question is there at once, the corrections wait in the summary |
+| **Weekly Flashcard Check** | Once a week Clikoda proofreads your cards: a wrong answer, an ambiguous question, a card that only makes sense next to the PDF. Nothing changes without you |
 | **Hidden Cognitive Gauges** | Attention, comprehension, curiosity, retention, creativity, metacognition — computed and recorded, never nagging |
 | **Session Memory** | Pages seen, dwell time, revisits, questions per page, detected difficulties |
 | **Manual Flashcards** | One click turns a useful assistant answer into a flashcard |
@@ -217,6 +226,25 @@ This describes how the software is designed; it is not a legal certification.
 5. **Ask anything.** Click the bubble, type, press Enter. The answer cites the page you were on when you asked.
 6. **Get challenged.** Sometimes Clikoda asks *you* a question. Answer it (it is evaluated, it feeds your profile, it may become a flashcard) — or close it.
 7. **End the session.** Synthesis, metacognitive questions, profile update.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Before reading** — a 30-second airlock, then a quick review of a flashcard from a previous session.
+
+![The entry airlock counts down, then a flashcard flips and the reader opens](.github/media/before-reading.gif)
+
+</td>
+<td width="50%" valign="top">
+
+**Quiz me** — a question generated from the page, a written answer, and Clikoda's feedback.
+
+![Clikoda asks a question about the page, the student types an answer, Clikoda's feedback appears](.github/media/quiz-me.gif)
+
+</td>
+</tr>
+</table>
 
 ---
 
