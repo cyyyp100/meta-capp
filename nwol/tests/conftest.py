@@ -127,6 +127,19 @@ def no_startup_session_finalize(monkeypatch):
     return real
 
 
+@pytest.fixture(autouse=True)
+def no_startup_flashcard_check(monkeypatch):
+    """Le démarrage (lifespan) lance en thread la relecture hebdomadaire des
+    flashcards (services/flashcard_check). Même raison que la finalisation
+    ci-dessus : ce thread lirait la base du test suivant. Coupée ; renvoie la
+    vraie fonction pour les tests qui la jouent eux-mêmes."""
+    from services import flashcard_check
+
+    real = flashcard_check.run_if_due
+    monkeypatch.setattr(flashcard_check, "run_if_due", lambda *a, **k: 0)
+    return real
+
+
 class _CapturedQueue:
     """File LLM de substitution : les tâches enfilées sont gardées et jouées par
     le test, dans l'ordre de priorité, sur SON thread.

@@ -98,6 +98,10 @@ OLLAMA_TASK_OPTIONS: dict[str, dict] = {
     # courts en JSON structuré, ~60 tokens — le double pour ne jamais couper.
     # Prompt ~500 tokens au pire (deux faces de MANUAL_CARD_LANG_MAX_CHARS).
     "flashcard_lang_rules":     {"num_ctx": 2048, "num_predict": 160, "temperature": 0.1},
+    # Relecture hebdomadaire d'une carte (services/flashcard_check) : verdict,
+    # recto et verso corrigés, raison. Prompt ~800 tokens au pire (faces aux
+    # plafonds FLASHCARD_CHECK_*_CHARS), sortie ~250 : cf. le banc de budget.
+    "flashcard_check":          {"num_ctx": 3072, "num_predict": 420, "temperature": 0.1},
     # Génération batch des distracteurs de QCM (~10 questions en un seul appel).
     "quiz_distractors":         {"num_ctx": 4096, "num_predict": 1200, "temperature": 0.3},
     "quiz_analysis":            {"num_ctx": 4096, "num_predict": 420, "temperature": 0.2},
@@ -423,7 +427,7 @@ LLM_SLOW_MACHINE_FACTOR = 1.5
 # à l'écran) et `lang_writing_feedback` (la correction de fin de séance) restent
 # servies, comme le calibrage du débit.
 OLLAMA_BACKGROUND_TASKS: frozenset[str] = frozenset({
-    "document_digest", "flashcard_lang_rules",
+    "document_digest", "flashcard_lang_rules", "flashcard_check",
     "lang_story_bible", "lang_story_arc",
     "lang_episode_text", "lang_episode_text_hanzi",
     "lang_episode_glossary", "lang_episode_glossary_pron", "lang_episode_notes_point",
@@ -1204,7 +1208,7 @@ if not getattr(sys, "frozen", False):
     if _db_override:
         DB_PATH = str(Path(_db_override).expanduser().resolve())
 
-DB_SCHEMA_VERSION = 46
+DB_SCHEMA_VERSION = 47
 
 # Logs
 LOG_MAX_BYTES = 1_000_000
@@ -1569,6 +1573,16 @@ FLASHCARD_REVIEW_FLOOR = 0.2
 # Au-delà de ce nombre de caractères sur une face, ce n'est plus un mot ni une
 # courte expression (définition, question de cours) : aucun appel.
 MANUAL_CARD_LANG_MAX_CHARS = 120
+# Relecture des flashcards par Clikoda (services/flashcard_check) : au plus une
+# fois par FLASHCARD_CHECK_INTERVAL_DAYS, à l'ouverture de l'app, en travail de
+# fond. Une passe relit au plus FLASHCARD_CHECK_BATCH cartes (les jamais relues,
+# ou modifiées depuis leur relecture, les plus anciennes d'abord) : un stock de
+# 500 cartes ne bloque pas Ollama une après-midi. Les faces sont coupées à ces
+# longueurs dans le prompt (llm/prompts.build_flashcard_check_prompt).
+FLASHCARD_CHECK_INTERVAL_DAYS = 7
+FLASHCARD_CHECK_BATCH = 20
+FLASHCARD_CHECK_FRONT_CHARS = 600
+FLASHCARD_CHECK_BACK_CHARS = 1200
 
 # Brainstorming : plafond d'extraits par type de source (surlignage, flashcard, erreur,
 # Q&R, document, mot et épisode du module Langues) et amortissement d'une source

@@ -76,6 +76,10 @@ async def _lifespan(_app: FastAPI):
     from services.session import close_abandoned_sessions, finalize_pending_sessions
 
     close_abandoned_sessions()
+    # Relecture hebdomadaire des flashcards (services/flashcard_check), en
+    # travail de fond après les bilans. Importée ICI pour que les tests
+    # puissent la remplacer (tests/conftest.py).
+    from services.flashcard_check import run_if_due as check_flashcards_if_due
 
     def _llm_startup() -> None:
         # Le calibrage d'abord : il fixe le modèle (le choix automatique écarte
@@ -87,6 +91,7 @@ async def _lifespan(_app: FastAPI):
         except Exception:
             logger.exception("Calibrage de Clikoda impossible au démarrage")
         finalize_pending_sessions()
+        check_flashcards_if_due()
 
     threading.Thread(target=_llm_startup, daemon=True, name="llm-startup").start()
     # Empreinte des documents importés avant qu'elle existe : c'est elle qui

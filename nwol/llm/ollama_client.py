@@ -39,6 +39,7 @@ from llm.prompts import (
     build_chapter_summary_prompt,
     build_curiosity_hook_prompt,
     build_evaluation_prompt,
+    build_flashcard_check_prompt,
     build_flashcard_prompt,
     build_intervention_prompt,
     build_meta_cognition_analysis_prompt,
@@ -55,6 +56,7 @@ from llm.schema_json import (
     parse_curiosity_hook,
     parse_evaluation,
     parse_flashcard,
+    parse_flashcard_check,
     parse_follow_up,
     parse_intervention,
     parse_meta_cognition_analysis,
@@ -88,6 +90,8 @@ _TASK_PRIORITY: dict[str, int] = {
     # Règles de langue d'une carte manuelle : travail de fond, la carte est déjà
     # créée et utilisable telle que saisie. Cède le pas à tout ce qui est attendu.
     "flashcard_lang_rules":     6,
+    # Relecture hebdomadaire des cartes : personne ne l'attend.
+    "flashcard_check":          7,
     "quiz_distractors":         5,
     "quiz_analysis":            6,
     "assistant_intervention":   6,
@@ -967,6 +971,16 @@ def make_standalone_flashcard_async(
         paragraph=context.get("paragraph") or "",
     )
     return _run_json_async("flashcard_standalone", prompt, parse_flashcard, on_success, on_error, model)
+
+
+def check_flashcard_async(context: dict, on_success, on_error, model: str = "") -> None:
+    """Relit une flashcard existante : juste, claire, autoportante ? Propose
+    une version corrigée sinon (services/flashcard_check)."""
+    prompt = build_flashcard_check_prompt(
+        front=context.get("front") or "",
+        back=context.get("back") or "",
+    )
+    return _run_json_async("flashcard_check", prompt, parse_flashcard_check, on_success, on_error, model)
 
 
 def generate_manual_card_lang_async(params: dict, on_success, on_error, model: str = "") -> None:

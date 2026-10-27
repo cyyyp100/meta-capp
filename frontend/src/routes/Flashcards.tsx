@@ -17,7 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { api } from "../api/client";
-import type { Flashcard } from "../api/types";
+import type { Flashcard, FlashcardSuggestion } from "../api/types";
 import { AutoGrowTextarea } from "../components/AutoGrowTextarea";
 import { FlipCard } from "../components/FlipCard";
 import { MathText } from "../components/MathText";
@@ -48,8 +48,24 @@ export function Flashcards() {
     queryFn: () => api.flashcards({ difficulty: difficulty || undefined, tags: tag || undefined }),
   });
 
+  // Propositions de la relecture hebdomadaire de Clikoda (services/flashcard_check).
+  const suggestions = useQuery({
+    queryKey: ["flashcards", "suggestions"],
+    queryFn: () => api.flashcardSuggestions(),
+  });
+
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["flashcards"] });
+  }
+
+  async function settleSuggestion(s: FlashcardSuggestion, accept: boolean) {
+    try {
+      if (accept) await api.acceptFlashcardSuggestion(s.card_id);
+      else await api.dismissFlashcardSuggestion(s.card_id);
+    } catch {
+      toast.error(t("flash.check_error"));
+    }
+    invalidate();
   }
 
   async function create() {
@@ -155,6 +171,25 @@ export function Flashcards() {
             </Button>
           </div>
         </motion.div>
+      )}
+
+      {suggestions.data && suggestions.data.length > 0 && (
+        <section aria-labelledby="flash-check-title" className="mt-5 grid gap-3 rounded-md border border-brand/40 bg-brand-soft/40 p-4.5">
+          <div>
+            <h2 id="flash-check-title" className="m-0 text-base font-bold">
+              {t("flash.check_title")} ({suggestions.data.length})
+            </h2>
+            <p className="m-0 mt-1 text-[13px] text-muted-foreground">{t("flash.check_intro")}</p>
+          </div>
+          {suggestions.data.map((s) => (
+            <SuggestionRow
+              key={s.card_id}
+              suggestion={s}
+              onAccept={() => void settleSuggestion(s, true)}
+              onDismiss={() => void settleSuggestion(s, false)}
+            />
+          ))}
+        </section>
       )}
 
       {/* Filtres */}
@@ -315,6 +350,60 @@ function CardRow({ card, onDelete }: { card: Flashcard; onDelete: () => void }) 
           </Pill>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Une proposition de Clikoda : la carte telle qu'elle est, et ce qu'il propose
+ *  (une version corrigée, ou la suppression d'une carte qui dépend du document). */
+function SuggestionRow({
+  suggestion: s,
+  onAccept,
+  onDismiss,
+}: {
+  suggestion: FlashcardSuggestion;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  const t = useT();
+  const remove = s.kind === "remove";
+  return (
+    <div data-testid="flash-suggestion" className="grid gap-2.5 rounded-md border border-border bg-surface p-4 shadow-e1">
+      {remove && (
+        <div>
+          <Pill>{t("flash.check_context")}</Pill>
+        </div>
+      )}
+      <MathText text={s.reason} className="block text-[13px] text-text-soft" />
+      <div className={remove ? "grid gap-2" : "grid gap-3 sm:grid-cols-2"}>
+        <SuggestionSide label={t("flash.check_yours")} front={s.front} back={s.back} />
+        {!remove && (
+          <SuggestionSide
+            label={t("flash.check_proposed")}
+            front={s.suggested_front ?? ""}
+            back={s.suggested_back ?? ""}
+            highlight
+          />
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant={remove ? "destructive" : "default"} onClick={onAccept}>
+          {remove ? t("flash.check_remove") : t("flash.check_apply")}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onDismiss}>
+          {t("flash.check_keep")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionSide({ label, front, back, highlight }: { label: string; front: string; back: string; highlight?: boolean }) {
+  return (
+    <div className={highlight ? "rounded-sm bg-brand-soft p-3" : "rounded-sm bg-canvas-alt p-3"}>
+      <div className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{label}</div>
+      <MathText text={front} dir="auto" className="block font-semibold" />
+      <MathText text={back} dir="auto" className="mt-1 block text-text-soft" />
     </div>
   );
 }

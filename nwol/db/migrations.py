@@ -240,6 +240,11 @@ def run_migrations(conn) -> None:
         _set_version(conn, 46)
         current = 46
 
+    if current < 47 <= TARGET_SCHEMA_VERSION:
+        _migrate_to_v47(conn)
+        _set_version(conn, 47)
+        current = 47
+
     if current < TARGET_SCHEMA_VERSION:
         _set_version(conn, TARGET_SCHEMA_VERSION)
 
@@ -2074,6 +2079,48 @@ def _migrate_to_v46(conn) -> None:
         ).rowcount
         logger.info("Migration v46 : %d séance(s) close(s) réputée(s) finalisée(s)", int(dated or 0))
     logger.info("Migration SQLite v46 terminée")
+
+
+def _migrate_to_v47(conn) -> None:
+    """Clikoda relit les flashcards une fois par semaine (`flashcard_checks`).
+
+    Une carte créée sur une réponse fausse, une question ambiguë ou une formule
+    cassée restait telle quelle : rien ne revenait dessus. La relecture
+    hebdomadaire (services/flashcard_check) garde ici, carte par carte, ce
+    qu'elle a conclu :
+
+    * `checked_key` — la clé de doublon de la carte au moment de la relecture :
+      une carte modifiée depuis ne la porte plus, elle sera relue ;
+    * `status` — `ok`, `suggested` (une proposition attend l'élève), `accepted`
+      ou `dismissed` ;
+    * `kind` — ce qui est proposé : `fix`, une version corrigée (`front`,
+      `back`) ; `remove`, la suppression d'une carte qui renvoie à un contexte
+      absent de la carte (un passage, une figure, un exemple du document lu)
+      et que rien sur la carte ne permet de rendre autonome ;
+    * `reason` — la raison, pour l'élève. Rien n'est réécrit ni supprimé sans
+      son accord.
+
+    Une table à part plutôt que des colonnes sur `flashcards` : la relecture
+    est un avis sur la carte, pas la carte ; supprimer la carte l'emporte
+    (ON DELETE CASCADE). Rejouable : `CREATE … IF NOT EXISTS`."""
+    logger.info("Migration SQLite v47 démarrée")
+    with conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS flashcard_checks (
+                   card_id     INTEGER PRIMARY KEY REFERENCES flashcards(id) ON DELETE CASCADE,
+                   checked_key TEXT NOT NULL,
+                   checked_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+                   status      TEXT NOT NULL CHECK (status IN ('ok', 'suggested', 'accepted', 'dismissed')),
+                   kind        TEXT CHECK (kind IN ('fix', 'remove')),
+                   front       TEXT,
+                   back        TEXT,
+                   reason      TEXT
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_flashcard_checks_status ON flashcard_checks(status)"
+        )
+    logger.info("Migration SQLite v47 terminée")
 
 
 def _merge_subject(conn, old: str, new: str) -> None:

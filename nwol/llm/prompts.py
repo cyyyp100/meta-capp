@@ -1405,6 +1405,88 @@ Contraintes :
 - Garde les formules et notations importantes.{image_rule}"""
 
 
+def build_flashcard_check_prompt(front: str, back: str) -> str:
+    """Relecture d'une flashcard existante (services/flashcard_check).
+
+    Aucun exemple de contenu dans la consigne : gemma4 recopie les exemples
+    qu'on lui donne. Les faces sont coupées aux plafonds de config/settings,
+    ceux que mesure le banc de budget."""
+    from config.settings import FLASHCARD_CHECK_BACK_CHARS, FLASHCARD_CHECK_FRONT_CHARS
+
+    front = (front or "")[:FLASHCARD_CHECK_FRONT_CHARS]
+    back = (back or "")[:FLASHCARD_CHECK_BACK_CHARS]
+    if _i18n.current_lang() == "en":
+        return f"""You proofread a student's review flashcard.
+
+Front (question):
+---
+{front}
+---
+
+Back (answer):
+---
+{back}
+---
+
+Check four things:
+1. The back is correct and answers the front.
+2. The front is a clear question.
+3. The card stands on its own: it does not rely on a context that is not written on it (a document, a passage, a page, a figure, a table, an example, an exercise, values given elsewhere).
+4. Formulas are valid LaTeX between $...$.
+
+Respond only in valid JSON, without Markdown:
+{{
+  "verdict": "ok, fix or remove",
+  "front": "corrected front, or the front unchanged",
+  "back": "corrected back, or the back unchanged",
+  "reason": "one short sentence for the student: what was wrong"
+}}
+
+Rules:
+- verdict is "fix" for a real error: a false or incomplete answer, an ambiguous question, broken notation, or a missing context that the card itself lets you restore. Style, length or tone are never a reason.
+- verdict is "remove" when the card relies on a context that is not written on it and that nothing on the card lets you restore: without the document, the card can neither be understood nor answered.
+- Notation that is already valid is never rewritten: no other LaTeX form, no fraction instead of a slash, no spacing change.
+- When in doubt, verdict is "ok".
+- With "fix", change as little as possible: keep the student's wording wherever it is right, and write the missing context into the card.
+- With "ok" or "remove", front and back are copied unchanged. With "ok", reason is empty.
+- Write reason in English."""
+
+    return f"""Tu relis une flashcard de révision d'un étudiant.
+
+Recto (question) :
+---
+{front}
+---
+
+Verso (réponse) :
+---
+{back}
+---
+
+Vérifie quatre choses :
+1. Le verso est juste et répond au recto.
+2. Le recto est une question claire.
+3. La carte se suffit à elle-même : elle ne renvoie pas à un contexte qui n'est pas écrit dessus (un document, un passage, une page, une figure, un tableau, un exemple, un exercice, des valeurs données ailleurs).
+4. Les formules sont en LaTeX valide entre $...$.
+
+Réponds uniquement en JSON valide, sans Markdown :
+{{
+  "verdict": "ok, fix ou remove",
+  "front": "recto corrigé, ou le recto inchangé",
+  "back": "verso corrigé, ou le verso inchangé",
+  "reason": "une phrase courte pour l'étudiant : ce qui n'allait pas"
+}}
+
+Règles :
+- verdict vaut "fix" pour une vraie erreur : réponse fausse ou incomplète, question ambiguë, notation cassée, ou contexte manquant que la carte elle-même permet de rétablir. Le style, la longueur ou le ton ne sont jamais une raison.
+- verdict vaut "remove" quand la carte renvoie à un contexte qui n'est pas écrit dessus et que rien sur la carte ne permet de rétablir : sans le document, on ne peut ni la comprendre ni y répondre.
+- Une notation déjà valide n'est jamais réécrite : pas d'autre forme LaTeX, pas de fraction à la place d'une barre oblique, pas de changement d'espacement.
+- Dans le doute, verdict vaut "ok".
+- Avec "fix", change le moins possible : garde la formulation de l'étudiant partout où elle est juste, et écris dans la carte le contexte qui manquait.
+- Avec "ok" ou "remove", front et back sont recopiés tels quels. Avec "ok", reason est vide.
+- Écris reason en français."""
+
+
 def build_flashcard_prompt(front: str, back: str, paragraph: str = "") -> str:
     """Transforme un échange (question utilisateur + réponse de l'assistant) en
     flashcard de révision AUTONOME : le recto doit être compréhensible sans avoir
