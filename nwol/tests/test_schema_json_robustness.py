@@ -183,3 +183,31 @@ def test_question_without_source_excerpt_gets_an_empty_string():
     })
     assert parsed is not None
     assert parsed["source_excerpt"] == ""
+
+
+# Le décodage contraint d'Ollama n'admet après `\` qu'un échappement JSON
+# valide : gemma4:e4b, voulant `\subseteq` et `\in` avec un seul backslash,
+# écrit `\tsubseteq` et `\tin` (réponse de Clikoda réelle, oct. 2026).
+@pytest.mark.parametrize(
+    ("raw_answer", "expected"),
+    [
+        (r"$S \tsubseteq \mathbb{R}^n$, $u, v \tin S$", r"$S \subseteq \mathbb{R}^n$, $u, v \in S$"),
+        (r"$$\tsum_i x_i \tleq \tinfty$$", r"$$\sum_i x_i \leq \infty$$"),
+        (r"\\(\tmathcal{X}\\) et \\[\tint f\\]", r"\(\mathcal{X}\) et \[\int f\]"),
+        # Une commande entière garde sa lettre, dans ou hors formule.
+        (r"$\theta \times \to \nabla \frac{1}{2} \beta$", r"$\theta \times \to \nabla \frac{1}{2} \beta$"),
+        (r"\text{u} hors formule", r"\text{u} hors formule"),
+        # Le double backslash correct ne change pas.
+        (r"$S \\subseteq \\mathbb{R}$ \\$5", r"$S \subseteq \mathbb{R}$ \$5"),
+    ],
+)
+def test_latex_forced_into_a_json_escape_is_restored(raw_answer, expected):
+    parsed = schema_json.parse_follow_up('{"answer": "' + raw_answer + '"}')
+    assert parsed is not None
+    assert parsed["answer"] == expected
+
+
+def test_json_newlines_and_tabs_outside_math_stay_text():
+    parsed = schema_json.parse_follow_up(r'{"answer": "Fin.\nLa suite\tici, $\theta$.\nin the end"}')
+    assert parsed is not None
+    assert parsed["answer"] == "Fin.\nLa suite\tici, $\\theta$.\nin the end"

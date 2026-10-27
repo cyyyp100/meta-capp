@@ -29,6 +29,7 @@ import { QuestionTypeBadge } from "../features/questions/QuestionTypeBadge";
 import { VerdictBadge } from "../features/questions/VerdictBadge";
 import { answerWidget } from "../features/questions/registry";
 import { renderMathToHtml } from "../features/reader/renderMath";
+import { MathText } from "../components/MathText";
 import { WhyButton } from "../features/science/WhyButton";
 import { formatDuration } from "../features/session/duration";
 import { useT } from "../i18n";
@@ -485,7 +486,7 @@ export function Quiz() {
               {analysisQuery.data.analysis && (
                 <div style={{ background: "var(--surface-soft)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "var(--space-md)", marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>{t("quiz.analysisTitle")}</div>
-                  <div style={{ color: "var(--text-soft)", fontSize: 14 }}>{analysisQuery.data.analysis}</div>
+                  <MathText text={analysisQuery.data.analysis} style={{ display: "block", color: "var(--text-soft)", fontSize: 14 }} />
                 </div>
               )}
               {analysisQuery.data.courses_to_review.length > 0 ? (
@@ -913,12 +914,12 @@ function Correction({ result }: { result: QuizEvaluation }) {
   return (
     <div className="mt-4 grid gap-2">
       <VerdictBadge verdict={result.verdict} />
-      {result.feedback && <div className="text-[13px] text-[var(--text-soft)]">{result.feedback}</div>}
-      {result.completion && <div className="text-[13px] text-[var(--text-soft)]">{result.completion}</div>}
+      {result.feedback && <MathText text={result.feedback} className="block text-[13px] text-[var(--text-soft)]" />}
+      {result.completion && <MathText text={result.completion} className="block text-[13px] text-[var(--text-soft)]" />}
       {result.hint && (
         <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Lightbulb className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
-          {result.hint}
+          <MathText text={result.hint} />
         </div>
       )}
       {result.expected_answer && (

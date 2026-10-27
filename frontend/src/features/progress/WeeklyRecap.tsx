@@ -9,6 +9,7 @@
 // un bilan qui déborde n'est plus lu.
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, CalendarDays } from "lucide-react";
+import { MathText } from "../../components/MathText";
 
 import { api } from "@/api/client";
 
@@ -75,7 +76,7 @@ export function WeeklyRecap() {
               accroche — l'étude qui la fonde se consulte APRÈS, sur /stats/science. */}
           {data.analysis && (
             <p className="mt-4 mb-0 border-l-2 border-brand pl-3.5 text-sm leading-relaxed text-text-soft">
-              {data.analysis}
+              <MathText text={data.analysis} />
             </p>
           )}
 

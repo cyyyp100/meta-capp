@@ -18,7 +18,7 @@ from config.subjects import (
     is_generic_language,
     subject_token,
 )
-from core.math_text import repair_common_inline_math_artifacts
+from core.math_text import LATEX_COMMANDS, repair_common_inline_math_artifacts
 from i18n import t
 from metacog.reflection import normalize_meta_cognition_questions
 from utils.tags import normalize_document_keywords, normalize_flashcard_tags
@@ -38,16 +38,6 @@ CRITERIA = (
 QUESTION_TYPES = question_types.KEYS
 
 _QUESTION_TYPE_ALIASES = question_types.alias_map()
-
-_AMBIGUOUS_JSON_LATEX_ESCAPE_RE = re.compile(
-    r"\\(?:"
-    r"bar|begin|beta|big|binom|bmatrix|boldsymbol|"
-    r"forall|frac|"
-    r"nabla|neg|ne|neq|ngeq|nleq|not|notin|nsim|nu|"
-    r"rangle|rightarrow|right|"
-    r"tan|tau|text|theta|therefore|times|to|top"
-    r")\b"
-)
 
 # Fragments caractéristiques des questions génériques émises par le LLM
 # quand il n'a pas de contexte suffisant pour générer une question ancrée.
@@ -753,10 +743,10 @@ def _json_candidates(text: str) -> list[str]:
 
 
 def _json_parse_variants(text: str) -> list[str]:
+    # La lecture réparée passe d'abord : elle ne diffère du texte que là où un
+    # échappement JSON valide était en fait du LaTeX (`\theta`, `\tsubseteq`).
     repaired = _escape_invalid_json_backslashes(text)
-    roots = [repaired, text] if repaired != text and _AMBIGUOUS_JSON_LATEX_ESCAPE_RE.search(text) else [text]
-    if repaired != text and repaired not in roots:
-        roots.append(repaired)
+    roots = [repaired, text] if repaired != text else [text]
 
     variants: list[str] = []
     for root in roots:
@@ -931,12 +921,25 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _escape_invalid_json_backslashes(text: str) -> str:
-    r"""Repair common LLM JSON errors such as LaTeX ``\sim`` inside strings."""
+    r"""Repair common LLM JSON errors such as LaTeX ``\sim`` inside strings.
+
+    Le décodage contraint d'Ollama n'admet après `\` qu'un échappement JSON
+    valide : un modèle qui écrit le LaTeX avec un seul backslash est forcé de
+    choisir `\t`, `\n`, `\b`, `\f` ou `\r` là où il voulait `\subseteq` ou `\in`,
+    et produit `\tsubseteq`, `\tin` — du JSON valide, du LaTeX faux. Dans une
+    formule (`$…$`, `\(…\)`, `\[…\]`), une lettre d'échappement suivie d'un nom
+    de commande connu (`LATEX_COMMANDS`) est donc lue comme ce LaTeX, la
+    lettre forcée en moins ; hors formule, seule une commande connue entière
+    (`\theta`, `\nabla`) l'emporte sur le saut de ligne ou la tabulation."""
     valid_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t", "u"}
     hex_digits = set(string.hexdigits)
     repaired: list[str] = []
     in_string = False
+    in_math = False
     pending_backslash = False
+    # Le caractère qui suit un `\\` (backslash littéral) : `\$` n'ouvre rien,
+    # `\(` et `\[` ouvrent une formule.
+    after_literal_backslash = False
     i = 0
     while i < len(text):
         char = text[i]
@@ -945,28 +948,51 @@ def _escape_invalid_json_backslashes(text: str) -> str:
             repaired.append(char)
             if char == '"':
                 in_string = True
+                in_math = False
             i += 1
             continue
 
         if pending_backslash:
-            next_char = text[i + 1] if i + 1 < len(text) else ""
+            word = re.match(r"[A-Za-z]*", text[i:]).group(0)
             is_valid_unicode_escape = char == "u" and len(text[i + 1 : i + 5]) == 4 and all(
                 item in hex_digits for item in text[i + 1 : i + 5]
             )
-            looks_like_latex_command = (
-                char.isalpha()
-                and not is_valid_unicode_escape
-                and (char not in valid_escapes or next_char.isalpha())
-            )
-            if char in valid_escapes and not looks_like_latex_command and (char != "u" or is_valid_unicode_escape):
+            pending_backslash = False
+            if char in "bfnrt":
+                if word in LATEX_COMMANDS or (in_math and len(word) > 1 and word[1:] not in LATEX_COMMANDS):
+                    repaired.append("\\\\")
+                    repaired.append(char)
+                elif in_math and word[1:] in LATEX_COMMANDS:
+                    repaired.append("\\\\")  # la lettre forcée tombe : `\tin` → `\in`
+                else:
+                    repaired.append("\\")
+                    repaired.append(char)
+            elif char == "\\":
+                repaired.append("\\\\")
+                after_literal_backslash = True
+            elif char in valid_escapes and (char != "u" or is_valid_unicode_escape):
                 repaired.append("\\")
                 repaired.append(char)
             else:
                 repaired.append("\\\\")
                 repaired.append(char)
-            pending_backslash = False
+                if char in "([":
+                    in_math = True
+                elif char in ")]":
+                    in_math = False
             i += 1
             continue
+
+        if after_literal_backslash:
+            after_literal_backslash = False
+            if char in "([":
+                in_math = True
+            elif char in ")]":
+                in_math = False
+            if char in "$([)]":
+                repaired.append(char)
+                i += 1
+                continue
 
         if char == "\\":
             pending_backslash = True
@@ -979,6 +1005,11 @@ def _escape_invalid_json_backslashes(text: str) -> str:
             i += 1
             continue
 
+        if char == "$":
+            in_math = not in_math
+            if text[i + 1 : i + 2] == "$":  # `$$` : un seul délimiteur
+                repaired.append(char)
+                i += 1
         if char == "\n":
             repaired.append("\\n")
         elif char == "\r":

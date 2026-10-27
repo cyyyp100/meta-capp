@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Lightbulb } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
+import { MathText } from "../../components/MathText";
 
 import { Button } from "@/components/ui/button";
 
@@ -226,7 +227,7 @@ export function EntrySas({
             transition={{ duration: 0.4, delay: 0.15, ease: [0.33, 1, 0.68, 1] }}
           >
             <Lightbulb className="mt-0.5 size-4 shrink-0" aria-hidden />
-            <span>{hookText}</span>
+            <MathText text={hookText} />
           </motion.div>
         )}
 
