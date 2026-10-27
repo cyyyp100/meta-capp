@@ -741,13 +741,18 @@ export function ClikodaPanel({
     setBusy(true);
   }
 
+  /** Les extraits joints au contexte, tels qu'ils partent avec une demande. */
+  function attachedContext() {
+    return (contextChipsRef.current ?? []).map(({ page, text: snippet }) => ({ page, text: snippet }));
+  }
+
   function ask() {
     const text = draft.trim();
     if (!text || busy) return;
     // Les extraits joints suivent LA question qu'ils accompagnent : ils
     // s'affichent dans sa bulle, et la suivante part sans eux. Ils restaient
     // sinon sous le champ et repartaient avec chaque question.
-    const context = (contextChipsRef.current ?? []).map(({ page, text: snippet }) => ({ page, text: snippet }));
+    const context = attachedContext();
     setMessages((m) => [...m, { role: "user", text, ...(context.length ? { context } : {}) }]);
     setDraft("");
     beginRequest();
@@ -761,11 +766,18 @@ export function ClikodaPanel({
     if (context.length) onContextConsumed?.();
   }
 
+  /** Reformuler, résumer, curiosité : sur les extraits joints quand il y en
+   *  a (ils partent avec la commande, comme avec une question), sur la page sinon. */
   function action(type: "rephrase" | "recap" | "hook", label: string) {
     if (busy) return;
-    setMessages((m) => [...m, { role: "user", text: label }]);
+    const context = attachedContext();
+    setMessages((m) => [...m, { role: "user", text: label, ...(context.length ? { context } : {}) }]);
     beginRequest();
-    if (!sendRaw({ type, page: pageRef.current })) setBusy(false);
+    if (!sendRaw({ type, page: pageRef.current, selected_snippets: context.map((c) => c.text) })) {
+      setBusy(false);
+      return;
+    }
+    if (context.length) onContextConsumed?.();
   }
 
   /** « Annuler » : la main est rendue tout de suite, et le serveur coupe la
@@ -800,12 +812,18 @@ export function ClikodaPanel({
     // désarmait le verrou côté client si la génération échouait ou était
     // annulée (`restoreGate` ne trouvait plus de carte), alors que le serveur
     // restait verrouillé : Clikoda se taisait pour toute la séance.
+    // Extraits joints : la question porte sur eux. Tous pris sur une même
+    // page, c'est elle qui fait page-contexte (zone cadrée, passage caché).
+    const context = attachedContext();
+    const pages = new Set(context.map((c) => c.page));
+    const page = pages.size === 1 ? context[0].page : pageRef.current;
     beginRequest();
-    if (!sendRaw({ type: "start_qa", page: pageRef.current, session_id: sessionId ?? null })) {
+    if (!sendRaw({ type: "start_qa", page, session_id: sessionId ?? null, selected_snippets: context.map((c) => c.text) })) {
       setBusy(false);
       restoreGate();
       return;
     }
+    if (context.length) onContextConsumed?.();
     // Même après une réponse fausse : le temps que Clikoda prépare la question
     // suivante, on est libre de bouger dans le document.
     releaseWhileThinking();

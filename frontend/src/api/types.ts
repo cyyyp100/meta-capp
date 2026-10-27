@@ -164,6 +164,23 @@ export interface ReaderBlock {
   };
 }
 
+/** Proposition de la relecture hebdomadaire de Clikoda (GET /api/flashcards/suggestions).
+ *  Rien n'est appliqué sans l'élève. */
+export interface FlashcardSuggestion {
+  card_id: number;
+  /** La carte telle qu'elle est. */
+  front: string;
+  back: string;
+  /** « fix » : une version corrigée ; « remove » : la carte renvoie à un
+   *  contexte absent (passage, figure, exemple du document) que rien sur elle
+   *  ne rétablit — Clikoda propose de la supprimer. */
+  kind: "fix" | "remove";
+  suggested_front: string | null;
+  suggested_back: string | null;
+  reason: string;
+  checked_at: string;
+}
+
 export interface Flashcard {
   id: number;
   front: string;

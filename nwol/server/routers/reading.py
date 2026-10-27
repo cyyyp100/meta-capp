@@ -2,6 +2,7 @@
 #
 # client -> serveur : {"type":"ask","question","page"} | {"type":"rephrase","page"}
 #                     {"type":"recap","page"} | {"type":"hook","page"}
+#                     (+ "selected_snippets" sur ask, les trois commandes et start_qa)
 #                     {"type":"viewport","page"} | {"type":"mode","mode"} | {"type":"focus"}
 #                     {"type":"activity","hidden":bool,"engaged":bool}  # fenêtre
 #                       masquée / app au second plan, ou (engaged) défilement /
@@ -501,7 +502,9 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
 
     def _safe_mask(result: dict, page: int) -> dict | None:
         try:
-            return assistant.resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+            return assistant.resolve_paragraph_mask(
+                doc_id, page, result.get("paragraph_mask"), str(result.get("source_excerpt") or ""),
+            )
         except Exception:  # le masque est un confort : sans lui, la question reste posée
             logger.warning("Masque de question non résolu", exc_info=True)
             return None
@@ -991,7 +994,13 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                 "hook": ("curiosity_hook", assistant.curiosity_hook),
             }[kind]
             await out.put(loading(task))
-            launch(task, lambda ok, err, _page=page: run(doc_id, _page, ok, err), on_command_success, report_error)
+            snippets = msg.selected_snippets
+            launch(
+                task,
+                lambda ok, err, _page=page: run(doc_id, _page, ok, err, selected_snippets=snippets),
+                on_command_success,
+                report_error,
+            )
         elif kind == "start_qa":
             sid = msg.session_id
             await out.put(loading("question"))
@@ -1003,6 +1012,7 @@ async def reader_stream(ws: WebSocket, doc_id: int) -> None:
                     session_gauges=qa_gauges,
                     recent_question_types=list(state["recent_qtypes"]),
                     history=list(state["qa_history"]),
+                    selected_snippets=msg.selected_snippets,
                 ),
                 lambda result, _page=page, _sid=sid: emit_question(result, _page, _sid, gated=False),
                 report_error,

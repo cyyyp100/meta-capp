@@ -31,6 +31,7 @@ import type {
   FindOnPage,
   FindSummary,
   Flashcard,
+  FlashcardSuggestion,
   FolderNode,
   Health,
   HighlightAnchor,
@@ -207,6 +208,13 @@ export const api = {
       doc_id: docId ?? null,
       page: page ?? null,
     }),
+  // Relecture hebdomadaire : propositions en attente, appliquées (carte réécrite
+  // ou supprimée) ou laissées par l'élève.
+  flashcardSuggestions: () => getJSON<FlashcardSuggestion[]>("/api/flashcards/suggestions"),
+  acceptFlashcardSuggestion: (id: number) =>
+    postJSON<{ id: number; removed?: boolean }>(`/api/flashcards/${id}/suggestion/accept`, {}),
+  dismissFlashcardSuggestion: (id: number) =>
+    postJSON<{ ok: boolean }>(`/api/flashcards/${id}/suggestion/dismiss`, {}),
   deleteFlashcard: (id: number) =>
     fetch(`/api/flashcards/${id}`, { method: "DELETE" }).then((r) => {
       if (!r.ok) throw new Error(`${r.status}`);

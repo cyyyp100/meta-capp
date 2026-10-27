@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-10-27
+
+### Added
+
+- **Clikoda proofreads your flashcards once a week.** When the app opens, at
+  most once a week and in the background, Clikoda rereads up to 20 cards
+  (never checked, or edited since). It proposes a corrected version for a
+  wrong answer, an ambiguous question or broken notation. A card that only
+  makes sense next to the PDF ("the figure", "this passage") gets a
+  self-contained rewrite, or a proposal to delete it. Proposals wait at the
+  top of the Flashcards page: nothing is rewritten or deleted without you.
+  Suspended in economy mode. The database moves to schema v47 (new
+  `flashcard_checks` table; existing cards are kept as they are).
+- **Animated demos in the README**, in English and French.
+
+### Changed
+
+- **The quiz no longer waits for Clikoda between questions.** A written
+  answer shows the expected answer at once and the next question is
+  available. Clikoda grades it in the background, and the corrections appear
+  in the end-of-quiz summary. If grading is unavailable, you mark your own
+  answers there.
+- **Rephrase, Recap, Curiosity and Quiz me use the context you attached.**
+  The first three work on the selected passages instead of the whole page.
+  Quiz me asks about them first.
+
+### Fixed
+
+- A recall question hid the wrong part of the page: the passage to recall
+  stayed readable, framed in a transparent box. The hidden passage now
+  follows the text the model quotes, not the character positions it
+  guesses.
+- The exit screen's reflection questions were in French in the English
+  interface.
+- An unknown address (for instance `/progress`) showed an empty page. It now
+  says the page does not exist and links back to the library.
+- Formulas broken in Clikoda's answers (`\tsubseteq` instead of
+  `\subseteq`) and LaTeX shown as raw text on several screens.
+
 ## [0.2.4] — 2026-10-26
 
 ### Added
@@ -520,7 +559,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audited by `pip-audit`): a release no longer depends on whatever version PyPI
   serves that day.
 
-[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/cyyyp100/meta-capp/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/cyyyp100/meta-capp/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/cyyyp100/meta-capp/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/cyyyp100/meta-capp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cyyyp100/meta-capp/compare/v0.2.1...v0.2.2

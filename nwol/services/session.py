@@ -55,6 +55,7 @@ from db.sessions import delete_session as _delete_session
 from db.sessions import end_session as _end_session
 from db.sessions import start_session as _start_session
 from db.user import DEFAULT_USER_ID, get_streak, record_study_day
+from i18n import t
 from llm.ollama_client import SESSION_SUMMARY_FALLBACK, background_tasks, cancel_pending_generations
 from metacog.gauges import (
     VERDICT_CRITERIA,
@@ -72,7 +73,7 @@ from services.pause import summarize as summarize_pauses
 logger = logging.getLogger("services.session")
 
 __all__ = [
-    "REFLECTION_QUESTIONS",
+    "reflection_questions",
     "start_session",
     "end_session",
     "abandon_session",
@@ -90,10 +91,13 @@ __all__ = [
 # livrée avec l'analyse de session — cf. `session_analysis`). Trois questions
 # figées faisaient attendre le modèle pour rien ; trois questions générées
 # faisaient attendre l'étudiant devant un écran vide.
-REFLECTION_QUESTIONS = [
-    "Qu'as-tu compris de plus important dans cette session ?",
-    "Quel point reste flou et mériterait d'être revu ?",
-]
+# Elles suivent la langue de l'interface (clés `session.reflection_q*`) : une
+# liste figée en français les montrait telles quelles à un sas en anglais.
+_REFLECTION_KEYS = ("session.reflection_q1", "session.reflection_q2")
+
+
+def reflection_questions() -> list[str]:
+    return [t(key) for key in _REFLECTION_KEYS]
 
 # Critères que le seul taux de réussite informe honnêtement, quand la séance n'a
 # pas de courbe de jauges. Les trois autres (curiosité, créativité, métacognition)
@@ -345,7 +349,7 @@ def session_metrics(session_id: int) -> dict:
         "success_rate": success,
         # pauses, pause_s, pauses_after_recommendation (services/pause.summarize)
         **pauses,
-        "reflection_questions": list(REFLECTION_QUESTIONS),
+        "reflection_questions": reflection_questions(),
     }
 
 
@@ -407,7 +411,7 @@ def session_analysis(session_id: int, user_id: int = DEFAULT_USER_ID) -> dict:
         "analysis": analysis,
         "question": pick_reflection_question(
             summary.get("metacognitive_questions") or [],
-            avoid=list(REFLECTION_QUESTIONS) + list(recent),
+            avoid=reflection_questions() + list(recent),
             seed_context=session_id,
         ),
     }
@@ -431,10 +435,10 @@ def _reflection_pairs(questions: list[str] | None, responses: list[str] | None) 
     for order, response in enumerate(responses or []):
         if order < len(questions) and str(questions[order] or "").strip():
             label = str(questions[order]).strip()
-        elif order < len(REFLECTION_QUESTIONS):
-            label = REFLECTION_QUESTIONS[order]
+        elif order < len(_REFLECTION_KEYS):
+            label = t(_REFLECTION_KEYS[order])
         else:
-            label = f"Réflexion {order + 1}"
+            label = t("session.reflection_n", n=order + 1)
         pairs.append({"question": label, "answer": str(response or "")})
     return pairs
 

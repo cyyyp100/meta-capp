@@ -123,7 +123,7 @@ def test_question_prompt_fits(machine, lang, page_kind):
         paragraph=PAGES[page_kind], chapter_title="Chapitre 4 — Méthodes du premier ordre", doc_title="Un titre.pdf",
         metacog_profile=PROFILE, history=HISTORY, session_gauges=GAUGES,
         recent_question_types=["comprehension", "application", "connection", "recall", "metacognition"],
-        standalone=True, past_struggles=STRUGGLES, user_highlights=QUOTES,
+        standalone=True, past_struggles=STRUGGLES, user_highlights=QUOTES, selected_snippets=QUOTES,
     )
     _check("question", prompt, lang, machine)
 
@@ -293,3 +293,22 @@ def test_profile_analysis_keeps_short_reflections_whole():
     answer = "J'ai compris la descente de gradient, mais le pas reste flou."
     prompt = prompts.build_profile_analysis_prompt(reflections=[{"question": "Q ?", "answer": answer}])
     assert answer in prompt
+
+
+@pytest.mark.parametrize("profile", list({(p.tokenizer, p.max_num_ctx): p for p in LLM_MODELS.values()}.values()),
+                         ids=lambda p: p.name)
+@pytest.mark.parametrize("economy", [False, True], ids=["normal", "econome"])
+@pytest.mark.parametrize("page_kind", list(PAGES))
+def test_flashcard_check_prompt_fits(monkeypatch, profile, economy, lang, page_kind):
+    """Relecture hebdomadaire d'une carte : les deux faces à leurs plafonds,
+    dans l'écriture la plus coûteuse, sur chaque modèle (contexte plein ou
+    compact). En mode économe elle ne part pas (tâche de fond suspendue)."""
+    monkeypatch.setattr(settings, "_active_profile", lambda: profile)
+    monkeypatch.setattr(settings, "_economy", lambda: economy)
+    monkeypatch.setattr(llm_models, "active_profile", lambda: profile)
+    machine = SimpleNamespace(profile=profile, economy=economy, tokenizer=profile.tokenizer)
+    text = PAGES[page_kind]
+    prompt = prompts.build_flashcard_check_prompt(
+        front=text[:settings.FLASHCARD_CHECK_FRONT_CHARS], back=text[:settings.FLASHCARD_CHECK_BACK_CHARS],
+    )
+    _check("flashcard_check", prompt, lang, machine)

@@ -213,15 +213,28 @@ def answer_question(
 # Toutes les actions ci-dessous normalisent la sortie en {answer, highlights}
 # pour que le transport (WebSocket) reste uniforme.
 
+def _snippets_or_page(doc_id: int, page: int, selected_snippets: list[str] | None) -> str:
+    """Le texte sur lequel travaille une commande (reformuler, résumer,
+    accrocher) : les extraits joints au contexte quand l'élève en a mis, la
+    page sinon. Il a choisi CE passage ; la commande portait sur toute la page.
+    Même borne que la page : chaque prompt coupe ce texte comme il la coupait."""
+    snippets = [" ".join(str(s or "").split()) for s in selected_snippets or []]
+    snippets = [s for s in snippets if s]
+    if snippets:
+        return "\n\n".join(snippets)
+    return library.page_text(doc_id, page)
+
+
 def rephrase_page(
     doc_id: int,
     page: int,
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_rephrasing_async,
 ) -> None:
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
 
     def _wrap(result: dict) -> None:
         text = (result.get("rephrased_paragraph") or "").strip()
@@ -242,9 +255,10 @@ def chapter_recap(
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_chapter_summary_async,
 ) -> None:
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
     context = {
         "chapter_title": chapter_title_for_page(doc_id, page),
         "paragraphs_summary": [page_text[:1500]] if page_text else [],
@@ -265,10 +279,11 @@ def curiosity_hook(
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
     *,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_curiosity_hook_async,
 ) -> None:
     doc = _get_document(doc_id) or {}
-    page_text = library.page_text(doc_id, page)
+    page_text = _snippets_or_page(doc_id, page, selected_snippets)
 
     def _wrap(result: dict) -> None:
         on_success({"answer": (result.get("curiosity_hook") or "").strip() or "(pas de hook)", "highlights": []})
@@ -296,6 +311,7 @@ def generate_page_question(
     session_gauges: dict | None = None,
     recent_question_types: list[str] | None = None,
     history: list[dict] | None = None,
+    selected_snippets: list[str] | None = None,
     generator: Callable = generate_question_async,
 ) -> None:
     doc = _get_document(doc_id) or {}
@@ -319,30 +335,56 @@ def generate_page_question(
         "preferred_question_type": FORCE_QUESTION_TYPE,
         "past_struggles": _safe(lambda: get_recurring_struggles(doc_id=doc_id), []),
         "user_highlights": _safe(lambda: get_highlight_quotes(doc_id, page=page), []),
+        # Extraits joints au contexte : la question porte sur eux en priorité.
+        # La page reste le texte de référence (zone, masque, question autonome).
+        "selected_snippets": list(selected_snippets or []),
         "image_paths": _page_image_paths(doc_id, page),
     }
     generator(context, on_success, on_error)
 
 
-def resolve_paragraph_mask(doc_id: int, page: int, mask: dict | None) -> dict | None:
-    """Transforme le masque du LLM (indices de caractères) en citation affichable.
+def resolve_paragraph_mask(doc_id: int, page: int, mask: dict | None, excerpt: str = "") -> dict | None:
+    """Transforme le masque du LLM en citation affichable.
 
-    Le LLM renvoie `paragraph_mask` en indices dans le texte de la page ; l'UI, elle,
-    localise un passage par sa **citation** (même chemin que les surlignages :
-    `library.search_page`). C'est ici qu'on convertit, pour que le routeur WS n'ait
-    plus qu'à transporter. Renvoie None si le masque est absent ou intraduisible."""
+    L'UI localise un passage par sa **citation** (même chemin que les
+    surlignages : `library.search_page`) ; c'est ici qu'on la choisit, pour que
+    le routeur WS n'ait plus qu'à transporter. Renvoie None si le masque est
+    absent ou intraduisible.
+
+    Le passage que le modèle RECOPIE (`excerpt`, son `source_excerpt`) passe
+    avant ses indices de caractères : mesuré sur gemma4, les indices tombent
+    à côté (« …nd everyday life. Bayes' theorem… » caché, la réponse restée
+    lisible et cadrée par la zone de la question), la recopie, elle, est
+    exacte. Les indices ne servent plus que de repli, élargis au mot entier."""
     if not isinstance(mask, dict) or not mask.get("enabled"):
         return None
     text = library.page_text(doc_id, page) or ""
-    try:
-        start = int(mask.get("start_char", 0))
-        end = int(mask.get("end_char", 0))
-    except (TypeError, ValueError):
-        return None
-    quote = " ".join(text[max(0, start):end].split())
+    placeholder = (mask.get("placeholder") or "").strip()
+    quote = _snap_excerpt_to_page(excerpt, text) if excerpt else None
+    if quote is None:
+        try:
+            start = int(mask.get("start_char", 0))
+            end = int(mask.get("end_char", 0))
+        except (TypeError, ValueError):
+            return None
+        quote = " ".join(_widen_to_words(text, start, end).split())
     if len(quote) < _MIN_MASK_CHARS:
         return None
-    return {"quote": quote, "placeholder": (mask.get("placeholder") or "").strip()}
+    return {"quote": quote, "placeholder": placeholder}
+
+
+def _widen_to_words(text: str, start: int, end: int) -> str:
+    """Tranche `text[start:end]` élargie aux mots entiers : un « nd everyday »
+    coupé ne se retrouve pas toujours sur la page, et laisse lisible la moitié
+    d'un mot."""
+    start, end = max(0, start), min(len(text), end)
+    if start >= end:
+        return ""
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return text[start:end]
 
 
 def resolve_question_zone(doc_id: int, page: int, result: dict | None) -> dict | None:
@@ -358,9 +400,10 @@ def resolve_question_zone(doc_id: int, page: int, result: dict | None) -> dict |
     None : le lecteur se rabat sur le haut de la page."""
     result = result or {}
     text = library.page_text(doc_id, page) or ""
-    quote = _snap_excerpt_to_page(str(result.get("source_excerpt") or ""), text)
+    excerpt = str(result.get("source_excerpt") or "")
+    quote = _snap_excerpt_to_page(excerpt, text)
     if quote is None:
-        mask = resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"))
+        mask = resolve_paragraph_mask(doc_id, page, result.get("paragraph_mask"), excerpt)
         quote = mask["quote"] if mask else None
     if not quote:
         return None

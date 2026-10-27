@@ -220,7 +220,7 @@ def test_the_reader_socket_survives_a_missing_file(client, tmp_path, make_pdf, m
 
     monkeypatch.setattr(
         assistant, "rephrase_page",
-        lambda d, p, ok, err: real_rephrase(d, p, ok, err, generator=generator),
+        lambda d, p, ok, err, **kw: real_rephrase(d, p, ok, err, generator=generator, **kw),
     )
     with client.websocket_connect(f"/api/reader/{doc['id']}/stream") as ws:
         ws.send_json({"type": "rephrase", "page": 1})

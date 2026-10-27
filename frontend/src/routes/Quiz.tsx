@@ -146,6 +146,24 @@ export function Quiz() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [recorded, setRecorded] = useState(false);
 
+  // Réponses rédigées : corrigées par Clikoda EN ARRIÈRE-PLAN, sans faire
+  // attendre la question suivante (une correction prend des dizaines de
+  // secondes sur un modèle local). Leur verdict n'apparaît qu'au bilan, qui
+  // les attend avant d'enregistrer la séance. Clés : rang dans `historyRef`.
+  const pending = useRef(new Map<number, Promise<QuizEvaluation | null>>());
+  // Rangs sans verdict définitif (correction en cours, ou à trancher par
+  // l'apprenant) : une séance quittée avant ne les enregistre pas.
+  const unsettled = useRef(new Set<number>());
+  const [corrections, setCorrections] = useState<Record<number, QuizEvaluation>>({});
+  const [grading, setGrading] = useState<{ done: number; total: number } | null>(null);
+  const [toSelfGrade, setToSelfGrade] = useState<number[]>([]);
+  // Réponse attendue de chaque réponse rédigée, pour le bilan (même sans correction).
+  const expected = useRef(new Map<number, string>());
+  const selfGraded = useRef<(() => void) | null>(null);
+  // Change à chaque nouvelle séance : une correction arrivée pour l'ancienne
+  // ne touche pas à la nouvelle.
+  const generation = useRef(0);
+
   // L'analyse lit les réglages FIGÉS de la session (matière, précision, mode) :
   // elle parle de ce qui a été joué, pas du profil entier. Elle attend
   // l'enregistrement de la séance (sans LLM, immédiat) pour être gardée avec elle.
@@ -166,8 +184,10 @@ export function Quiz() {
   useEffect(() => {
     return () => {
       if (historyRef.current.length === 0) return;
-      void record().then(finalize);
+      void settlePending().then(() => record()).then(finalize);
     };
+    // Au démontage seulement : les refs portent l'état de la séance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** Libellé affiché d'une matière (code stocké en base → nom traduit). */
@@ -197,6 +217,14 @@ export function Quiz() {
     if (recording.current) void recording.current.then(finalize);
     recording.current = null;
     historyRef.current = [];
+    generation.current += 1;
+    pending.current = new Map();
+    unsettled.current = new Set();
+    expected.current = new Map();
+    selfGraded.current = null;
+    setCorrections({});
+    setGrading(null);
+    setToSelfGrade([]);
     setSessionId(null);
     setRecorded(false);
     setIndex(0);
@@ -208,9 +236,22 @@ export function Quiz() {
   }
 
   function answered(q: QuizQuestion, outcome: QuizOutcome) {
-    setScore((s) => s + outcome.score);
+    keep(q, outcome);
+    count(q.category, outcome.verdict, outcome.score);
+  }
+
+  /** Points, bilan par matière et maîtrise : au verdict, tout de suite ou au bilan. */
+  function count(category: string | null | undefined, verdict: QuizVerdict, points: number) {
+    setScore((s) => s + points);
+    const cat = category || "autre";
+    setByCat((b) => ({ ...b, [cat]: { correct: (b[cat]?.correct ?? 0) + points, total: (b[cat]?.total ?? 0) + 1 } }));
+    // Maîtrise de la matière ; le verdict garde le « partiel ».
+    void api.submitQuizAnswer(category ?? "", verdict === "correct", verdict);
+  }
+
+  /** Ajoute la réponse à la séance ; renvoie son rang. */
+  function keep(q: QuizQuestion, outcome: QuizOutcome): number {
     const cat = q.category || "autre";
-    setByCat((b) => ({ ...b, [cat]: { correct: (b[cat]?.correct ?? 0) + outcome.score, total: (b[cat]?.total ?? 0) + 1 } }));
     historyRef.current = [
       ...historyRef.current,
       {
@@ -231,14 +272,91 @@ export function Quiz() {
       },
     ];
     setHistory(historyRef.current);
-    // Maîtrise de la matière, tout de suite ; le verdict garde le « partiel ».
-    void api.submitQuizAnswer(q.category, outcome.verdict === "correct", outcome.verdict);
+    return historyRef.current.length - 1;
+  }
+
+  /** Réponse rédigée : la question suivante n'attend pas sa correction. Elle
+   *  compte pour zéro tant que Clikoda ne l'a pas corrigée (au bilan). */
+  function deferred(q: QuizQuestion, written: string, responseTimeMs: number) {
+    const rank = keep(q, { verdict: "incorrect", score: 0, userAnswer: written, graded: false, responseTimeMs });
+    unsettled.current.add(rank);
+    expected.current.set(rank, q.answer);
+    pending.current.set(
+      rank,
+      api
+        .quizEvaluate({
+          question_id: q.id,
+          question: q.question,
+          user_answer: written,
+          question_type: q.question_type,
+          answer: q.answer,
+          choices: q.choices,
+        })
+        .then((evaluation) => (evaluation.graded && evaluation.verdict ? evaluation : null))
+        .catch(() => null),
+    );
+  }
+
+  /** Verdict définitif d'une réponse rédigée : dans la séance, le score et le bilan. */
+  function settle(rank: number, evaluation: QuizEvaluation) {
+    const entry = historyRef.current[rank];
+    if (!entry || !evaluation.verdict) return;
+    historyRef.current = historyRef.current.map((e, i) =>
+      i === rank
+        ? { ...e, verdict: evaluation.verdict as QuizVerdict, score: evaluation.score, graded: evaluation.graded, signals: evaluation.signals ?? null }
+        : e,
+    );
+    setHistory(historyRef.current);
+    unsettled.current.delete(rank);
+    count(entry.category, evaluation.verdict, evaluation.score);
+    setCorrections((c) => ({ ...c, [rank]: evaluation }));
+  }
+
+  /** Attend les corrections lancées. Celles que le serveur n'a pas pu rendre
+   *  restent à trancher (`toSelfGrade`) ; sans `ask`, elles sont laissées de
+   *  côté (séance quittée en cours de route). */
+  async function settlePending(ask = false) {
+    const gen = generation.current;
+    const waiting = [...pending.current.entries()];
+    pending.current = new Map();
+    if (waiting.length === 0) return;
+    let finished = 0;
+    if (ask) setGrading({ done: 0, total: waiting.length });
+    const failed: number[] = [];
+    await Promise.all(
+      waiting.map(async ([rank, promise]) => {
+        const evaluation = await promise;
+        if (gen !== generation.current) return;
+        finished += 1;
+        if (ask) setGrading({ done: finished, total: waiting.length });
+        if (evaluation) settle(rank, evaluation);
+        else failed.push(rank);
+      }),
+    );
+    if (!ask || gen !== generation.current || failed.length === 0) return;
+    // Clikoda n'a pas pu corriger (modèle éteint) : l'apprenant tranche, comme
+    // il le faisait question par question, avant que la séance ne parte.
+    failed.sort((a, b) => a - b);
+    await new Promise<void>((resolve) => {
+      selfGraded.current = resolve;
+      setToSelfGrade(failed);
+    });
+  }
+
+  function selfGradeLater(rank: number, knew: boolean) {
+    const verdict: QuizVerdict = knew ? "correct" : "incorrect";
+    settle(rank, localVerdict(expected.current.get(rank) ?? "", verdict));
+    setToSelfGrade((left) => {
+      const rest = left.filter((r) => r !== rank);
+      if (rest.length === 0) selfGraded.current?.();
+      return rest;
+    });
   }
 
   /** Enregistre la séance (une fois) ; résout son id, ou null sans réponse ni serveur. */
   function record(): Promise<number | null> {
     if (!recording.current) {
-      const answers = historyRef.current;
+      const answers = historyRef.current.filter((_, rank) => !unsettled.current.has(rank));
       const elapsed = Math.max(0, Math.round((Date.now() - startedAt.current) / 1000));
       recording.current =
         answers.length === 0
@@ -268,12 +386,18 @@ export function Quiz() {
       setDurationS(elapsed);
       setDone(true);
       // Déclenché depuis le handler et non un effet : l'app est montée en StrictMode.
-      const pending = record();
-      void pending.then((id) => {
-        // « Recommencer » pressé entre-temps : cette séance n'est plus à l'écran.
-        if (recording.current !== pending) return;
-        setSessionId(id);
-        setRecorded(true);
+      // La séance part une fois les réponses rédigées corrigées : le bilan et
+      // l'analyse lisent leurs verdicts.
+      const gen = generation.current;
+      void settlePending(true).then(() => {
+        if (gen !== generation.current) return;
+        const saving = record();
+        void saving.then((id) => {
+          // « Recommencer » pressé entre-temps : cette séance n'est plus à l'écran.
+          if (recording.current !== saving) return;
+          setSessionId(id);
+          setRecorded(true);
+        });
       });
     } else setIndex((i) => i + 1);
   }
@@ -447,6 +571,7 @@ export function Quiz() {
           q={data[index]}
           position={`${index + 1} / ${data.length}`}
           onAnswered={(outcome) => answered(data[index], outcome)}
+          onDeferred={(written, ms) => deferred(data[index], written, ms)}
           onNext={() => next(data.length)}
         />
       )}
@@ -479,6 +604,17 @@ export function Quiz() {
               </div>
             ))}
           </div>
+
+          {grading && grading.done < grading.total && (
+            <p style={{ color: "var(--muted)" }}>{t("quiz.grading", { done: grading.done, total: grading.total })}</p>
+          )}
+          <DeferredCorrections
+            history={history}
+            corrections={corrections}
+            toSelfGrade={toSelfGrade}
+            expected={expected.current}
+            onSelfGrade={selfGradeLater}
+          />
 
           {analysisQuery.isFetching && <p style={{ color: "var(--muted)" }}>{t("quiz.analyzing")}</p>}
           {analysisQuery.data && (
@@ -727,11 +863,14 @@ function QuestionCard({
   q,
   position,
   onAnswered,
+  onDeferred,
   onNext,
 }: {
   q: QuizQuestion;
   position: string;
   onAnswered: (outcome: QuizOutcome) => void;
+  /** Réponse rédigée : corrigée en arrière-plan, verdict au bilan. */
+  onDeferred: (written: string, responseTimeMs: number) => void;
   onNext: () => void;
 }) {
   const t = useT();
@@ -742,8 +881,11 @@ function QuestionCard({
   // Réponse rédigée que le serveur n'a pas pu corriger (LLM éteint) : l'apprenant
   // tranche lui-même plutôt que de voir la session s'arrêter là.
   const [selfGrading, setSelfGrading] = useState<string | null>(null);
+  // Réponse rédigée envoyée à la correction différée : la réponse attendue
+  // s'affiche tout de suite, le verdict de Clikoda au bilan.
+  const [sent, setSent] = useState(false);
   const widget = answerWidget(q.question_type, q.choices);
-  const settled = picked !== null || result !== null;
+  const settled = picked !== null || result !== null || sent;
   // Temps de réponse (attention) : de l'affichage de la question au geste qui y
   // répond. L'attente de la correction n'y entre pas — d'où le temps figé à la
   // soumission, que reprend une auto-évaluation arrivée après coup.
@@ -768,11 +910,18 @@ function QuestionCard({
     });
   }
 
-  /** Réponse rédigée ou remise en ordre : corrigée par le serveur, comme en lecture. */
+  /** Réponse rédigée : la question suivante est tout de suite là, Clikoda corrige
+   *  en arrière-plan. Une remise en ordre, elle, a un verdict objectif et
+   *  immédiat : elle passe par le serveur sans attendre de modèle. */
   async function submit(answer: string) {
     const written = answer.trim();
     if (busy || settled || selfGrading !== null || !written) return;
     answeredIn.current = elapsedMs();
+    if (widget === "text") {
+      setSent(true);
+      onDeferred(written, answeredIn.current);
+      return;
+    }
     setBusy(true);
     try {
       const evaluation = await api.quizEvaluate({
@@ -896,6 +1045,12 @@ function QuestionCard({
         )}
 
         {result && <Correction result={result} />}
+        {sent && (
+          <div className="mt-4 grid gap-2">
+            <p className="m-0 text-[13px] text-muted-foreground">{t("quiz.deferred_note")}</p>
+            {q.answer && <ExpectedAnswer text={q.answer} />}
+          </div>
+        )}
 
         {settled && (
           <Button onClick={onNext} className="mt-4.5">
@@ -910,7 +1065,6 @@ function QuestionCard({
 
 /** Correction affichée sous la question : verdict, retour de Clikoda, réponse attendue. */
 function Correction({ result }: { result: QuizEvaluation }) {
-  const t = useT();
   return (
     <div className="mt-4 grid gap-2">
       <VerdictBadge verdict={result.verdict} />
@@ -922,17 +1076,85 @@ function Correction({ result }: { result: QuizEvaluation }) {
           <MathText text={result.hint} />
         </div>
       )}
-      {result.expected_answer && (
-        <div className="grid gap-1">
-          <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-            {t("quiz.expected")}
-          </span>
+      {result.expected_answer && <ExpectedAnswer text={result.expected_answer} />}
+    </div>
+  );
+}
+
+function ExpectedAnswer({ text }: { text: string }) {
+  const t = useT();
+  return (
+    <div className="grid gap-1">
+      <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        {t("quiz.expected")}
+      </span>
+      <div
+        style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-ink)" }}
+        dangerouslySetInnerHTML={{ __html: renderMathToHtml(text) }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Bilan des réponses rédigées : la correction de Clikoda, arrivée pendant la
+ * séance ou à sa fin, et celles qu'il n'a pas pu rendre, à trancher soi-même.
+ */
+function DeferredCorrections({
+  history,
+  corrections,
+  toSelfGrade,
+  expected,
+  onSelfGrade,
+}: {
+  history: QuizAnswerRecord[];
+  corrections: Record<number, QuizEvaluation>;
+  toSelfGrade: number[];
+  expected: Map<number, string>;
+  onSelfGrade: (rank: number, knew: boolean) => void;
+}) {
+  const t = useT();
+  const ranks = [...Object.keys(corrections).map(Number), ...toSelfGrade].sort((a, b) => a - b);
+  if (ranks.length === 0) return null;
+  return (
+    <div style={{ maxWidth: 520, margin: "8px auto 16px", display: "grid", gap: 10, textAlign: "left" }}>
+      <div style={{ fontWeight: 700 }}>{t("quiz.corrections_title")}</div>
+      {ranks.map((rank) => {
+        const entry = history[rank];
+        const correction = corrections[rank];
+        if (!entry) return null;
+        return (
           <div
-            style={{ background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", padding: 12, color: "var(--accent-ink)" }}
-            dangerouslySetInnerHTML={{ __html: renderMathToHtml(result.expected_answer) }}
-          />
-        </div>
-      )}
+            key={rank}
+            data-testid="deferred-correction"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", padding: "var(--space-md)" }}
+          >
+            <MathText text={entry.question} className="block text-sm font-semibold" />
+            <div className="mt-2 text-[13px] text-[var(--text-soft)]">
+              <span className="font-semibold">{t("quiz.your_answer")} : </span>
+              {entry.user_answer}
+            </div>
+            {correction ? (
+              <Correction result={correction} />
+            ) : (
+              <div className="mt-3 grid gap-2">
+                {expected.get(rank) && <ExpectedAnswer text={expected.get(rank) ?? ""} />}
+                <p className="m-0 text-[13px] text-muted-foreground">{t("quiz.selfGrade")}</p>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Button variant="secondary" onClick={() => onSelfGrade(rank, true)}>
+                    <Check className="size-4" aria-hidden />
+                    {t("quiz.knew")}
+                  </Button>
+                  <Button variant="secondary" onClick={() => onSelfGrade(rank, false)}>
+                    <X className="size-4" aria-hidden />
+                    {t("quiz.didntKnow")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

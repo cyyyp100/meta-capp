@@ -583,6 +583,26 @@ def parse_flashcard(raw: str | dict) -> dict | None:
     }
 
 
+def parse_flashcard_check(raw: str | dict) -> dict | None:
+    """Relecture d'une carte : {verdict: "ok"|"fix"|"remove", front, back, reason}.
+    Un « fix » sans recto ou verso n'est pas une correction exploitable ; un
+    « remove » sans raison ne dit pas à l'élève pourquoi supprimer sa carte."""
+    data = _load_json(raw)
+    if not isinstance(data, dict):
+        return None
+    verdict = str(data.get("verdict") or "").strip().lower()
+    if verdict not in ("ok", "fix", "remove"):
+        return None
+    front = _coerce_text(data.get("front")) or ""
+    back = _coerce_text(data.get("back")) or ""
+    reason = _coerce_text(data.get("reason")) or ""
+    if verdict == "fix" and not (_non_empty_str(front) and _non_empty_str(back)):
+        return None
+    if verdict == "remove" and not _non_empty_str(reason):
+        return None
+    return {"verdict": verdict, "front": front.strip(), "back": back.strip(), "reason": reason.strip()}
+
+
 HIGHLIGHT_PURPOSES = ("key", "explain", "reference")
 _HIGHLIGHT_MIN_CHARS = 15  # citations plus courtes = trop ambiguës à localiser
 _HIGHLIGHT_MAX_ITEMS = 3

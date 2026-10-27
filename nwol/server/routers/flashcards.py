@@ -1,9 +1,10 @@
 # server/routers/flashcards.py
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from services import flashcard_check
 from services.flashcards import (
     create_flashcard,
     delete_flashcards,
@@ -122,6 +123,31 @@ def from_exchange(body: FromExchangeBody) -> dict:
         origin=(front, back),
     )
     return {"id": card_id, "front": final_front, "back": final_back, "created": already is None}
+
+
+@router.get("/suggestions")
+def suggestions() -> list[dict]:
+    """Corrections proposées par la relecture hebdomadaire, en attente."""
+    return flashcard_check.suggestions()
+
+
+@router.post("/{card_id}/suggestion/accept")
+def accept_suggestion(card_id: int) -> dict:
+    try:
+        return flashcard_check.accept(card_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Aucune correction en attente pour cette carte")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{card_id}/suggestion/dismiss")
+def dismiss_suggestion(card_id: int) -> dict:
+    try:
+        flashcard_check.dismiss(card_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Aucune correction en attente pour cette carte")
+    return {"ok": True}
 
 
 @router.post("/{card_id}/review")

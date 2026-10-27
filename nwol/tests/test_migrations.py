@@ -548,3 +548,34 @@ def test_v46_keeps_open_sessions_open_and_closed_ones_finalized(fresh_db, monkey
     done, pending = get_session(closed), get_session(left_open)
     assert done["finalized_at"] == done["ended_at"] and done["analysis"] is None
     assert pending["ended_at"] is None and pending["finalized_at"] is None
+
+
+def test_v47_adds_flashcard_checks_and_keeps_the_cards(fresh_db, monkeypatch):
+    """Une base v46 avec des cartes : la migration ajoute `flashcard_checks`
+    sans toucher aux cartes. Une relecture suit sa carte : la supprimer
+    l'emporte. Rejouable."""
+    from db import get_connection, migrations
+    from db.flashcard_checks import get_check, save_check
+    from db.flashcards import delete_flashcard, get_flashcard, save_flashcard
+    from db.schema import SCHEMA_SQL, _ensure_default_user
+
+    conn = get_connection()
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 46)
+    with conn:
+        conn.executescript(SCHEMA_SQL)
+        migrations.run_migrations(conn)
+        _ensure_default_user(conn)
+    card = save_flashcard(1, None, "Que vaut P(B) ?", "La probabilité totale de l'indice.", source="manual")
+
+    monkeypatch.setattr(migrations, "TARGET_SCHEMA_VERSION", 47)
+    with conn:
+        migrations.run_migrations(conn)
+        migrations.run_migrations(conn)  # rejouée : aucune erreur, rien ne change
+    assert _schema_version(conn) == 47
+    kept = get_flashcard(card)
+    assert kept["front"] == "Que vaut P(B) ?"
+
+    save_check(card, kept["dedup_key"], "ok")
+    assert get_check(card)["status"] == "ok"
+    delete_flashcard(card)
+    assert get_check(card) is None

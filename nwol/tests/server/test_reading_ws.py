@@ -80,6 +80,62 @@ def test_reader_ws_rephrase(client, monkeypatch):
         assert a["type"] == "answer" and a["answer"] == "reformulé"
 
 
+@pytest.mark.parametrize("command, service", [
+    ("rephrase", "rephrase_page"), ("recap", "chapter_recap"), ("hook", "curiosity_hook"),
+])
+def test_reader_ws_commands_receive_the_attached_context(client, monkeypatch, command, service):
+    """Les trois commandes rapides reçoivent les extraits joints, comme « ask » :
+    elles ignoraient le contexte et travaillaient sur toute la page."""
+    from services import assistant
+
+    seen: dict = {}
+
+    def fake(d, p, ok, err, **kw):
+        seen.update(kw)
+        ok({"answer": "ok", "highlights": []})
+
+    monkeypatch.setattr(assistant, service, fake)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": command, "page": 1, "selected_snippets": ["Le passage choisi."]})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "answer"
+    assert seen["selected_snippets"] == ["Le passage choisi."]
+
+
+def test_reader_ws_quiz_me_receives_the_attached_context(client, monkeypatch):
+    from services import assistant
+
+    seen: dict = {}
+
+    def fake(d, p, ok, err, **kw):
+        seen.update(kw)
+        ok({"question": "Quelle est la thèse ?", "choices": None, "question_type": "open"})
+
+    monkeypatch.setattr(assistant, "generate_page_question", fake)
+    with client.websocket_connect("/api/reader/1/stream") as ws:
+        ws.send_json({"type": "start_qa", "page": 1, "selected_snippets": ["Le passage choisi."]})
+        assert ws.receive_json()["type"] == "loading"
+        assert ws.receive_json()["type"] == "qa_question"
+    assert seen["selected_snippets"] == ["Le passage choisi."]
+
+
+def test_commands_work_on_the_snippets_when_there_are_some(client, monkeypatch):
+    """Reformuler, résumer, accrocher : sur les extraits joints, sinon la page."""
+    from services import assistant, library
+
+    monkeypatch.setattr(library, "page_text", lambda d, p: "Texte de toute la page.")
+    seen: list = []
+
+    def fake_gen(ctx, ok, err):
+        seen.append(ctx["paragraph"])
+        ok({"rephrased_paragraph": "x"})
+
+    assistant.rephrase_page(1, 1, lambda r: None, lambda m: None, generator=fake_gen,
+                            selected_snippets=["Premier extrait.", "  Second   extrait. "])
+    assistant.rephrase_page(1, 1, lambda r: None, lambda m: None, generator=fake_gen)
+    assert seen == ["Premier extrait.\n\nSecond extrait.", "Texte de toute la page."]
+
+
 def test_reader_ws_mode_and_focus(client):
     from i18n import t
 

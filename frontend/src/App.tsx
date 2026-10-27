@@ -23,6 +23,7 @@ const Brainstorming = lazy(() => import("./routes/Brainstorming").then((m) => ({
 const Reader = lazy(() => import("./routes/ReaderRoute").then((m) => ({ default: m.ReaderRoute })));
 const Progress = lazy(() => import("./routes/Progress").then((m) => ({ default: m.Progress })));
 const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.Settings })));
+const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: m.NotFound })));
 
 /**
  * Aucune animation à ce niveau : elle emporterait la barre latérale avec elle,
@@ -65,6 +66,9 @@ export function App() {
               dialogue — sans adresse — ne saurait pas faire. */}
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/:section" element={<Settings />} />
+          {/* Adresse inconnue : un message et le chemin du retour, plutôt
+              qu'un panneau vide (« /progress » au lieu de /stats/progress). */}
+          <Route path="*" element={<NotFound />} />
         </Route>
         {/* Le Reader et la séance de langue sont plein écran (pas de barre latérale). */}
         <Route path="/reader/:docId" element={<Reader />} />

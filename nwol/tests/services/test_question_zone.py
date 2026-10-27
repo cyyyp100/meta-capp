@@ -74,3 +74,36 @@ def test_overlong_excerpt_is_cut_on_a_word():
     quote = assistant._cut_at_word(long_page, assistant._MAX_ZONE_CHARS)
     assert len(quote) <= assistant._MAX_ZONE_CHARS
     assert not quote.endswith(" ") and long_page.startswith(quote)
+
+
+def test_recall_mask_hides_the_copied_passage_not_the_indices():
+    """Rappel libre : gemma4 donne des indices à côté du passage (mesuré sur
+    trois questions) mais le recopie exactement. Le cache suit la recopie,
+    sinon la réponse reste lisible, cadrée par la zone de la question."""
+    mask = assistant.resolve_paragraph_mask(
+        1, 1,
+        {"enabled": True, "start_char": 150, "end_char": 230, "placeholder": "…"},
+        "il existe un point c tel que f'(c) égale le taux d'accroissement moyen",
+    )
+    assert mask["quote"] == "il existe un point c tel que f'(c) égale le taux d'accroissement moyen"
+
+
+def test_recall_mask_indices_are_widened_to_whole_words():
+    """Sans recopie exploitable, les indices restent le repli, au mot entier."""
+    mask = assistant.resolve_paragraph_mask(
+        1, 1, {"enabled": True, "start_char": 1, "end_char": 60, "placeholder": "…"},
+    )
+    assert mask["quote"].startswith("Le théorème de Rolle")
+    assert mask["quote"].endswith("d'une fonction")
+
+
+def test_recall_zone_and_mask_cover_the_same_passage():
+    """La zone cadrée et le cache désignent le même passage : plus de « fenêtre »
+    transparente posée sur la réponse à côté d'un cache qui masque autre chose."""
+    result = {
+        "source_excerpt": "On en déduit le théorème des accroissements finis : il existe un point c",
+        "paragraph_mask": {"enabled": True, "start_char": 0, "end_char": 50, "placeholder": "…"},
+    }
+    zone = assistant.resolve_question_zone(1, 1, result)
+    mask = assistant.resolve_paragraph_mask(1, 1, result["paragraph_mask"], result["source_excerpt"])
+    assert zone["quote"] == mask["quote"]
