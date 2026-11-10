@@ -40,6 +40,18 @@
 
 ---
 
+## News
+
+- **2026-10-27 · v0.2.5** — Clikoda proofreads your flashcards once a week (nothing changes without you); the quiz no longer waits between questions.
+- **2026-10-26 · v0.2.4** — Clikoda says she is an AI from her first message; third-party licenses in *Settings ▸ Help ▸ About*.
+- **2026-10-23 · v0.2.3** — Clikoda gets a face (the sperm whale of the new logo) and the app its own icon.
+- **2026-10-21 · v0.2.0** — Choose Clikoda's model; economy mode for 4 GB laptops with `qwen3:1.7b`; search, bookmarks and notes in the reader.
+- **2026-10-12 · v0.1.0** — Public beta.
+
+Full history in the [CHANGELOG](CHANGELOG.md).
+
+---
+
 ## The Core Idea
 
 Large Language Models have made information access almost effortless.
@@ -290,6 +302,20 @@ During reading they are invisible. They still drive everything: question difficu
 
 Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
 
+### Quick start
+
+1. Download the archive for your system from the [latest release](https://github.com/cyyyp100/meta-capp/releases/latest) (about 30 to 45 MB).
+2. Open it. The builds are **not signed yet**, so the first launch needs one extra step:
+   - **macOS** — the first double-click is refused. Open *System Settings ▸ Privacy &
+     Security*, scroll to the message about Meta-Capp and click **Open Anyway** (once).
+     If macOS instead says the app *is damaged*, the download lost its signature in
+     transit: `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` restores it.
+   - **Windows** — SmartScreen shows *Windows protected your PC*: **More info ▸ Run anyway**.
+   - **Linux** — run `./Meta-Capp/Meta-Capp` from a terminal and keep it open; the app opens in your browser.
+3. For Clikoda, install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (9.6 GB; see [Pull a model](#pull-a-model) for lighter machines).
+
+Check the archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <file> SHA256`).
+
 ### Requirements
 
 | | App alone | With Clikoda (the assistant) |
@@ -328,17 +354,6 @@ archive per platform, with a `SHA256SUMS.txt`:
 | Intel Mac | `macos-x86_64.zip` | built on GitHub's last Intel runner, available until August 2027 |
 | Windows 10/11 x64 | `windows.zip` | keep the unzipped folder whole; uses WebView2 (built into Windows 11 and up-to-date Windows 10) |
 | Linux x86_64 | `linux-x86_64.tar.gz` | run `./Meta-Capp/Meta-Capp` from a terminal and keep it open; opens in your browser |
-
-**First launch of a build that is not signed yet** (beta releases may not be):
-
-- **macOS** — the first double-click is refused. Open *System Settings ▸ Privacy &
-  Security*, scroll to the message about Meta-Capp and click **Open Anyway** (once).
-  If macOS instead says the app *is damaged*, the download lost its signature in
-  transit: `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` restores it.
-- **Windows** — SmartScreen shows *Windows protected your PC*: **More info ▸ Run anyway**.
-
-Signed and notarized releases open like any other application. Either way, check the
-archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <file> SHA256`).
 
 ### Pull a model
 

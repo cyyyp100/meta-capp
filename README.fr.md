@@ -40,6 +40,18 @@
 
 ---
 
+## Nouveautés
+
+- **27/10/2026 · v0.2.5** — Clikoda relit vos flashcards une fois par semaine (rien ne change sans vous) ; le quiz n'attend plus entre deux questions.
+- **26/10/2026 · v0.2.4** — Clikoda dit qu'elle est une IA dès son premier message ; licences tierces dans *Réglages ▸ Aide ▸ À propos*.
+- **23/10/2026 · v0.2.3** — Clikoda a un visage (le cachalot du nouveau logo) et l'app sa propre icône.
+- **21/10/2026 · v0.2.0** — Choix du modèle de Clikoda ; mode économe pour les portables de 4 Go avec `qwen3:1.7b` ; recherche, marque-page et notes dans le lecteur.
+- **12/10/2026 · v0.1.0** — Bêta publique.
+
+Tout l'historique dans le [CHANGELOG](CHANGELOG.md) (en anglais).
+
+---
+
 ## L'idée centrale
 
 Les grands modèles de langage ont rendu l'accès à l'information presque sans effort.
@@ -290,6 +302,22 @@ Pendant la lecture, elles sont invisibles. Elles pilotent pourtant tout : la dif
 
 Meta-Capp tourne sur **macOS, Windows et Linux**, avec ou sans GPU.
 
+### Démarrage rapide
+
+1. Téléchargez l'archive de votre système dans la [dernière version](https://github.com/cyyyp100/meta-capp/releases/latest) (30 à 45 Mo environ).
+2. Ouvrez-la. Les versions **ne sont pas encore signées** : le premier lancement demande une étape de plus.
+   - **macOS** : le premier double-clic est refusé. Ouvrez *Réglages Système ▸ Confidentialité
+     et sécurité*, descendez jusqu'au message concernant Meta-Capp et cliquez sur
+     **Ouvrir quand même** (une seule fois). Si macOS dit plutôt que l'app *est endommagée*,
+     le téléchargement a perdu sa signature en route :
+     `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` la rétablit.
+   - **Windows** : SmartScreen affiche *Windows a protégé votre ordinateur* :
+     **Informations complémentaires ▸ Exécuter quand même**.
+   - **Linux** : lancez `./Meta-Capp/Meta-Capp` depuis un terminal et laissez-le ouvert ; l'app s'ouvre dans votre navigateur.
+3. Pour Clikoda, installez [Ollama](https://ollama.com) puis `ollama pull gemma4:e4b` (9,6 Go ; voir plus bas pour les machines plus légères).
+
+Vérifiez l'archive avec `SHA256SUMS.txt` (`shasum -a 256 <fichier>` / `certutil -hashfile <fichier> SHA256`).
+
 ### Configuration requise
 
 | | L'app seule | Avec Clikoda (l'assistant) |
@@ -331,20 +359,6 @@ archive par plateforme, avec un `SHA256SUMS.txt` :
 | Mac Intel | `macos-x86_64.zip` | compilée sur le dernier runner Intel de GitHub, disponible jusqu'en août 2027 |
 | Windows 10/11 x64 | `windows.zip` | gardez le dossier décompressé entier ; utilise WebView2 (intégré à Windows 11 et à Windows 10 à jour) |
 | Linux x86_64 | `linux-x86_64.tar.gz` | lancez `./Meta-Capp/Meta-Capp` depuis un terminal et laissez-le ouvert ; l'app s'ouvre dans votre navigateur |
-
-**Premier lancement d'une version pas encore signée** (les bêtas peuvent ne pas l'être) :
-
-- **macOS** : le premier double-clic est refusé. Ouvrez *Réglages Système ▸ Confidentialité
-  et sécurité*, descendez jusqu'au message concernant Meta-Capp et cliquez sur
-  **Ouvrir quand même** (une seule fois). Si macOS dit plutôt que l'app *est endommagée*,
-  le téléchargement a perdu sa signature en route :
-  `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` la rétablit.
-- **Windows** : SmartScreen affiche *Windows a protégé votre ordinateur* :
-  **Informations complémentaires ▸ Exécuter quand même**.
-
-Les versions signées et notarisées s'ouvrent comme n'importe quelle application. Dans tous
-les cas, vérifiez l'archive avec `SHA256SUMS.txt` (`shasum -a 256 <fichier>` /
-`certutil -hashfile <fichier> SHA256`).
 
 ### Télécharger un modèle
 
