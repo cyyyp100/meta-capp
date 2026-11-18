@@ -1,17 +1,36 @@
 # Dependabot (S5) : PRs automatiques sur les dépendances vulnérables/obsolètes.
+# Rythme mensuel pour garder la liste des PR courte. Par écosystème : une PR groupée
+# pour les versions mineures et correctives, une PR groupée pour les correctifs de
+# sécurité (ceux-là n'attendent pas le mois : ils partent dès l'alerte) ; les versions
+# majeures restent seules, pour être lues une à une.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      pip-minor-patch:
+        update-types: [minor, patch]
+      pip-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]

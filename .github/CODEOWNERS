@@ -1,0 +1,4 @@
+# Meta-Capp has a single maintainer, the only account with write access: outside
+# contributions come from forks, and every pull request is reviewed and merged by
+# @cyyyp100. This file makes GitHub request that review automatically.
+*       @cyyyp100
