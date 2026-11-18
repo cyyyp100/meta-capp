@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Python 3.11.9 : pas de build pour Ubuntu 26.04 (= ubuntu-latest depuis oct. 2026)
     env:
       NWOL_DISABLE_CONDA_REEXEC: "1" # F9 : pas de conda en CI
     steps:
@@ -53,7 +53,7 @@ jobs:
         working-directory: nwol
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Python 3.11.9 : pas de build pour Ubuntu 26.04 (= ubuntu-latest depuis oct. 2026)
     defaults:
       run:
         working-directory: frontend
