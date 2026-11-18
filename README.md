@@ -44,6 +44,7 @@
 
 ## News
 
+- **2026-11-18 · v0.2.6** — Security and maintenance: react-router 7 and fresher dependencies (PDF engine, FastAPI, uvicorn, websockets 17).
 - **2026-10-27 · v0.2.5** — Clikoda proofreads your flashcards once a week (nothing changes without you); the quiz no longer waits between questions.
 - **2026-10-26 · v0.2.4** — Clikoda says she is an AI from her first message; third-party licenses in *Settings ▸ Help ▸ About*.
 - **2026-10-23 · v0.2.3** — Clikoda gets a face (the sperm whale of the new logo) and the app its own icon.

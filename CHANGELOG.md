@@ -7,10 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-11-18
+
 ### Security
 
 - **react-router 7.18.5** (from 6.30): fixes the moderate advisories
   GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. No change in behaviour.
+- Build tooling: `minimatch` 10.2.6 (GHSA-g3hv-75wg-m249).
+
+### Changed
+
+- **Dependencies refreshed.** PDF engine `pypdfium2` 5.15, FastAPI 0.163,
+  uvicorn 0.54, pydantic 2.14, pythonnet 3.2 (used by the Windows window) and
+  `websockets` 17 for the reader and Brainstorming streams. Builds use
+  PyInstaller 6.22.
 
 ## [0.2.5] — 2026-10-27
 
