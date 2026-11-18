@@ -370,6 +370,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Le CHANGELOG seul : il fournit le texte de la release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: /CHANGELOG.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: Meta-Capp-*
@@ -379,12 +385,37 @@ jobs:
       # nôtre (architecture/13 § 4).
       - name: Empreintes SHA-256
         run: sha256sum Meta-Capp-*.zip Meta-Capp-*.tar.gz | tee SHA256SUMS.txt
+      # Texte de la release : la section du tag dans CHANGELOG.md (en anglais, écrite
+      # pour les utilisateurs) et une ligne d'installation ; GitHub ajoute ensuite la
+      # liste des PR (generate_release_notes).
+      - name: Notes de version (section du CHANGELOG)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::CHANGELOG.md n'a pas de section [$VERSION] : seule la liste des PR sera publiée."
+          fi
+          {
+            echo
+            echo "**Install**: download the archive for your system below, then follow the [installation guide](https://github.com/$GITHUB_REPOSITORY#installation). Check it against \`SHA256SUMS.txt\`."
+          } >> release-notes.md
       - name: Publication (canal beta si tag pré-release, sinon stable)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          body_path: release-notes.md
           files: |
             Meta-Capp-*.zip
             Meta-Capp-*.tar.gz
             SHA256SUMS.txt
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          # Chaque release ouvre sa discussion dans Announcements (ceux qui suivent
+          # les Discussions sont prévenus). Ailleurs (fork, dépôt sans Discussions),
+          # chaîne vide = pas de discussion.
+          discussion_category_name: ${{ github.repository == 'cyyyp100/meta-capp' && 'Announcements' || '' }}
