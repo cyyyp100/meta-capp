@@ -18,6 +18,8 @@ more comfortable writing.
 | ♿ **Accessibility** | Keyboard navigation, contrast, screen readers, reduced motion. |
 | 🌍 **Translations** | The FR/EN dictionaries are `nwol/i18n.py` and `frontend/src/i18n/index.ts`. |
 | 📚 **Docs** | If the README or this guide is stale or unclear, say so — or fix it. |
+| 🧪 **Beta testing** | Read a real PDF with it, then fill the [Beta feedback form](https://github.com/cyyyp100/meta-capp/issues/new?template=beta_feedback.yml). |
+| 💬 **Discussions** | Answer a question in [Q&A](https://github.com/cyyyp100/meta-capp/discussions/categories/q-a), upvote or sharpen an [idea](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas). |
 
 ---
 
@@ -70,15 +72,18 @@ pip install pre-commit && pre-commit install
 
 ## Before you open a pull request
 
-Run the same checks CI runs:
+Run the same checks CI runs, from the repository root:
 
 ```bash
-cd nwol && python -m pytest                     # backend suite
-cd nwol && ruff check .                         # lint
-python -m compileall nwol                       # static import/syntax check
-cd frontend && npm run build && npx vitest run  # type-check, bundle, UI tests
-python desktop/pywebview_main.py --server-only  # headless server smoke test
+ruff check .                                                # lint
+python -m compileall -q nwol desktop                        # static import/syntax check
+(cd nwol && python -m pytest)                               # backend suite
+(cd frontend && npm run lint && npm test && npm run build)  # lint, UI tests, type-check + bundle
+python desktop/pywebview_main.py --server-only              # headless server smoke test
 ```
+
+CI also runs the end-to-end journeys (`cd frontend && npx playwright test`); running them
+locally is optional.
 
 ---
 
@@ -111,6 +116,30 @@ newcomers up, and a pull request that breaks them will be sent back:
 - Link the issue the PR closes, and say how you verified it (commands, PDF used, OS).
 - Small PRs get merged. Large refactors are much easier to accept if you open an issue
   first and agree on the shape.
+
+---
+
+## How contributions are reviewed
+
+Meta-Capp is open to outside contributions and has a single maintainer,
+[@cyyyp100](https://github.com/cyyyp100), the only account with write access. Anyone can
+propose a change; only the maintainer checks it and merges it:
+
+- **Work from a fork.** Fork the repository, create a branch in your fork and open a pull
+  request against `main`. Tick *Allow edits by maintainers* so that small fixes can be
+  made directly on your branch.
+- CI does not run on a pull request from a fork until the maintainer has looked at it and
+  approved the run. A CI that stays pending for a while is expected, not a problem with
+  your branch.
+- `main` only changes through pull requests, merged once CI is green: `backend`,
+  `backend-windows`, `frontend` and `gitleaks`. The maintainer is requested as reviewer
+  automatically ([`.github/CODEOWNERS`](.github/CODEOWNERS)) and alone decides what gets
+  merged.
+- Pull requests are squash-merged and the PR title becomes the commit message: make it a
+  clear one-line summary, such as `fix(reader): keep the zoom when the window resizes`.
+- Not sure an idea fits? Start a thread in
+  [Discussions ▸ Ideas](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas)
+  before writing code.
 
 ---
 

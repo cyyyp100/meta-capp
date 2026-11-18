@@ -1,0 +1,40 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas about *pedagogy* are as welcome as ideas about code: intervention timing,
+        prompt quality, gauge formulas, flashcard usefulness. English or French are both fine.
+
+        Upvote the ideas you want most: the maintainer turns the accepted ones into issues.
+        This repository is the **local edition**, so anything that needs a remote service, an
+        account or a subscription is out of scope (see
+        [CONTRIBUTING.md](https://github.com/cyyyp100/meta-capp/blob/main/CONTRIBUTING.md)).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The situation you hit as a learner, a teacher or a developer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead? Sketches and prompt drafts welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This works fully offline, with local inference only.
+          required: true

@@ -16,8 +16,10 @@
 [![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
 [![100% offline](https://img.shields.io/badge/100%25-offline-2ea44f?style=flat-square)](#why-local-ai-matters)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-blueviolet?style=flat-square)](CONTRIBUTING.md)
+[![Latest release](https://img.shields.io/github/v/release/cyyyp100/meta-capp?style=flat-square&label=release)](https://github.com/cyyyp100/meta-capp/releases/latest)
+[![Discussions](https://img.shields.io/badge/Discussions-join-8957e5?style=flat-square&logo=github)](https://github.com/cyyyp100/meta-capp/discussions)
 
-[**Why**](#the-core-idea) · [**Features**](#core-features) · [**Install**](#installation) · [**Architecture**](#tech-stack) · [**Editions**](#editions--local-vs-pro) · [**Contributing**](CONTRIBUTING.md)
+[**Why**](#the-core-idea) · [**Features**](#core-features) · [**Install**](#installation) · [**Architecture**](#tech-stack) · [**Editions**](#editions--local-vs-pro) · [**Discussions**](https://github.com/cyyyp100/meta-capp/discussions) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
 
@@ -598,7 +600,9 @@ Settings ▸ Help ▸ About, next to the third-party licenses.
 
 Issues, ideas and pull requests are welcome — especially around pedagogy, accessibility, and PDF edge cases.
 
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and the review checklist.
+- **Questions and ideas** go to [Discussions](https://github.com/cyyyp100/meta-capp/discussions): [Q&A](https://github.com/cyyyp100/meta-capp/discussions/categories/q-a) for help, [Ideas](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas) for features, where others can upvote them.
+- **Tried it on a real PDF?** The [Beta feedback form](https://github.com/cyyyp100/meta-capp/issues/new?template=beta_feedback.yml) takes a few minutes and shapes the next releases.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and the review checklist. Every pull request is reviewed and merged by the maintainer.
 - By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 - Found a vulnerability? Please follow [SECURITY.md](SECURITY.md) rather than opening a public issue.
 

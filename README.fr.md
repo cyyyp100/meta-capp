@@ -16,8 +16,10 @@
 [![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
 [![100 % hors ligne](https://img.shields.io/badge/100%25-offline-2ea44f?style=flat-square)](#pourquoi-une-ia-locale)
 [![PRs bienvenues](https://img.shields.io/badge/PRs-welcome-blueviolet?style=flat-square)](CONTRIBUTING.md)
+[![Dernière version](https://img.shields.io/github/v/release/cyyyp100/meta-capp?style=flat-square&label=release)](https://github.com/cyyyp100/meta-capp/releases/latest)
+[![Discussions](https://img.shields.io/badge/Discussions-join-8957e5?style=flat-square&logo=github)](https://github.com/cyyyp100/meta-capp/discussions)
 
-[**Pourquoi**](#lidée-centrale) · [**Fonctionnalités**](#fonctionnalités-principales) · [**Installation**](#installation) · [**Architecture**](#stack-technique) · [**Éditions**](#éditions--local-vs-pro) · [**Contribuer**](CONTRIBUTING.md)
+[**Pourquoi**](#lidée-centrale) · [**Fonctionnalités**](#fonctionnalités-principales) · [**Installation**](#installation) · [**Architecture**](#stack-technique) · [**Éditions**](#éditions--local-vs-pro) · [**Discussions**](https://github.com/cyyyp100/meta-capp/discussions) · [**Contribuer**](CONTRIBUTING.md)
 
 </div>
 
@@ -608,7 +610,9 @@ accessible depuis Réglages ▸ Aide ▸ À propos, à côté des licences des c
 
 Les issues, idées et pull requests sont les bienvenues, en particulier sur la pédagogie, l'accessibilité et les cas limites des PDF.
 
-- Lisez [CONTRIBUTING.md](CONTRIBUTING.md) pour l'installation, les conventions et la liste de vérification des revues.
+- **Questions et idées** : dans les [Discussions](https://github.com/cyyyp100/meta-capp/discussions), [Q&A](https://github.com/cyyyp100/meta-capp/discussions/categories/q-a) pour l'aide, [Ideas](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas) pour les fonctionnalités, que chacun peut soutenir d'un vote.
+- **Vous l'avez essayé sur un vrai PDF ?** Le [formulaire Beta feedback](https://github.com/cyyyp100/meta-capp/issues/new?template=beta_feedback.yml) prend quelques minutes et oriente les prochaines versions.
+- Lisez [CONTRIBUTING.md](CONTRIBUTING.md) pour l'installation, les conventions et la liste de vérification des revues. Chaque pull request est relue puis fusionnée par le mainteneur.
 - En participant, vous acceptez le [Code de conduite](CODE_OF_CONDUCT.md).
 - Vous avez trouvé une vulnérabilité ? Suivez [SECURITY.md](SECURITY.md) plutôt que d'ouvrir une issue publique.
 

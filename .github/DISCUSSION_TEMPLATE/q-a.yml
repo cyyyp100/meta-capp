@@ -1,0 +1,25 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about installing or using Meta-Capp: Ollama, choosing a model, the
+        reader, Clikoda, flashcards, quizzes. English or French are both fine.
+
+        A reproducible bug? The
+        [bug report form](https://github.com/cyyyp100/meta-capp/issues/new?template=bug_report.yml)
+        is quicker to act on. Never paste a document or a log without reading it first.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and what happens instead?
+    validations:
+      required: true
+
+  - type: input
+    id: setup
+    attributes:
+      label: Setup (optional)
+      description: System, Meta-Capp version, model and RAM, when it matters.
+      placeholder: macOS 15 (Apple Silicon), v0.2.5, gemma4:e4b, 16 GB
