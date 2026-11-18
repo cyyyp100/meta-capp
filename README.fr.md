@@ -4,7 +4,7 @@
 
 ### Le compagnon d'apprentissage cognitif, nativement IA, pour les PDF éducatifs
 
-[English](README.md) · **Français**
+[English](README.md) · **Français** · [Türkçe](README.tr.md)
 
 **Votre PDF, exactement tel que son auteur l'a conçu, avec à côté un compagnon de lecture IA bien vivant : il observe comment vous apprenez, répond dans le contexte, et ne prend la parole que lorsque cela aide vraiment.**
 

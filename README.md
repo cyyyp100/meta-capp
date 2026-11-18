@@ -4,7 +4,7 @@
 
 ### The AI-native cognitive learning companion for educational PDFs
 
-**English** · [Français](README.fr.md)
+**English** · [Français](README.fr.md) · [Türkçe](README.tr.md)
 
 **Your PDF, exactly as its author designed it but with a living AI reading companion beside it that watches how you learn, answers in context, and speaks up only when it actually helps.**
 
