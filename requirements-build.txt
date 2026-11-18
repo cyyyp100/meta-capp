@@ -8,7 +8,7 @@
 # working conda env `metacapp`, the ones local builds are made with. The release
 # workflow installs this file on every runner; security.yml audits it;
 # Dependabot proposes the bumps.
-pyinstaller==6.21.0
+pyinstaller==6.22.3
 # PyInstaller's community hooks (pywebview, pypinyin's data…): versioned
 # separately, and a new release can change what gets collected.
-pyinstaller-hooks-contrib==2026.6
+pyinstaller-hooks-contrib==2026.10
