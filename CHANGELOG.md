@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **react-router 7.18.5** (from 6.30): fixes the moderate advisories
+  GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. No change in behaviour.
+
 ## [0.2.5] — 2026-10-27
 
 ### Added

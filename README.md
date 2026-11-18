@@ -16,8 +16,10 @@
 [![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
 [![100% offline](https://img.shields.io/badge/100%25-offline-2ea44f?style=flat-square)](#why-local-ai-matters)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-blueviolet?style=flat-square)](CONTRIBUTING.md)
+[![Latest release](https://img.shields.io/github/v/release/cyyyp100/meta-capp?style=flat-square&label=release)](https://github.com/cyyyp100/meta-capp/releases/latest)
+[![Discussions](https://img.shields.io/badge/Discussions-join-8957e5?style=flat-square&logo=github)](https://github.com/cyyyp100/meta-capp/discussions)
 
-[**Why**](#the-core-idea) · [**Features**](#core-features) · [**Install**](#installation) · [**Architecture**](#tech-stack) · [**Editions**](#editions--local-vs-pro) · [**Contributing**](CONTRIBUTING.md)
+[**Why**](#the-core-idea) · [**Features**](#core-features) · [**Install**](#installation) · [**Architecture**](#tech-stack) · [**Editions**](#editions--local-vs-pro) · [**Discussions**](https://github.com/cyyyp100/meta-capp/discussions) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
 
@@ -37,6 +39,18 @@
 <sub>Select a passage, add it as context, ask. The answer comes from Gemma 4 running on the laptop through Ollama; the waiting time is sped up, as the badge on screen says.</sub>
 
 </div>
+
+---
+
+## News
+
+- **2026-10-27 · v0.2.5** — Clikoda proofreads your flashcards once a week (nothing changes without you); the quiz no longer waits between questions.
+- **2026-10-26 · v0.2.4** — Clikoda says she is an AI from her first message; third-party licenses in *Settings ▸ Help ▸ About*.
+- **2026-10-23 · v0.2.3** — Clikoda gets a face (the sperm whale of the new logo) and the app its own icon.
+- **2026-10-21 · v0.2.0** — Choose Clikoda's model; economy mode for 4 GB laptops with `qwen3:1.7b`; search, bookmarks and notes in the reader.
+- **2026-10-12 · v0.1.0** — Public beta.
+
+Full history in the [CHANGELOG](CHANGELOG.md).
 
 ---
 
@@ -290,6 +304,20 @@ During reading they are invisible. They still drive everything: question difficu
 
 Meta-Capp runs on **macOS, Windows and Linux**, with or without a GPU.
 
+### Quick start
+
+1. Download the archive for your system from the [latest release](https://github.com/cyyyp100/meta-capp/releases/latest) (about 30 to 45 MB).
+2. Open it. The builds are **not signed yet**, so the first launch needs one extra step:
+   - **macOS** — the first double-click is refused. Open *System Settings ▸ Privacy &
+     Security*, scroll to the message about Meta-Capp and click **Open Anyway** (once).
+     If macOS instead says the app *is damaged*, the download lost its signature in
+     transit: `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` restores it.
+   - **Windows** — SmartScreen shows *Windows protected your PC*: **More info ▸ Run anyway**.
+   - **Linux** — run `./Meta-Capp/Meta-Capp` from a terminal and keep it open; the app opens in your browser.
+3. For Clikoda, install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (9.6 GB; see [Pull a model](#pull-a-model) for lighter machines).
+
+Check the archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <file> SHA256`).
+
 ### Requirements
 
 | | App alone | With Clikoda (the assistant) |
@@ -328,17 +356,6 @@ archive per platform, with a `SHA256SUMS.txt`:
 | Intel Mac | `macos-x86_64.zip` | built on GitHub's last Intel runner, available until August 2027 |
 | Windows 10/11 x64 | `windows.zip` | keep the unzipped folder whole; uses WebView2 (built into Windows 11 and up-to-date Windows 10) |
 | Linux x86_64 | `linux-x86_64.tar.gz` | run `./Meta-Capp/Meta-Capp` from a terminal and keep it open; opens in your browser |
-
-**First launch of a build that is not signed yet** (beta releases may not be):
-
-- **macOS** — the first double-click is refused. Open *System Settings ▸ Privacy &
-  Security*, scroll to the message about Meta-Capp and click **Open Anyway** (once).
-  If macOS instead says the app *is damaged*, the download lost its signature in
-  transit: `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` restores it.
-- **Windows** — SmartScreen shows *Windows protected your PC*: **More info ▸ Run anyway**.
-
-Signed and notarized releases open like any other application. Either way, check the
-archive against `SHA256SUMS.txt` (`shasum -a 256 <file>` / `certutil -hashfile <file> SHA256`).
 
 ### Pull a model
 
@@ -583,7 +600,9 @@ Settings ▸ Help ▸ About, next to the third-party licenses.
 
 Issues, ideas and pull requests are welcome — especially around pedagogy, accessibility, and PDF edge cases.
 
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and the review checklist.
+- **Questions and ideas** go to [Discussions](https://github.com/cyyyp100/meta-capp/discussions): [Q&A](https://github.com/cyyyp100/meta-capp/discussions/categories/q-a) for help, [Ideas](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas) for features, where others can upvote them.
+- **Tried it on a real PDF?** The [Beta feedback form](https://github.com/cyyyp100/meta-capp/issues/new?template=beta_feedback.yml) takes a few minutes and shapes the next releases.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and the review checklist. Every pull request is reviewed and merged by the maintainer.
 - By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 - Found a vulnerability? Please follow [SECURITY.md](SECURITY.md) rather than opening a public issue.
 
