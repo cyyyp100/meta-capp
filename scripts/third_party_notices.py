@@ -48,6 +48,19 @@ DATA_ATTRIBUTIONS = (
 )
 # Licences « faibles » admises, mais qui doivent être nommées dans le texte.
 WEAK_COPYLEFT = re.compile(r"\bMPL\b|Mozilla Public License", re.I)
+# Paquets dont les métadonnées ne nomment aucune licence alors que le paquet en
+# embarque le texte (repris tel quel dans les mentions). Chaque entrée est
+# vérifiée à la source ; elle ne joue que si les métadonnées ne disent rien et
+# que le texte est bien dans le paquet.
+DECLARED_LICENSES = {
+    # clr-loader 0.3.x, dépendance Windows de pythonnet : LICENSE (MIT) dans le
+    # paquet et sur github.com/pythonnet/clr-loader, aucun champ de licence sur PyPI.
+    "clr-loader": "MIT",
+}
+
+
+def _key(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _python_roots() -> list[str]:
@@ -69,7 +82,7 @@ def _python_closure() -> list[metadata.Distribution]:
     stack = _python_roots()
     while stack:
         name = stack.pop()
-        key = re.sub(r"[-_.]+", "-", name).lower()
+        key = _key(name)
         if key in seen:
             continue
         try:
@@ -92,7 +105,10 @@ def _python_license(dist: metadata.Distribution) -> str:
     if classifiers:
         return "; ".join(classifiers)
     declared = (meta.get("License") or "").strip().splitlines()
-    return declared[0] if declared else "?"
+    if declared:
+        return declared[0]
+    override = DECLARED_LICENSES.get(_key(meta["Name"]))
+    return override if override and _python_texts(dist) else "?"
 
 
 def _python_texts(dist: metadata.Distribution) -> list[tuple[str, str]]:
