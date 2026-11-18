@@ -16,8 +16,10 @@
 [![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
 [![100 % hors ligne](https://img.shields.io/badge/100%25-offline-2ea44f?style=flat-square)](#pourquoi-une-ia-locale)
 [![PRs bienvenues](https://img.shields.io/badge/PRs-welcome-blueviolet?style=flat-square)](CONTRIBUTING.md)
+[![Dernière version](https://img.shields.io/github/v/release/cyyyp100/meta-capp?style=flat-square&label=release)](https://github.com/cyyyp100/meta-capp/releases/latest)
+[![Discussions](https://img.shields.io/badge/Discussions-join-8957e5?style=flat-square&logo=github)](https://github.com/cyyyp100/meta-capp/discussions)
 
-[**Pourquoi**](#lidée-centrale) · [**Fonctionnalités**](#fonctionnalités-principales) · [**Installation**](#installation) · [**Architecture**](#stack-technique) · [**Éditions**](#éditions--local-vs-pro) · [**Contribuer**](CONTRIBUTING.md)
+[**Pourquoi**](#lidée-centrale) · [**Fonctionnalités**](#fonctionnalités-principales) · [**Installation**](#installation) · [**Architecture**](#stack-technique) · [**Éditions**](#éditions--local-vs-pro) · [**Discussions**](https://github.com/cyyyp100/meta-capp/discussions) · [**Contribuer**](CONTRIBUTING.md)
 
 </div>
 
@@ -37,6 +39,18 @@
 <sub>Sélectionnez un passage, ajoutez-le au contexte, posez votre question. La réponse vient de Gemma 4, qui tourne sur l'ordinateur avec Ollama ; l'attente est accélérée, comme l'indique le badge à l'écran. La démo est en anglais.</sub>
 
 </div>
+
+---
+
+## Nouveautés
+
+- **27/10/2026 · v0.2.5** — Clikoda relit vos flashcards une fois par semaine (rien ne change sans vous) ; le quiz n'attend plus entre deux questions.
+- **26/10/2026 · v0.2.4** — Clikoda dit qu'elle est une IA dès son premier message ; licences tierces dans *Réglages ▸ Aide ▸ À propos*.
+- **23/10/2026 · v0.2.3** — Clikoda a un visage (le cachalot du nouveau logo) et l'app sa propre icône.
+- **21/10/2026 · v0.2.0** — Choix du modèle de Clikoda ; mode économe pour les portables de 4 Go avec `qwen3:1.7b` ; recherche, marque-page et notes dans le lecteur.
+- **12/10/2026 · v0.1.0** — Bêta publique.
+
+Tout l'historique dans le [CHANGELOG](CHANGELOG.md) (en anglais).
 
 ---
 
@@ -290,6 +304,22 @@ Pendant la lecture, elles sont invisibles. Elles pilotent pourtant tout : la dif
 
 Meta-Capp tourne sur **macOS, Windows et Linux**, avec ou sans GPU.
 
+### Démarrage rapide
+
+1. Téléchargez l'archive de votre système dans la [dernière version](https://github.com/cyyyp100/meta-capp/releases/latest) (30 à 45 Mo environ).
+2. Ouvrez-la. Les versions **ne sont pas encore signées** : le premier lancement demande une étape de plus.
+   - **macOS** : le premier double-clic est refusé. Ouvrez *Réglages Système ▸ Confidentialité
+     et sécurité*, descendez jusqu'au message concernant Meta-Capp et cliquez sur
+     **Ouvrir quand même** (une seule fois). Si macOS dit plutôt que l'app *est endommagée*,
+     le téléchargement a perdu sa signature en route :
+     `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` la rétablit.
+   - **Windows** : SmartScreen affiche *Windows a protégé votre ordinateur* :
+     **Informations complémentaires ▸ Exécuter quand même**.
+   - **Linux** : lancez `./Meta-Capp/Meta-Capp` depuis un terminal et laissez-le ouvert ; l'app s'ouvre dans votre navigateur.
+3. Pour Clikoda, installez [Ollama](https://ollama.com) puis `ollama pull gemma4:e4b` (9,6 Go ; voir plus bas pour les machines plus légères).
+
+Vérifiez l'archive avec `SHA256SUMS.txt` (`shasum -a 256 <fichier>` / `certutil -hashfile <fichier> SHA256`).
+
 ### Configuration requise
 
 | | L'app seule | Avec Clikoda (l'assistant) |
@@ -331,20 +361,6 @@ archive par plateforme, avec un `SHA256SUMS.txt` :
 | Mac Intel | `macos-x86_64.zip` | compilée sur le dernier runner Intel de GitHub, disponible jusqu'en août 2027 |
 | Windows 10/11 x64 | `windows.zip` | gardez le dossier décompressé entier ; utilise WebView2 (intégré à Windows 11 et à Windows 10 à jour) |
 | Linux x86_64 | `linux-x86_64.tar.gz` | lancez `./Meta-Capp/Meta-Capp` depuis un terminal et laissez-le ouvert ; l'app s'ouvre dans votre navigateur |
-
-**Premier lancement d'une version pas encore signée** (les bêtas peuvent ne pas l'être) :
-
-- **macOS** : le premier double-clic est refusé. Ouvrez *Réglages Système ▸ Confidentialité
-  et sécurité*, descendez jusqu'au message concernant Meta-Capp et cliquez sur
-  **Ouvrir quand même** (une seule fois). Si macOS dit plutôt que l'app *est endommagée*,
-  le téléchargement a perdu sa signature en route :
-  `xattr -dr com.apple.quarantine /Applications/Meta-Capp.app` la rétablit.
-- **Windows** : SmartScreen affiche *Windows a protégé votre ordinateur* :
-  **Informations complémentaires ▸ Exécuter quand même**.
-
-Les versions signées et notarisées s'ouvrent comme n'importe quelle application. Dans tous
-les cas, vérifiez l'archive avec `SHA256SUMS.txt` (`shasum -a 256 <fichier>` /
-`certutil -hashfile <fichier> SHA256`).
 
 ### Télécharger un modèle
 
@@ -594,7 +610,9 @@ accessible depuis Réglages ▸ Aide ▸ À propos, à côté des licences des c
 
 Les issues, idées et pull requests sont les bienvenues, en particulier sur la pédagogie, l'accessibilité et les cas limites des PDF.
 
-- Lisez [CONTRIBUTING.md](CONTRIBUTING.md) pour l'installation, les conventions et la liste de vérification des revues.
+- **Questions et idées** : dans les [Discussions](https://github.com/cyyyp100/meta-capp/discussions), [Q&A](https://github.com/cyyyp100/meta-capp/discussions/categories/q-a) pour l'aide, [Ideas](https://github.com/cyyyp100/meta-capp/discussions/categories/ideas) pour les fonctionnalités, que chacun peut soutenir d'un vote.
+- **Vous l'avez essayé sur un vrai PDF ?** Le [formulaire Beta feedback](https://github.com/cyyyp100/meta-capp/issues/new?template=beta_feedback.yml) prend quelques minutes et oriente les prochaines versions.
+- Lisez [CONTRIBUTING.md](CONTRIBUTING.md) pour l'installation, les conventions et la liste de vérification des revues. Chaque pull request est relue puis fusionnée par le mainteneur.
 - En participant, vous acceptez le [Code de conduite](CODE_OF_CONDUCT.md).
 - Vous avez trouvé une vulnérabilité ? Suivez [SECURITY.md](SECURITY.md) plutôt que d'ouvrir une issue publique.
 

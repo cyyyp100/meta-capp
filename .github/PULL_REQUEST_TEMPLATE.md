@@ -18,16 +18,16 @@ Closes #
 <!-- Commands you ran, the document you tested with, the OS, whether Ollama was up. -->
 
 ```bash
-cd nwol && python -m pytest
-cd nwol && ruff check .
-cd frontend && npm run build && npx vitest run
+ruff check .
+(cd nwol && python -m pytest)
+(cd frontend && npm run lint && npm test && npm run build)
 ```
 
 ## Checklist
 
 - [ ] Backend suite passes (`cd nwol && python -m pytest`)
-- [ ] Lint passes (`cd nwol && ruff check .`)
-- [ ] Frontend type-check, build and tests pass
+- [ ] Lint passes (`ruff check .` from the repository root)
+- [ ] Frontend lint, tests, type-check and build pass
 - [ ] New behaviour lives in `nwol/services/`, not in a router or a component
 - [ ] No duplicated policy or magic threshold — `nwol/config/settings.py` stays the source of truth
 - [ ] Schema change (if any) bumps `DB_SCHEMA_VERSION` and adds an idempotent migration step

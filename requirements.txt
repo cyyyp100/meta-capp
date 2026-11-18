@@ -32,19 +32,19 @@
 # their own environment, not in Meta-Capp's.
 # PDFium is NOT thread-safe — every call is serialised through
 # pdf_viewer/engine.py:PDFIUM_LOCK. Do not bypass it.
-pypdfium2==5.14.0
+pypdfium2==5.15.2
 Pillow==13.0.0            # PNG encoding of the rendered pages (PdfBitmap -> file)
 
 # Local API server (the app's backend) — runs on 127.0.0.1, embedded in the app
-fastapi==0.136.1
-uvicorn==0.46.0
+fastapi==0.163.1
+uvicorn==0.54.0
 websockets==16.0          # WebSocket transport (reader + brainstorming streams)
-pydantic==2.10.6          # request bodies in server/routers (used directly)
+pydantic==2.14.3          # request bodies in server/routers (used directly)
 
 # Native desktop shell (embeds the local web UI in an OS window)
 pywebview==6.2.1
 # Windows-only: pywebview's EdgeChromium/WebView2 backend needs the .NET binding.
-pythonnet==3.0.5 ; sys_platform == "win32"
+pythonnet==3.2.1 ; sys_platform == "win32"
 # Linux: the native window needs GTK or Qt, deliberately NOT pinned here —
 # GTK requires system libraries pip cannot install, Qt is ~200 MB. Without
 # either, the app opens in the default browser (desktop/pywebview_main.py).
@@ -63,8 +63,8 @@ httpx==0.28.1
 # Mozilla CA bundle for the opt-in update check (services/updates.py). Frozen
 # builds cannot rely on OpenSSL's compiled-in store: it points at the build
 # machine. Already pulled in by httpx; pinned here because the app imports it.
-certifi==2026.10.19
+certifi==2026.10.23
 
 # Testing (reportlab builds the PDF fixtures — test-only, never shipped)
-pytest==9.0.3
+pytest==9.2.0
 reportlab==4.4.10

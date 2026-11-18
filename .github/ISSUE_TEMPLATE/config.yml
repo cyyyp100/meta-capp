@@ -1,11 +1,14 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: 💬 Questions and ideas
-    url: https://github.com/cyyyp100/meta-capp/discussions
-    about: Usage questions, pedagogy debates, showing what you built with it.
+  - name: ❓ Ask a question
+    url: https://github.com/cyyyp100/meta-capp/discussions/new?category=q-a
+    about: Installing, running Ollama, choosing a model, everyday use.
+  - name: 💡 Suggest a feature or a pedagogy idea
+    url: https://github.com/cyyyp100/meta-capp/discussions/new?category=ideas
+    about: Ideas live in Discussions, where others can upvote them; accepted ones become issues.
   - name: 🔒 Report a vulnerability
     url: https://github.com/cyyyp100/meta-capp/security/advisories/new
     about: Please report security issues privately, never as a public issue.
-  - name: ✨ Meta-Capp Pro (hosted models, OCR, speech)
+  - name: ✨ Meta-Capp Pro (cloud AI models)
     url: https://github.com/cyyyp100/meta-capp#editions--local-vs-pro
-    about: Early access, school deployments and anything about the hosted edition.
+    about: Early access, school deployments and anything about the Pro edition.

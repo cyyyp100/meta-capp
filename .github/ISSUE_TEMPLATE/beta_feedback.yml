@@ -1,0 +1,68 @@
+name: 🧪 Beta feedback
+description: You tried Meta-Capp on a real PDF. Tell us how it went, good or bad.
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying the beta. Short answers are fine, English or French.
+        A crash or a clear bug? The **Bug report** form is quicker to act on.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10/11
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Meta-Capp version
+      description: Settings ▸ Help ▸ About, or the archive name.
+      placeholder: v0.2.5
+
+  - type: input
+    id: model
+    attributes:
+      label: Model and RAM
+      description: Which model Clikoda used (Settings ▸ Clikoda shows it) and how much memory the machine has.
+      placeholder: gemma4:e4b, 16 GB
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did the installation go?
+      options:
+        - Smoothly
+        - The first launch was blocked (Gatekeeper / SmartScreen) but I got through
+        - I needed help or gave up (please tell us where below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: pdf
+    attributes:
+      label: What did you read?
+      description: The kind of PDF (lecture notes, textbook, paper, slides…), its length, and whether it has formulas or figures. No need to share the file.
+
+  - type: textarea
+    id: helped
+    attributes:
+      label: What helped you learn?
+
+  - type: textarea
+    id: annoyed
+    attributes:
+      label: What got in your way?
+      description: Slow answers, an intervention at the wrong moment, a question that made no sense…
+
+  - type: textarea
+    id: next
+    attributes:
+      label: Would you open it again for your next PDF? Why or why not?
