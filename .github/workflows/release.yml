@@ -44,7 +44,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Python 3.11.9 : pas de build pour Ubuntu 26.04 (= ubuntu-latest depuis oct. 2026)
     env:
       NWOL_DISABLE_CONDA_REEXEC: "1"
     steps:
