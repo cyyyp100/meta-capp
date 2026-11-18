@@ -44,7 +44,7 @@
 
 ## Nouveautés
 
-- **18/11/2026 · v0.2.6** — Sécurité et maintenance : react-router 7 et des dépendances à jour (moteur PDF, FastAPI, uvicorn, websockets 17).
+- **18/11/2026 · v0.2.7** — Sécurité et maintenance : react-router 7 et des dépendances à jour (moteur PDF, FastAPI, uvicorn, websockets 17).
 - **27/10/2026 · v0.2.5** — Clikoda relit vos flashcards une fois par semaine (rien ne change sans vous) ; le quiz n'attend plus entre deux questions.
 - **26/10/2026 · v0.2.4** — Clikoda dit qu'elle est une IA dès son premier message ; licences tierces dans *Réglages ▸ Aide ▸ À propos*.
 - **23/10/2026 · v0.2.3** — Clikoda a un visage (le cachalot du nouveau logo) et l'app sa propre icône.

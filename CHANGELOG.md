@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.6] — 2026-11-18
+## [0.2.7] — 2026-11-18
+
+These changes were first tagged as 0.2.6, whose release build failed (see
+*Fixed*): 0.2.6 was never published.
 
 ### Security
 
@@ -21,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uvicorn 0.54, pydantic 2.14, pythonnet 3.2 (used by the Windows window) and
   `websockets` 17 for the reader and Brainstorming streams. Builds use
   PyInstaller 6.22.
+
+### Fixed
+
+- **Release builds.** The third-party notices name the licence of
+  `clr-loader` (MIT), a Windows dependency whose package metadata declares
+  none, and the Apple Silicon build moves from the retired macOS 14 build
+  machine to macOS 15.
+
+## [0.2.6] — 2026-11-18
+
+Tagged, never published: see 0.2.7.
 
 ## [0.2.5] — 2026-10-27
 
