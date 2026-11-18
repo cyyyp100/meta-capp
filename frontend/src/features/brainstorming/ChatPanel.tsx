@@ -216,8 +216,13 @@ export function ChatPanel({
           placeholder={t("brainstorm.placeholder")}
           style={input}
         />
-        <button onClick={ask} disabled={waiting} style={{ ...sendBtn, background: waiting ? "var(--muted-light)" : "var(--accent)" }}>
-          ↵
+        <button
+          onClick={ask}
+          disabled={waiting}
+          aria-label={t("brainstorm.send")}
+          style={{ ...sendBtn, background: waiting ? "var(--muted-light)" : "var(--accent)" }}
+        >
+          <span aria-hidden="true">↵</span>
         </button>
       </div>
     </div>
