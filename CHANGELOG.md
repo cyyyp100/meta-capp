@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Brainstorming accessibility.** The send button now has a localized name
+  for screen readers in French and English; its decorative arrow is hidden
+  from assistive technology.
+
 ## [0.2.7] — 2026-11-18
 
 These changes were first tagged as 0.2.6, whose release build failed (see
